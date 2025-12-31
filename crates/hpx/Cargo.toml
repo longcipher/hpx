@@ -1,0 +1,324 @@
+[package]
+name = "hpx"
+version.workspace = true
+description = "High Performance HTTP Client"
+keywords = ["http", "client", "websocket", "exchange", "crypto"]
+categories = ["web-programming::http-client"]
+repository = "https://github.com/longcipher/hpx"
+authors = ["Akagi201 <akagi201@gmail.com>"]
+readme = "README.md"
+license = "Apache-2.0"
+edition.workspace = true
+include = ["README.md", "LICENSE", "src/**/*.rs"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[features]
+default = ["boring", "http1", "http2"]
+
+# Enable support for decoding text.
+charset = ["dep:encoding_rs", "dep:mime"]
+
+# Enable cookies store support.
+cookies = ["dep:cookie"]
+
+# Enable gzip compression support.
+gzip = ["tower-http/decompression-gzip"]
+
+# Enable Brotli compression support.
+brotli = ["tower-http/decompression-br"]
+
+# Enable Zstandard compression support.
+zstd = ["tower-http/decompression-zstd"]
+
+# Enable deflate compression support.
+deflate = ["tower-http/decompression-deflate"]
+
+# Enable URL query string serialization support.
+query = ["dep:serde", "dep:serde_urlencoded"]
+
+# Enable x-www-form-urlencoded form support.
+form = ["dep:serde", "dep:serde_urlencoded"]
+
+# Enable JSON support.
+json = ["dep:serde", "dep:serde_json"]
+
+# Enable multipart/form-data support.
+multipart = ["dep:mime_guess", "dep:sync_wrapper"]
+
+# Enable hickory DNS resolver.
+hickory-dns = ["dep:hickory-resolver"]
+
+# Enable streaming support.
+stream = ["tokio/fs", "dep:tokio-util", "dep:sync_wrapper"]
+
+# Enable SOCKS proxy support.
+socks = ["dep:tokio-socks"]
+
+# Enable WebSocket support.
+ws = ["dep:sha1", "dep:fastwebsockets"]
+
+# Enable webpki-roots for TLS certificate validation.
+webpki-roots = ["dep:webpki-root-certs"]
+
+# Use the system's proxy configuration.
+system-proxy = ["dep:system-configuration", "dep:windows-registry"]
+
+# Enable tracing logging.
+tracing = ["http2/tracing", "dep:tracing"]
+
+# Enable BoringSSL support.
+boring = [
+    "dep:boring2",
+    "dep:tokio-boring2",
+    "dep:brotli",
+    "dep:flate2",
+    "dep:zstd",
+]
+
+# Enable Rustls support.
+rustls-tls = [
+    "dep:rustls",
+    "dep:tokio-rustls",
+    "dep:rustls-pki-types",
+    "dep:webpki-roots",
+    "dep:rustls-pemfile",
+]
+
+# Enable HTTP/1 support.
+http1 = ["dep:httparse"]
+
+# Enable HTTP/2 support.
+http2 = ["dep:http2"]
+
+# Enable macros.
+macros = ["tokio/macros"]
+
+[dependencies]
+ahash = { workspace = true }
+boring2 = { workspace = true, features = ["pq-experimental"], optional = true }
+brotli = { workspace = true, optional = true }
+bytes = { workspace = true }
+flate2 = { workspace = true, optional = true }
+futures-channel = { workspace = true }
+futures-util = { workspace = true }
+http = { workspace = true }
+http-body = { workspace = true }
+http-body-util = { workspace = true }
+http2 = { workspace = true, features = ["unstable"], optional = true }
+httparse = { workspace = true, optional = true }
+ipnet = { workspace = true }
+percent-encoding = { workspace = true }
+pin-project-lite = { workspace = true }
+rustls = { workspace = true, optional = true, features = [
+    "std",
+    "tls12",
+    "ring",
+] }
+rustls-pemfile = { workspace = true, optional = true }
+rustls-pki-types = { workspace = true, optional = true }
+schnellru = { workspace = true }
+smallvec = { workspace = true, features = ["const_generics", "const_new"] }
+socket2 = { workspace = true, features = ["all"] }
+tokio = { workspace = true, features = ["net", "time", "rt", "io-util"] }
+tokio-boring2 = { workspace = true, features = [
+    "pq-experimental",
+], optional = true }
+tokio-rustls = { workspace = true, optional = true, features = ["ring"] }
+tower = { workspace = true, features = ["timeout", "util", "retry"] }
+url = { workspace = true }
+want = { workspace = true }
+webpki-roots = { workspace = true, optional = true }
+zstd = { workspace = true, optional = true }
+
+# Optional deps...
+
+## serde
+serde = { workspace = true, features = ["derive"], optional = true }
+serde_json = { workspace = true, optional = true }
+serde_urlencoded = { workspace = true, optional = true }
+
+## multipart
+mime_guess = { workspace = true, optional = true }
+
+## charset
+encoding_rs = { workspace = true, optional = true }
+mime = { workspace = true, optional = true }
+
+## sync wrapper
+sync_wrapper = { workspace = true, features = ["futures"], optional = true }
+
+## webpki root certs
+webpki-root-certs = { workspace = true, optional = true }
+
+## cookies
+cookie = { workspace = true, optional = true }
+
+## tower http
+tower-http = { workspace = true, optional = true }
+
+## tokio util
+tokio-util = { workspace = true, optional = true }
+
+## socks
+tokio-socks = { workspace = true, optional = true }
+
+## websocket
+fastwebsockets = { workspace = true, features = [
+    "upgrade",
+    "unstable-split",
+], optional = true }
+
+## hickory-dns
+hickory-resolver = { workspace = true, optional = true }
+
+## tracing
+base64 = { workspace = true }
+sha1 = { workspace = true, optional = true }
+tracing = { workspace = true, features = ["std"], optional = true }
+
+## windows system proxy
+[target.'cfg(windows)'.dependencies]
+windows-registry = { workspace = true, optional = true }
+
+## macOS system proxy
+[target.'cfg(target_os = "macos")'.dependencies]
+system-configuration = { workspace = true, optional = true }
+
+## interface binding
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[dev-dependencies]
+futures = { workspace = true, features = ["std"] }
+hyper = { workspace = true, features = ["http1", "http2", "server"] }
+hyper-util = { workspace = true, features = [
+    "http1",
+    "http2",
+    "server-auto",
+    "server-graceful",
+    "tokio",
+] }
+pretty_env_logger = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio-test = { workspace = true }
+tower = { workspace = true, features = ["limit"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[[test]]
+name = "cookie"
+path = "tests/cookie.rs"
+required-features = ["cookies"]
+
+[[test]]
+name = "gzip"
+path = "tests/gzip.rs"
+required-features = ["gzip", "stream"]
+
+[[test]]
+name = "brotli"
+path = "tests/brotli.rs"
+required-features = ["brotli", "stream"]
+
+[[test]]
+name = "zstd"
+path = "tests/zstd.rs"
+required-features = ["zstd", "stream"]
+
+[[test]]
+name = "deflate"
+path = "tests/deflate.rs"
+required-features = ["deflate", "stream"]
+
+[[test]]
+name = "multipart"
+path = "tests/multipart.rs"
+required-features = ["multipart", "stream"]
+
+[[test]]
+name = "retry"
+path = "tests/retry.rs"
+
+[[example]]
+name = "json_dynamic"
+path = "examples/json_dynamic.rs"
+required-features = ["json"]
+
+[[example]]
+name = "json_typed"
+path = "examples/json_typed.rs"
+required-features = ["json"]
+
+[[example]]
+name = "tor_socks"
+path = "examples/tor_socks.rs"
+required-features = ["socks"]
+
+[[example]]
+name = "form"
+path = "examples/form.rs"
+required-features = ["form"]
+
+[[example]]
+name = "connect_via_lower_priority_tokio_runtime"
+path = "examples/connect_via_lower_priority_tokio_runtime.rs"
+required-features = ["tracing"]
+
+[[example]]
+name = "emulation"
+path = "examples/emulation.rs"
+required-features = ["gzip", "brotli", "zstd", "deflate", "tracing"]
+
+[[example]]
+name = "cert_store"
+path = "examples/cert_store.rs"
+required-features = ["webpki-roots"]
+
+[[example]]
+name = "request_with_redirect"
+path = "examples/request_with_redirect.rs"
+
+[[example]]
+name = "request_with_version"
+path = "examples/request_with_version.rs"
+
+[[example]]
+name = "request_with_proxy"
+path = "examples/request_with_proxy.rs"
+required-features = ["socks"]
+
+[[example]]
+name = "request_with_emulation"
+path = "examples/request_with_emulation.rs"
+required-features = ["gzip", "brotli", "zstd", "deflate", "tracing"]
+
+[[example]]
+name = "request_with_local_address"
+path = "examples/request_with_local_address.rs"
+
+[[example]]
+name = "request_with_interface"
+path = "examples/request_with_interface.rs"
+
+[[example]]
+name = "http1_websocket"
+path = "examples/http1_websocket.rs"
+required-features = ["ws", "futures-util/std"]
+
+[[example]]
+name = "http2_websocket"
+path = "examples/http2_websocket.rs"
+required-features = ["ws", "futures-util/std"]
+
+[[example]]
+name = "keylog"
+path = "examples/keylog.rs"
+
+[[example]]
+name = "unix_socket"
+path = "examples/unix_socket.rs"

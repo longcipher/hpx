@@ -1,0 +1,9 @@
+[files]
+extend-exclude = ["specs/**", "target/**"]
+[default.extend-words]
+# Names
+Divy = "Divy"
+# Technical terms
+EDE = "EDE"
+WRK = "WRK"
+RQUEST = "RQUEST"

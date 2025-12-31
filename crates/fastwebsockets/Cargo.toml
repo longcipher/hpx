@@ -1,0 +1,116 @@
+[package]
+name = "fastwebsockets"
+description = "A fast RFC6455 WebSocket server implementation"
+version.workspace = true
+authors = ["Divy Srivastava <dj.srivastava23@gmail.com>"]
+license = "Apache-2.0"
+edition.workspace = true
+repository = "https://github.com/denoland/fastwebsockets"
+
+[[example]]
+name = "echo_server"
+path = "examples/echo_server.rs"
+required-features = ["upgrade"]
+
+[[example]]
+name = "autobahn_client"
+path = "examples/autobahn_client.rs"
+required-features = ["upgrade"]
+
+[[example]]
+name = "tls_client"
+path = "examples/tls_client.rs"
+required-features = ["upgrade"]
+
+[[example]]
+name = "tls_server"
+path = "examples/tls_server.rs"
+required-features = ["upgrade"]
+
+[[example]]
+name = "axum"
+path = "examples/axum.rs"
+required-features = ["upgrade", "with_axum"]
+
+[[example]]
+name = "echo_server_split"
+path = "examples/echo_server_split.rs"
+required-features = ["upgrade", "unstable-split"]
+
+[dependencies]
+tokio = { workspace = true, features = ["io-util"] }
+simdutf8 = { workspace = true, optional = true }
+hyper-util = { workspace = true, features = ["tokio"], optional = true }
+http-body-util = { workspace = true, optional = true }
+hyper = { workspace = true, features = [
+    "http1",
+    "server",
+    "client",
+], optional = true }
+pin-project = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
+sha1 = { workspace = true, optional = true }
+utf-8 = { workspace = true }
+rand = { workspace = true }
+thiserror = { workspace = true }
+bytes = { workspace = true }
+
+# Axum integration
+axum-core = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
+async-trait = { workspace = true, optional = true }
+
+[features]
+default = ["simd", "upgrade"]
+upgrade = [
+    "hyper",
+    "pin-project",
+    "base64",
+    "sha1",
+    "hyper-util",
+    "http-body-util",
+]
+simd = ["simdutf8"]
+unstable-split = []
+# Axum integration
+with_axum = ["axum-core", "http", "async-trait"]
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "macros"] }
+tokio-rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+hyper-util = { workspace = true, features = ["tokio"] }
+http-body-util = { workspace = true }
+hyper = { workspace = true, features = ["http1", "server", "client"] }
+assert2 = { workspace = true }
+trybuild = { workspace = true }
+criterion = { workspace = true }
+anyhow = { workspace = true }
+webpki-roots = { workspace = true }
+bytes = { workspace = true }
+axum = { workspace = true }
+
+[[test]]
+name = "upgrade"
+path = "tests/upgrade.rs"
+required-features = ["upgrade"]
+
+[[test]]
+name = "split"
+path = "tests/split.rs"
+required-features = ["upgrade", "unstable-split"]
+
+[[test]]
+name = "concurrency"
+path = "tests/concurrency.rs"
+required-features = ["upgrade"]
+
+[[bench]]
+name = "unmask"
+harness = false
+
+[package.metadata.docs.rs]
+features = ["upgrade", "with_axum"]
+
+[package.metadata.cargo-machete]
+ignored = ["async-trait", "utf-8"]

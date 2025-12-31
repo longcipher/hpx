@@ -1,0 +1,102 @@
+[package]
+name = "hpx-util"
+version.workspace = true
+description = "Common utilities for hpx"
+repository = "https://github.com/longcipher/hpx"
+documentation = "https://docs.rs/hpx-util"
+keywords = ["http", "client", "emulation", "ja3", "ja4"]
+authors = ["Akagi201 <akagi201@gmail.com>"]
+readme = "README.md"
+license = "LGPL-3.0"
+edition.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[features]
+default = ["emulation"]
+
+emulation = ["dep:typed-builder"]
+emulation-compression = []
+emulation-rand = ["emulation", "dep:strum_macros", "dep:strum"]
+emulation-serde = ["dep:serde"]
+
+tower-delay = ["dep:tower", "dep:pin-project-lite", "tokio/time"]
+
+[dependencies]
+hpx = { workspace = true }
+pin-project-lite = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+strum = { workspace = true, optional = true }
+strum_macros = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+tower = { workspace = true, optional = true }
+typed-builder = { workspace = true, optional = true }
+
+[dev-dependencies]
+futures-util = { workspace = true }
+http = { workspace = true }
+hyper = { workspace = true, features = ["http1", "http2", "client", "server"] }
+hyper-util = { workspace = true, features = [
+    "http1",
+    "http2",
+    "client",
+    "client-legacy",
+    "server-auto",
+    "tokio",
+] }
+pin-project-lite = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tower = { workspace = true, features = ["limit"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lib]
+doctest = false
+
+[[test]]
+name = "client"
+path = "tests/client.rs"
+
+[[test]]
+name = "emulation_chrome"
+path = "tests/emulation_chrome.rs"
+
+[[test]]
+name = "emulation_okhttp"
+path = "tests/emulation_okhttp.rs"
+
+[[test]]
+name = "emulation_firefox"
+path = "tests/emulation_firefox.rs"
+
+[[test]]
+name = "emulation_safari"
+path = "tests/emulation_safari.rs"
+
+[[example]]
+name = "emulation"
+path = "examples/emulation.rs"
+required-features = ["emulation"]
+
+[[example]]
+name = "emulation_rand"
+path = "examples/emulation_rand.rs"
+required-features = ["emulation", "emulation-rand"]
+
+[[example]]
+name = "emulation_option"
+path = "examples/emulation_option.rs"
+required-features = ["emulation"]
+
+[[example]]
+name = "tower_delay"
+path = "examples/tower_delay.rs"
+required-features = ["tower-delay"]
+
+[[example]]
+name = "tower_jitter_delay"
+path = "examples/tower_jitter_delay.rs"
+required-features = ["tower-delay"]

@@ -1,0 +1,18 @@
+//! HTTP Client protocol implementation and low level utilities.
+
+mod common;
+mod dispatch;
+mod error;
+mod proto;
+
+pub mod body;
+pub mod conn;
+pub mod ext;
+#[cfg(feature = "http1")]
+pub mod http1;
+#[cfg(feature = "http2")]
+pub mod http2;
+pub mod rt;
+pub mod upgrade;
+
+pub use self::error::{Error, Result};
