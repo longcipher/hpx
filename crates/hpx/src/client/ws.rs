@@ -19,6 +19,7 @@ use futures_util::Stream;
 use http::{
     HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, Version, header, uri::Scheme,
 };
+#[cfg(feature = "http2")]
 use http2::ext::Protocol;
 use sha1::{Digest, Sha1};
 
@@ -319,12 +320,19 @@ impl WebSocketRequestBuilder {
                 Some(nonce)
             }
             Some(Version::HTTP_2) => {
-                *request.method_mut() = Method::CONNECT;
-                *request.version_mut() = Some(Version::HTTP_2);
-                request
-                    .extensions_mut()
-                    .insert(Protocol::from_static("websocket"));
-                None
+                #[cfg(feature = "http2")]
+                {
+                    *request.method_mut() = Method::CONNECT;
+                    *request.version_mut() = Some(Version::HTTP_2);
+                    request
+                        .extensions_mut()
+                        .insert(Protocol::from_static("websocket"));
+                    None
+                }
+                #[cfg(not(feature = "http2"))]
+                {
+                    return Err(Error::upgrade("HTTP/2 WebSockets require 'http2' feature"));
+                }
             }
             unsupported => {
                 return Err(Error::upgrade(format!(

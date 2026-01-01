@@ -30,7 +30,7 @@ macro_rules! test_emulation {
             let _permit = crate::support::TEST_SEMAPHORE.acquire().await.unwrap();
 
             let resp = crate::support::CLIENT
-                .get("https://tls.browserleaks.com/")
+                .get("https://tls.peet.ws/api/all")
                 .emulation($emulation)
                 .send()
                 .await

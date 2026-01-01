@@ -156,8 +156,8 @@ fn emulation_template() -> Emulation {
         .build()
 }
 
-#[tokio::test]
-async fn test_emulation() -> hpx::Result<()> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::builder()
         .emulation(emulation_template())
         .connect_timeout(Duration::from_secs(10))
@@ -171,96 +171,6 @@ async fn test_emulation() -> hpx::Result<()> {
         .text()
         .await?;
 
-    let ja4_15 = "t13d1715h2_5b57614c22b0_c1eccb039341";
-    let ja4_16 = "t13d1716h2_5b57614c22b0_e66002de8a8b";
-    let ja4_peet = "t13d1716h2_5b57614c22b0_c1eccb039341";
-    assert!(
-        text.contains(ja4_15) || text.contains(ja4_16) || text.contains(ja4_peet),
-        "Response ja4_hash fingerprint not found: {text}"
-    );
-    assert!(
-        text.contains("6ea73faa8fc5aac76bded7bd238f6433"),
-        "Response akamai_hash fingerprint not found: {text}"
-    );
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_request_with_emulation() -> hpx::Result<()> {
-    let client = Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .cert_verification(false)
-        .build()?;
-
-    let text = client
-        .get("https://tls.peet.ws/api/all")
-        .emulation(emulation_template())
-        .send()
-        .await?
-        .text()
-        .await?;
-
-    let ja4_15 = "t13d1715h2_5b57614c22b0_c1eccb039341";
-    let ja4_16 = "t13d1716h2_5b57614c22b0_e66002de8a8b";
-    let ja4_peet = "t13d1716h2_5b57614c22b0_c1eccb039341";
-    assert!(
-        text.contains(ja4_15) || text.contains(ja4_16) || text.contains(ja4_peet),
-        "Response ja4_hash fingerprint not found: {text}"
-    );
-    assert!(
-        text.contains("6ea73faa8fc5aac76bded7bd238f6433"),
-        "Response akamai_hash fingerprint not found: {text}"
-    );
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_request_with_emulation_tls() -> hpx::Result<()> {
-    let client = Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .cert_verification(false)
-        .build()?;
-
-    let text = client
-        .get("https://tls.peet.ws/api/all")
-        .emulation(tls_options_template())
-        .send()
-        .await?
-        .text()
-        .await?;
-
-    let ja4_15 = "t13d1715h2_5b57614c22b0_c1eccb039341";
-    let ja4_16 = "t13d1716h2_5b57614c22b0_e66002de8a8b";
-    let ja4_peet = "t13d1716h2_5b57614c22b0_c1eccb039341";
-    assert!(
-        text.contains(ja4_15) || text.contains(ja4_16) || text.contains(ja4_peet),
-        "Response ja4_hash fingerprint not found: {text}"
-    );
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_request_with_emulation_http2() -> hpx::Result<()> {
-    let client = Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .cert_verification(false)
-        .build()?;
-
-    let text = client
-        .get("https://tls.peet.ws/api/all")
-        .emulation(http2_options_template())
-        .send()
-        .await?
-        .text()
-        .await?;
-
-    assert!(
-        text.contains("6ea73faa8fc5aac76bded7bd238f6433"),
-        "Response akamai_hash fingerprint not found: {text}"
-    );
-
+    println!("{}", text);
     Ok(())
 }

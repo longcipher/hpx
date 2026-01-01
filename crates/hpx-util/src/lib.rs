@@ -12,6 +12,8 @@
 //! - **Emulation**: Browser emulation capabilities (TLS fingerprinting, HTTP/2 settings).
 //! - **Tower**: Middleware layers for `tower` services (e.g., delay, jitter).
 
+use hpx as _;
+
 #[cfg(feature = "emulation")]
 pub mod emulation;
 pub mod tower;
