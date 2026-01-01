@@ -50,11 +50,12 @@
 //! The `websocket` module provides a way to upgrade a connection to a websocket.
 //!
 //! ```rust,no_run
+//! # #[cfg(feature = "ws")]
+//! # #[tokio::main]
+//! # async fn main() -> hpx::Result<()> {
 //! use futures_util::{SinkExt, StreamExt, TryStreamExt};
 //! use hpx::{header, ws::message::Message};
 //!
-//! #[tokio::main]
-//! async fn main() -> hpx::Result<()> {
 //!     // Use the API you're already familiar with
 //!     let websocket = hpx::websocket("wss://echo.websocket.org")
 //!         .header(header::USER_AGENT, env!("CARGO_PKG_NAME"))
@@ -80,7 +81,9 @@
 //!     }
 //!
 //!     Ok(())
-//! }
+//! # }
+//! # #[cfg(not(feature = "ws"))]
+//! # fn main() {}
 //! ```
 //!
 //! ## Making a GET request
@@ -268,6 +271,17 @@
 //! [Proxy]: ./struct.Proxy.html
 //! [cargo-features]: https://doc.rust-lang.org/stable/cargo/reference/manifest.html#the-features-section
 
+#[cfg(feature = "rustls-tls")]
+use rustls as _;
+#[cfg(feature = "rustls-tls")]
+use rustls_pemfile as _;
+#[cfg(feature = "rustls-tls")]
+use rustls_pki_types as _;
+#[cfg(feature = "webpki-roots")]
+use webpki_root_certs as _;
+#[cfg(feature = "rustls-tls")]
+use webpki_roots as _;
+
 #[macro_use]
 mod trace;
 #[macro_use]
@@ -299,8 +313,8 @@ pub use self::client::multipart;
 pub use self::client::ws;
 pub use self::{
     client::{
-        Body, Client, ClientBuilder, Emulation, EmulationBuilder, EmulationFactory, Request,
-        RequestBuilder, Response, Upgraded, http1, http2,
+        Body, Client, ClientBuilder, Emulation, EmulationBuilder, EmulationFactory, HttpInfo,
+        Request, RequestBuilder, Response, Upgraded, http1, http2,
     },
     error::{Error, Result},
     ext::{ResponseBuilderExt, ResponseExt},

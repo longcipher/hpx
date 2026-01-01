@@ -1,5 +1,6 @@
 mod body;
-mod conn;
+#[doc(hidden)]
+pub mod conn;
 mod core;
 mod emulation;
 mod http;
@@ -16,6 +17,7 @@ pub mod ws;
 pub(crate) use self::http::ConnectIdentity;
 pub use self::{
     body::Body,
+    conn::HttpInfo,
     core::{http1, http2, upgrade::Upgraded},
     emulation::{Emulation, EmulationBuilder, EmulationFactory},
     http::{Client, ClientBuilder},

@@ -3,7 +3,7 @@ mod parser;
 mod store;
 
 #[cfg(feature = "boring")]
-use boring2::x509::X509;
+use boring::x509::X509;
 #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
 use rustls_pki_types::CertificateDer;
 

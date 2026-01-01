@@ -46,10 +46,10 @@ pub struct HttpConnector<R = GaiResolver> {
 ///
 /// ```
 /// # fn doc(res: http::Response<()>) {
-/// use crate::util::client::connect::HttpInfo;
+/// use hpx::HttpInfo;
 ///
 /// // res = http::Response
-/// res.extensions().get::<HttpInfo>().map(|info| {
+/// res.extensions().get::<HttpInfo>().map(|info: &HttpInfo| {
 ///     println!("remote addr = {}", info.remote_addr());
 /// });
 /// # }

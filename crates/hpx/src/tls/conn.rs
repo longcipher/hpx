@@ -1,5 +1,5 @@
 #[cfg(feature = "boring")]
-pub use tokio_boring2::SslStream as TlsStream;
+pub use tokio_boring::SslStream as TlsStream;
 #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
 pub use tokio_rustls::client::TlsStream;
 

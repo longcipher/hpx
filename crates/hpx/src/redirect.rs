@@ -138,7 +138,7 @@ impl Policy {
     /// #
     /// # fn run() -> Result<(), Error> {
     /// let custom = redirect::Policy::custom(|attempt| {
-    ///     if attempt.previous.len() > 5 {
+    ///     if attempt.previous().len() > 5 {
     ///         attempt.error("too many redirects")
     ///     } else if attempt.uri() == "example.domain" {
     ///         // prevent redirects to 'example.domain'

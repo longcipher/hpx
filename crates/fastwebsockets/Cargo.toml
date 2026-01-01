@@ -85,7 +85,7 @@ hyper = { workspace = true, features = ["http1", "server", "client"] }
 assert2 = { workspace = true }
 trybuild = { workspace = true }
 criterion = { workspace = true }
-anyhow = { workspace = true }
+eyre = { workspace = true }
 webpki-roots = { workspace = true }
 bytes = { workspace = true }
 axum = { workspace = true }

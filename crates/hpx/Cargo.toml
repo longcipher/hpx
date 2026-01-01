@@ -6,7 +6,6 @@ keywords = ["http", "client", "websocket", "exchange", "crypto"]
 categories = ["web-programming::http-client"]
 repository = "https://github.com/longcipher/hpx"
 authors = ["Akagi201 <akagi201@gmail.com>"]
-readme = "README.md"
 license = "Apache-2.0"
 edition.workspace = true
 include = ["README.md", "LICENSE", "src/**/*.rs"]
@@ -72,11 +71,10 @@ tracing = ["http2/tracing", "dep:tracing"]
 
 # Enable BoringSSL support.
 boring = [
-    "dep:boring2",
-    "dep:tokio-boring2",
+    "dep:boring",
+    "dep:tokio-boring",
     "dep:brotli",
     "dep:flate2",
-    "dep:zstd",
 ]
 
 # Enable Rustls support.
@@ -99,7 +97,7 @@ macros = ["tokio/macros"]
 
 [dependencies]
 ahash = { workspace = true }
-boring2 = { workspace = true, features = ["pq-experimental"], optional = true }
+boring = { workspace = true, optional = true }
 brotli = { workspace = true, optional = true }
 bytes = { workspace = true }
 flate2 = { workspace = true, optional = true }
@@ -124,15 +122,12 @@ schnellru = { workspace = true }
 smallvec = { workspace = true, features = ["const_generics", "const_new"] }
 socket2 = { workspace = true, features = ["all"] }
 tokio = { workspace = true, features = ["net", "time", "rt", "io-util"] }
-tokio-boring2 = { workspace = true, features = [
-    "pq-experimental",
-], optional = true }
+tokio-boring = { workspace = true, optional = true }
 tokio-rustls = { workspace = true, optional = true, features = ["ring"] }
 tower = { workspace = true, features = ["timeout", "util", "retry"] }
 url = { workspace = true }
 want = { workspace = true }
 webpki-roots = { workspace = true, optional = true }
-zstd = { workspace = true, optional = true }
 
 # Optional deps...
 
@@ -194,6 +189,7 @@ libc = { workspace = true }
 
 [dev-dependencies]
 futures = { workspace = true, features = ["std"] }
+hpx-util = { path = "../hpx-util" }
 hyper = { workspace = true, features = ["http1", "http2", "server"] }
 hyper-util = { workspace = true, features = [
     "http1",
@@ -209,6 +205,7 @@ tokio-test = { workspace = true }
 tower = { workspace = true, features = ["limit"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+zstd = { workspace = true }
 
 [[test]]
 name = "cookie"

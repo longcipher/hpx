@@ -47,7 +47,7 @@ jobs:
               CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-g++
               RUSTC_LINKER: arm-linux-gnueabihf-g++
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install base dependencies on Ubuntu
         run: |
@@ -74,7 +74,7 @@ jobs:
         working-directory: ${{ github.workspace }}
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: build-linux-${{ matrix.target }}
           path: build-linux-${{ matrix.target }}.zip
@@ -124,7 +124,7 @@ jobs:
               RUSTC_LINKER: armv7l-linux-musleabihf-g++
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install base dependencies on Ubuntu
         run: |
@@ -157,7 +157,7 @@ jobs:
         working-directory: ${{ github.workspace }}
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: build-musllinux-${{ matrix.target }}
           path: build-musllinux-${{ matrix.target }}.zip
@@ -174,7 +174,7 @@ jobs:
           - target: i686
             target_triple: i686-pc-windows-msvc
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install dependencies on Windows
         run: |
@@ -197,7 +197,7 @@ jobs:
         working-directory: ${{ github.workspace }}
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: build-windows-${{ matrix.target }}
           path: build-windows-${{ matrix.target }}.zip
@@ -216,7 +216,7 @@ jobs:
             target_triple: aarch64-apple-darwin
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install dependencies on macOS
         run: |
@@ -236,7 +236,7 @@ jobs:
         working-directory: ${{ github.workspace }}
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: build-macos-${{ matrix.target }}
           path: build-macos-${{ matrix.target }}.zip

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Result;
+use eyre::Result;
 use fastwebsockets::Frame;
 use fastwebsockets::OpCode;
 use fastwebsockets::upgrade;
@@ -111,7 +111,7 @@ async fn start_client(client_id: usize) -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test() -> Result<()> {
   let listener = TcpListener::bind("127.0.0.1:8080").await?;
-  println!("Server started, listening on {}", "127.0.0.1:8080");
+  println!("Server started, listening on 127.0.0.1:8080");
   tokio::spawn(async move {
     loop {
       let (stream, _) = listener.accept().await.unwrap();

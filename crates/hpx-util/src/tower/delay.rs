@@ -11,7 +11,7 @@
 //! use std::time::Duration;
 //!
 //! use hpx::Client;
-//! use hpx_util::middleware::delay::DelayLayer;
+//! use hpx_util::tower::delay::DelayLayer;
 //!
 //! let client = Client::builder()
 //!     .layer(DelayLayer::new(Duration::from_secs(1)))
@@ -25,7 +25,7 @@
 //! use std::time::Duration;
 //!
 //! use hpx::Client;
-//! use hpx_util::middleware::delay::JitterDelayLayer;
+//! use hpx_util::tower::delay::JitterDelayLayer;
 //!
 //! let client = Client::builder()
 //!     .layer(JitterDelayLayer::new(Duration::from_secs(1), 0.2))

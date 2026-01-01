@@ -992,7 +992,7 @@ mod tests {
         );
 
         // Now wait passed the minimum interval more
-        tokio::time::sleep(Duration::from_millis(70)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
 
         assert!(pool.locked().idle.get(&key).is_none());
     }

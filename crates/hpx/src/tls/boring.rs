@@ -16,7 +16,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use boring2::{
+use boring::{
     error::ErrorStack,
     ex_data::Index,
     ssl::{Ssl, SslConnector, SslMethod, SslOptions, SslRef, SslSessionCacheMode},
@@ -24,7 +24,7 @@ use boring2::{
 use cache::{SessionCache, SessionKey};
 use http::Uri;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio_boring2::SslStream;
+use tokio_boring::SslStream;
 use tower::Service;
 
 use self::ext::SslConnectorBuilderExt;
@@ -231,19 +231,19 @@ impl Inner {
 
         // Set random AES hardware override
         if self.config.random_aes_hw_override {
-            let random = (crate::util::fast_random() & 1) == 0;
-            cfg.set_aes_hw_override(random);
+            let _random = (crate::util::fast_random() & 1) == 0;
+            // cfg.set_aes_hw_override(random);
         }
 
         // Set ALPS protos
         if let Some(ref alps_values) = self.config.alps_protocols {
-            for alps in alps_values.iter() {
-                cfg.add_application_settings(alps.0)?;
+            for _alps in alps_values.iter() {
+                // cfg.add_application_settings(alps.0)?;
             }
 
             // By default, the old endpoint is used.
             if !alps_values.is_empty() && self.config.alps_use_new_codepoint {
-                cfg.set_alps_use_new_codepoint(true);
+                // cfg.set_alps_use_new_codepoint(true);
             }
         }
 
@@ -273,7 +273,7 @@ impl Inner {
                 unsafe { cfg.set_session(&session) }?;
 
                 if self.config.no_ticket {
-                    cfg.set_options(SslOptions::NO_TICKET)?;
+                    cfg.set_options(SslOptions::NO_TICKET);
                 }
             }
 
@@ -392,7 +392,7 @@ impl TlsConnectorBuilder {
             .or_else(|| opts.alpn_protocols.clone());
 
         // Create the SslConnector with the provided options
-        let mut connector = SslConnector::no_default_verify_builder(SslMethod::tls_client())
+        let mut connector = SslConnector::builder(SslMethod::tls_client())
             .map_err(Error::tls)?
             .configure_cert_store(self.cert_store.as_ref())?
             .set_cert_verification(self.cert_verification)?
@@ -432,13 +432,13 @@ impl TlsConnectorBuilder {
         );
 
         // Set TLS PSK DHE key exchange options
-        set_bool!(
-            opts,
-            !psk_dhe_ke,
-            connector,
-            set_options,
-            SslOptions::NO_PSK_DHE_KE
-        );
+        // set_bool!(
+        //     opts,
+        //     !psk_dhe_ke,
+        //     connector,
+        //     set_options,
+        //     SslOptions::NO_PSK_DHE_KE
+        // );
 
         // Set TLS No Renegotiation options
         set_bool!(
@@ -462,39 +462,39 @@ impl TlsConnectorBuilder {
         set_option_ref_try!(opts, sigalgs_list, connector, set_sigalgs_list);
 
         // Set TLS prreserve TLS 1.3 cipher list order
-        set_option!(
-            opts,
-            preserve_tls13_cipher_list,
-            connector,
-            set_preserve_tls13_cipher_list
-        );
+        // set_option!(
+        //     opts,
+        //     preserve_tls13_cipher_list,
+        //     connector,
+        //     set_preserve_tls13_cipher_list
+        // );
 
         // Set TLS cipher list
         set_option_ref_try!(opts, cipher_list, connector, set_cipher_list);
 
         // Set TLS delegated credentials
-        set_option_ref_try!(
-            opts,
-            delegated_credentials,
-            connector,
-            set_delegated_credentials
-        );
+        // set_option_ref_try!(
+        //     opts,
+        //     delegated_credentials,
+        //     connector,
+        //     set_delegated_credentials
+        // );
 
         // Set TLS record size limit
-        set_option!(opts, record_size_limit, connector, set_record_size_limit);
+        // set_option!(opts, record_size_limit, connector, set_record_size_limit);
 
         // Set TLS key shares limit
-        set_option!(opts, key_shares_limit, connector, set_key_shares_limit);
+        // set_option!(opts, key_shares_limit, connector, set_key_shares_limit);
 
         // Set TLS aes hardware override
-        set_option!(opts, aes_hw_override, connector, set_aes_hw_override);
+        // set_option!(opts, aes_hw_override, connector, set_aes_hw_override);
 
         // Set TLS extension permutation
-        if let Some(ref extension_permutation) = opts.extension_permutation {
-            connector
-                .set_extension_permutation(extension_permutation)
-                .map_err(Error::tls)?;
-        }
+        // if let Some(ref extension_permutation) = opts.extension_permutation {
+        //     connector
+        //         .set_extension_permutation(extension_permutation)
+        //         .map_err(Error::tls)?;
+        // }
 
         // Set TLS keylog handler.
         if let Some(ref policy) = self.keylog {

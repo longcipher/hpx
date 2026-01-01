@@ -15,7 +15,7 @@ pub(crate) mod boring;
 pub(crate) mod rustls;
 
 #[cfg(feature = "boring")]
-pub use boring2::ssl::{CertificateCompressionAlgorithm, ExtensionType};
+pub use ::boring::ssl::{CertificateCompressionAlgorithm, ExtensionType};
 
 pub use self::{
     keylog::KeyLog,
@@ -37,14 +37,23 @@ impl TlsInfo {
     }
 }
 
+use std::hash::{Hash, Hasher};
+
 #[cfg(feature = "boring")]
-use boring2::ssl;
+use ::boring::ssl;
 use bytes::{BufMut, Bytes, BytesMut};
 
 /// A TLS protocol version.
 #[cfg(feature = "boring")]
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TlsVersion(ssl::SslVersion);
+
+#[cfg(feature = "boring")]
+impl Hash for TlsVersion {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        format!("{:?}", self.0).hash(state);
+    }
+}
 
 #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
 /// TLS protocol version.

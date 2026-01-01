@@ -4,7 +4,7 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use boring2::ssl::{SslSession, SslSessionRef, SslVersion};
+use boring::ssl::{SslSession, SslSessionRef, SslVersion};
 use schnellru::ByLength;
 
 use crate::hash::{HASHER, HashMap, LruMap};

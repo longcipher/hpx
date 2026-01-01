@@ -23,15 +23,10 @@ use tower::{
     util::{BoxCloneSyncService, BoxCloneSyncServiceLayer},
 };
 
+pub use self::http::{HttpInfo, TcpConnectOptions};
 #[cfg(feature = "socks")]
 pub(super) use self::proxy::socks;
-pub(super) use self::{
-    conn::Conn,
-    connector::Connector,
-    http::{HttpInfo, TcpConnectOptions},
-    proxy::tunnel,
-    tls_info::TlsInfoFactory,
-};
+pub(crate) use self::{conn::Conn, connector::Connector, proxy::tunnel, tls_info::TlsInfoFactory};
 use crate::{client::http::ConnectRequest, dns::DynResolver, proxy::matcher::Intercept};
 
 /// HTTP connector with dynamic DNS resolver.

@@ -1,7 +1,8 @@
-use boring2::ssl::{SslConnectorBuilder, SslVerifyMode};
+use boring::ssl::{SslConnectorBuilder, SslVerifyMode};
 
 use super::cert_compression::{
-    BrotliCertificateCompressor, ZlibCertificateCompressor, ZstdCertificateCompressor,
+    BrotliCertificateCompressor,
+    ZlibCertificateCompressor, // ZstdCertificateCompressor,
 };
 use crate::{
     Error,
@@ -55,22 +56,22 @@ impl SslConnectorBuilderExt for SslConnectorBuilder {
     ) -> crate::Result<SslConnectorBuilder> {
         if let Some(algs) = algs {
             for algorithm in algs.iter() {
-                let res =
-                    match *algorithm {
-                        CertificateCompressionAlgorithm::ZLIB => self
-                            .add_certificate_compression_algorithm(
-                                ZlibCertificateCompressor::default(),
-                            ),
-                        CertificateCompressionAlgorithm::BROTLI => self
-                            .add_certificate_compression_algorithm(
-                                BrotliCertificateCompressor::default(),
-                            ),
-                        CertificateCompressionAlgorithm::ZSTD => self
-                            .add_certificate_compression_algorithm(
-                                ZstdCertificateCompressor::default(),
-                            ),
-                        _ => continue,
-                    };
+                let res = match *algorithm {
+                    CertificateCompressionAlgorithm::ZLIB => {
+                        self.add_certificate_compression_algorithm(
+                            ZlibCertificateCompressor::default(),
+                        )
+                    }
+                    CertificateCompressionAlgorithm::BROTLI => self
+                        .add_certificate_compression_algorithm(
+                            BrotliCertificateCompressor::default(),
+                        ),
+                    // CertificateCompressionAlgorithm::ZSTD => self
+                    //     .add_certificate_compression_algorithm(
+                    //         ZstdCertificateCompressor::default(),
+                    //     ),
+                    _ => continue,
+                };
 
                 if let Err(e) = res {
                     return Err(Error::tls(e));

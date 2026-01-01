@@ -7,7 +7,7 @@ use std::{
 
 use http::{Uri, uri::Scheme};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_boring2::SslStreamBuilder;
+use tokio_boring::SslStreamBuilder;
 use tower::Service;
 
 use super::{EstablishedConn, HttpsConnector, MaybeHttpsStream};

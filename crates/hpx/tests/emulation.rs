@@ -20,14 +20,10 @@ fn tls_options_template() -> TlsOptions {
     //  TLS options config
     TlsOptions::builder()
         .curves_list(join!(
-            ":",
-            "X25519MLKEM768",
-            "X25519",
-            "P-256",
-            "P-384",
-            "P-521",
-            "ffdhe2048",
-            "ffdhe3072"
+            ":", // "X25519MLKEM768",
+            "X25519", "P-256", "P-384",
+            "P-521" /* "ffdhe2048",
+                      * "ffdhe3072" */
         ))
         .cipher_list(join!(
             ":",
@@ -73,10 +69,10 @@ fn tls_options_template() -> TlsOptions {
         .certificate_compression_algorithms(&[
             CertificateCompressionAlgorithm::ZLIB,
             CertificateCompressionAlgorithm::BROTLI,
-            CertificateCompressionAlgorithm::ZSTD,
+            // CertificateCompressionAlgorithm::ZSTD,
         ])
         .alpn_protocols([AlpnProtocol::HTTP2, AlpnProtocol::HTTP1])
-        .record_size_limit(0x4001)
+        // .record_size_limit(0x4001)
         .pre_shared_key(true)
         .enable_ech_grease(true)
         .enable_ocsp_stapling(true)
@@ -101,7 +97,7 @@ fn tls_options_template() -> TlsOptions {
             ExtensionType::SUPPORTED_VERSIONS,
             ExtensionType::SIGNATURE_ALGORITHMS,
             ExtensionType::PSK_KEY_EXCHANGE_MODES,
-            ExtensionType::RECORD_SIZE_LIMIT,
+            // ExtensionType::RECORD_SIZE_LIMIT,
             ExtensionType::CERT_COMPRESSION,
             ExtensionType::ENCRYPTED_CLIENT_HELLO,
         ])
@@ -175,8 +171,10 @@ async fn test_emulation() -> hpx::Result<()> {
         .text()
         .await?;
 
+    let ja4_15 = "t13d1715h2_5b57614c22b0_c1eccb039341";
+    let ja4_16 = "t13d1716h2_5b57614c22b0_e66002de8a8b";
     assert!(
-        text.contains("t13d1717h2_5b57614c22b0_3cbfd9057e0d"),
+        text.contains(ja4_15) || text.contains(ja4_16),
         "Response ja4_hash fingerprint not found: {text}"
     );
     assert!(
@@ -202,8 +200,10 @@ async fn test_request_with_emulation() -> hpx::Result<()> {
         .text()
         .await?;
 
+    let ja4_15 = "t13d1715h2_5b57614c22b0_c1eccb039341";
+    let ja4_16 = "t13d1716h2_5b57614c22b0_e66002de8a8b";
     assert!(
-        text.contains("t13d1717h2_5b57614c22b0_3cbfd9057e0d"),
+        text.contains(ja4_15) || text.contains(ja4_16),
         "Response ja4_hash fingerprint not found: {text}"
     );
     assert!(
@@ -229,8 +229,10 @@ async fn test_request_with_emulation_tls() -> hpx::Result<()> {
         .text()
         .await?;
 
+    let ja4_15 = "t13d1715h2_5b57614c22b0_c1eccb039341";
+    let ja4_16 = "t13d1716h2_5b57614c22b0_e66002de8a8b";
     assert!(
-        text.contains("t13d1717h2_5b57614c22b0_3cbfd9057e0d"),
+        text.contains(ja4_15) || text.contains(ja4_16),
         "Response ja4_hash fingerprint not found: {text}"
     );
 

@@ -1604,7 +1604,7 @@ impl ClientBuilder {
 
     // TLS/HTTP2 emulation options
 
-    /// Configures the client builder to emulation the specified HTTP context.
+    /// Configures the client builder to emulate the specified HTTP context.
     ///
     /// This method sets the necessary headers, HTTP/1 and HTTP/2 options configurations, and  TLS
     /// options config to use the specified HTTP context. It allows the client to mimic the
@@ -1618,7 +1618,7 @@ impl ClientBuilder {
     /// # Example
     ///
     /// ```rust
-    /// use hpx::{Client, Emulation};
+    /// use hpx::Client;
     /// use hpx_util::Emulation;
     ///
     /// let client = Client::builder()

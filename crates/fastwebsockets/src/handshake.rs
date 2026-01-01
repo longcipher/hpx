@@ -47,7 +47,7 @@ use crate::WebSocketError;
 /// use http_body_util::Empty;
 /// use tokio::net::TcpStream;
 /// use std::future::Future;
-/// use anyhow::Result;
+/// use eyre::Result;
 ///
 /// async fn connect() -> Result<WebSocket<TokioIo<Upgraded>>> {
 ///   let stream = TcpStream::connect("localhost:9001").await?;

@@ -1,5 +1,7 @@
 # hpx
 
+This project is a fork of `wreq` and indirectly `reqwest`, designed for the network layer of crypto exchange HFT (High-Frequency Trading) high-performance applications. The primary goal of this fork is performance optimization.
+
 An ergonomic all-in-one HTTP client for browser emulation with TLS, JA3/JA4, and HTTP/2 fingerprints.
 
 ## Features
@@ -104,7 +106,7 @@ async fn main() -> hpx::Result<()> {
         .emulation(Emulation::Firefox136)
         .send()
         .await?;
-    
+
     println!("{}", resp.text().await?);
     Ok(())
 }

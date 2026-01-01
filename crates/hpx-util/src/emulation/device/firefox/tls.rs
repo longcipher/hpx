@@ -59,25 +59,8 @@ macro_rules! tls_options {
     };
 }
 
-pub const CURVES_1: &str = join!(
-    ":",
-    "X25519",
-    "P-256",
-    "P-384",
-    "P-521",
-    "ffdhe2048",
-    "ffdhe3072"
-);
-pub const CURVES_2: &str = join!(
-    ":",
-    "X25519MLKEM768",
-    "X25519",
-    "P-256",
-    "P-384",
-    "P-521",
-    "ffdhe2048",
-    "ffdhe3072"
-);
+pub const CURVES_1: &str = join!(":", "X25519", "P-256", "P-384", "P-521");
+pub const CURVES_2: &str = join!(":", "X25519MLKEM768", "X25519", "P-256", "P-384", "P-521");
 
 pub const CIPHER_LIST_1: &str = join!(
     ":",
@@ -136,7 +119,7 @@ pub const SIGALGS_LIST: &str = join!(
 pub const CERT_COMPRESSION_ALGORITHM: &[CertificateCompressionAlgorithm] = &[
     CertificateCompressionAlgorithm::ZLIB,
     CertificateCompressionAlgorithm::BROTLI,
-    CertificateCompressionAlgorithm::ZSTD,
+    // CertificateCompressionAlgorithm::ZSTD,
 ];
 
 pub const DELEGATED_CREDENTIALS: &str = join!(
@@ -164,7 +147,7 @@ pub const EXTENSION_PERMUTATION_INDICES: &[ExtensionType] = &[
     ExtensionType::SUPPORTED_VERSIONS,
     ExtensionType::SIGNATURE_ALGORITHMS,
     ExtensionType::PSK_KEY_EXCHANGE_MODES,
-    ExtensionType::RECORD_SIZE_LIMIT,
+    // ExtensionType::RECORD_SIZE_LIMIT,
     ExtensionType::CERT_COMPRESSION,
     ExtensionType::ENCRYPTED_CLIENT_HELLO,
 ];

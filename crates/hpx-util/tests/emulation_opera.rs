@@ -10,27 +10,27 @@ use hpx_util::Emulation;
 test_emulation!(
     test_opera116,
     Emulation::Opera116,
-    ["t13d1516h2_8daaf6152771_02713d6af862"],
+    ["t13d1515h2_8daaf6152771_0a20fe35d3a5"],
     "52d84b11737d980aef856699f885ca86"
 );
 
 test_emulation!(
     test_opera117,
     Emulation::Opera117,
-    ["t13d1516h2_8daaf6152771_02713d6af862"],
+    ["t13d1515h2_8daaf6152771_0a20fe35d3a5"],
     "52d84b11737d980aef856699f885ca86"
 );
 
 test_emulation!(
     test_opera118,
     Emulation::Opera118,
-    ["t13d1516h2_8daaf6152771_02713d6af862"],
+    ["t13d1515h2_8daaf6152771_0a20fe35d3a5"],
     "52d84b11737d980aef856699f885ca86"
 );
 
 test_emulation!(
     test_opera119,
     Emulation::Opera119,
-    ["t13d1516h2_8daaf6152771_02713d6af862"],
+    ["t13d1515h2_8daaf6152771_0a20fe35d3a5"],
     "52d84b11737d980aef856699f885ca86"
 );

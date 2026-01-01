@@ -105,20 +105,27 @@ significant_drop_tightening = "allow"
 too_long_first_doc_paragraph = "allow"
 
 [workspace.dependencies]
-# Internal Crates
+ahash = "0.8.12"
+assert2 = "0.3.4"
+async-trait = "0.1.80"
+axum = "0.8.1"
+axum-core = "0.5.0"
+base64 = "0.22.1"
+boring = { git = "https://github.com/cloudflare/boring.git" }
+brotli = "8.0.2"
+bytes = "1.11.0"
+cookie = "0.18.1"
+criterion = "0.8.1"
+encoding_rs = "0.8.35"
+eyre = "0.6.12"
 fastwebsockets = { path = "crates/fastwebsockets" }
+flate2 = "1.1.5"
+futures = "0.3.31"
+futures-channel = "0.3.31"
+futures-util = "0.3.31"
+hickory-resolver = "0.25.2"
 hpx = { path = "crates/hpx" }
 hpx-util = { path = "crates/hpx-util" }
-
-# Async Runtime
-tokio = "1.48.0"
-tokio-boring2 = "5.0.0-alpha.10"
-tokio-rustls = "0.26"
-tokio-socks = "0.5.2"
-tokio-tungstenite = "0.28.0"
-tokio-util = "0.7.17"
-
-# HTTP & Network
 http = "1.4.0"
 http-body = "1.0.1"
 http-body-util = "0.1.3"
@@ -127,83 +134,49 @@ httparse = "1.10.1"
 hyper = "1.8.1"
 hyper-util = "0.1.19"
 ipnet = "2.11.0"
+libc = "0.2.178"
 mime = "0.3.17"
 mime_guess = "2.0.5"
-socket2 = "0.6.1"
-tower = "0.5.2"
-tower-http = "0.6.8"
-url = "2.5.7"
-
-# TLS & Crypto
-boring2 = "5.0.0-alpha.10"
-ring = "0.17.14"
+percent-encoding = "2.3.2"
+pin-project = "1.1.10"
+pin-project-lite = "0.2.16"
+pretty_env_logger = "0.5.0"
+rand = "0.9.2"
 rustls = "0.23.35"
 rustls-pemfile = "2.2.0"
 rustls-pki-types = "1.13.2"
-webpki-roots = "1.0.4"
-
-# Serialization
-base64 = "0.22.1"
+schnellru = "0.2.4"
 serde = "1.0.228"
 serde_json = "1.0.148"
 serde_urlencoded = "0.7.1"
 sha1 = "0.10.6"
-
-# Utilities
-ahash = "0.8.12"
-bytes = "1.11.0"
-cookie = "0.18.1"
-encoding_rs = "0.8.35"
-futures-channel = "0.3.31"
-futures-util = "0.3.31"
-once_cell = "1.19"
-percent-encoding = "2.3.2"
-pin-project-lite = "0.2.16"
-schnellru = "0.2.4"
-smallvec = "1.15.1"
-sync_wrapper = "1.0.2"
-want = "0.3.1"
-webpki-root-certs = "1.0.4"
-
-# Observability
-tracing = "0.1.44"
-
-# Compression
-brotli = "8.0.2"
-flate2 = "1.1.5"
-zstd = "0.13.3"
-
-# DNS
-hickory-resolver = "0.25.2"
-
-# System
-libc = "0.2.178"
-system-configuration = "0.7.0"
-windows-registry = "0.6.1"
-
-# Dev
-anyhow = "1.0.71"
-assert2 = "0.3.4"
-criterion = "0.4.0"
-eyre = "0.6.12"
-futures = "0.3.31"
-pin-project = "1.1.10"
-pretty_env_logger = "0.5.0"
 simdutf8 = "0.1.5"
+smallvec = "1.15.1"
+socket2 = "0.6.1"
 strum = "0.27.2"
 strum_macros = "0.27.2"
+sync_wrapper = "1.0.2"
+system-configuration = "0.7.0"
 thiserror = "2.0.17"
+tokio = "1.48.0"
+tokio-boring = { git = "https://github.com/cloudflare/boring.git" }
+tokio-rustls = "0.26"
+tokio-socks = "0.5.2"
 tokio-test = "0.4.4"
+tokio-util = "0.7.17"
+tower = "0.5.2"
+tower-http = "0.6.8"
+tracing = "0.1.44"
 tracing-subscriber = "0.3.22"
 trybuild = "1.0.80"
 typed-builder = "0.23.2"
-
-# Fastwebsockets specific
-async-trait = "0.1.80"
-axum = "0.8.1"
-axum-core = "0.5.0"
-rand = "0.9.2"
+url = "2.5.7"
 utf-8 = "0.7.6"
+want = "0.3.1"
+webpki-root-certs = "1.0.4"
+webpki-roots = "1.0.4"
+windows-registry = "0.6.1"
+zstd = "0.13.3"
 
 [profile.release-with-debug]
 inherits = "release"

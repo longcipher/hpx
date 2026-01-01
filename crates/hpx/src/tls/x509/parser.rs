@@ -1,6 +1,6 @@
 #![allow(unused)]
 #[cfg(feature = "boring")]
-use boring2::x509::store::{X509Store, X509StoreBuilder};
+use boring::x509::store::{X509Store, X509StoreBuilder};
 #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
 use rustls::RootCertStore;
 

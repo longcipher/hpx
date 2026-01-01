@@ -115,19 +115,20 @@ async fn stream_part() {
 #[tokio::test]
 async fn async_impl_file_part() {
     let _ = env_logger::try_init();
+    println!("Current directory: {:?}", std::env::current_dir());
 
     let form = hpx::multipart::Form::new()
-        .file("foo", "Cargo.lock")
+        .file("foo", "Cargo.toml")
         .await
         .unwrap();
 
-    let fcontents = std::fs::read_to_string("Cargo.lock").unwrap();
+    let fcontents = std::fs::read_to_string("Cargo.toml").unwrap();
 
     let expected_body = format!(
         "\
          --{0}\r\n\
-         Content-Disposition: form-data; name=\"foo\"; filename=\"Cargo.lock\"\r\n\
-         Content-Type: application/octet-stream\r\n\r\n\
+         Content-Disposition: form-data; name=\"foo\"; filename=\"Cargo.toml\"\r\n\
+         Content-Type: text/x-toml\r\n\r\n\
          {1}\r\n\
          --{0}--\r\n\
          ",

@@ -2,7 +2,7 @@ use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::UnixStream;
 #[cfg(feature = "boring")]
-use tokio_boring2::SslStream;
+use tokio_boring::SslStream;
 #[cfg(feature = "rustls-tls")]
 use tokio_rustls::client::TlsStream;
 

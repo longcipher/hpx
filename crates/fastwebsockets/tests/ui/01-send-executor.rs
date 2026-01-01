@@ -8,7 +8,7 @@ use hyper::Request;
 use std::future::Future;
 use tokio::net::TcpStream;
 use hyper_util::rt::tokio::TokioIo;
-use anyhow::Result;
+use eyre::Result;
 
 struct SpawnExecutor;
 

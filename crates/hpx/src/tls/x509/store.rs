@@ -2,7 +2,7 @@
 use std::{fmt::Debug, sync::Arc};
 
 #[cfg(feature = "boring")]
-use boring2::{
+use boring::{
     ssl::SslConnectorBuilder,
     x509::store::{X509Store, X509StoreBuilder},
 };
@@ -180,6 +180,15 @@ impl CertStore {
         let builder = Ok(RootCertStore::empty());
 
         CertStoreBuilder { builder }
+    }
+
+    /// Creates a new `CertStore` from a list of DER-encoded certificates.
+    pub fn from_der_certs<'a, I>(certs: I) -> Result<Self>
+    where
+        I: IntoIterator,
+        I::Item: Into<CertificateInput<'a>>,
+    {
+        CertStore::builder().add_der_certs(certs).build()
     }
 }
 

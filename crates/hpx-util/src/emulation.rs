@@ -79,7 +79,7 @@ define_enum!(
     /// Represents different browser versions for emulation.
     ///
     /// The `Emulation` enum provides variants for different browser versions that can be used
-    /// to emulation HTTP requests. Each variant corresponds to a specific browser version.
+    /// to emulate HTTP requests. Each variant corresponds to a specific browser version.
     ///
     /// # Naming Convention
     ///
@@ -224,7 +224,7 @@ define_enum!(
     /// Represents different operating systems for emulation.
     ///
     /// The `EmulationOS` enum provides variants for different operating systems that can be used
-    /// to emulation HTTP requests. Each variant corresponds to a specific operating system.
+    /// to emulate HTTP requests. Each variant corresponds to a specific operating system.
     ///
     /// # Naming Convention
     ///
@@ -276,9 +276,9 @@ impl EmulationOS {
 /// - `emulation_os`: The operating system to emulate. Defaults to `EmulationOS::default()`.
 /// - `skip_http2`: Whether to skip HTTP/2 support. Defaults to `false`.
 /// - `skip_headers`: Whether to skip adding default headers. Defaults to `false`.
-#[derive(Default, Clone, TypedBuilder)]
+#[derive(Default, Clone, Debug, TypedBuilder)]
 pub struct EmulationOption {
-    /// The browser version to emulation.
+    /// The browser version to emulate.
     #[builder(default)]
     emulation: Emulation,
 

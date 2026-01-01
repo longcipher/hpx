@@ -1,4 +1,7 @@
-use std::borrow::Cow;
+use std::{
+    borrow::Cow,
+    hash::{Hash, Hasher},
+};
 
 use super::{AlpnProtocol, AlpsProtocol, TlsVersion};
 #[cfg(feature = "boring")]
@@ -21,7 +24,7 @@ pub struct TlsOptionsBuilder {
 /// - **Performance tuning** (record size, cipher preferences, hardware overrides)
 ///
 /// All fields are optional or have defaults. See each field for details.
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct TlsOptions {
     /// Application-Layer Protocol Negotiation ([RFC 7301](https://datatracker.ietf.org/doc/html/rfc7301)).
@@ -176,6 +179,37 @@ pub struct TlsOptions {
     ///
     /// **Default:** `false`
     pub random_aes_hw_override: bool,
+}
+
+impl Hash for TlsOptions {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.alpn_protocols.hash(state);
+        self.alps_protocols.hash(state);
+        self.alps_use_new_codepoint.hash(state);
+        self.session_ticket.hash(state);
+        self.min_tls_version.hash(state);
+        self.max_tls_version.hash(state);
+        self.pre_shared_key.hash(state);
+        self.enable_ech_grease.hash(state);
+        self.permute_extensions.hash(state);
+        self.grease_enabled.hash(state);
+        self.enable_ocsp_stapling.hash(state);
+        self.enable_signed_cert_timestamps.hash(state);
+        self.record_size_limit.hash(state);
+        self.psk_skip_session_ticket.hash(state);
+        self.key_shares_limit.hash(state);
+        self.psk_dhe_ke.hash(state);
+        self.renegotiation.hash(state);
+        self.delegated_credentials.hash(state);
+        self.curves_list.hash(state);
+        self.cipher_list.hash(state);
+        self.sigalgs_list.hash(state);
+        // certificate_compression_algorithms and extension_permutation do not implement Hash
+        // We skip them for hashing, relying on PartialEq for collision resolution.
+        self.aes_hw_override.hash(state);
+        self.preserve_tls13_cipher_list.hash(state);
+        self.random_aes_hw_override.hash(state);
+    }
 }
 
 impl TlsOptionsBuilder {

@@ -43,7 +43,7 @@ impl Fragment {
 
 /// Collects fragmented messages over a WebSocket connection and returns the completed message once all fragments have been received.
 ///
-/// This is useful for applications that do not want to deal with fragmented messages and the default behavior of tungstenite.
+/// This is useful for applications that do not want to deal with fragmented messages.
 /// The payload is buffered in memory until the final fragment is received
 /// so use this when streaming messages is not an option.
 ///
@@ -52,7 +52,7 @@ impl Fragment {
 /// ```
 /// use tokio::net::TcpStream;
 /// use fastwebsockets::{WebSocket, FragmentCollector, OpCode, Role};
-/// use anyhow::Result;
+/// use eyre::Result;
 ///
 /// async fn handle_client(
 ///   socket: TcpStream,

@@ -14,8 +14,8 @@
 
 use std::future::Future;
 
-use anyhow::Result;
 use bytes::Bytes;
+use eyre::Result;
 use fastwebsockets::FragmentCollector;
 use fastwebsockets::Frame;
 use fastwebsockets::OpCode;

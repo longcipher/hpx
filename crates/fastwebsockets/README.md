@@ -43,8 +43,7 @@ async fn handle_client(
 **Fragmentation**
 
 By default, fastwebsockets will give the application raw frames with FIN set.
-Other crates like tungstenite which will give you a single message with all the
-frames concatenated.
+To get a single message with all frames concatenated, use `FragmentCollector`.
 
 For concanated frames, use `FragmentCollector`:
 

@@ -126,10 +126,10 @@ async fn test_proxy_unix_socket() {
 
     let client = Client::builder()
         .proxy(Proxy::unix(sock_path).unwrap())
-        .timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
         .build()
         .unwrap();
 
-    let resp = client.get("https://www.google.com").send().await.unwrap();
+    let resp = client.get("https://example.com").send().await.unwrap();
     assert!(resp.status().is_success(), "Expected successful response");
 }

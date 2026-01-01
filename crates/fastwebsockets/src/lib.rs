@@ -25,7 +25,7 @@
 //! ```
 //! use tokio::net::TcpStream;
 //! use fastwebsockets::{WebSocket, OpCode, Role};
-//! use anyhow::Result;
+//! use eyre::Result;
 //!
 //! async fn handle(
 //!   socket: TcpStream,
@@ -51,15 +51,14 @@
 //!
 //! ## Fragmentation
 //!
-//! By default, fastwebsockets will give the application raw frames with FIN set. Other
-//! crates like tungstenite which will give you a single message with all the frames
-//! concatenated.
+//! By default, fastwebsockets will give the application raw frames with FIN set.
+//! To get a single message with all frames concatenated, use `FragmentCollector`.
 //!
 //! For concanated frames, use `FragmentCollector`:
 //! ```
 //! use fastwebsockets::{FragmentCollector, WebSocket, Role};
 //! use tokio::net::TcpStream;
-//! use anyhow::Result;
+//! use eyre::Result;
 //!
 //! async fn handle(
 //!   socket: TcpStream,
@@ -86,7 +85,7 @@
 //! use fastwebsockets::upgrade::upgrade;
 //! use http_body_util::Empty;
 //! use hyper::{Request, body::{Incoming, Bytes}, Response};
-//! use anyhow::Result;
+//! use eyre::Result;
 //!
 //! async fn server_upgrade(
 //!   mut req: Request<Incoming>,
@@ -112,7 +111,7 @@
 //! use hyper_util::rt::TokioIo;
 //! use tokio::net::TcpStream;
 //! use std::future::Future;
-//! use anyhow::Result;
+//! use eyre::Result;
 //!
 //! async fn connect() -> Result<FragmentCollector<TokioIo<Upgraded>>> {
 //!   let stream = TcpStream::connect("localhost:9001").await?;
@@ -376,7 +375,7 @@ impl<'f, S> WebSocket<S> {
   /// ```
   /// use tokio::net::TcpStream;
   /// use fastwebsockets::{WebSocket, OpCode, Role};
-  /// use anyhow::Result;
+  /// use eyre::Result;
   ///
   /// async fn handle_client(
   ///   socket: TcpStream,
@@ -489,7 +488,7 @@ impl<'f, S> WebSocket<S> {
   /// ```
   /// use fastwebsockets::{WebSocket, Frame, OpCode};
   /// use tokio::net::TcpStream;
-  /// use anyhow::Result;
+  /// use eyre::Result;
   ///
   /// async fn send(
   ///   ws: &mut WebSocket<TcpStream>
@@ -533,7 +532,7 @@ impl<'f, S> WebSocket<S> {
   /// ```
   /// use fastwebsockets::{OpCode, WebSocket, Frame};
   /// use tokio::net::TcpStream;
-  /// use anyhow::Result;
+  /// use eyre::Result;
   ///
   /// async fn echo(
   ///   ws: &mut WebSocket<TcpStream>

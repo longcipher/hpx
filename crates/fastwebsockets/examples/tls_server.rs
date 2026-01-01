@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Result;
+use eyre::Result;
 use fastwebsockets::OpCode;
 use fastwebsockets::upgrade;
 use http_body_util::Empty;
@@ -26,8 +26,8 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 use tokio_rustls::rustls;
-use tokio_rustls::rustls::Certificate;
-use tokio_rustls::rustls::PrivateKey;
+use tokio_rustls::rustls::pki_types::CertificateDer;
+use tokio_rustls::rustls::pki_types::PrivateKeyDer;
 
 async fn handle_client(fut: upgrade::UpgradeFut) -> Result<()> {
   let mut ws = fut.await?;
@@ -66,16 +66,15 @@ fn tls_acceptor() -> Result<TlsAcceptor> {
   static KEY: &[u8] = include_bytes!("./localhost.key");
   static CERT: &[u8] = include_bytes!("./localhost.crt");
 
-  let mut keys: Vec<PrivateKey> =
+  let mut keys: Vec<PrivateKeyDer> =
     rustls_pemfile::pkcs8_private_keys(&mut &*KEY)
-      .map(|mut certs| certs.drain(..).map(PrivateKey).collect())
-      .unwrap();
-  let certs = rustls_pemfile::certs(&mut &*CERT)
-    .map(|mut certs| certs.drain(..).map(Certificate).collect())
-    .unwrap();
+      .map(|key| key.unwrap().into())
+      .collect();
+  let certs: Vec<CertificateDer> = rustls_pemfile::certs(&mut &*CERT)
+    .map(|cert| cert.unwrap())
+    .collect();
   dbg!(&certs);
   let config = rustls::ServerConfig::builder()
-    .with_safe_defaults()
     .with_no_client_auth()
     .with_single_cert(certs, keys.remove(0))?;
   Ok(TlsAcceptor::from(Arc::new(config)))
@@ -85,7 +84,7 @@ fn tls_acceptor() -> Result<TlsAcceptor> {
 async fn main() -> Result<()> {
   let acceptor = tls_acceptor()?;
   let listener = TcpListener::bind("127.0.0.1:8080").await?;
-  println!("Server started, listening on {}", "127.0.0.1:8080");
+  println!("Server started, listening on 127.0.0.1:8080");
   loop {
     let (stream, _) = listener.accept().await?;
     println!("Client connected");

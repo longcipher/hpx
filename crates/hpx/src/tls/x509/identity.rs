@@ -1,6 +1,6 @@
 #![allow(unused)]
 #[cfg(feature = "boring")]
-use boring2::{
+use boring::{
     pkcs12::Pkcs12,
     pkey::{PKey, Private},
     x509::X509,
@@ -48,7 +48,7 @@ impl Identity {
     /// # fn pkcs12() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut buf = Vec::new();
     /// File::open("my-ident.pfx")?.read_to_end(&mut buf)?;
-    /// let pkcs12 = hpx::Identity::from_pkcs12_der(&buf, "my-privkey-password")?;
+    /// let pkcs12 = hpx::tls::Identity::from_pkcs12_der(&buf, "my-privkey-password")?;
     /// # drop(pkcs12);
     /// # Ok(())
     /// # }
@@ -90,7 +90,7 @@ impl Identity {
     /// # fn pkcs8() -> Result<(), Box<dyn std::error::Error>> {
     /// let cert = fs::read("client.pem")?;
     /// let key = fs::read("key.pem")?;
-    /// let pkcs8 = hpx::Identity::from_pkcs8_pem(&cert, &key)?;
+    /// let pkcs8 = hpx::tls::Identity::from_pkcs8_pem(&cert, &key)?;
     /// # drop(pkcs8);
     /// # Ok(())
     /// # }
@@ -133,7 +133,7 @@ impl Identity {
     #[cfg(feature = "boring")]
     pub(crate) fn add_to_tls(
         &self,
-        connector: &mut boring2::ssl::SslConnectorBuilder,
+        connector: &mut boring::ssl::SslConnectorBuilder,
     ) -> crate::Result<()> {
         connector.set_certificate(&self.cert).map_err(Error::tls)?;
         connector.set_private_key(&self.pkey).map_err(Error::tls)?;
