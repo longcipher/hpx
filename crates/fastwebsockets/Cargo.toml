@@ -1,5 +1,5 @@
 [package]
-name = "fastwebsockets"
+name = "hpx-fastwebsockets"
 description = "A fast RFC6455 WebSocket server implementation"
 version.workspace = true
 authors = ["Divy Srivastava <dj.srivastava23@gmail.com>"]

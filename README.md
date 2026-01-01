@@ -1,5 +1,7 @@
 # hpx
 
+[![DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/longcipher/hpx) [![Context7](https://img.shields.io/badge/Website-context7.com-blue)](https://context7.com/longcipher/hpx)
+
 ![hpx](https://socialify.git.ci/longcipher/hpx/image?font=Source+Code+Pro&language=1&name=1&owner=1&pattern=Circuit+Board&theme=Auto)
 
 This project is a fork of [wreq](https://github.com/0x676e67/wreq) and indirectly [reqwest](https://github.com/seanmonstar/reqwest), designed for the network layer of crypto exchange HFT high-performance applications. The primary goal of this fork is performance optimization.
@@ -46,7 +48,8 @@ Add `hpx` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hpx = "0.1"
+hpx = "0.1.0"
+hpx-util = "0.1.0"
 ```
 
 ## TLS Backend Configuration
@@ -61,7 +64,7 @@ To use BoringSSL, no additional configuration is needed if you are using the def
 
 ```toml
 [dependencies]
-hpx = "0.1"
+hpx = "0.1.0"
 ```
 
 ### Rustls
@@ -74,7 +77,7 @@ To use Rustls, you must disable the default features and explicitly enable `rust
 
 ```toml
 [dependencies]
-hpx = { version = "0.1", default-features = false, features = ["rustls-tls", "http1", "http2"] }
+hpx = { version = "0.1.0", default-features = false, features = ["rustls-tls", "http1", "http2"] }
 ```
 
 ## Usage Examples

@@ -51,13 +51,8 @@ async fn test_badssl_self_signed() {
 #[cfg(feature = "boring")]
 #[allow(dead_code)]
 const CURVES_LIST: &str = join!(
-    ":",
-    "X25519",
-    "P-256",
-    "P-384",
-    "P-521"
-    // "ffdhe2048",
-    // "ffdhe3072"
+    ":", "X25519", "P-256", "P-384", "P-521" /* "ffdhe2048",
+             * "ffdhe3072" */
 );
 
 #[tokio::test]

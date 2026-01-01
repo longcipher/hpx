@@ -105,6 +105,12 @@ significant_drop_tightening = "allow"
 too_long_first_doc_paragraph = "allow"
 
 [workspace.dependencies]
+# local crates
+fastwebsockets = { path = "crates/fastwebsockets", package = "hpx-fastwebsockets" }
+hpx = { path = "crates/hpx" }
+hpx-util = { path = "crates/hpx-util" }
+
+# external crates
 ahash = "0.8.12"
 assert2 = "0.3.4"
 async-trait = "0.1.80"
@@ -118,14 +124,11 @@ cookie = "0.18.1"
 criterion = "0.8.1"
 encoding_rs = "0.8.35"
 eyre = "0.6.12"
-fastwebsockets = { path = "crates/fastwebsockets" }
 flate2 = "1.1.5"
 futures = "0.3.31"
 futures-channel = "0.3.31"
 futures-util = "0.3.31"
 hickory-resolver = "0.25.2"
-hpx = { path = "crates/hpx" }
-hpx-util = { path = "crates/hpx-util" }
 http = "1.4.0"
 http-body = "1.0.1"
 http-body-util = "0.1.3"

@@ -56,31 +56,31 @@
 //! use futures_util::{SinkExt, StreamExt, TryStreamExt};
 //! use hpx::{header, ws::message::Message};
 //!
-//!     // Use the API you're already familiar with
-//!     let websocket = hpx::websocket("wss://echo.websocket.org")
-//!         .header(header::USER_AGENT, env!("CARGO_PKG_NAME"))
-//!         .send()
-//!         .await?;
+//! // Use the API you're already familiar with
+//! let websocket = hpx::websocket("wss://echo.websocket.org")
+//!     .header(header::USER_AGENT, env!("CARGO_PKG_NAME"))
+//!     .send()
+//!     .await?;
 //!
-//!     assert_eq!(websocket.version(), http::Version::HTTP_11);
+//! assert_eq!(websocket.version(), http::Version::HTTP_11);
 //!
-//!     let (mut tx, mut rx) = websocket.into_websocket().await?.split();
+//! let (mut tx, mut rx) = websocket.into_websocket().await?.split();
 //!
-//!     tokio::spawn(async move {
-//!         for i in 1..11 {
-//!             if let Err(err) = tx.send(Message::text(format!("Hello, World! {i}"))).await {
-//!                 eprintln!("failed to send message: {err}");
-//!             }
-//!         }
-//!     });
-//!
-//!     while let Some(message) = rx.try_next().await? {
-//!         if let Message::Text(text) = message {
-//!             println!("received: {text}");
+//! tokio::spawn(async move {
+//!     for i in 1..11 {
+//!         if let Err(err) = tx.send(Message::text(format!("Hello, World! {i}"))).await {
+//!             eprintln!("failed to send message: {err}");
 //!         }
 //!     }
+//! });
 //!
-//!     Ok(())
+//! while let Some(message) = rx.try_next().await? {
+//!     if let Message::Text(text) = message {
+//!         println!("received: {text}");
+//!     }
+//! }
+//!
+//! Ok(())
 //! # }
 //! # #[cfg(not(feature = "ws"))]
 //! # fn main() {}

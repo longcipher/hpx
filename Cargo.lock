@@ -691,35 +691,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fastwebsockets"
-version = "0.1.0"
-dependencies = [
- "assert2",
- "async-trait",
- "axum",
- "axum-core",
- "base64",
- "bytes",
- "criterion",
- "eyre",
- "http",
- "http-body-util",
- "hyper",
- "hyper-util",
- "pin-project",
- "rand",
- "rustls-pemfile",
- "sha1",
- "simdutf8",
- "thiserror 2.0.17",
- "tokio",
- "tokio-rustls",
- "trybuild",
- "utf-8",
- "webpki-roots",
-]
-
-[[package]]
 name = "find-msvc-tools"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1032,12 +1003,12 @@ dependencies = [
  "bytes",
  "cookie",
  "encoding_rs",
- "fastwebsockets",
  "flate2",
  "futures",
  "futures-channel",
  "futures-util",
  "hickory-resolver",
+ "hpx-fastwebsockets",
  "hpx-util",
  "http",
  "http-body",
@@ -1081,6 +1052,35 @@ dependencies = [
  "webpki-roots",
  "windows-registry",
  "zstd",
+]
+
+[[package]]
+name = "hpx-fastwebsockets"
+version = "0.1.0"
+dependencies = [
+ "assert2",
+ "async-trait",
+ "axum",
+ "axum-core",
+ "base64",
+ "bytes",
+ "criterion",
+ "eyre",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "pin-project",
+ "rand",
+ "rustls-pemfile",
+ "sha1",
+ "simdutf8",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-rustls",
+ "trybuild",
+ "utf-8",
+ "webpki-roots",
 ]
 
 [[package]]
