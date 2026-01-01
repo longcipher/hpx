@@ -1618,7 +1618,7 @@ impl ClientBuilder {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```rust,no_run
     /// use hpx::Client;
     /// use hpx_util::Emulation;
     ///
