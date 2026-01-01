@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fastwebsockets::FragmentCollectorRead;
-use fastwebsockets::OpCode;
-use fastwebsockets::WebSocketError;
-use fastwebsockets::upgrade;
+use hpx_fastwebsockets::FragmentCollectorRead;
+use hpx_fastwebsockets::OpCode;
+use hpx_fastwebsockets::WebSocketError;
+use hpx_fastwebsockets::upgrade;
 use http_body_util::Empty;
 use hyper::Request;
 use hyper::Response;
@@ -69,7 +69,7 @@ fn main() -> Result<(), WebSocketError> {
 
   rt.block_on(async move {
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
-    println!("Server started, listening on {}", "127.0.0.1:8080");
+    println!("Server started, listening on 127.0.0.1:8080");
     loop {
       let (stream, _) = listener.accept().await?;
       println!("Client connected");

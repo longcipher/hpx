@@ -24,6 +24,8 @@ pub struct Identity {
     pub(crate) cert: Vec<CertificateDer<'static>>,
     #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
     pub(crate) key: std::sync::Arc<PrivateKeyDer<'static>>,
+    #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+    _marker: std::marker::PhantomData<()>,
 }
 
 impl Identity {
@@ -72,6 +74,10 @@ impl Identity {
             let _ = buf;
             let _ = pass;
             Err(Error::builder("PKCS12 not supported with rustls"))
+        }
+        #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+        {
+            Err(Error::tls("TLS not supported"))
         }
     }
 
@@ -127,6 +133,10 @@ impl Identity {
                 cert: certs,
                 key: std::sync::Arc::new(key),
             })
+        }
+        #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+        {
+            Err(Error::tls("TLS not supported"))
         }
     }
 

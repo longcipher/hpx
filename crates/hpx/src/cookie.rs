@@ -392,10 +392,10 @@ impl Jar {
         let uri = into_uri!(uri);
         if let Some(host) = uri.host() {
             let mut inner = self.store.write();
-            if let Some(path_map) = inner.get_mut(host) {
-                if let Some(name_map) = path_map.get_mut(uri.path()) {
-                    name_map.remove(cookie.into());
-                }
+            if let Some(path_map) = inner.get_mut(host)
+                && let Some(name_map) = path_map.get_mut(uri.path())
+            {
+                name_map.remove(cookie.into());
             }
         }
     }
@@ -450,10 +450,10 @@ impl CookieStore for Jar {
                                 return false;
                             }
 
-                            if let Some(Expiration::DateTime(dt)) = cookie.expires() {
-                                if SystemTime::from(dt) <= SystemTime::now() {
-                                    return false;
-                                }
+                            if let Some(Expiration::DateTime(dt)) = cookie.expires()
+                                && SystemTime::from(dt) <= SystemTime::now()
+                            {
+                                return false;
                             }
 
                             true

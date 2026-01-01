@@ -11,11 +11,15 @@ use crate::{Error, Result};
 type StoreBuilder = X509StoreBuilder;
 #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
 type StoreBuilder = RootCertStore;
+#[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+type StoreBuilder = ();
 
 #[cfg(feature = "boring")]
 type StoreType = X509Store;
 #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
 type StoreType = RootCertStore;
+#[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+type StoreType = ();
 
 pub fn parse_certs<'c, I>(
     certs: I,
@@ -29,6 +33,8 @@ where
     let mut store = X509StoreBuilder::new().map_err(Error::tls)?;
     #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
     let mut store = RootCertStore::empty();
+    #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+    let mut store = ();
 
     let certs = filter_map_certs(certs.into_iter().map(|c| c.into().with_parser(parser)));
     process_certs(certs, &mut store)?;
@@ -37,6 +43,8 @@ where
     return Ok(store.build());
     #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
     return Ok(store);
+    #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+    return Ok(());
 }
 
 pub fn parse_certs_with_stack<C, F>(certs: C, parse: F) -> Result<StoreType>
@@ -48,6 +56,8 @@ where
     let mut store = X509StoreBuilder::new().map_err(Error::tls)?;
     #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
     let mut store = RootCertStore::empty();
+    #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+    let mut store = ();
 
     let certs = parse(certs)?;
     process_certs(certs.into_iter(), &mut store)?;
@@ -56,6 +66,8 @@ where
     return Ok(store.build());
     #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
     return Ok(store);
+    #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+    return Ok(());
 }
 
 pub fn process_certs<I>(iter: I, store: &mut StoreBuilder) -> Result<()>
@@ -71,6 +83,8 @@ where
         let res = store
             .add(cert.0.clone())
             .map_err(|e| Error::tls(Box::new(e)));
+        #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+        let res: Result<()> = Err(Error::tls("TLS not supported"));
 
         if let Err(_err) = res {
             invalid_count += 1;

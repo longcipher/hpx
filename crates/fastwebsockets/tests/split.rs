@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use eyre::Result;
-use fastwebsockets::Frame;
-use fastwebsockets::OpCode;
-use fastwebsockets::upgrade;
+use hpx_fastwebsockets::Frame;
+use hpx_fastwebsockets::OpCode;
+use hpx_fastwebsockets::upgrade;
 use http_body_util::Empty;
 use hyper::Request;
 use hyper::Response;
@@ -26,9 +26,9 @@ use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 
-use fastwebsockets::WebSocketRead;
-use fastwebsockets::WebSocketWrite;
-use fastwebsockets::handshake;
+use hpx_fastwebsockets::WebSocketRead;
+use hpx_fastwebsockets::WebSocketWrite;
+use hpx_fastwebsockets::handshake;
 use hyper::header::CONNECTION;
 use hyper::header::UPGRADE;
 use hyper::upgrade::Upgraded;
@@ -47,7 +47,7 @@ async fn handle_client(
 ) -> Result<()> {
   let mut ws = fut.await?;
   ws.set_writev(false);
-  let mut ws = fastwebsockets::FragmentCollector::new(ws);
+  let mut ws = hpx_fastwebsockets::FragmentCollector::new(ws);
 
   ws.write_frame(Frame::binary(client_id.to_ne_bytes().as_ref().into()))
     .await
@@ -93,7 +93,7 @@ async fn connect(
     .header("CLIENT-ID", &format!("{}", client_id))
     .header(
       "Sec-WebSocket-Key",
-      fastwebsockets::handshake::generate_key(),
+      hpx_fastwebsockets::handshake::generate_key(),
     )
     .header("Sec-WebSocket-Version", "13")
     .body(Empty::<Bytes>::new())?;
@@ -127,7 +127,7 @@ async fn start_client(client_id: usize) -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test() -> Result<()> {
   let listener = TcpListener::bind("127.0.0.1:8080").await?;
-  println!("Server started, listening on {}", "127.0.0.1:8080");
+  println!("Server started, listening on 127.0.0.1:8080");
   tokio::spawn(async move {
     loop {
       let (stream, _) = listener.accept().await.unwrap();

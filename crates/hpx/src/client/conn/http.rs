@@ -57,7 +57,7 @@ pub struct HttpConnector<R = GaiResolver> {
 ///
 /// # Note
 ///
-/// If a different connector is used besides [`HttpConnector`],
+/// If a different connector is used besides `HttpConnector`,
 /// this value will not exist in the extensions. Consult that specific
 /// connector to see what "extra" information it might provide to responses.
 #[derive(Clone, Debug)]

@@ -1,7 +1,7 @@
 use axum::{Router, response::IntoResponse, routing::get};
-use fastwebsockets::OpCode;
-use fastwebsockets::WebSocketError;
-use fastwebsockets::upgrade;
+use hpx_fastwebsockets::OpCode;
+use hpx_fastwebsockets::WebSocketError;
+use hpx_fastwebsockets::upgrade;
 
 #[tokio::main]
 async fn main() {
@@ -12,7 +12,7 @@ async fn main() {
 }
 
 async fn handle_client(fut: upgrade::UpgradeFut) -> Result<(), WebSocketError> {
-  let mut ws = fastwebsockets::FragmentCollector::new(fut.await?);
+  let mut ws = hpx_fastwebsockets::FragmentCollector::new(fut.await?);
 
   loop {
     let frame = ws.read_frame().await?;

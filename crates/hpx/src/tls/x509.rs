@@ -56,6 +56,11 @@ pub struct Certificate(X509);
 #[derive(Clone, Debug)]
 pub struct Certificate(pub(crate) CertificateDer<'static>);
 
+#[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+/// An X509 certificate.
+#[derive(Clone, Debug)]
+pub struct Certificate;
+
 impl Certificate {
     /// Parse a certificate from DER data.
     #[inline]
@@ -67,6 +72,11 @@ impl Certificate {
         #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
         {
             Ok(Self(CertificateDer::from(cert.as_ref().to_vec())))
+        }
+        #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+        {
+            let _ = cert;
+            Err(Error::tls("TLS not supported"))
         }
     }
 
@@ -91,6 +101,11 @@ impl Certificate {
                 .map(Self)
                 .ok_or_else(|| Error::tls("No certificate found in PEM"))
         }
+        #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+        {
+            let _ = cert;
+            Err(Error::tls("TLS not supported"))
+        }
     }
 
     /// Parse a stack of certificates from DER data.
@@ -110,6 +125,11 @@ impl Certificate {
                 .map_err(|e| Error::tls(Box::new(e)))?;
 
             Ok(certs.into_iter().map(Self).collect())
+        }
+        #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+        {
+            let _ = cert;
+            Err(Error::tls("TLS not supported"))
         }
     }
 }

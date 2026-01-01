@@ -9,7 +9,20 @@ use http_body::Body;
 use pin_project_lite::pin_project;
 use tokio::sync::{mpsc, oneshot};
 
-use super::{Error, body::Incoming, proto::h2::client::ResponseFutMap};
+#[cfg(feature = "http2")]
+use super::proto::h2::client::ResponseFutMap;
+use super::{Error, body::Incoming};
+
+#[cfg(not(feature = "http2"))]
+pub(crate) struct ResponseFutMap<B>(std::marker::PhantomData<B>);
+
+#[cfg(not(feature = "http2"))]
+impl<B> Future for ResponseFutMap<B> {
+    type Output = Result<Response<Incoming>, (Error, Option<Request<B>>)>;
+    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Poll::Pending
+    }
+}
 
 pub(crate) type RetryPromise<T, U> = oneshot::Receiver<Result<U, TrySendError<T>>>;
 

@@ -126,6 +126,7 @@ where
 }
 
 /// Implements [`RequestConfigValue`] for a given type.
+#[allow(unused_macro_rules)]
 macro_rules! impl_request_config_value {
     ($type:ty) => {
         impl crate::config::RequestConfigValue for $type {

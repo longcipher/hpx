@@ -37,6 +37,7 @@ impl TlsInfo {
     }
 }
 
+#[allow(unused_imports)]
 use std::hash::{Hash, Hasher};
 
 #[cfg(feature = "boring")]
@@ -60,12 +61,20 @@ impl Hash for TlsVersion {
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct TlsVersion(u16);
 
+#[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+/// TLS protocol version.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct TlsVersion(u16);
+
 impl TlsVersion {
     /// Version 1.0 of the TLS protocol.
     #[cfg(feature = "boring")]
     pub const TLS_1_0: TlsVersion = TlsVersion(ssl::SslVersion::TLS1);
     /// Version 1.0 of the TLS protocol.
     #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+    pub const TLS_1_0: TlsVersion = TlsVersion(0x0301);
+    /// Version 1.0 of the TLS protocol.
+    #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
     pub const TLS_1_0: TlsVersion = TlsVersion(0x0301);
 
     /// Version 1.1 of the TLS protocol.
@@ -74,6 +83,9 @@ impl TlsVersion {
     /// Version 1.1 of the TLS protocol.
     #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
     pub const TLS_1_1: TlsVersion = TlsVersion(0x0302);
+    /// Version 1.1 of the TLS protocol.
+    #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+    pub const TLS_1_1: TlsVersion = TlsVersion(0x0302);
 
     /// Version 1.2 of the TLS protocol.
     #[cfg(feature = "boring")]
@@ -81,12 +93,18 @@ impl TlsVersion {
     /// Version 1.2 of the TLS protocol.
     #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
     pub const TLS_1_2: TlsVersion = TlsVersion(0x0303);
+    /// Version 1.2 of the TLS protocol.
+    #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+    pub const TLS_1_2: TlsVersion = TlsVersion(0x0303);
 
     /// Version 1.3 of the TLS protocol.
     #[cfg(feature = "boring")]
     pub const TLS_1_3: TlsVersion = TlsVersion(ssl::SslVersion::TLS1_3);
     /// Version 1.3 of the TLS protocol.
     #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+    pub const TLS_1_3: TlsVersion = TlsVersion(0x0304);
+    /// Version 1.3 of the TLS protocol.
+    #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
     pub const TLS_1_3: TlsVersion = TlsVersion(0x0304);
 }
 

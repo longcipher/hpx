@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use eyre::Result;
-use fastwebsockets::Frame;
-use fastwebsockets::OpCode;
-use fastwebsockets::upgrade;
+use hpx_fastwebsockets::Frame;
+use hpx_fastwebsockets::OpCode;
+use hpx_fastwebsockets::upgrade;
 use http_body_util::Empty;
 use hyper::Request;
 use hyper::Response;
@@ -26,8 +26,8 @@ use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 
-use fastwebsockets::WebSocket;
-use fastwebsockets::handshake;
+use hpx_fastwebsockets::WebSocket;
+use hpx_fastwebsockets::handshake;
 use hyper::header::CONNECTION;
 use hyper::header::UPGRADE;
 use hyper::upgrade::Upgraded;
@@ -42,7 +42,7 @@ async fn handle_client(
 ) -> Result<()> {
   let mut ws = fut.await?;
   ws.set_writev(false);
-  let mut ws = fastwebsockets::FragmentCollector::new(ws);
+  let mut ws = hpx_fastwebsockets::FragmentCollector::new(ws);
 
   ws.write_frame(Frame::binary(client_id.to_ne_bytes().as_ref().into()))
     .await
@@ -83,7 +83,7 @@ async fn connect(client_id: usize) -> Result<WebSocket<TokioIo<Upgraded>>> {
     .header("CLIENT-ID", &format!("{}", client_id))
     .header(
       "Sec-WebSocket-Key",
-      fastwebsockets::handshake::generate_key(),
+      hpx_fastwebsockets::handshake::generate_key(),
     )
     .header("Sec-WebSocket-Version", "13")
     .body(Empty::<Bytes>::new())?;

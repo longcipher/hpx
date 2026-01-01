@@ -67,40 +67,40 @@ async fn hyper() {
       .header(CONNECTION, "upgrade")
       .header(
         "Sec-WebSocket-Key",
-        fastwebsockets::handshake::generate_key(),
+        hpx_fastwebsockets::handshake::generate_key(),
       )
       .header("Sec-WebSocket-Version", "13")
       .body(Empty::<Bytes>::new())
   );
-  let_assert!(Ok((mut stream, _response)) = fastwebsockets::handshake::client(&TestExecutor, req, stream).await);
+  let_assert!(Ok((mut stream, _response)) = hpx_fastwebsockets::handshake::client(&TestExecutor, req, stream).await);
 
   let_assert!(Ok(message) = stream.read_frame().await);
-  assert!(message.opcode == fastwebsockets::OpCode::Text);
+  assert!(message.opcode == hpx_fastwebsockets::OpCode::Text);
   assert!(message.payload == b"Hello!");
 
   let_assert!(
     Ok(()) = stream
-      .write_frame(fastwebsockets::Frame::text(b"Goodbye!".to_vec().into()))
+      .write_frame(hpx_fastwebsockets::Frame::text(b"Goodbye!".to_vec().into()))
       .await
   );
   let_assert!(Ok(close_frame) = stream.read_frame().await);
-  assert!(close_frame.opcode == fastwebsockets::OpCode::Close);
+  assert!(close_frame.opcode == hpx_fastwebsockets::OpCode::Close);
 }
 
 async fn upgrade_websocket(
   mut request: Request<Incoming>,
-) -> Result<Response<Empty<Bytes>>, fastwebsockets::WebSocketError> {
-  assert!(fastwebsockets::upgrade::is_upgrade_request(&request) == true);
+) -> Result<Response<Empty<Bytes>>, hpx_fastwebsockets::WebSocketError> {
+  assert!(hpx_fastwebsockets::upgrade::is_upgrade_request(&request) == true);
 
-  let (response, stream) = fastwebsockets::upgrade::upgrade(&mut request)?;
+  let (response, stream) = hpx_fastwebsockets::upgrade::upgrade(&mut request)?;
   tokio::spawn(async move {
     let_assert!(Ok(mut stream) = stream.await);
-    assert!(let Ok(()) = stream.write_frame(fastwebsockets::Frame::text(b"Hello!".to_vec().into())).await);
+    assert!(let Ok(()) = stream.write_frame(hpx_fastwebsockets::Frame::text(b"Hello!".to_vec().into())).await);
     let_assert!(Ok(reply) = stream.read_frame().await);
-    assert!(reply.opcode == fastwebsockets::OpCode::Text);
+    assert!(reply.opcode == hpx_fastwebsockets::OpCode::Text);
     assert!(reply.payload == b"Goodbye!");
 
-    assert!(let Ok(()) = stream.write_frame(fastwebsockets::Frame::close_raw(vec![].into())).await);
+    assert!(let Ok(()) = stream.write_frame(hpx_fastwebsockets::Frame::close_raw(vec![].into())).await);
   });
 
   Ok(response)

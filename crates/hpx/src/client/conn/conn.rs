@@ -150,6 +150,10 @@ impl Connection for TlsConn<TcpStream> {
                 connected
             }
         }
+        #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+        {
+            self.inner.get_ref().connected()
+        }
     }
 }
 
@@ -173,6 +177,10 @@ impl Connection for TlsConn<MaybeHttpsStream<TcpStream>> {
             } else {
                 connected
             }
+        }
+        #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+        {
+            self.inner.get_ref().connected()
         }
     }
 }
@@ -201,6 +209,10 @@ impl Connection for TlsConn<UnixStream> {
                 connected
             }
         }
+        #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+        {
+            self.inner.get_ref().connected()
+        }
     }
 }
 
@@ -225,6 +237,10 @@ impl Connection for TlsConn<MaybeHttpsStream<UnixStream>> {
             } else {
                 connected
             }
+        }
+        #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+        {
+            self.inner.get_ref().connected()
         }
     }
 }

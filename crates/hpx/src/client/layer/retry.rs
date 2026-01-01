@@ -123,12 +123,13 @@ impl Policy<Req, Res, BoxError> for RetryPolicy {
 /// Returns `true` if the error type or content indicates that the request can be retried,
 /// otherwise returns `false`.
 fn is_retryable_error(err: &(dyn StdError + 'static)) -> bool {
-    let err = if let Some(err) = err.source() {
+    let _err = if let Some(_err) = err.source() {
         err
     } else {
         return false;
     };
 
+    #[cfg(feature = "http2")]
     if let Some(cause) = err.source()
         && let Some(err) = cause.downcast_ref::<http2::Error>()
     {

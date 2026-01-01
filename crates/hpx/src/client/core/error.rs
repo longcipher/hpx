@@ -174,6 +174,7 @@ impl Error {
         None
     }
 
+    #[cfg(feature = "http2")]
     pub(super) fn h2_reason(&self) -> http2::Reason {
         // Find an http2::Reason somewhere in the cause stack, if it exists,
         // otherwise assume an INTERNAL_ERROR.
@@ -202,7 +203,7 @@ impl Error {
         Error::new(Kind::UnexpectedMessage)
     }
 
-    pub(super) fn new_io(cause: std::io::Error) -> Error {
+    pub(crate) fn new_io(cause: std::io::Error) -> Error {
         Error::new(Kind::Io).with(cause)
     }
 
@@ -234,7 +235,7 @@ impl Error {
         Error::new_user(User::ManualUpgrade)
     }
 
-    pub(super) fn new_user_service<E: Into<Cause>>(cause: E) -> Error {
+    pub(crate) fn new_user_service<E: Into<Cause>>(cause: E) -> Error {
         Error::new_user(User::Service).with(cause)
     }
 
@@ -254,6 +255,7 @@ impl Error {
         Error::new(Kind::User(User::DispatchGone))
     }
 
+    #[cfg(feature = "http2")]
     pub(super) fn new_h2(cause: ::http2::Error) -> Error {
         if cause.is_io() {
             Error::new_io(cause.into_io().expect("http2::Error::is_io"))
@@ -347,6 +349,7 @@ impl Parse {
     }
 }
 
+#[cfg(feature = "http1")]
 impl From<httparse::Error> for Parse {
     fn from(err: httparse::Error) -> Parse {
         match err {

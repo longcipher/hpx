@@ -3,8 +3,10 @@
 //! Traits in this module ease setting bounds and usually automatically
 //! implemented by implementing another trait.
 
+#[cfg(feature = "http2")]
 pub use self::h2_client::Http2ClientConnExec;
 
+#[cfg(feature = "http2")]
 mod h2_client {
     use std::future::Future;
 

@@ -32,6 +32,8 @@ use self::{
     extra::{ConnectExtra, ConnectIdentity},
     lazy::{Started as Lazy, lazy},
 };
+#[allow(unused_imports)]
+use crate::client::core::conn::{self, TrySendError as ConnTrySendError};
 #[cfg(feature = "http1")]
 use crate::client::core::http1::Http1Options;
 #[cfg(feature = "http2")]
@@ -41,7 +43,6 @@ use crate::{
         conn::{Connected, Connection},
         core::{
             body::Incoming,
-            conn::{self, TrySendError as ConnTrySendError},
             rt::{ArcTimer, Executor, Timer},
         },
         layer::config::RequestOptions,
@@ -118,7 +119,9 @@ pub struct HttpClient<C, B> {
     config: Config,
     connector: C,
     exec: Exec,
+    #[cfg(feature = "http1")]
     h1_builder: conn::http1::Builder,
+    #[cfg(feature = "http2")]
     h2_builder: conn::http2::Builder<Exec>,
     pool: pool::Pool<PoolClient<B>, ConnectIdentity>,
 }
@@ -179,6 +182,7 @@ where
             Err(err) => return ResponseFuture::new(futures_util::future::err(err)),
         };
 
+        #[allow(unused_mut)]
         let mut this = self.clone();
 
         // Extract per-request options from the request extensions and apply them to the client
@@ -187,11 +191,14 @@ where
         let options = RequestConfig::<RequestOptions>::remove(req.extensions_mut());
 
         // Apply HTTP/1 and HTTP/2 options if provided
+        #[allow(unused_variables)]
         if let Some(opts) = options.as_ref().map(RequestOptions::transport_opts) {
+            #[cfg(feature = "http1")]
             if let Some(opts) = opts.http1_options() {
                 this.h1_builder.options(opts.clone());
             }
 
+            #[cfg(feature = "http2")]
             if let Some(opts) = opts.http2_options() {
                 this.h2_builder.options(opts.clone());
             }
@@ -454,10 +461,13 @@ where
     + Send
     + Unpin
     + 'static {
+        #[allow(unused_variables)]
         let executor = self.exec.clone();
         let pool = self.pool.clone();
 
+        #[cfg(feature = "http1")]
         let h1_builder = self.h1_builder.clone();
+        #[cfg(feature = "http2")]
         let h2_builder = self.h2_builder.clone();
         let ver = match req.extra().alpn_protocol() {
             Some(AlpnProtocol::HTTP2) => Ver::Http2,
@@ -486,7 +496,7 @@ where
                         let connected = io.connected();
                         // If ALPN is h2 and we aren't http2_only already,
                         // then we need to convert our pool checkout into
-                        // a single HTTP2 one.
+                        #[allow(unused_variables)]
                         let connecting = if connected.is_negotiated_h2() && !is_ver_h2 {
                             match connecting.alpn_h2(&pool) {
                                 Some(lock) => {
@@ -507,8 +517,11 @@ where
                         let is_h2 = is_ver_h2 || connected.is_negotiated_h2();
 
                         Either::Left(Box::pin(async move {
+                            let _ = (&pool, &connected, &connecting);
+                            #[allow(unused_variables)]
                             let tx = if is_h2 {
-                               {
+                                #[cfg(feature = "http2")]
+                                {
                                     let (mut tx, conn) =
                                         h2_builder.handshake(io).await.map_err(Error::tx)?;
 
@@ -525,8 +538,13 @@ where
                                     tx.ready().await.map_err(Error::tx)?;
                                     PoolTx::Http2(tx)
                                 }
+                                #[cfg(not(feature = "http2"))]
+                                {
+                                    return Err(Error::new(ErrorKind::UserUnsupportedVersion, "HTTP/2 not supported"));
+                                }
                             } else {
-                                 {
+                                #[cfg(feature = "http1")]
+                                {
                                     // Perform the HTTP/1.1 handshake on the provided I/O stream. More actions
                                     // Uses the h1_builder to establish a connection, returning a sender (tx) for requests
                                     // and a connection task (conn) that manages the connection lifecycle.
@@ -613,13 +631,19 @@ where
                                         }
                                     }
                                 }
+                                #[cfg(not(feature = "http1"))]
+                                {
+                                    return Err(Error::new(ErrorKind::UserUnsupportedVersion, "HTTP/1 not supported"));
+                                }
                             };
 
+                            #[allow(unreachable_code)]
                             Ok(pool.pooled(
                                 connecting,
                                 PoolClient {
                                     conn_info: connected,
                                     tx,
+                                    _marker: std::marker::PhantomData,
                                 },
                             ))
                         }))
@@ -680,7 +704,9 @@ impl<C: Clone, B> Clone for HttpClient<C, B> {
         HttpClient {
             config: self.config,
             exec: self.exec.clone(),
+            #[cfg(feature = "http1")]
             h1_builder: self.h1_builder.clone(),
+            #[cfg(feature = "http2")]
             h2_builder: self.h2_builder.clone(),
             connector: self.connector.clone(),
             pool: self.pool.clone(),
@@ -692,21 +718,30 @@ impl<C: Clone, B> Clone for HttpClient<C, B> {
 struct PoolClient<B> {
     conn_info: Connected,
     tx: PoolTx<B>,
+    _marker: std::marker::PhantomData<B>,
 }
 
 enum PoolTx<B> {
+    #[cfg(feature = "http1")]
     Http1(conn::http1::SendRequest<B>),
+    #[cfg(feature = "http2")]
     Http2(conn::http2::SendRequest<B>),
+    #[cfg(not(any(feature = "http1", feature = "http2")))]
+    None(std::marker::PhantomData<B>),
 }
 
 // ===== impl PoolClient =====
 
 impl<B> PoolClient<B> {
+    #[allow(unused_variables)]
     fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Error>> {
         match self.tx {
+            #[cfg(feature = "http1")]
             PoolTx::Http1(ref mut tx) => tx.poll_ready(cx).map_err(Error::closed),
-
+            #[cfg(feature = "http2")]
             PoolTx::Http2(_) => Poll::Ready(Ok(())),
+            #[cfg(not(any(feature = "http1", feature = "http2")))]
+            PoolTx::None(_) => Poll::Ready(Ok(())),
         }
     }
 
@@ -716,9 +751,12 @@ impl<B> PoolClient<B> {
 
     fn is_http2(&self) -> bool {
         match self.tx {
+            #[cfg(feature = "http1")]
             PoolTx::Http1(_) => false,
-
+            #[cfg(feature = "http2")]
             PoolTx::Http2(_) => true,
+            #[cfg(not(any(feature = "http1", feature = "http2")))]
+            PoolTx::None(_) => false,
         }
     }
 
@@ -728,9 +766,12 @@ impl<B> PoolClient<B> {
 
     fn is_ready(&self) -> bool {
         match self.tx {
+            #[cfg(feature = "http1")]
             PoolTx::Http1(ref tx) => tx.is_ready(),
-
+            #[cfg(feature = "http2")]
             PoolTx::Http2(ref tx) => tx.is_ready(),
+            #[cfg(not(any(feature = "http1", feature = "http2")))]
+            PoolTx::None(_) => true,
         }
     }
 }
@@ -744,15 +785,43 @@ impl<B: Body + 'static> PoolClient<B> {
         B: Send,
     {
         match self.tx {
-            PoolTx::Http1(ref mut tx) => Either::Left(tx.try_send_request(req)),
-            PoolTx::Http2(ref mut tx) => Either::Right(tx.try_send_request(req)),
+            #[cfg(feature = "http1")]
+            PoolTx::Http1(ref mut tx) => {
+                #[cfg(feature = "http2")]
+                {
+                    Either::Left(tx.try_send_request(req))
+                }
+                #[cfg(not(feature = "http2"))]
+                {
+                    tx.try_send_request(req)
+                }
+            }
+            #[cfg(feature = "http2")]
+            PoolTx::Http2(ref mut tx) => {
+                #[cfg(feature = "http1")]
+                {
+                    Either::Right(tx.try_send_request(req))
+                }
+                #[cfg(not(feature = "http1"))]
+                {
+                    tx.try_send_request(req)
+                }
+            }
+            #[cfg(not(any(feature = "http1", feature = "http2")))]
+            PoolTx::None(_) => std::future::ready(Err(ConnTrySendError {
+                error: crate::client::core::Error::new_user_service(Error::new(
+                    ErrorKind::UserUnsupportedVersion,
+                    "No HTTP version enabled",
+                )),
+                message: Some(req),
+            })),
         }
     }
 }
 
 impl<B> pool::Poolable for PoolClient<B>
 where
-    B: Send + 'static,
+    B: Send + 'static + Unpin,
 {
     fn is_open(&self) -> bool {
         !self.is_poisoned() && self.is_ready()
@@ -760,22 +829,32 @@ where
 
     fn reserve(self) -> pool::Reservation<Self> {
         match self.tx {
+            #[cfg(feature = "http1")]
             PoolTx::Http1(tx) => pool::Reservation::Unique(PoolClient {
                 conn_info: self.conn_info,
                 tx: PoolTx::Http1(tx),
+                _marker: std::marker::PhantomData,
             }),
-
+            #[cfg(feature = "http2")]
             PoolTx::Http2(tx) => {
                 let b = PoolClient {
                     conn_info: self.conn_info.clone(),
                     tx: PoolTx::Http2(tx.clone()),
+                    _marker: std::marker::PhantomData,
                 };
                 let a = PoolClient {
                     conn_info: self.conn_info,
                     tx: PoolTx::Http2(tx),
+                    _marker: std::marker::PhantomData,
                 };
                 pool::Reservation::Shared(a, b)
             }
+            #[cfg(not(any(feature = "http1", feature = "http2")))]
+            PoolTx::None(_) => pool::Reservation::Unique(PoolClient {
+                conn_info: self.conn_info,
+                tx: PoolTx::None(std::marker::PhantomData),
+                _marker: std::marker::PhantomData,
+            }),
         }
     }
 
@@ -1003,7 +1082,9 @@ impl Builder {
             config: self.config,
             exec: exec.clone(),
 
+            #[cfg(feature = "http1")]
             h1_builder: self.h1_builder,
+            #[cfg(feature = "http2")]
             h2_builder: self.h2_builder,
             connector,
             pool: pool::Pool::new(self.pool_config, exec, timer),

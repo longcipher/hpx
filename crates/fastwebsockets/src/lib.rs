@@ -511,7 +511,7 @@ impl<'f, S> WebSocket<S> {
 
   /// Flushes the data from the underlying stream.
   ///
-  /// if the underlying stream is buffered (i.e: TlsStream<TcpStream>), it is needed to call flush
+  /// if the underlying stream is buffered (i.e: `TlsStream<TcpStream>`), it is needed to call flush
   /// to be sure that the written frame are correctly pushed down to the bottom stream/channel.
   ///
   pub async fn flush(&mut self) -> Result<(), WebSocketError>

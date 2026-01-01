@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use eyre::Result;
-use fastwebsockets::FragmentCollector;
-use fastwebsockets::Frame;
-use fastwebsockets::OpCode;
+use hpx_fastwebsockets::FragmentCollector;
+use hpx_fastwebsockets::Frame;
+use hpx_fastwebsockets::OpCode;
 use http_body_util::Empty;
 use hyper::Request;
 use hyper::header::CONNECTION;
@@ -63,13 +63,14 @@ async fn connect(domain: &str) -> Result<FragmentCollector<TokioIo<Upgraded>>> {
     .header(CONNECTION, "upgrade")
     .header(
       "Sec-WebSocket-Key",
-      fastwebsockets::handshake::generate_key(),
+      hpx_fastwebsockets::handshake::generate_key(),
     )
     .header("Sec-WebSocket-Version", "13")
     .body(Empty::<Bytes>::new())?;
 
   let (ws, _) =
-    fastwebsockets::handshake::client(&SpawnExecutor, req, tls_stream).await?;
+    hpx_fastwebsockets::handshake::client(&SpawnExecutor, req, tls_stream)
+      .await?;
   Ok(FragmentCollector::new(ws))
 }
 

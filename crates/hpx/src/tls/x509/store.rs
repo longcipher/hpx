@@ -23,6 +23,8 @@ pub struct CertStoreBuilder {
     builder: Result<X509StoreBuilder>,
     #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
     builder: Result<RootCertStore>,
+    #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+    _marker: std::marker::PhantomData<()>,
 }
 
 // ====== impl CertStoreBuilder ======
@@ -71,6 +73,7 @@ impl CertStoreBuilder {
     where
         C: AsRef<[u8]>,
     {
+        #[cfg(any(feature = "boring", feature = "rustls-tls"))]
         if let Ok(ref mut builder) = self.builder {
             #[cfg(feature = "boring")]
             {
@@ -100,6 +103,7 @@ impl CertStoreBuilder {
     /// environment variables if present, or defaults specified at OpenSSL
     /// build time otherwise.
     pub fn set_default_paths(mut self) -> Self {
+        #[cfg(any(feature = "boring", feature = "rustls-tls"))]
         if let Ok(ref mut builder) = self.builder {
             #[cfg(feature = "boring")]
             if let Err(err) = builder.set_default_paths() {
@@ -132,6 +136,9 @@ impl CertStoreBuilder {
 
         #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
         return self.builder.map(Arc::new).map(CertStore);
+
+        #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+        return Ok(CertStore(std::marker::PhantomData));
     }
 
     fn parse_cert<'c, C, F>(mut self, cert: C, parser: F) -> Self
@@ -139,6 +146,7 @@ impl CertStoreBuilder {
         C: Into<CertificateInput<'c>>,
         F: Fn(&'c [u8]) -> Result<Certificate>,
     {
+        #[cfg(any(feature = "boring", feature = "rustls-tls"))]
         if let Ok(ref mut builder) = self.builder {
             let cert = cert.into().with_parser(parser);
             let result = cert.and_then(|cert| process_certs(std::iter::once(cert), builder));
@@ -156,6 +164,7 @@ impl CertStoreBuilder {
         I::Item: Into<CertificateInput<'c>>,
         F: Fn(&'c [u8]) -> Result<Certificate>,
     {
+        #[cfg(any(feature = "boring", feature = "rustls-tls"))]
         if let Ok(ref mut builder) = self.builder {
             let certs = certs
                 .into_iter()
@@ -179,7 +188,13 @@ impl CertStore {
         #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
         let builder = Ok(RootCertStore::empty());
 
-        CertStoreBuilder { builder }
+        #[cfg(any(feature = "boring", feature = "rustls-tls"))]
+        return CertStoreBuilder { builder };
+
+        #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+        return CertStoreBuilder {
+            _marker: std::marker::PhantomData,
+        };
     }
 
     /// Creates a new `CertStore` from a list of DER-encoded certificates.
@@ -203,6 +218,8 @@ impl Default for CertStore {
 pub struct CertStore(
     #[cfg(feature = "boring")] pub(crate) Arc<X509Store>,
     #[cfg(all(feature = "rustls-tls", not(feature = "boring")))] pub(crate) Arc<RootCertStore>,
+    #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+    pub(crate)  std::marker::PhantomData<()>,
 );
 
 impl Debug for CertStore {

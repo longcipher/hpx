@@ -7,6 +7,7 @@ pub(crate) mod resolve;
 
 pub use resolve::{Addrs, IntoResolve, Name, Resolve, Resolving};
 
+#[allow(unused_imports)]
 pub(crate) use self::{
     gai::{GaiResolver, SocketAddrs},
     resolve::{DnsResolverWithOverrides, DynResolver},

@@ -557,6 +557,7 @@ impl ClientBuilder {
                 .build(config.connector_layers)?;
 
             // Build client
+            #[allow(unused_mut)]
             let mut builder = HttpClient::builder(TokioExecutor::new());
 
             #[cfg(feature = "http1")]

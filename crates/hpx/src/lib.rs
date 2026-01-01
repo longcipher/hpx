@@ -1,4 +1,5 @@
 #![deny(unused)]
+#![allow(dead_code)]
 #![deny(unsafe_code)]
 #![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -277,6 +278,8 @@ use rustls as _;
 use rustls_pemfile as _;
 #[cfg(feature = "rustls-tls")]
 use rustls_pki_types as _;
+#[cfg(not(any(feature = "http2", feature = "http1")))]
+use smallvec as _;
 #[cfg(feature = "webpki-roots")]
 use webpki_root_certs as _;
 #[cfg(feature = "rustls-tls")]
@@ -307,6 +310,10 @@ pub use http::{Method, StatusCode, Uri, Version};
 #[cfg(unix)]
 use libc as _;
 
+#[cfg(feature = "http1")]
+pub use self::client::http1;
+#[cfg(feature = "http2")]
+pub use self::client::http2;
 #[cfg(feature = "multipart")]
 pub use self::client::multipart;
 #[cfg(feature = "ws")]
@@ -314,7 +321,7 @@ pub use self::client::ws;
 pub use self::{
     client::{
         Body, Client, ClientBuilder, Emulation, EmulationBuilder, EmulationFactory, HttpInfo,
-        Request, RequestBuilder, Response, Upgraded, http1, http2,
+        Request, RequestBuilder, Response, Upgraded,
     },
     error::{Error, Result},
     ext::{ResponseBuilderExt, ResponseExt},
@@ -590,3 +597,6 @@ pub fn request<T: IntoUri>(method: Method, uri: T) -> RequestBuilder {
 pub fn websocket<T: IntoUri>(uri: T) -> ws::WebSocketRequestBuilder {
     Client::new().websocket(uri)
 }
+
+#[cfg(not(any(feature = "http2", feature = "http1")))]
+use smallvec as _;

@@ -12,7 +12,9 @@ use http::HeaderMap;
 use http_body::{Body, Frame, SizeHint};
 
 use super::DecodedLength;
-use crate::client::core::{self, Error, common::watch, proto::h2::ping};
+#[cfg(feature = "http2")]
+use crate::client::core::proto::h2::ping;
+use crate::client::core::{self, Error, common::watch};
 
 type BodySender = mpsc::Sender<Result<Bytes, Error>>;
 type TrailersSender = oneshot::Sender<HeaderMap>;
@@ -34,6 +36,7 @@ enum Kind {
         data_rx: mpsc::Receiver<Result<Bytes, Error>>,
         trailers_rx: oneshot::Receiver<HeaderMap>,
     },
+    #[cfg(feature = "http2")]
     H2 {
         content_length: DecodedLength,
         data_done: bool,
@@ -108,6 +111,7 @@ impl Incoming {
         Incoming::new(Kind::Empty)
     }
 
+    #[cfg(feature = "http2")]
     pub(crate) fn h2(
         recv: http2::RecvStream,
         mut content_length: DecodedLength,
@@ -159,6 +163,7 @@ impl Body for Incoming {
                     Err(_) => Poll::Ready(None),
                 }
             }
+            #[cfg(feature = "http2")]
             Kind::H2 {
                 ref mut data_done,
                 ref ping,
@@ -207,6 +212,7 @@ impl Body for Incoming {
         match self.kind {
             Kind::Empty => true,
             Kind::Chan { content_length, .. } => content_length == DecodedLength::ZERO,
+            #[cfg(feature = "http2")]
             Kind::H2 { recv: ref h2, .. } => h2.is_end_stream(),
         }
     }
@@ -223,6 +229,7 @@ impl Body for Incoming {
         match self.kind {
             Kind::Empty => SizeHint::with_exact(0),
             Kind::Chan { content_length, .. } => opt_len(content_length),
+            #[cfg(feature = "http2")]
             Kind::H2 { content_length, .. } => opt_len(content_length),
         }
     }

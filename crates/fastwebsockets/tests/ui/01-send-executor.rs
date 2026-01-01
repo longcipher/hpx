@@ -1,4 +1,4 @@
-use fastwebsockets::WebSocket;
+use hpx_fastwebsockets::WebSocket;
 use hyper::header::CONNECTION;
 use hyper::header::UPGRADE;
 use hyper::upgrade::Upgraded;
@@ -35,13 +35,13 @@ async fn connect(
     .header(CONNECTION, "upgrade")
     .header(
       "Sec-WebSocket-Key",
-      fastwebsockets::handshake::generate_key(),
+      hpx_fastwebsockets::handshake::generate_key(),
     )
     .header("Sec-WebSocket-Version", "13")
     .body(Empty::<Bytes>::new())?;
 
   let (ws, _) =
-    fastwebsockets::handshake::client(&SpawnExecutor, req, stream).await?;
+    hpx_fastwebsockets::handshake::client(&SpawnExecutor, req, stream).await?;
   Ok(ws)
 }
 

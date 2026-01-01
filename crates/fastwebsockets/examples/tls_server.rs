@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use eyre::Result;
-use fastwebsockets::OpCode;
-use fastwebsockets::upgrade;
+use hpx_fastwebsockets::OpCode;
+use hpx_fastwebsockets::upgrade;
 use http_body_util::Empty;
 use hyper::Request;
 use hyper::Response;
@@ -32,7 +32,7 @@ use tokio_rustls::rustls::pki_types::PrivateKeyDer;
 async fn handle_client(fut: upgrade::UpgradeFut) -> Result<()> {
   let mut ws = fut.await?;
   ws.set_writev(false);
-  let mut ws = fastwebsockets::FragmentCollector::new(ws);
+  let mut ws = hpx_fastwebsockets::FragmentCollector::new(ws);
 
   loop {
     let frame = ws.read_frame().await?;

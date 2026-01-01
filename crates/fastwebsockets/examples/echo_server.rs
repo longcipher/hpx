@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fastwebsockets::OpCode;
-use fastwebsockets::WebSocketError;
-use fastwebsockets::upgrade;
+use hpx_fastwebsockets::OpCode;
+use hpx_fastwebsockets::WebSocketError;
+use hpx_fastwebsockets::upgrade;
 use http_body_util::Empty;
 use hyper::Request;
 use hyper::Response;
@@ -25,7 +25,7 @@ use hyper::service::service_fn;
 use tokio::net::TcpListener;
 
 async fn handle_client(fut: upgrade::UpgradeFut) -> Result<(), WebSocketError> {
-  let mut ws = fastwebsockets::FragmentCollector::new(fut.await?);
+  let mut ws = hpx_fastwebsockets::FragmentCollector::new(fut.await?);
 
   loop {
     let frame = ws.read_frame().await?;

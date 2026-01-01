@@ -11,10 +11,9 @@ pub mod bounds;
 mod timer;
 mod tokio;
 
-pub use self::{
-    timer::{ArcTimer, Sleep, Time, Timer},
-    tokio::{TokioExecutor, TokioTimer},
-};
+#[allow(unused_imports)]
+pub use self::timer::{ArcTimer, Sleep, Time, Timer};
+pub use self::tokio::{TokioExecutor, TokioTimer};
 
 /// An executor of futures.
 ///
