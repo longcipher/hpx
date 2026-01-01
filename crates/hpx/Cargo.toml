@@ -189,7 +189,7 @@ libc = { workspace = true }
 
 [dev-dependencies]
 futures = { workspace = true, features = ["std"] }
-hpx-util = { path = "../hpx-util" }
+hpx-util = { workspace = true }
 hyper = { workspace = true, features = ["http1", "http2", "server"] }
 hyper-util = { workspace = true, features = [
     "http1",
