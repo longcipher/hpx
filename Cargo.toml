@@ -117,7 +117,7 @@ async-trait = "0.1.80"
 axum = "0.8.1"
 axum-core = "0.5.0"
 base64 = "0.22.1"
-boring = { git = "https://github.com/cloudflare/boring.git" }
+boring = { git = "https://github.com/cloudflare/boring.git", rev = "456836aea1f7319b9e78a1c8a1489d941de36573" }
 brotli = "8.0.2"
 bytes = "1.11.0"
 cookie = "0.18.1"
@@ -162,7 +162,7 @@ sync_wrapper = "1.0.2"
 system-configuration = "0.7.0"
 thiserror = "2.0.17"
 tokio = "1.48.0"
-tokio-boring = { git = "https://github.com/cloudflare/boring.git" }
+tokio-boring = { git = "https://github.com/cloudflare/boring.git", rev = "456836aea1f7319b9e78a1c8a1489d941de36573" }
 tokio-rustls = "0.26"
 tokio-socks = "0.5.2"
 tokio-test = "0.4.4"

@@ -263,7 +263,7 @@ dependencies = [
 [[package]]
 name = "boring"
 version = "4.19.0"
-source = "git+https://github.com/cloudflare/boring.git#456836aea1f7319b9e78a1c8a1489d941de36573"
+source = "git+https://github.com/cloudflare/boring.git?rev=456836aea1f7319b9e78a1c8a1489d941de36573#456836aea1f7319b9e78a1c8a1489d941de36573"
 dependencies = [
  "bitflags",
  "boring-sys",
@@ -275,7 +275,7 @@ dependencies = [
 [[package]]
 name = "boring-sys"
 version = "4.19.0"
-source = "git+https://github.com/cloudflare/boring.git#456836aea1f7319b9e78a1c8a1489d941de36573"
+source = "git+https://github.com/cloudflare/boring.git?rev=456836aea1f7319b9e78a1c8a1489d941de36573#456836aea1f7319b9e78a1c8a1489d941de36573"
 dependencies = [
  "bindgen",
  "cmake",
@@ -2350,7 +2350,7 @@ dependencies = [
 [[package]]
 name = "tokio-boring"
 version = "4.19.0"
-source = "git+https://github.com/cloudflare/boring.git#456836aea1f7319b9e78a1c8a1489d941de36573"
+source = "git+https://github.com/cloudflare/boring.git?rev=456836aea1f7319b9e78a1c8a1489d941de36573#456836aea1f7319b9e78a1c8a1489d941de36573"
 dependencies = [
  "boring",
  "boring-sys",
