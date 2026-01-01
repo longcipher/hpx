@@ -8,7 +8,13 @@ repository = "https://github.com/longcipher/hpx"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license = "Apache-2.0"
 edition.workspace = true
-include = ["README.md", "LICENSE", "src/**/*.rs"]
+include = [
+    "README.md",
+    "LICENSE",
+    "src/**/*.rs",
+    "examples/**/*.rs",
+    "tests/**/*.rs",
+]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -189,7 +195,7 @@ libc = { workspace = true }
 
 [dev-dependencies]
 futures = { workspace = true, features = ["std"] }
-hpx-util = { workspace = true }
+# hpx-util = { workspace = true }
 hyper = { workspace = true, features = ["http1", "http2", "server"] }
 hyper-util = { workspace = true, features = [
     "http1",
