@@ -123,27 +123,31 @@ impl Policy<Req, Res, BoxError> for RetryPolicy {
 /// Returns `true` if the error type or content indicates that the request can be retried,
 /// otherwise returns `false`.
 fn is_retryable_error(err: &(dyn StdError + 'static)) -> bool {
-    let _err = if let Some(_err) = err.source() {
-        err
-    } else {
-        return false;
-    };
+    let mut source = Some(err);
 
-    #[cfg(feature = "http2")]
-    if let Some(cause) = err.source()
-        && let Some(err) = cause.downcast_ref::<http2::Error>()
-    {
-        // They sent us a graceful shutdown, try with a new connection!
-        if err.is_go_away() && err.is_remote() && err.reason() == Some(http2::Reason::NO_ERROR) {
-            return true;
+    while let Some(err) = source {
+        #[cfg(feature = "http2")]
+        if let Some(h2_err) = err.downcast_ref::<http2::Error>() {
+            // They sent us a graceful shutdown, try with a new connection!
+            if h2_err.is_go_away()
+                && h2_err.is_remote()
+                && h2_err.reason() == Some(http2::Reason::NO_ERROR)
+            {
+                return true;
+            }
+
+            // REFUSED_STREAM was sent from the server, which is safe to retry.
+            // https://www.rfc-editor.org/rfc/rfc9113.html#section-8.7-3.2
+            if h2_err.is_reset()
+                && h2_err.is_remote()
+                && h2_err.reason() == Some(http2::Reason::REFUSED_STREAM)
+            {
+                return true;
+            }
         }
 
-        // REFUSED_STREAM was sent from the server, which is safe to retry.
-        // https://www.rfc-editor.org/rfc/rfc9113.html#section-8.7-3.2
-        if err.is_reset() && err.is_remote() && err.reason() == Some(http2::Reason::REFUSED_STREAM)
-        {
-            return true;
-        }
+        source = err.source();
     }
+
     false
 }

@@ -162,7 +162,7 @@ cookie = { workspace = true, optional = true }
 tower-http = { workspace = true, optional = true }
 
 ## tokio util
-tokio-util = { workspace = true, optional = true }
+tokio-util = { workspace = true, features = ["io"], optional = true }
 
 ## socks
 tokio-socks = { workspace = true, optional = true }
