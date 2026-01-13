@@ -10,6 +10,7 @@ pub mod cookie;
     feature = "deflate",
 ))]
 pub mod decoder;
+pub mod hooks;
 pub mod redirect;
 pub mod retry;
 pub mod timeout;

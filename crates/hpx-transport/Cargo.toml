@@ -3,6 +3,7 @@ name = "hpx-transport"
 repository.workspace = true
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [package.metadata.cargo-machete]
 ignored = ["http-body", "http-body-util", "tower-http"]
@@ -18,14 +19,17 @@ hmac.workspace = true
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
+httpdate.workspace = true
 opentelemetry = { workspace = true, features = ["metrics"] }
 opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics"] }
 opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] }
 parking_lot.workspace = true
+rand.workspace = true
 scc = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2.workspace = true
+simd-json = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio = { workspace = true, features = [
     "time",
@@ -35,6 +39,7 @@ tokio = { workspace = true, features = [
     "rt-multi-thread",
 ] }
 
+base64.workspace = true
 fastwebsockets = { workspace = true, features = ["upgrade", "unstable-split"] }
 hpx = { workspace = true, features = [
     "ws",
@@ -66,6 +71,7 @@ uuid = { workspace = true, features = ["v4", "serde"] }
 default = ["http", "websocket", "middleware"]
 http = []
 middleware = []
+simd-json = ["dep:simd-json"]
 websocket = []
 
 [dev-dependencies]

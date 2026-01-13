@@ -8,7 +8,7 @@ use bytes::Bytes;
 #[cfg(feature = "charset")]
 use encoding_rs::{Encoding, UTF_8};
 #[cfg(feature = "stream")]
-use futures_util::Stream;
+use futures_util::{Stream, TryStreamExt};
 use http::{HeaderMap, StatusCode, Uri, Version};
 use http_body::{Body as HttpBody, Frame};
 use http_body_util::{BodyExt, Collected};
@@ -266,11 +266,55 @@ impl Response {
     /// details please see [`serde_json::from_reader`].
     ///
     /// [`serde_json::from_reader`]: https://docs.serde.rs/serde_json/fn.from_reader.html
-    #[cfg(feature = "json")]
+    #[cfg(all(feature = "json", not(feature = "simd-json")))]
     #[cfg_attr(docsrs, doc(cfg(feature = "json")))]
     pub async fn json<T: DeserializeOwned>(self) -> crate::Result<T> {
         let full = self.bytes().await?;
         serde_json::from_slice(&full).map_err(Error::decode)
+    }
+
+    /// Try to deserialize the response body as JSON using SIMD-accelerated parsing.
+    ///
+    /// This method uses `simd-json` for faster JSON parsing on supported platforms.
+    /// It requires a mutable buffer, so the response bytes are copied to a Vec.
+    ///
+    /// # Optional
+    ///
+    /// This requires the optional `simd-json` feature enabled.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate hpx;
+    /// # extern crate serde;
+    /// #
+    /// # use hpx::Error;
+    /// # use serde::Deserialize;
+    /// #
+    /// #[derive(Deserialize)]
+    /// struct Ip {
+    ///     origin: String,
+    /// }
+    ///
+    /// # async fn run() -> Result<(), Error> {
+    /// let ip = hpx::Client::new()
+    ///     .get("http://httpbin.org/ip")
+    ///     .send()
+    ///     .await?
+    ///     .json::<Ip>()
+    ///     .await?;
+    ///
+    /// println!("ip: {}", ip.origin);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "simd-json")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "simd-json")))]
+    pub async fn json<T: DeserializeOwned>(self) -> crate::Result<T> {
+        let full = self.bytes().await?;
+        // simd-json requires a mutable buffer
+        let mut bytes_vec = full.to_vec();
+        simd_json::from_slice(&mut bytes_vec).map_err(Error::decode)
     }
 
     /// Get the full response body as [`Bytes`].
@@ -352,6 +396,58 @@ impl Response {
     #[cfg_attr(docsrs, doc(cfg(feature = "stream")))]
     pub fn bytes_stream(self) -> impl Stream<Item = crate::Result<Bytes>> {
         http_body_util::BodyDataStream::new(self.res.into_body())
+    }
+
+    /// Consume the response and return the raw [`Body`].
+    ///
+    /// This is useful for zero-copy streaming scenarios where you want
+    /// direct access to the body without additional processing.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    /// let response = hpx::get("https://httpbin.org/bytes/1024").send().await?;
+    /// let body = response.into_body();
+    /// // Use body directly for zero-copy streaming
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn into_body(self) -> Body {
+        self.res.into_body()
+    }
+
+    /// Get an [`AsyncRead`] adapter for the response body.
+    ///
+    /// This enables efficient streaming of the response body using
+    /// standard async I/O traits.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use tokio::io::AsyncReadExt;
+    ///
+    /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    /// let response = hpx::get("https://httpbin.org/bytes/1024").send().await?;
+    /// let mut reader = response.reader();
+    ///
+    /// let mut buffer = Vec::new();
+    /// reader.read_to_end(&mut buffer).await?;
+    /// println!("Read {} bytes", buffer.len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Optional
+    ///
+    /// This requires the optional `stream` feature to be enabled.
+    #[cfg(feature = "stream")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "stream")))]
+    pub fn reader(self) -> impl tokio::io::AsyncRead {
+        tokio_util::io::StreamReader::new(
+            http_body_util::BodyDataStream::new(self.res.into_body())
+                .map_err(std::io::Error::other),
+        )
     }
 
     // extension methods

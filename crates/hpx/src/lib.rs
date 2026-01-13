@@ -302,6 +302,10 @@ mod util;
 pub mod cookie;
 pub mod dns;
 pub mod header;
+/// Lifecycle hooks for HTTP requests and responses.
+pub mod hooks {
+    pub use crate::client::layer::hooks::*;
+}
 pub mod redirect;
 pub mod retry;
 pub mod tls;

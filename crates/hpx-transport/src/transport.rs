@@ -327,8 +327,19 @@ impl Response {
     /// Parse the response body as JSON.
     #[allow(clippy::result_large_err)]
     #[allow(clippy::result_large_err)]
+    #[cfg(not(feature = "simd-json"))]
     pub fn json<T: for<'de> Deserialize<'de>>(&self) -> TransportResult<T> {
         Ok(serde_json::from_slice(&self.body)?)
+    }
+
+    /// Parse the response body as JSON using SIMD-accelerated parsing.
+    #[allow(clippy::result_large_err)]
+    #[allow(clippy::result_large_err)]
+    #[cfg(feature = "simd-json")]
+    pub fn json<T: for<'de> Deserialize<'de>>(&self) -> TransportResult<T> {
+        // simd-json requires a mutable buffer
+        let mut bytes_vec = self.body.to_vec();
+        Ok(simd_json::from_slice(&mut bytes_vec)?)
     }
 
     /// Get the response body as text.

@@ -71,7 +71,10 @@ async fn server_upgrade(
   Ok(response)
 }
 
-async fn connect(client_id: usize, addr: std::net::SocketAddr) -> Result<WebSocket<TokioIo<Upgraded>>> {
+async fn connect(
+  client_id: usize,
+  addr: std::net::SocketAddr,
+) -> Result<WebSocket<TokioIo<Upgraded>>> {
   let stream = TcpStream::connect(addr).await?;
 
   let req = Request::builder()
@@ -92,7 +95,10 @@ async fn connect(client_id: usize, addr: std::net::SocketAddr) -> Result<WebSock
   Ok(ws)
 }
 
-async fn start_client(client_id: usize, addr: std::net::SocketAddr) -> Result<()> {
+async fn start_client(
+  client_id: usize,
+  addr: std::net::SocketAddr,
+) -> Result<()> {
   let mut ws = connect(client_id, addr).await.unwrap();
   let frame = ws.read_frame().await?;
   match frame.opcode {

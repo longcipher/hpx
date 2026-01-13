@@ -4,6 +4,7 @@ use std::{
     collections::{HashMap, VecDeque},
     fmt::Debug,
     marker::PhantomData,
+    pin::Pin,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -14,7 +15,7 @@ use std::{
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures_util::future::BoxFuture;
+use futures_util::{future::BoxFuture, stream::Stream};
 use hpx::Client;
 use http::{Method as HttpMethod, StatusCode, header::HeaderMap};
 use parking_lot::RwLock;
@@ -27,6 +28,200 @@ use crate::{
     error::{ErrorFactory, NetworkError, ProtocolError, TransportError, TransportResult},
     transport::{Method, Request, Response, Transport, TransportMetrics},
 };
+
+// =============================================================================
+// Zero-Copy Streaming Types
+// =============================================================================
+
+/// A streaming response that provides zero-copy access to response data.
+///
+/// This type enables efficient streaming of response bodies without
+/// buffering the entire response in memory. It's particularly useful
+/// for large responses or when you need to process data as it arrives.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use futures_util::StreamExt;
+///
+/// let response: StreamingResponse<impl Stream<Item = Result<Bytes, Error>>> = /* ... */;
+///
+/// // Access metadata
+/// println!("Status: {}", response.status());
+///
+/// // Stream the body
+/// let mut stream = response.into_stream();
+/// while let Some(chunk) = stream.next().await {
+///     let bytes = chunk?;
+///     // Process chunk without additional copies
+/// }
+/// ```
+#[derive(Debug)]
+pub struct StreamingResponse<S> {
+    /// HTTP status code
+    status: StatusCode,
+    /// Response headers
+    headers: HeaderMap,
+    /// Streaming body
+    body: S,
+    /// Content length if known
+    content_length: Option<u64>,
+}
+
+impl<S> StreamingResponse<S> {
+    /// Create a new streaming response.
+    pub fn new(status: StatusCode, headers: HeaderMap, body: S) -> Self {
+        let content_length = headers
+            .get(http::header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse().ok());
+
+        Self {
+            status,
+            headers,
+            body,
+            content_length,
+        }
+    }
+
+    /// Get the HTTP status code.
+    #[inline]
+    pub fn status(&self) -> StatusCode {
+        self.status
+    }
+
+    /// Get a reference to the response headers.
+    #[inline]
+    pub fn headers(&self) -> &HeaderMap {
+        &self.headers
+    }
+
+    /// Get the content length if known.
+    #[inline]
+    pub fn content_length(&self) -> Option<u64> {
+        self.content_length
+    }
+
+    /// Check if the response was successful (2xx status code).
+    #[inline]
+    pub fn is_success(&self) -> bool {
+        self.status.is_success()
+    }
+
+    /// Check if the response is a client error (4xx status code).
+    #[inline]
+    pub fn is_client_error(&self) -> bool {
+        self.status.is_client_error()
+    }
+
+    /// Check if the response is a server error (5xx status code).
+    #[inline]
+    pub fn is_server_error(&self) -> bool {
+        self.status.is_server_error()
+    }
+
+    /// Consume the response and return the body stream.
+    pub fn into_stream(self) -> S {
+        self.body
+    }
+
+    /// Decompose the response into its parts.
+    pub fn into_parts(self) -> (StatusCode, HeaderMap, S) {
+        (self.status, self.headers, self.body)
+    }
+}
+
+impl<S, E> StreamingResponse<S>
+where
+    S: Stream<Item = Result<Bytes, E>> + Unpin,
+{
+    /// Collect all chunks into a single `Bytes` buffer.
+    ///
+    /// Note: This will buffer the entire response in memory.
+    /// For large responses, prefer streaming with `into_stream()`.
+    pub async fn collect(mut self) -> Result<Bytes, E> {
+        use futures_util::StreamExt;
+
+        let mut chunks = Vec::new();
+        let mut total_len = 0;
+
+        while let Some(result) = self.body.next().await {
+            let chunk = result?;
+            total_len += chunk.len();
+            chunks.push(chunk);
+        }
+
+        // Optimize for single chunk case
+        if chunks.len() == 1 {
+            return Ok(chunks.into_iter().next().unwrap());
+        }
+
+        // Combine chunks
+        let mut combined = bytes::BytesMut::with_capacity(total_len);
+        for chunk in chunks {
+            combined.extend_from_slice(&chunk);
+        }
+        Ok(combined.freeze())
+    }
+}
+
+impl<S, E> Stream for StreamingResponse<S>
+where
+    S: Stream<Item = Result<Bytes, E>> + Unpin,
+{
+    type Item = Result<Bytes, E>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.body).poll_next(cx)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        if let Some(len) = self.content_length {
+            (len as usize, Some(len as usize))
+        } else {
+            (0, None)
+        }
+    }
+}
+
+/// Builder for creating streaming responses from various sources.
+pub struct StreamingResponseBuilder {
+    status: StatusCode,
+    headers: HeaderMap,
+}
+
+impl StreamingResponseBuilder {
+    /// Create a new builder with the given status code.
+    pub fn new(status: StatusCode) -> Self {
+        Self {
+            status,
+            headers: HeaderMap::new(),
+        }
+    }
+
+    /// Set a header on the response.
+    pub fn header(mut self, key: http::header::HeaderName, value: &str) -> Self {
+        if let Ok(v) = http::header::HeaderValue::from_str(value) {
+            self.headers.insert(key, v);
+        }
+        self
+    }
+
+    /// Set multiple headers on the response.
+    pub fn headers(mut self, headers: HeaderMap) -> Self {
+        self.headers = headers;
+        self
+    }
+
+    /// Build the streaming response with the given body stream.
+    pub fn body<S>(self, stream: S) -> StreamingResponse<S> {
+        StreamingResponse::new(self.status, self.headers, stream)
+    }
+}
+
+// =============================================================================
+// Configuration
+// =============================================================================
 
 /// Configuration for the HTTP client.
 #[derive(Debug, Clone)]
@@ -245,6 +440,7 @@ pub struct HttpClient<A = NoAuth> {
     config: HttpConfig,
     _auth: PhantomData<A>,
     metrics: Arc<HttpClientMetrics>,
+    hooks: Arc<crate::hooks::Hooks>,
     // We use a shared service that implements Transport logic
     service: BoxCloneSyncService<Request, Response, TransportError>,
 }
@@ -263,6 +459,15 @@ where
 {
     /// Create a new HTTP client.
     pub fn new(config: HttpConfig, _auth: A) -> TransportResult<Self> {
+        Self::with_hooks(config, _auth, crate::hooks::Hooks::new())
+    }
+
+    /// Create a new HTTP client with custom hooks.
+    pub fn with_hooks(
+        config: HttpConfig,
+        _auth: A,
+        hooks: crate::hooks::Hooks,
+    ) -> TransportResult<Self> {
         config.validate()?;
 
         // Create hpx client
@@ -301,6 +506,7 @@ where
             config,
             _auth: PhantomData,
             metrics,
+            hooks: Arc::new(hooks),
             service: BoxCloneSyncService::new(service),
         })
     }
@@ -430,11 +636,17 @@ where
     }
 
     /// Send a request through the transport layer.
-    async fn send_request(&self, request: Request) -> TransportResult<Response> {
+    async fn send_request(&self, mut request: Request) -> TransportResult<Response> {
         self.metrics.requests_sent.fetch_add(1, Ordering::Relaxed);
         let start_time = SystemTime::now();
 
-        let result = self.service.clone().oneshot(request).await;
+        // Run before-request hooks
+        if let Err(e) = self.hooks.run_before_request(&mut request).await {
+            self.metrics.requests_failed.fetch_add(1, Ordering::Relaxed);
+            return Err(TransportError::hook_error(e.to_string()));
+        }
+
+        let result = self.service.clone().oneshot(request.clone()).await;
 
         let duration = start_time.elapsed().unwrap_or(Duration::ZERO);
 
@@ -445,11 +657,21 @@ where
                     .fetch_add(1, Ordering::Relaxed);
                 self.metrics.update_response_time(duration);
                 response = response.with_duration(duration);
+
+                // Run after-response hooks
+                if let Err(e) = self.hooks.run_after_response(&request, &mut response).await {
+                    return Err(TransportError::hook_error(e.to_string()));
+                }
+
                 Ok(response)
             }
             Err(e) => {
                 self.metrics.requests_failed.fetch_add(1, Ordering::Relaxed);
                 *self.metrics.last_error_at.write() = Some(SystemTime::now());
+
+                // Run on-error hooks
+                let _ = self.hooks.run_on_error(&request, &e).await;
+
                 Err(e)
             }
         }
@@ -469,6 +691,11 @@ where
         }
 
         response.json()
+    }
+
+    /// Get the hooks.
+    pub fn hooks(&self) -> &crate::hooks::Hooks {
+        &self.hooks
     }
 }
 

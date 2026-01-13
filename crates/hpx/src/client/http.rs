@@ -226,6 +226,7 @@ struct Config {
     dns_resolver: Option<Arc<dyn Resolve>>,
     http_version_pref: HttpVersionPref,
     https_only: bool,
+    hooks: Option<super::layer::hooks::Hooks>,
     layers: Vec<BoxedClientLayer>,
     connector_layers: Vec<BoxedConnectorLayer>,
     keylog: Option<KeyLog>,
@@ -307,6 +308,7 @@ impl Client {
                 dns_resolver: None,
                 http_version_pref: HttpVersionPref::All,
                 https_only: false,
+                hooks: None,
                 layers: Vec::new(),
                 connector_layers: Vec::new(),
                 keylog: None,
@@ -618,19 +620,33 @@ impl ClientBuilder {
                 ))
                 .service(service);
 
-            if config.layers.is_empty() {
+            // Add hooks layer if configured
+            let has_hooks = config.hooks.as_ref().is_some_and(|h| !h.is_empty());
+
+            if config.layers.is_empty() && !has_hooks {
                 let service = ServiceBuilder::new()
                     .layer(TimeoutLayer::new(config.timeout_options))
                     .service(service);
 
                 ClientRef::Left(service)
             } else {
-                let service = config
-                    .layers
-                    .into_iter()
-                    .fold(BoxCloneSyncService::new(service), |service, layer| {
-                        ServiceBuilder::new().layer(layer).service(service)
-                    });
+                // Start with boxed service
+                let mut service = BoxCloneSyncService::new(service);
+
+                // Add hooks layer if present
+                if let Some(hooks) = config.hooks
+                    && !hooks.is_empty()
+                {
+                    let hooks_layer = super::layer::hooks::HooksLayer::new(hooks);
+                    service = ServiceBuilder::new()
+                        .layer(BoxCloneSyncServiceLayer::new(hooks_layer))
+                        .service(service);
+                }
+
+                // Add custom layers
+                let service = config.layers.into_iter().fold(service, |service, layer| {
+                    ServiceBuilder::new().layer(layer).service(service)
+                });
 
                 let service = ServiceBuilder::new()
                     .layer(TimeoutLayer::new(config.timeout_options))
@@ -1530,6 +1546,128 @@ impl ClientBuilder {
         R: IntoResolve,
     {
         self.config.dns_resolver = Some(resolver.into_resolve());
+        self
+    }
+
+    // Hooks options
+
+    /// Adds lifecycle hooks to the client.
+    ///
+    /// Hooks allow you to execute custom logic at different stages of the
+    /// request lifecycle, such as before sending a request or after receiving
+    /// a response.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use std::sync::Arc;
+    ///
+    /// use hpx::hooks::{Hooks, LoggingHook};
+    ///
+    /// let hooks = Hooks::builder()
+    ///     .before_request(Arc::new(LoggingHook::new()))
+    ///     .build();
+    ///
+    /// let client = hpx::Client::builder().hooks(hooks).build().unwrap();
+    /// ```
+    #[inline]
+    pub fn hooks(mut self, hooks: super::layer::hooks::Hooks) -> ClientBuilder {
+        self.config.hooks = Some(hooks);
+        self
+    }
+
+    /// Adds a before-request hook using a closure.
+    ///
+    /// This is a convenience method for adding simple request hooks without
+    /// implementing the `BeforeRequestHook` trait manually.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use hpx::header;
+    ///
+    /// let client = hpx::Client::builder()
+    ///     .on_request(|req| {
+    ///         req.headers_mut().insert(
+    ///             header::HeaderName::from_static("x-custom"),
+    ///             header::HeaderValue::from_static("value"),
+    ///         );
+    ///         Ok(())
+    ///     })
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    #[inline]
+    pub fn on_request<F>(mut self, hook: F) -> ClientBuilder
+    where
+        F: Fn(&mut http::Request<Body>) -> Result<(), Error> + Send + Sync + 'static,
+    {
+        let hooks = self
+            .config
+            .hooks
+            .get_or_insert_with(super::layer::hooks::Hooks::new);
+
+        // Create a wrapper struct to implement BeforeRequestHook
+        struct ClosureHook<F>(F);
+
+        impl<F> super::layer::hooks::BeforeRequestHook for ClosureHook<F>
+        where
+            F: Fn(&mut http::Request<Body>) -> Result<(), Error> + Send + Sync,
+        {
+            fn on_request(&self, request: &mut http::Request<Body>) -> Result<(), Error> {
+                (self.0)(request)
+            }
+        }
+
+        hooks.before_request.push(Arc::new(ClosureHook(hook)));
+        self
+    }
+
+    /// Adds an after-response hook using a closure.
+    ///
+    /// This is a convenience method for adding simple response hooks without
+    /// implementing the `AfterResponseHook` trait manually.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use http::StatusCode;
+    ///
+    /// let client = hpx::Client::builder()
+    ///     .on_response(|status, _headers| {
+    ///         println!("Response status: {}", status);
+    ///         Ok(())
+    ///     })
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    #[inline]
+    pub fn on_response<F>(mut self, hook: F) -> ClientBuilder
+    where
+        F: Fn(http::StatusCode, &http::HeaderMap) -> Result<(), Error> + Send + Sync + 'static,
+    {
+        let hooks = self
+            .config
+            .hooks
+            .get_or_insert_with(super::layer::hooks::Hooks::new);
+
+        // Create a wrapper struct to implement AfterResponseHook
+        struct ClosureHook<F>(F);
+
+        impl<F> super::layer::hooks::AfterResponseHook for ClosureHook<F>
+        where
+            F: Fn(http::StatusCode, &http::HeaderMap) -> Result<(), Error> + Send + Sync,
+        {
+            fn on_response(
+                &self,
+                status: http::StatusCode,
+                headers: &http::HeaderMap,
+            ) -> Result<(), Error> {
+                (self.0)(status, headers)
+            }
+        }
+
+        hooks.after_response.push(Arc::new(ClosureHook(hook)));
         self
     }
 

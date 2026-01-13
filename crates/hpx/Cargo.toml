@@ -6,7 +6,7 @@ keywords = ["http", "client", "websocket", "exchange", "crypto"]
 categories = ["web-programming::http-client"]
 repository = "https://github.com/longcipher/hpx"
 authors = ["Akagi201 <akagi201@gmail.com>"]
-license = "Apache-2.0"
+license.workspace = true
 edition.workspace = true
 include = [
     "README.md",
@@ -50,6 +50,9 @@ form = ["dep:serde", "dep:serde_urlencoded"]
 
 # Enable JSON support.
 json = ["dep:serde", "dep:serde_json"]
+
+# Enable SIMD-accelerated JSON support (requires json feature).
+simd-json = ["json", "dep:simd-json"]
 
 # Enable multipart/form-data support.
 multipart = ["dep:mime_guess", "dep:sync_wrapper"]
@@ -141,6 +144,7 @@ webpki-roots = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
 serde_urlencoded = { workspace = true, optional = true }
+simd-json = { workspace = true, optional = true }
 
 ## multipart
 mime_guess = { workspace = true, optional = true }
@@ -194,6 +198,7 @@ system-configuration = { workspace = true, optional = true }
 libc = { workspace = true }
 
 [dev-dependencies]
+criterion = { workspace = true }
 futures = { workspace = true, features = ["std"] }
 hyper = { workspace = true, features = ["http1", "http2", "server"] }
 hyper-util = { workspace = true, features = [
@@ -203,6 +208,7 @@ hyper-util = { workspace = true, features = [
     "server-graceful",
     "tokio",
 ] }
+parking_lot = { workspace = true }
 pretty_env_logger = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -324,3 +330,17 @@ path = "examples/keylog.rs"
 [[example]]
 name = "unix_socket"
 path = "examples/unix_socket.rs"
+
+# Benchmarks
+[[bench]]
+name = "json_parsing"
+harness = false
+required-features = ["json"]
+
+[[bench]]
+name = "http_throughput"
+harness = false
+
+[[bench]]
+name = "connection_pool"
+harness = false

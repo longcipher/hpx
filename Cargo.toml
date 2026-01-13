@@ -108,8 +108,8 @@ too_long_first_doc_paragraph = "allow"
 # local crates
 fastwebsockets = { path = "crates/fastwebsockets", package = "hpx-fastwebsockets", version = "0.1.4" }
 hpx = { path = "crates/hpx", version = "0.1.4" }
-hpx-util = { path = "crates/hpx-util", version = "0.1.4" }
 hpx-transport = { path = "crates/hpx-transport", version = "0.1.4" }
+hpx-util = { path = "crates/hpx-util", version = "0.1.4" }
 
 # external crates
 ahash = "0.8.12"
@@ -137,6 +137,7 @@ http-body = "1.0.1"
 http-body-util = "0.1.3"
 http2 = "0.5.11"
 httparse = "1.10.1"
+httpdate = "1.0.3"
 hyper = "1.8.1"
 hyper-util = "0.1.19"
 ipnet = "2.11.0"
@@ -162,6 +163,7 @@ serde_json = "1.0.149"
 serde_urlencoded = "0.7.1"
 sha1 = "0.10.6"
 sha2 = "0.10.8"
+simd-json = "0.17.0"
 simdutf8 = "0.1.5"
 smallvec = "1.15.1"
 socket2 = "0.6.1"

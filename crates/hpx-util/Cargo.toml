@@ -6,7 +6,7 @@ repository = "https://github.com/longcipher/hpx"
 documentation = "https://docs.rs/hpx-util"
 keywords = ["http", "client", "emulation", "ja3", "ja4"]
 authors = ["Akagi201 <akagi201@gmail.com>"]
-license = "LGPL-3.0"
+license.workspace = true
 edition.workspace = true
 
 [package.metadata.docs.rs]

@@ -192,6 +192,11 @@ pub enum SerializationError {
         source: serde_json::Error,
     },
 
+    /// SIMD JSON serialization/deserialization error
+    #[cfg(feature = "simd-json")]
+    #[error("SIMD JSON error: {message}")]
+    SimdJson { message: String },
+
     /// URL encoding error
     #[error("URL encoding error: {message}")]
     UrlEncoding { message: String },
@@ -268,6 +273,15 @@ impl From<serde_json::Error> for TransportError {
     }
 }
 
+#[cfg(feature = "simd-json")]
+impl From<simd_json::Error> for TransportError {
+    fn from(e: simd_json::Error) -> Self {
+        Self::Serialization(Box::new(SerializationError::SimdJson {
+            message: e.to_string(),
+        }))
+    }
+}
+
 /// Error context trait for adding additional context to errors
 pub trait ErrorContext<T> {
     /// Add context to an error
@@ -325,6 +339,13 @@ pub trait ErrorFactory {
         TransportError::RateLimit {
             message: message.into(),
         }
+    }
+
+    fn hook_error(message: impl Into<String>) -> TransportError {
+        TransportError::Middleware(Box::new(MiddlewareError::ExecutionFailed {
+            middleware: "hook".to_string(),
+            message: message.into(),
+        }))
     }
 }
 

@@ -37,9 +37,11 @@
 
 pub mod auth;
 pub mod error;
+pub mod hooks;
 pub mod metrics;
 pub mod middleware;
 pub mod transport;
+pub mod typed;
 
 #[cfg(feature = "http")]
 pub mod http;
@@ -49,8 +51,18 @@ pub mod websocket;
 
 // Re-export commonly used types
 pub use error::{TransportError, TransportResult};
+pub use hooks::{
+    AfterResponseHook, BeforeRedirectHook, BeforeRequestHook, BeforeRetryHook, HeaderInjectionHook,
+    HookError, Hooks, LoggingHook, OnErrorHook, RequestIdHook,
+};
 #[cfg(feature = "http")]
-pub use http::{HttpClient, HttpConfig, RequestHandler, RestClient, RestClientBuilder};
+pub use http::{
+    HttpClient, HttpConfig, RequestHandler, RestClient, RestClientBuilder, StreamingResponse,
+    StreamingResponseBuilder,
+};
 pub use transport::{Request, Response, Transport};
+pub use typed::{
+    ApiError, GenericApiError, TypedApiError, TypedResponse, TypedResponseExt, TypedResult,
+};
 #[cfg(feature = "websocket")]
 pub use websocket::{ExchangeHandler, WebSocketClient, WebSocketConfig};

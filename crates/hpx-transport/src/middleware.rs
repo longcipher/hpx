@@ -5,7 +5,7 @@ use std::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
-    time::{Duration, Instant, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use async_trait::async_trait;
@@ -14,13 +14,14 @@ use opentelemetry::{
     KeyValue, global,
     metrics::{Counter, Histogram},
 };
+use rand::Rng;
 use scc::HashMap;
 use tokio::time::sleep;
 
 use crate::{
     auth::Authentication,
     error::{TransportError, TransportResult},
-    transport::{Request, RequestContext, Response, Transport},
+    transport::{Method, Request, RequestContext, Response, Transport},
 };
 
 /// Middleware trait for processing requests and responses.
@@ -64,23 +65,353 @@ pub struct MiddlewareStack<T> {
     middlewares: Arc<Vec<Arc<dyn Middleware>>>,
 }
 
-/// Configuration for retry logic.
+/// Retry strategy for calculating delay between attempts.
+#[derive(Clone, Debug)]
+pub enum RetryStrategy {
+    /// Exponential backoff: `base * multiplier^attempt`
+    Exponential {
+        /// Base delay for the first retry.
+        base: Duration,
+        /// Maximum delay cap.
+        max: Duration,
+        /// Multiplier for each attempt (default 2.0).
+        multiplier: f64,
+    },
+    /// Linear backoff: `base + (increment * attempt)`
+    Linear {
+        /// Base delay.
+        base: Duration,
+        /// Increment per attempt.
+        increment: Duration,
+        /// Maximum delay cap.
+        max: Duration,
+    },
+    /// Constant delay between retries.
+    Constant {
+        /// Fixed delay between attempts.
+        delay: Duration,
+    },
+    /// Decorrelated jitter (AWS-style): `min(cap, random_between(base, prev * 3))`
+    /// This provides better distribution than exponential jitter.
+    DecorrelatedJitter {
+        /// Base delay for the first retry.
+        base: Duration,
+        /// Maximum delay cap.
+        max: Duration,
+    },
+    /// Full jitter: `random(0, min(cap, base * 2^attempt))`
+    FullJitter {
+        /// Base delay for the first retry.
+        base: Duration,
+        /// Maximum delay cap.
+        max: Duration,
+    },
+}
+
+impl Default for RetryStrategy {
+    fn default() -> Self {
+        Self::DecorrelatedJitter {
+            base: Duration::from_millis(100),
+            max: Duration::from_secs(60),
+        }
+    }
+}
+
+impl RetryStrategy {
+    /// Calculate delay for a given attempt using the configured strategy.
+    ///
+    /// # Arguments
+    /// * `attempt` - The current attempt number (1-indexed)
+    /// * `prev_delay` - The previous delay (used for decorrelated jitter)
+    pub fn calculate_delay(&self, attempt: usize, prev_delay: Option<Duration>) -> Duration {
+        match self {
+            Self::Exponential {
+                base,
+                max,
+                multiplier,
+            } => {
+                let delay_ms = (base.as_millis() as f64 * multiplier.powi((attempt - 1) as i32))
+                    .min(max.as_millis() as f64) as u64;
+                Duration::from_millis(delay_ms)
+            }
+            Self::Linear {
+                base,
+                increment,
+                max,
+            } => {
+                let delay = *base + (*increment * (attempt - 1) as u32);
+                delay.min(*max)
+            }
+            Self::Constant { delay } => *delay,
+            Self::DecorrelatedJitter { base, max } => {
+                let base_ms = base.as_millis() as f64;
+                let cap_ms = max.as_millis() as f64;
+                let prev_ms = prev_delay.map(|d| d.as_millis() as f64).unwrap_or(base_ms);
+
+                // Decorrelated Jitter: sleep = min(cap, random_between(base, sleep * 3))
+                let upper = (prev_ms * 3.0).min(cap_ms);
+                let jittered = if upper > base_ms {
+                    rand::rng().random_range(base_ms..=upper)
+                } else {
+                    base_ms
+                };
+                Duration::from_millis(jittered.min(cap_ms) as u64)
+            }
+            Self::FullJitter { base, max } => {
+                let cap_ms = max.as_millis() as f64;
+                let exp_delay_ms =
+                    (base.as_millis() as f64 * 2.0f64.powi((attempt - 1) as i32)).min(cap_ms);
+                let jittered = rand::rng().random_range(0.0..=exp_delay_ms);
+                Duration::from_millis(jittered as u64)
+            }
+        }
+    }
+}
+
+/// Configuration for retry logic with enhanced capabilities.
 #[derive(Clone, Debug)]
 pub struct RetryPolicy {
+    /// Maximum number of retry attempts (including the initial request).
     pub max_attempts: usize,
+    /// Retry strategy for calculating delays.
+    pub strategy: RetryStrategy,
+    /// HTTP status codes that should trigger a retry.
+    pub retryable_status_codes: Vec<u16>,
+    /// Whether to respect `Retry-After` header in responses.
+    pub respect_retry_after: bool,
+    /// Maximum delay to honor from `Retry-After` header (prevents abuse).
+    pub max_retry_after: Duration,
+    /// Whether to only retry idempotent HTTP methods.
+    pub idempotent_only: bool,
+    /// Per-method retry configuration (overrides default max_attempts).
+    pub method_config: std::collections::HashMap<Method, MethodRetryConfig>,
+    /// Retry budget configuration to prevent retry storms.
+    pub budget: Option<RetryBudget>,
+    /// Legacy fields for backward compatibility
     pub initial_delay: Duration,
     pub max_delay: Duration,
     pub backoff_multiplier: f64,
+}
+
+/// Per-method retry configuration.
+#[derive(Clone, Debug)]
+pub struct MethodRetryConfig {
+    /// Maximum retry attempts for this method.
+    pub max_attempts: usize,
+    /// Whether this method is retryable at all.
+    pub enabled: bool,
+}
+
+impl Default for MethodRetryConfig {
+    fn default() -> Self {
+        Self {
+            max_attempts: 3,
+            enabled: true,
+        }
+    }
+}
+
+/// Retry budget to prevent retry storms.
+///
+/// The budget uses a token bucket algorithm where:
+/// - Successful requests add tokens to the bucket
+/// - Retries consume tokens from the bucket
+/// - If the bucket is empty, retries are not allowed
+#[derive(Clone, Debug)]
+pub struct RetryBudget {
+    /// Maximum tokens in the bucket.
+    max_tokens: u64,
+    /// Current token count (shared via Arc for concurrent access).
+    tokens: std::sync::Arc<AtomicU64>,
+    /// Tokens added per successful request.
+    tokens_per_success: u64,
+    /// Tokens consumed per retry.
+    tokens_per_retry: u64,
+    /// Maximum percentage of requests that can be retries (0.0 - 1.0).
+    max_retry_ratio: f64,
+}
+
+impl RetryBudget {
+    /// Create a new retry budget with default settings.
+    ///
+    /// Default: 10 max tokens, 1 token per success, 5 tokens per retry, 20% max retry ratio.
+    pub fn new() -> Self {
+        Self {
+            max_tokens: 10,
+            tokens: std::sync::Arc::new(AtomicU64::new(10)),
+            tokens_per_success: 1,
+            tokens_per_retry: 5,
+            max_retry_ratio: 0.2,
+        }
+    }
+
+    /// Create a retry budget with custom settings.
+    pub fn custom(
+        max_tokens: u64,
+        tokens_per_success: u64,
+        tokens_per_retry: u64,
+        max_retry_ratio: f64,
+    ) -> Self {
+        Self {
+            max_tokens,
+            tokens: std::sync::Arc::new(AtomicU64::new(max_tokens)),
+            tokens_per_success,
+            tokens_per_retry,
+            max_retry_ratio: max_retry_ratio.clamp(0.0, 1.0),
+        }
+    }
+
+    /// Try to consume tokens for a retry. Returns true if retry is allowed.
+    pub fn try_acquire(&self) -> bool {
+        let current = self.tokens.load(Ordering::Relaxed);
+        if current >= self.tokens_per_retry {
+            // Use compare_exchange for thread-safe token consumption
+            self.tokens
+                .compare_exchange_weak(
+                    current,
+                    current.saturating_sub(self.tokens_per_retry),
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                )
+                .is_ok()
+        } else {
+            false
+        }
+    }
+
+    /// Add tokens for a successful request.
+    pub fn record_success(&self) {
+        let current = self.tokens.load(Ordering::Relaxed);
+        let new_value = (current + self.tokens_per_success).min(self.max_tokens);
+        self.tokens.store(new_value, Ordering::Relaxed);
+    }
+
+    /// Get current token count.
+    pub fn available_tokens(&self) -> u64 {
+        self.tokens.load(Ordering::Relaxed)
+    }
+
+    /// Get the maximum retry ratio.
+    pub fn max_retry_ratio(&self) -> f64 {
+        self.max_retry_ratio
+    }
+}
+
+impl Default for RetryBudget {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Default for RetryPolicy {
     fn default() -> Self {
         Self {
             max_attempts: 3,
+            strategy: RetryStrategy::default(),
+            retryable_status_codes: vec![
+                429, // Too Many Requests
+                500, // Internal Server Error
+                502, // Bad Gateway
+                503, // Service Unavailable
+                504, // Gateway Timeout
+            ],
+            respect_retry_after: true,
+            max_retry_after: Duration::from_secs(120), // Cap at 2 minutes
+            idempotent_only: true,
+            method_config: std::collections::HashMap::new(),
+            budget: Some(RetryBudget::default()),
+            // Legacy fields
             initial_delay: Duration::from_millis(100),
             max_delay: Duration::from_secs(60),
             backoff_multiplier: 2.0,
         }
+    }
+}
+
+impl RetryPolicy {
+    /// Create a new retry policy with default settings.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the maximum number of retry attempts.
+    pub fn with_max_attempts(mut self, max_attempts: usize) -> Self {
+        self.max_attempts = max_attempts;
+        self
+    }
+
+    /// Set the retry strategy.
+    pub fn with_strategy(mut self, strategy: RetryStrategy) -> Self {
+        self.strategy = strategy;
+        self
+    }
+
+    /// Add a retryable status code.
+    pub fn with_retryable_status(mut self, status: u16) -> Self {
+        if !self.retryable_status_codes.contains(&status) {
+            self.retryable_status_codes.push(status);
+        }
+        self
+    }
+
+    /// Set whether to respect `Retry-After` header.
+    pub fn with_respect_retry_after(mut self, respect: bool) -> Self {
+        self.respect_retry_after = respect;
+        self
+    }
+
+    /// Set the maximum delay to honor from `Retry-After` header.
+    pub fn with_max_retry_after(mut self, max: Duration) -> Self {
+        self.max_retry_after = max;
+        self
+    }
+
+    /// Set whether to only retry idempotent methods.
+    pub fn with_idempotent_only(mut self, idempotent_only: bool) -> Self {
+        self.idempotent_only = idempotent_only;
+        self
+    }
+
+    /// Configure retry behavior for a specific HTTP method.
+    pub fn with_method_config(mut self, method: Method, config: MethodRetryConfig) -> Self {
+        self.method_config.insert(method, config);
+        self
+    }
+
+    /// Set the retry budget.
+    pub fn with_budget(mut self, budget: RetryBudget) -> Self {
+        self.budget = Some(budget);
+        self
+    }
+
+    /// Disable retry budget.
+    pub fn no_budget(mut self) -> Self {
+        self.budget = None;
+        self
+    }
+
+    /// Get the max attempts for a specific method.
+    pub fn max_attempts_for_method(&self, method: &Method) -> usize {
+        self.method_config
+            .get(method)
+            .map(|c| c.max_attempts)
+            .unwrap_or(self.max_attempts)
+    }
+
+    /// Check if retries are enabled for a specific method.
+    pub fn is_retryable_method(&self, method: &Method) -> bool {
+        self.method_config
+            .get(method)
+            .map(|c| c.enabled)
+            .unwrap_or(true)
+    }
+
+    /// Check if an HTTP method is considered idempotent.
+    pub fn is_idempotent(method: &Method) -> bool {
+        matches!(
+            method,
+            Method::Get | Method::Head | Method::Put | Method::Delete | Method::Options
+        )
     }
 }
 
@@ -91,6 +422,7 @@ pub struct RetryableTransport<T> {
 }
 
 impl<T> RetryableTransport<T> {
+    /// Create a new retryable transport with the given policy.
     pub fn new(transport: T, policy: RetryPolicy) -> Self {
         Self {
             inner: transport,
@@ -98,15 +430,32 @@ impl<T> RetryableTransport<T> {
         }
     }
 
-    fn should_retry(&self, error: &TransportError) -> bool {
+    /// Check if the error or response should trigger a retry.
+    fn should_retry(&self, error: &TransportError, method: &Method) -> bool {
+        // Check idempotency first if required
+        if self.retry_policy.idempotent_only && !RetryPolicy::is_idempotent(method) {
+            return false;
+        }
+
         match error {
-            TransportError::Network(_) => true,
+            TransportError::Network(network_err) => {
+                // DNS failures and connection issues are usually transient
+                matches!(
+                    &**network_err,
+                    crate::error::NetworkError::ConnectionFailed { .. }
+                        | crate::error::NetworkError::ConnectionLost { .. }
+                        | crate::error::NetworkError::DnsResolution { .. }
+                        | crate::error::NetworkError::Io { .. }
+                )
+            }
             TransportError::Timeout { .. } => true,
             TransportError::Protocol(boxed_proto) => {
                 match &**boxed_proto {
                     crate::error::ProtocolError::Http { status, .. } => {
-                        // Retry on server errors and rate limits
-                        status.as_u16() >= 500 || status.as_u16() == 429
+                        // Check if status code is in the retryable list
+                        self.retry_policy
+                            .retryable_status_codes
+                            .contains(&status.as_u16())
                     }
                     _ => false,
                 }
@@ -115,14 +464,73 @@ impl<T> RetryableTransport<T> {
         }
     }
 
-    fn calculate_delay(&self, attempt: usize) -> Duration {
-        let delay_ms = (self.retry_policy.initial_delay.as_millis() as f64
-            * self
-                .retry_policy
-                .backoff_multiplier
-                .powi((attempt - 1) as i32))
-        .min(self.retry_policy.max_delay.as_millis() as f64) as u64;
-        Duration::from_millis(delay_ms)
+    /// Parse `Retry-After` header from an error response.
+    /// Returns the delay to wait, or None if not present/parseable.
+    fn parse_retry_after(error: &TransportError) -> Option<Duration> {
+        // Extract Retry-After from error if it contains response headers
+        // This is a simplified implementation - in practice we'd need access to response headers
+        if let TransportError::Protocol(boxed_proto) = error
+            && let crate::error::ProtocolError::Http {
+                body: Some(body_str),
+                ..
+            } = &**boxed_proto
+        {
+            // Check for embedded Retry-After (simplified)
+            if let Some(retry_after) = Self::extract_retry_after_from_body(body_str) {
+                return Some(retry_after);
+            }
+        }
+        None
+    }
+
+    /// Extract Retry-After value from response body or headers.
+    fn extract_retry_after_from_body(body: &str) -> Option<Duration> {
+        // First try to parse as seconds
+        if let Ok(seconds) = body.trim().parse::<u64>() {
+            return Some(Duration::from_secs(seconds));
+        }
+
+        // Try to parse as HTTP-date using httpdate crate
+        if let Ok(datetime) = httpdate::parse_http_date(body.trim()) {
+            let now = SystemTime::now();
+            if let Ok(duration) = datetime.duration_since(now) {
+                return Some(duration);
+            }
+        }
+
+        None
+    }
+
+    /// Calculate delay for a retry attempt.
+    fn calculate_delay(&self, attempt: usize, prev_delay: Option<Duration>) -> Duration {
+        self.retry_policy
+            .strategy
+            .calculate_delay(attempt, prev_delay)
+    }
+
+    /// Calculate delay considering Retry-After header.
+    fn calculate_delay_with_retry_after(
+        &self,
+        attempt: usize,
+        prev_delay: Option<Duration>,
+        error: &TransportError,
+    ) -> Duration {
+        // Check for Retry-After header first
+        if self.retry_policy.respect_retry_after
+            && let Some(retry_after) = Self::parse_retry_after(error)
+        {
+            // Cap the Retry-After delay
+            let capped = retry_after.min(self.retry_policy.max_retry_after);
+            tracing::debug!(
+                retry_after_secs = retry_after.as_secs(),
+                capped_secs = capped.as_secs(),
+                "Using Retry-After header for delay"
+            );
+            return capped;
+        }
+
+        // Fall back to strategy-based delay
+        self.calculate_delay(attempt, prev_delay)
     }
 }
 
@@ -136,10 +544,19 @@ where
 
     async fn send(&self, request: Request) -> Result<Response, TransportError> {
         let mut attempt = 0;
-        let max_attempts = self.retry_policy.max_attempts;
+        let method = request.method.clone();
+
+        // Check if retries are enabled for this method
+        if !self.retry_policy.is_retryable_method(&method) {
+            return self.inner.send(request).await.map_err(|e| e.into());
+        }
+
+        // Get max attempts for this specific method
+        let max_attempts = self.retry_policy.max_attempts_for_method(&method);
 
         // Clone request ONCE before the loop
         let original_request = request.clone();
+        let mut prev_delay: Option<Duration> = None;
 
         loop {
             attempt += 1;
@@ -154,14 +571,60 @@ where
             let result = self.inner.send(current_request).await;
 
             match result {
-                Ok(response) => return Ok(response),
+                Ok(response) => {
+                    // Record success for retry budget
+                    if let Some(budget) = &self.retry_policy.budget {
+                        budget.record_success();
+                    }
+                    return Ok(response);
+                }
                 Err(e) => {
                     let transport_error = e.into();
-                    if attempt < max_attempts && self.should_retry(&transport_error) {
-                        let delay = self.calculate_delay(attempt);
+
+                    // Check if we should retry
+                    let should_retry =
+                        attempt < max_attempts && self.should_retry(&transport_error, &method);
+
+                    // Check retry budget if configured
+                    let budget_allows = if should_retry {
+                        self.retry_policy
+                            .budget
+                            .as_ref()
+                            .map(|b| b.try_acquire())
+                            .unwrap_or(true)
+                    } else {
+                        false
+                    };
+
+                    if should_retry && budget_allows {
+                        let delay = self.calculate_delay_with_retry_after(
+                            attempt,
+                            prev_delay,
+                            &transport_error,
+                        );
+                        prev_delay = Some(delay);
+
+                        tracing::info!(
+                            attempt = attempt,
+                            max_attempts = max_attempts,
+                            delay_ms = delay.as_millis(),
+                            error = %transport_error,
+                            budget_tokens = self.retry_policy.budget.as_ref().map(|b| b.available_tokens()),
+                            "Retrying request"
+                        );
+
                         sleep(delay).await;
                         continue;
                     }
+
+                    if should_retry && !budget_allows {
+                        tracing::warn!(
+                            attempt = attempt,
+                            error = %transport_error,
+                            "Retry budget exhausted, not retrying"
+                        );
+                    }
+
                     return Err(transport_error);
                 }
             }

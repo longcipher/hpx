@@ -137,6 +137,72 @@ impl Body {
             Either::Right { .. } => None,
         }
     }
+
+    /// Convert the body into a mutable [`bytes::BytesMut`] if possible.
+    ///
+    /// This is useful for zero-copy operations where you need a mutable buffer,
+    /// such as with SIMD JSON parsing.
+    ///
+    /// Returns `Some(BytesMut)` if the body is a reusable `Bytes` chunk,
+    /// `None` if the body is a streaming body.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use bytes::BytesMut;
+    /// use hpx::Body;
+    ///
+    /// let body = Body::from("hello world");
+    /// if let Some(bytes_mut) = body.into_bytes_mut() {
+    ///     // Use mutable bytes for zero-copy operations
+    ///     println!("Got {} bytes", bytes_mut.len());
+    /// }
+    /// ```
+    pub fn into_bytes_mut(self) -> Option<bytes::BytesMut> {
+        match self.0 {
+            Either::Left(bytes) => {
+                // Try to convert without copying if possible
+                match bytes.try_into_mut() {
+                    Ok(bytes_mut) => Some(bytes_mut),
+                    Err(bytes) => Some(bytes::BytesMut::from(bytes.as_ref())),
+                }
+            }
+            Either::Right(_) => None,
+        }
+    }
+
+    /// Get an [`AsyncRead`] adapter for the body.
+    ///
+    /// This enables efficient streaming of the body using standard async I/O traits.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use hpx::Body;
+    /// use tokio::io::AsyncReadExt;
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let body = Body::from("hello world");
+    /// let mut reader = body.reader();
+    ///
+    /// let mut buffer = Vec::new();
+    /// reader.read_to_end(&mut buffer).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Optional
+    ///
+    /// This requires the optional `stream` feature to be enabled.
+    #[cfg(feature = "stream")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "stream")))]
+    pub fn reader(self) -> impl tokio::io::AsyncRead {
+        use futures_util::TryStreamExt;
+
+        tokio_util::io::StreamReader::new(
+            http_body_util::BodyDataStream::new(self).map_err(std::io::Error::other),
+        )
+    }
 }
 
 impl Default for Body {
