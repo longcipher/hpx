@@ -10,6 +10,7 @@ lint:
   cargo +nightly fmt --all -- --check
   cargo +nightly clippy --workspace --all-targets --all-features -- -D warnings
   cargo machete
+  build-docs
 test:
   cargo nextest run --workspace --all-features
 build-docs:

@@ -8,6 +8,7 @@ use http::{
     Method, StatusCode, Version,
     header::{self, Entry, HeaderMap, HeaderName, HeaderValue},
 };
+#[cfg(feature = "http1")]
 use smallvec::{SmallVec, smallvec, smallvec_inline};
 
 use crate::{

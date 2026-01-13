@@ -96,7 +96,7 @@ rustls-tls = [
 ]
 
 # Enable HTTP/1 support.
-http1 = ["dep:httparse"]
+http1 = ["dep:httparse", "dep:smallvec"]
 
 # Enable HTTP/2 support.
 http2 = ["dep:http2"]
@@ -128,9 +128,9 @@ rustls = { workspace = true, optional = true, features = [
 rustls-pemfile = { workspace = true, optional = true }
 rustls-pki-types = { workspace = true, optional = true }
 schnellru = { workspace = true }
-smallvec = { workspace = true, features = ["const_generics", "const_new"] }
+smallvec = { workspace = true, features = ["const_generics", "const_new"], optional = true }
 socket2 = { workspace = true, features = ["all"] }
-tokio = { workspace = true, features = ["net", "time", "rt", "io-util"] }
+tokio = { workspace = true, features = ["net", "time", "rt", "io-util", "sync"] }
 tokio-boring = { workspace = true, optional = true }
 tokio-rustls = { workspace = true, optional = true, features = ["ring"] }
 tower = { workspace = true, features = ["timeout", "util", "retry"] }

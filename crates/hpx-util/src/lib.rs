@@ -13,6 +13,8 @@
 //! - **Tower**: Middleware layers for `tower` services (e.g., delay, jitter).
 
 use hpx as _;
+#[cfg(feature = "emulation-serde")]
+use serde as _;
 
 #[cfg(feature = "emulation")]
 pub mod emulation;

@@ -49,7 +49,7 @@ pub struct Unnameable(pub(super) ConnectRequest);
 /// A trait alias for types that can be used as async connections.
 ///
 /// This trait is automatically implemented for any type that satisfies the required bounds:
-/// - [`AsyncRead`] + [`AsyncWrite`]: For I/O operations
+/// - [`tokio::io::AsyncRead`] + [`tokio::io::AsyncWrite`]: For I/O operations
 /// - [`Connection`]: For connection metadata
 /// - [`Send`] + [`Sync`] + [`Unpin`] + `'static`: For async/await compatibility
 trait AsyncConn: AsyncRead + AsyncWrite + Connection + Send + Sync + Unpin + 'static {}

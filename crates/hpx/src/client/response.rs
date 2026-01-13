@@ -417,7 +417,7 @@ impl Response {
         self.res.into_body()
     }
 
-    /// Get an [`AsyncRead`] adapter for the response body.
+    /// Get an [`tokio::io::AsyncRead`] adapter for the response body.
     ///
     /// This enables efficient streaming of the response body using
     /// standard async I/O traits.

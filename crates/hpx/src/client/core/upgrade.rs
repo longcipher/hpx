@@ -45,7 +45,7 @@ use crate::sync::Mutex;
 ///
 /// This type holds a trait object internally of the original IO that
 /// was used to speak HTTP before the upgrade. It can be used directly
-/// as a [`AsyncRead`] or [`AsyncWrite`] for convenience.
+/// as a [`tokio::io::AsyncRead`] or [`tokio::io::AsyncWrite`] for convenience.
 ///
 /// Alternatively, if the exact type is known, this can be deconstructed
 /// into its parts.

@@ -278,7 +278,7 @@ use rustls as _;
 use rustls_pemfile as _;
 #[cfg(feature = "rustls-tls")]
 use rustls_pki_types as _;
-#[cfg(not(any(feature = "http2", feature = "http1")))]
+#[cfg(feature = "http1")]
 use smallvec as _;
 #[cfg(feature = "webpki-roots")]
 use webpki_root_certs as _;
@@ -602,5 +602,5 @@ pub fn websocket<T: IntoUri>(uri: T) -> ws::WebSocketRequestBuilder {
     Client::new().websocket(uri)
 }
 
-#[cfg(not(any(feature = "http2", feature = "http1")))]
+#[cfg(feature = "http1")]
 use smallvec as _;

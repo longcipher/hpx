@@ -171,7 +171,7 @@ impl Body {
         }
     }
 
-    /// Get an [`AsyncRead`] adapter for the body.
+    /// Get an [`tokio::io::AsyncRead`] adapter for the body.
     ///
     /// This enables efficient streaming of the body using standard async I/O traits.
     ///

@@ -1,3 +1,4 @@
+#[cfg(any(feature = "boring", feature = "rustls-tls"))]
 use bytes::Bytes;
 use tokio::net::TcpStream;
 #[cfg(unix)]
