@@ -71,13 +71,13 @@ async fn server_upgrade(
   Ok(response)
 }
 
-async fn connect(client_id: usize) -> Result<WebSocket<TokioIo<Upgraded>>> {
-  let stream = TcpStream::connect("localhost:8080").await?;
+async fn connect(client_id: usize, addr: std::net::SocketAddr) -> Result<WebSocket<TokioIo<Upgraded>>> {
+  let stream = TcpStream::connect(addr).await?;
 
   let req = Request::builder()
     .method("GET")
-    .uri("http://localhost:8080/")
-    .header("Host", "localhost:8080")
+    .uri(format!("http://{}/", addr))
+    .header("Host", addr.to_string())
     .header(UPGRADE, "websocket")
     .header(CONNECTION, "upgrade")
     .header("CLIENT-ID", &format!("{}", client_id))
@@ -92,8 +92,8 @@ async fn connect(client_id: usize) -> Result<WebSocket<TokioIo<Upgraded>>> {
   Ok(ws)
 }
 
-async fn start_client(client_id: usize) -> Result<()> {
-  let mut ws = connect(client_id).await.unwrap();
+async fn start_client(client_id: usize, addr: std::net::SocketAddr) -> Result<()> {
+  let mut ws = connect(client_id, addr).await.unwrap();
   let frame = ws.read_frame().await?;
   match frame.opcode {
     OpCode::Close => {}
@@ -110,8 +110,9 @@ async fn start_client(client_id: usize) -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test() -> Result<()> {
-  let listener = TcpListener::bind("127.0.0.1:8080").await?;
-  println!("Server started, listening on 127.0.0.1:8080");
+  let listener = TcpListener::bind("127.0.0.1:0").await?;
+  let addr = listener.local_addr()?;
+  println!("Server started, listening on {}", addr);
   tokio::spawn(async move {
     loop {
       let (stream, _) = listener.accept().await.unwrap();
@@ -126,7 +127,7 @@ async fn test() -> Result<()> {
   });
   let mut tasks = Vec::with_capacity(N_CLIENTS);
   for client in 0..N_CLIENTS {
-    tasks.push(tokio::spawn(start_client(client)));
+    tasks.push(tokio::spawn(start_client(client, addr)));
   }
   for handle in tasks {
     handle.await.unwrap().unwrap();

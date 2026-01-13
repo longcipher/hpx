@@ -8,7 +8,7 @@ use std::{borrow::Cow, error::Error as StdError, fmt, sync::Arc};
 
 use bytes::Bytes;
 use futures_util::FutureExt;
-use http::{HeaderMap, HeaderValue, StatusCode, Uri};
+use http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri};
 
 use crate::{
     client::{Body, layer::redirect},
@@ -37,10 +37,17 @@ pub struct Policy {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Attempt<'a, const PENDING: bool = true> {
-    status: StatusCode,
-    headers: Cow<'a, HeaderMap>,
-    next: Cow<'a, Uri>,
-    previous: Cow<'a, [Uri]>,
+    /// The status code of the redirect response.
+    pub status: StatusCode,
+
+    /// The headers of the redirect response.
+    pub headers: Cow<'a, HeaderMap>,
+
+    /// The URI to redirect to.
+    pub uri: Cow<'a, Uri>,
+
+    /// The list of previous URIs that have already been requested in this chain.
+    pub previous: Cow<'a, [Uri]>,
 }
 
 /// An action to perform when a redirect status code is found.
@@ -208,7 +215,7 @@ impl Policy {
         self.redirect(Attempt {
             status,
             headers: Cow::Borrowed(headers),
-            next: Cow::Borrowed(next),
+            uri: Cow::Borrowed(next),
             previous: Cow::Borrowed(previous),
         })
         .inner
@@ -227,31 +234,7 @@ impl_request_config_value!(Policy);
 
 // ===== impl Attempt =====
 
-impl<'a, const PENDING: bool> Attempt<'a, PENDING> {
-    /// Get the type of redirect.
-    #[inline]
-    pub fn status(&self) -> StatusCode {
-        self.status
-    }
-
-    /// Get the headers of redirect.
-    #[inline]
-    pub fn headers(&self) -> &HeaderMap {
-        self.headers.as_ref()
-    }
-
-    /// Get the next URI to redirect to.
-    #[inline]
-    pub fn uri(&self) -> &Uri {
-        self.next.as_ref()
-    }
-
-    /// Get the list of previous URIs that have already been requested in this chain.
-    #[inline]
-    pub fn previous(&self) -> &[Uri] {
-        self.previous.as_ref()
-    }
-
+impl<const PENDING: bool> Attempt<'_, PENDING> {
     /// Returns an action meaning hpx should follow the next URI.
     #[inline]
     pub fn follow(self) -> Action {
@@ -281,7 +264,7 @@ impl<'a, const PENDING: bool> Attempt<'a, PENDING> {
     }
 }
 
-impl<'a> Attempt<'a, true> {
+impl Attempt<'_, true> {
     /// Returns an action meaning hpx should perform the redirect asynchronously.
     ///
     /// The provided async closure receives an owned [`Attempt<'static>`] and should
@@ -295,7 +278,7 @@ impl<'a> Attempt<'a, true> {
     /// let policy = redirect::Policy::custom(|attempt| {
     ///     attempt.pending(|attempt| async move {
     ///         // Perform some async operation
-    ///         if attempt.uri().host() == Some("trusted.domain") {
+    ///         if attempt.uri.host() == Some("trusted.domain") {
     ///             attempt.follow()
     ///         } else {
     ///             attempt.stop()
@@ -303,7 +286,7 @@ impl<'a> Attempt<'a, true> {
     ///     })
     /// });
     /// ```
-    pub fn pending<F, Fut>(self, task: F) -> Action
+    pub fn pending<F, Fut>(self, func: F) -> Action
     where
         F: FnOnce(Attempt<'static, false>) -> Fut + Send + 'static,
         Fut: Future<Output = Action> + Send + 'static,
@@ -311,10 +294,10 @@ impl<'a> Attempt<'a, true> {
         let attempt = Attempt {
             status: self.status,
             headers: Cow::Owned(self.headers.into_owned()),
-            next: Cow::Owned(self.next.into_owned()),
+            uri: Cow::Owned(self.uri.into_owned()),
             previous: Cow::Owned(self.previous.into_owned()),
         };
-        let pending = Box::pin(task(attempt).map(|action| action.inner));
+        let pending = Box::pin(func(attempt).map(|action| action.inner));
         Action {
             inner: redirect::Action::Pending(pending),
         }
@@ -489,9 +472,13 @@ fn remove_sensitive_headers(headers: &mut HeaderMap, next: &Uri, previous: &[Uri
             || next.port() != previous.port()
             || next.scheme() != previous.scheme();
         if cross_host {
+            /// Avoid dynamic allocation of `HeaderName` by using `from_static`.
+            /// https://github.com/hyperium/http/blob/e9de46c9269f0a476b34a02a401212e20f639df2/src/header/map.rs#L3794
+            const COOKIE2: HeaderName = HeaderName::from_static("cookie2");
+
             headers.remove(AUTHORIZATION);
             headers.remove(COOKIE);
-            headers.remove("cookie2");
+            headers.remove(COOKIE2);
             headers.remove(PROXY_AUTHORIZATION);
             headers.remove(WWW_AUTHENTICATE);
         }
@@ -538,7 +525,7 @@ mod tests {
     #[test]
     fn test_redirect_policy_custom() {
         let policy = Policy::custom(|attempt| {
-            if attempt.uri().host() == Some("foo") {
+            if attempt.uri.host() == Some("foo") {
                 attempt.stop()
             } else {
                 attempt.follow()

@@ -16,6 +16,7 @@ pub(crate) mod rustls;
 
 #[cfg(feature = "boring")]
 pub use ::boring::ssl::{CertificateCompressionAlgorithm, ExtensionType};
+use bytes::Bytes;
 
 pub use self::{
     keylog::KeyLog,
@@ -27,13 +28,23 @@ pub use self::{
 /// Made available to clients on responses when `tls_info` is set.
 #[derive(Debug, Clone)]
 pub struct TlsInfo {
-    pub(crate) peer_certificate: Option<Vec<u8>>,
+    pub(crate) peer_certificate: Option<Bytes>,
+    pub(crate) peer_certificate_chain: Option<Vec<Bytes>>,
 }
 
 impl TlsInfo {
     /// Get the DER encoded leaf certificate of the peer.
     pub fn peer_certificate(&self) -> Option<&[u8]> {
         self.peer_certificate.as_deref()
+    }
+
+    /// Get the DER encoded certificate chain of the peer.
+    ///
+    /// This includes the leaf certificate on the client side.
+    pub fn peer_certificate_chain(&self) -> Option<impl Iterator<Item = &[u8]>> {
+        self.peer_certificate_chain
+            .as_ref()
+            .map(|v| v.iter().map(|b| b.as_ref()))
     }
 }
 
@@ -42,7 +53,7 @@ use std::hash::{Hash, Hasher};
 
 #[cfg(feature = "boring")]
 use ::boring::ssl;
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{BufMut, BytesMut};
 
 /// A TLS protocol version.
 #[cfg(feature = "boring")]

@@ -1,11 +1,6 @@
 //! HTTP Cookies
 
-use std::{
-    convert::TryInto,
-    fmt,
-    sync::Arc,
-    time::{Duration, SystemTime},
-};
+use std::{convert::TryInto, fmt, sync::Arc, time::SystemTime};
 
 use bytes::Bytes;
 use cookie::{Cookie as RawCookie, CookieJar, Expiration, SameSite};
@@ -57,6 +52,12 @@ pub trait IntoCookieStore {
     fn into_cookie_store(self) -> Arc<dyn CookieStore>;
 }
 
+/// Trait for converting types into an owned cookie ([`Cookie<'static>`]).
+pub trait IntoCookie {
+    /// Converts the implementor into an optional owned [`Cookie<'static>`].
+    fn into_cookie(self) -> Option<Cookie<'static>>;
+}
+
 /// A single HTTP cookie.
 #[derive(Debug, Clone)]
 pub struct Cookie<'a>(RawCookie<'a>);
@@ -101,6 +102,29 @@ where
     #[inline]
     fn into_cookie_store(self) -> Arc<dyn CookieStore> {
         Arc::new(self)
+    }
+}
+
+// ===== impl IntoCookie =====
+
+impl IntoCookie for Cookie<'_> {
+    #[inline]
+    fn into_cookie(self) -> Option<Cookie<'static>> {
+        Some(self.into_owned())
+    }
+}
+
+impl IntoCookie for RawCookie<'_> {
+    #[inline]
+    fn into_cookie(self) -> Option<Cookie<'static>> {
+        Some(Cookie(self.into_owned()))
+    }
+}
+
+impl IntoCookie for &str {
+    #[inline]
+    fn into_cookie(self) -> Option<Cookie<'static>> {
+        RawCookie::parse(self).map(|c| Cookie(c.into_owned())).ok()
     }
 }
 
@@ -187,18 +211,21 @@ impl<'a> Cookie<'a> {
 }
 
 impl fmt::Display for Cookie<'_> {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.0.fmt(f)
     }
 }
 
 impl<'c> From<RawCookie<'c>> for Cookie<'c> {
+    #[inline]
     fn from(cookie: RawCookie<'c>) -> Cookie<'c> {
         Cookie(cookie)
     }
 }
 
 impl<'c> From<Cookie<'c>> for RawCookie<'c> {
+    #[inline]
     fn from(cookie: Cookie<'c>) -> RawCookie<'c> {
         cookie.0
     }
@@ -310,12 +337,65 @@ impl Jar {
     /// jar.add_cookie_str(cookie, "https://yolo.local");
     /// ```
     pub fn add_cookie_str<U: IntoUri>(&self, cookie: &str, uri: U) {
-        if let Ok(raw) = RawCookie::parse(cookie) {
-            self.add_cookie(raw.into_owned(), uri);
-        }
+        self.add(cookie, uri);
     }
 
     /// Add a cookie to this jar.
+    ///
+    /// The cookie's domain and path attributes are used if present, otherwise
+    /// the domain and path are derived from the provided Uri.
+    ///
+    /// # Example
+    /// ```
+    /// use cookie::CookieBuilder;
+    /// use hpx::cookie::Jar;
+    /// let jar = Jar::default();
+    /// let cookie = CookieBuilder::new("foo", "bar")
+    ///     .domain("example.com")
+    ///     .path("/")
+    ///     .build();
+    /// jar.add(cookie, "http://example.com");
+    ///
+    /// // You can also use a string directly
+    /// jar.add("foo=bar; Domain=example.com; Path=/", "http://example.com");
+    /// ```
+    pub fn add<C, U>(&self, cookie: C, uri: U)
+    where
+        C: IntoCookie,
+        U: IntoUri,
+    {
+        if let Some(cookie) = cookie.into_cookie() {
+            let cookie: RawCookie<'static> = cookie.into();
+            let uri = into_uri!(uri);
+            let domain = cookie
+                .domain()
+                .map(normalize_domain)
+                .or_else(|| uri.host())
+                .unwrap_or_default();
+            let path = cookie.path().unwrap_or_else(|| normalize_path(&uri));
+
+            let mut inner = self.store.write();
+            let name_map = inner
+                .entry(domain.to_owned())
+                .or_insert_with(|| HashMap::with_hasher(HASHER))
+                .entry(path.to_owned())
+                .or_default();
+
+            // RFC 6265: If Max-Age=0 or Expires in the past, remove the cookie
+            let expired = cookie
+                .expires_datetime()
+                .is_some_and(|dt| dt <= SystemTime::now())
+                || cookie.max_age().is_some_and(|age| age.is_zero());
+
+            if expired {
+                name_map.remove(cookie);
+            } else {
+                name_map.add(cookie);
+            }
+        }
+    }
+
+    /// Add a cookie to this jar (legacy API).
     ///
     /// The cookie's domain and path attributes are used if present, otherwise
     /// the domain and path are derived from the provided Uri.
@@ -353,12 +433,10 @@ impl Jar {
             .or_default();
 
         // RFC 6265: If Max-Age=0 or Expires in the past, remove the cookie
-        let expired = match cookie.expires() {
-            Some(Expiration::DateTime(dt)) => SystemTime::from(dt) <= SystemTime::now(),
-            _ => false,
-        } || cookie
-            .max_age()
-            .is_some_and(|age| age == Duration::from_secs(0));
+        let expired = cookie
+            .expires_datetime()
+            .is_some_and(|dt| dt <= SystemTime::now())
+            || cookie.max_age().is_some_and(|age| age.is_zero());
 
         if expired {
             name_map.remove(cookie);
@@ -450,8 +528,9 @@ impl CookieStore for Jar {
                                 return false;
                             }
 
-                            if let Some(Expiration::DateTime(dt)) = cookie.expires()
-                                && SystemTime::from(dt) <= SystemTime::now()
+                            if cookie
+                                .expires_datetime()
+                                .is_some_and(|dt| dt <= SystemTime::now())
                             {
                                 return false;
                             }
