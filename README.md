@@ -82,6 +82,25 @@ hpx = { version = "0.1.4", features = [
 ] }
 ```
 
+### Performance Optimization
+
+To achieve the best possible performance, consider enabling the following features:
+
+- **`simd-json`**: Replaces `serde_json` with `simd-json` for faster JSON serialization/deserialization (uses SIMD instructions where available).
+- **`hickory-dns`**: Enables the high-performance, async-native Hickory (formerly Trust-DNS) resolver, avoiding blocking system calls.
+- **`zstd` / `brotli`**: Use modern compression algorithms for better bandwidth efficiency. `zstd` usually offers the best balance of speed and compression ratio.
+
+**Recommended configuration for high-performance applications:**
+
+```toml
+[dependencies]
+hpx = { version = "0.1.4", features = [
+    "simd-json",      # SIMD-accelerated JSON handling
+    "hickory-dns",    # Async DNS resolver
+    "zstd",           # Fast compression
+] }
+```
+
 ## TLS Backend Configuration
 
 `hpx` supports two TLS backends: **BoringSSL** (default) and **Rustls**.
@@ -94,7 +113,7 @@ To use BoringSSL, no additional configuration is needed if you are using the def
 
 ```toml
 [dependencies]
-hpx = "0.1.0"
+hpx = "0.1"
 ```
 
 ### Rustls
@@ -107,7 +126,7 @@ To use Rustls, you must disable the default features and explicitly enable `rust
 
 ```toml
 [dependencies]
-hpx = { version = "0.1.0", default-features = false, features = ["rustls-tls", "http1", "http2"] }
+hpx = { version = "0.1", default-features = false, features = ["rustls-tls", "http1", "http2"] }
 ```
 
 ## Usage Examples
