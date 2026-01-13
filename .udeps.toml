@@ -1,0 +1,4 @@
+[ignore]
+crates = ["arrow-array", "arrow-schema", "getrandom_02", "getrandom"]
+npm = []
+pypi = []

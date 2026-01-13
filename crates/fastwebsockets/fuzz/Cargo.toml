@@ -1,16 +1,16 @@
 [package]
 name = "fastwebsockets-fuzz"
-version = "0.0.0"
+version = "0.1.0"
 publish = false
-edition = "2021"
+edition = "2024"
 
 [package.metadata]
 cargo-fuzz = true
 
 [dependencies]
-futures = "0.3.27"
-libfuzzer-sys = "0.4"
-tokio = { version = "1.0", features = ["full"] }
+futures = "0.3.31"
+libfuzzer-sys = "0.4.10"
+tokio = { version = "1.49.0", features = ["full"] }
 
 [dependencies.fastwebsockets]
 path = ".."
@@ -18,6 +18,12 @@ path = ".."
 # Prevent this from interfering with workspaces
 [workspace]
 members = ["."]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+
+[workspace.dependencies]
 
 [profile.release]
 debug = 1
