@@ -2,6 +2,7 @@
 name = "hpx-transport"
 repository.workspace = true
 version.workspace = true
+description = "Transport layer for hpx HTTP client with middleware support"
 edition.workspace = true
 license.workspace = true
 
