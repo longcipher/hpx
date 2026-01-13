@@ -14,7 +14,7 @@ An ergonomic all-in-one HTTP client for browser emulation with TLS, JA3/JA4, and
 ## Features
 
 - **Browser Emulation**: Simulate various browser TLS/HTTP2 fingerprints (JA3/JA4).
-- **Content Handling**: Plain bodies, JSON, urlencoded, multipart.
+- **Content Handling**: Plain bodies, JSON, urlencoded, multipart, streaming.
 - **Advanced Features**:
   - Cookies Store
   - Redirect Policy
@@ -22,6 +22,10 @@ An ergonomic all-in-one HTTP client for browser emulation with TLS, JA3/JA4, and
   - Rotating Proxies
   - Certificate Store
   - Tower Middleware Support
+  - Request/Response Hooks
+  - Retry Configuration
+  - Compression (gzip, brotli, deflate, zstd)
+  - Character Encoding Support
 - **WebSocket**: Upgrade support for WebSockets.
 - **TLS Backends**: Support for both BoringSSL (default) and Rustls.
 
@@ -30,10 +34,10 @@ An ergonomic all-in-one HTTP client for browser emulation with TLS, JA3/JA4, and
 ```text
 +-----------------------------------------------------------+
 |                        User API                           |
-| (HpxClient, HpxBuilder, RequestBuilder, WsConnection)     |
+| (Client, ClientBuilder, RequestBuilder, Response)         |
 +-----------------------------------------------------------+
 |                     Tower Middleware Stack                |
-| (AuthLayer, RetryLayer, TimeoutLayer, DecompressionLayer) |
+| (HooksLayer, RetryLayer, TimeoutLayer, DecompressionLayer)|
 +---------------------------+-------------------------------+
 |        hpx-core           |      hpx-ws (fastwebsockets)  |
 +---------------------------+                               |
@@ -47,12 +51,35 @@ An ergonomic all-in-one HTTP client for browser emulation with TLS, JA3/JA4, and
 
 ## Installation
 
-Add `hpx` to your `Cargo.toml`:
+Add `hpx` and related crates to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hpx = "0.1.0"
-hpx-util = "0.1.0"
+hpx = "0.1.4"
+hpx-util = "0.1.4"
+hpx-transport = "0.1.4"  # Optional: for transport layer access
+```
+
+### Feature Flags
+
+`hpx` provides extensive feature flags for customization:
+
+```toml
+[dependencies]
+hpx = { version = "0.1.4", features = [
+    "json",           # JSON request/response support
+    "stream",         # Streaming request/response bodies
+    "cookies",        # Cookie store support
+    "charset",        # Character encoding support
+    "gzip",           # Gzip compression
+    "brotli",         # Brotli compression
+    "zstd",           # Zstandard compression
+    "multipart",      # Multipart form data
+    "ws",             # WebSocket support
+    "socks",          # SOCKS proxy support
+    "hickory-dns",    # Alternative DNS resolver
+    "tracing",        # Logging support
+] }
 ```
 
 ## TLS Backend Configuration
@@ -101,21 +128,128 @@ async fn main() -> hpx::Result<()> {
 }
 ```
 
-### Browser Emulation
-
-The `emulation` module allows you to simulate specific browser fingerprints.
+### JSON Requests
 
 ```rust
-use hpx_util::Emulation;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Debug)]
+struct User {
+    name: String,
+    email: String,
+}
 
 #[tokio::main]
 async fn main() -> hpx::Result<()> {
-    let resp = hpx::get("https://tls.peet.ws/api/all")
-        .emulation(Emulation::Firefox136)
+    // POST with JSON body
+    let user = User {
+        name: "John Doe".to_string(),
+        email: "john@example.com".to_string(),
+    };
+
+    let response = hpx::Client::new()
+        .post("https://jsonplaceholder.typicode.com/users")
+        .json(&user)
         .send()
         .await?;
 
-    println!("{}", resp.text().await?);
+    println!("Status: {}", response.status());
+    Ok(())
+}
+```
+
+### Request/Response Hooks
+
+Add lifecycle hooks to monitor and modify requests/responses:
+
+```rust
+use hpx::client::{layer::hooks::{Hooks, LoggingHook, RequestIdHook}, Client};
+
+#[tokio::main]
+async fn main() -> hpx::Result<()> {
+    let client = Client::builder()
+        .hooks(Hooks::new()
+            .before_request(|req| {
+                println!("Sending request to: {}", req.uri());
+                async { Ok(()) }
+            })
+            .after_response(|res| {
+                println!("Received response: {}", res.status());
+                async { Ok(()) }
+            })
+        )
+        .build()?;
+
+    let _response = client.get("https://httpbin.org/get").send().await?;
+    Ok(())
+}
+```
+
+### Retry Configuration
+
+Configure retry behavior for failed requests:
+
+```rust
+use hpx::{client::http::ClientBuilder, retry::RetryConfig};
+use std::time::Duration;
+
+#[tokio::main]
+async fn main() -> hpx::Result<()> {
+    let client = ClientBuilder::new()
+        .retry(RetryConfig::new()
+            .max_attempts(3)
+            .backoff(Duration::from_millis(100))
+            .max_backoff(Duration::from_secs(10))
+        )
+        .build()?;
+
+    let response = client.get("https://httpbin.org/status/500").send().await?;
+    println!("Final status: {}", response.status());
+    Ok(())
+}
+```
+
+### Streaming Response Bodies
+
+Efficiently stream large response bodies:
+
+```rust
+use tokio::io::AsyncReadExt;
+
+#[tokio::main]
+async fn main() -> hpx::Result<()> {
+    let mut reader = hpx::get("https://httpbin.org/stream/100")
+        .send()
+        .await?
+        .reader();
+
+    let mut buffer = Vec::new();
+    reader.read_to_end(&mut buffer).await?;
+    println!("Read {} bytes", buffer.len());
+    Ok(())
+}
+```
+
+### Cookies
+
+Automatic cookie handling:
+
+```rust
+use hpx::cookie::Jar;
+
+#[tokio::main]
+async fn main() -> hpx::Result<()> {
+    let jar = Jar::default();
+    
+    let client = hpx::Client::builder()
+        .cookie_provider(jar.clone())
+        .build()?;
+
+    // Cookies will be automatically stored and sent
+    let _resp = client.get("https://httpbin.org/cookies/set/session/123").send().await?;
+    
+    // Check stored cookies
+    println!("Cookies: {:?}", jar.cookies("https://httpbin.org"));
     Ok(())
 }
 ```
@@ -149,6 +283,49 @@ async fn main() -> hpx::Result<()> {
         }
     }
 
+    Ok(())
+}
+```
+
+### Browser Emulation
+
+The `emulation` module allows you to simulate specific browser fingerprints.
+
+```rust
+use hpx_util::Emulation;
+
+#[tokio::main]
+async fn main() -> hpx::Result<()> {
+    let resp = hpx::get("https://tls.peet.ws/api/all")
+        .emulation(Emulation::Firefox136)
+        .send()
+        .await?;
+
+    println!("{}", resp.text().await?);
+    Ok(())
+}
+```
+
+### Transport Layer
+
+For advanced use cases, you can work directly with the transport layer:
+
+```rust
+use hpx_transport::{HttpClient, typed::TypedRequestBuilder};
+use std::time::Duration;
+
+#[tokio::main]
+async fn main() -> hpx_transport::Result<()> {
+    let client = HttpClient::builder()
+        .timeout(Duration::from_secs(30))
+        .build()?;
+
+    let request = TypedRequestBuilder::get("https://httpbin.org/get")
+        .header("User-Agent", "hpx-transport")
+        .build()?;
+
+    let response = client.send_request(request).await?;
+    println!("Status: {}", response.status());
     Ok(())
 }
 ```

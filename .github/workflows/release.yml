@@ -73,3 +73,11 @@ jobs:
         run: cargo publish -p hpx-util
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Wait for index update
+        run: sleep 30
+
+      - name: Publish hpx-transport
+        run: cargo publish -p hpx-transport
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
