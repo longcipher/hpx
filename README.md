@@ -113,7 +113,7 @@ To use BoringSSL, no additional configuration is needed if you are using the def
 
 ```toml
 [dependencies]
-hpx = "0.1"
+hpx = "0.1.4"
 ```
 
 ### Rustls
@@ -126,7 +126,7 @@ To use Rustls, you must disable the default features and explicitly enable `rust
 
 ```toml
 [dependencies]
-hpx = { version = "0.1", default-features = false, features = ["rustls-tls", "http1", "http2"] }
+hpx = { version = "0.1.4", default-features = false, features = ["rustls-tls", "http1", "http2"] }
 ```
 
 ## Usage Examples
