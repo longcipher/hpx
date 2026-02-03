@@ -55,9 +55,9 @@ Add `hpx` and related crates to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hpx = "0.1.4"
-hpx-util = "0.1.4"
-hpx-transport = "0.1.4"  # Optional: for transport layer access
+hpx = "0.1.5"
+hpx-util = "0.1.5"
+hpx-transport = "0.1.5"  # Optional: for transport layer access
 ```
 
 ### Feature Flags
@@ -66,7 +66,7 @@ hpx-transport = "0.1.4"  # Optional: for transport layer access
 
 ```toml
 [dependencies]
-hpx = { version = "0.1.4", features = [
+hpx = { version = "0.1.5", features = [
     "json",           # JSON request/response support
     "stream",         # Streaming request/response bodies
     "cookies",        # Cookie store support
@@ -94,7 +94,7 @@ To achieve the best possible performance, consider enabling the following featur
 
 ```toml
 [dependencies]
-hpx = { version = "0.1.4", features = [
+hpx = { version = "0.1.5", features = [
     "simd-json",      # SIMD-accelerated JSON handling
     "hickory-dns",    # Async DNS resolver
     "zstd",           # Fast compression
@@ -113,7 +113,7 @@ To use BoringSSL, no additional configuration is needed if you are using the def
 
 ```toml
 [dependencies]
-hpx = "0.1.4"
+hpx = "0.1.5"
 ```
 
 ### Rustls
@@ -126,7 +126,7 @@ To use Rustls, you must disable the default features and explicitly enable `rust
 
 ```toml
 [dependencies]
-hpx = { version = "0.1.4", default-features = false, features = ["rustls-tls", "http1", "http2"] }
+hpx = { version = "0.1.5", default-features = false, features = ["rustls-tls", "http1", "http2"] }
 ```
 
 ## Usage Examples
@@ -259,14 +259,14 @@ use hpx::cookie::Jar;
 #[tokio::main]
 async fn main() -> hpx::Result<()> {
     let jar = Jar::default();
-    
+
     let client = hpx::Client::builder()
         .cookie_provider(jar.clone())
         .build()?;
 
     // Cookies will be automatically stored and sent
     let _resp = client.get("https://httpbin.org/cookies/set/session/123").send().await?;
-    
+
     // Check stored cookies
     println!("Cookies: {:?}", jar.cookies("https://httpbin.org"));
     Ok(())

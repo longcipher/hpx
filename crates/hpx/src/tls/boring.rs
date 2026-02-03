@@ -392,7 +392,7 @@ impl TlsConnectorBuilder {
             .or_else(|| opts.alpn_protocols.clone());
 
         // Create the SslConnector with the provided options
-        let mut connector = SslConnector::builder(SslMethod::tls_client())
+        let mut connector = SslConnector::builder(SslMethod::tls())
             .map_err(Error::tls)?
             .configure_cert_store(self.cert_store.as_ref())?
             .set_cert_verification(self.cert_verification)?

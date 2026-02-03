@@ -128,9 +128,18 @@ rustls = { workspace = true, optional = true, features = [
 rustls-pemfile = { workspace = true, optional = true }
 rustls-pki-types = { workspace = true, optional = true }
 schnellru = { workspace = true }
-smallvec = { workspace = true, features = ["const_generics", "const_new"], optional = true }
+smallvec = { workspace = true, features = [
+    "const_generics",
+    "const_new",
+], optional = true }
 socket2 = { workspace = true, features = ["all"] }
-tokio = { workspace = true, features = ["net", "time", "rt", "io-util", "sync"] }
+tokio = { workspace = true, features = [
+    "net",
+    "time",
+    "rt",
+    "io-util",
+    "sync",
+] }
 tokio-boring = { workspace = true, optional = true }
 tokio-rustls = { workspace = true, optional = true, features = ["ring"] }
 tower = { workspace = true, features = ["timeout", "util", "retry"] }

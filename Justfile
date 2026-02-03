@@ -5,12 +5,13 @@ format:
 fix:
   rumdl check --fix .
 lint:
+  typos
   rumdl check .
   taplo fmt --check
   cargo +nightly fmt --all -- --check
-  cargo +nightly clippy --workspace --all-targets --all-features -- -D warnings
+  cargo +nightly clippy --all -- -D warnings
   cargo machete
-  build-docs
+  just build-docs
 test:
   cargo nextest run --workspace --all-features
 build-docs:
