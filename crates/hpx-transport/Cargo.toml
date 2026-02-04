@@ -2,46 +2,19 @@
 name = "hpx-transport"
 repository.workspace = true
 version.workspace = true
-description = "Transport layer for hpx HTTP client with middleware support"
+description = "Exchange SDK toolkit for cryptocurrency trading with authentication, WebSocket, and rate limiting"
 edition.workspace = true
 license.workspace = true
-
-[package.metadata.cargo-machete]
-ignored = ["http-body", "http-body-util", "tower-http"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 async-trait = { workspace = true }
 bytes.workspace = true
+fastwebsockets = { workspace = true, features = ["upgrade", "unstable-split"] }
 futures-util.workspace = true
 hex.workspace = true
 hmac.workspace = true
-http = { workspace = true }
-http-body = { workspace = true }
-http-body-util = { workspace = true }
-httpdate.workspace = true
-opentelemetry = { workspace = true, features = ["metrics"] }
-opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics"] }
-opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] }
-parking_lot.workspace = true
-rand.workspace = true
-scc = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
-sha2.workspace = true
-simd-json = { workspace = true, optional = true }
-thiserror.workspace = true
-tokio = { workspace = true, features = [
-    "time",
-    "sync",
-    "net",
-    "macros",
-    "rt-multi-thread",
-] }
-
-base64.workspace = true
-fastwebsockets = { workspace = true, features = ["upgrade", "unstable-split"] }
 hpx = { workspace = true, features = [
     "ws",
     "json",
@@ -50,30 +23,24 @@ hpx = { workspace = true, features = [
     "http1",
     "http2",
 ] }
-tower = { workspace = true, features = [
-    "util",
-    "timeout",
-    "limit",
-    "retry",
-    "buffer",
-] }
-tower-http = { workspace = true, features = [
-    "trace",
-    "timeout",
-    "limit",
-    "decompression-gzip",
-    "decompression-deflate",
+http = { workspace = true }
+opentelemetry = { workspace = true, features = ["metrics"] }
+opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics"] }
+opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] }
+parking_lot.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+serde_urlencoded.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = [
+    "time",
+    "sync",
+    "net",
+    "macros",
+    "rt-multi-thread",
 ] }
 tracing.workspace = true
-url.workspace = true
-uuid = { workspace = true, features = ["v4", "serde"] }
-
-[features]
-default = ["http", "websocket", "middleware"]
-http = []
-middleware = []
-simd-json = ["dep:simd-json"]
-websocket = []
 
 [dev-dependencies]
 criterion.workspace = true

@@ -156,6 +156,8 @@ fn emulation_template() -> Emulation {
         .build()
 }
 
+// This test requires network access to tls.peet.ws and may be flaky
+#[ignore]
 #[tokio::test]
 async fn test_emulation() -> hpx::Result<()> {
     let client = Client::builder()
@@ -242,6 +244,8 @@ async fn test_request_with_emulation_tls() -> hpx::Result<()> {
     Ok(())
 }
 
+// This test requires network access to tls.peet.ws and may be flaky
+#[ignore]
 #[tokio::test]
 async fn test_request_with_emulation_http2() -> hpx::Result<()> {
     let client = Client::builder()

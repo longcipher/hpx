@@ -1,0 +1,11 @@
+# Configuration for cargo-nextest
+# https://nexte.st/book/configuration.html
+
+[profile.default]
+# Retry flaky tests up to 2 times
+retries = 2
+
+# Tests that hit external network (tls.peet.ws) may fail due to network conditions
+[[profile.default.overrides]]
+filter = "package(hpx-util) & test(/emulation/)"
+retries = 3

@@ -1,68 +1,61 @@
-//! # LongTrader Transport
+//! # hpx-transport
 //!
-//! High-performance, extensible transport layer for cryptocurrency trading applications.
+//! Exchange SDK toolkit for cryptocurrency trading applications.
 //!
-//! This crate provides a unified abstraction over HTTP and WebSocket communications
-//! with support for middleware, connection pooling, metrics, and comprehensive error handling.
+//! This crate builds on `hpx` to provide exchange-specific functionality:
 //!
-//! ## Features
-//!
-//! - **Unified Transport Abstraction**: Common interface for HTTP and WebSocket
-//! - **Middleware Support**: Pluggable middleware for authentication, retry, rate limiting
-//! - **Connection Management**: Automatic connection pooling and health monitoring
-//! - **High Performance**: Zero-copy operations and async-first design
-//! - **Observability**: Built-in metrics, tracing, and structured logging
-//! - **Type Safety**: Strongly typed APIs with comprehensive error handling
+//! - **Authentication**: API key, HMAC signing, and custom auth strategies
+//! - **WebSocket**: Actor-based WebSocket with automatic reconnection
+//! - **Typed Responses**: Generic response wrapper with metadata
+//! - **Rate Limiting**: Token bucket rate limiter
+//! - **Metrics**: OpenTelemetry metrics integration
 //!
 //! ## Quick Start
 //!
 //! ```rust,no_run
 //! use hpx_transport::{
-//!     auth::NoAuth,
-//!     http::{HttpClient, HttpConfig},
+//!     auth::ApiKeyAuth,
+//!     exchange::{ExchangeClient, RestClient, RestConfig},
 //! };
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let config = HttpConfig::builder("https://api.example.com")
-//!         .timeout(std::time::Duration::from_secs(30))
-//!         .build()?;
+//!     let config =
+//!         RestConfig::new("https://api.example.com").timeout(std::time::Duration::from_secs(30));
 //!
-//!     let client = HttpClient::new(config, NoAuth)?;
+//!     let auth = ApiKeyAuth::header("X-API-Key", "my-api-key");
+//!     let client = RestClient::new(config, auth)?;
 //!
 //!     // Use the client...
 //!     Ok(())
 //! }
 //! ```
+//!
+//! ## Rate Limiting Example
+//!
+//! ```rust
+//! use hpx_transport::rate_limit::RateLimiter;
+//!
+//! let limiter = RateLimiter::new();
+//! limiter.add_limit("orders", 10, 1.0); // 10 capacity, 1/sec refill
+//!
+//! if limiter.try_acquire("orders") {
+//!     println!("Request allowed");
+//! }
+//! ```
 
 pub mod auth;
 pub mod error;
-pub mod hooks;
+pub mod exchange;
 pub mod metrics;
-pub mod middleware;
-pub mod transport;
+pub mod rate_limit;
 pub mod typed;
-
-#[cfg(feature = "http")]
-pub mod http;
-
-#[cfg(feature = "websocket")]
 pub mod websocket;
 
 // Re-export commonly used types
+pub use auth::{ApiKeyAuth, Authentication, BearerAuth, HmacAuth, NoAuth};
 pub use error::{TransportError, TransportResult};
-pub use hooks::{
-    AfterResponseHook, BeforeRedirectHook, BeforeRequestHook, BeforeRetryHook, HeaderInjectionHook,
-    HookError, Hooks, LoggingHook, OnErrorHook, RequestIdHook,
-};
-#[cfg(feature = "http")]
-pub use http::{
-    HttpClient, HttpConfig, RequestHandler, RestClient, RestClientBuilder, StreamingResponse,
-    StreamingResponseBuilder,
-};
-pub use transport::{Request, Response, Transport};
-pub use typed::{
-    ApiError, GenericApiError, TypedApiError, TypedResponse, TypedResponseExt, TypedResult,
-};
-#[cfg(feature = "websocket")]
-pub use websocket::{ExchangeHandler, WebSocketClient, WebSocketConfig};
+pub use exchange::{ExchangeClient, RestClient, RestConfig};
+pub use rate_limit::RateLimiter;
+pub use typed::{ApiError, TypedResponse};
+pub use websocket::{ExchangeHandler, WebSocketConfig, WebSocketHandle};

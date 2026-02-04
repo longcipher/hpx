@@ -1,24 +1,16 @@
-//! High-performance WebSocket client implementation.
+//! High-performance WebSocket client with automatic reconnection.
 //!
 //! This module provides a robust, actor-based WebSocket client with support for:
 //! - Automatic reconnection with exponential backoff
 //! - Subscription management (Pub/Sub)
 //! - Exchange-specific message routing via `ExchangeHandler` trait
 //! - Thread-safe message sending
-//!
-//! # Architecture
-//!
-//! The implementation follows the Actor model:
-//! - `WebSocketClient`: A lightweight handle to the actor, used by the application.
-//! - `WebSocketActor`: The background task managing the connection, state, and message routing.
-//!
-//! Messages are routed based on topics extracted by the `ExchangeHandler`.
 
 use std::{collections::HashMap, time::Duration};
 
+use bytes::Bytes;
 use futures_util::StreamExt;
 use hpx::ws::{WebSocket, WebSocketWrite, message::Message};
-use opentelemetry::{KeyValue, global, metrics::Counter};
 use serde::Serialize;
 use tokio::{
     sync::{broadcast, mpsc, oneshot},
@@ -28,49 +20,22 @@ use tracing::{error, info, warn};
 
 use crate::error::{TransportError, TransportResult};
 
-/// Trait for exchange-specific WebSocket logic.
-pub trait ExchangeHandler: Send + Sync + 'static {
-    /// Process incoming message and return routing info
-    /// Returns (topic, processed_message) or None if message should be ignored
-    fn process_message(&self, message: Message) -> Option<(String, Message)> {
-        match message {
-            Message::Text(ref text) => self.get_topic(text.as_str()).map(|topic| (topic, message)),
-            Message::Binary(ref data) => self.decode_binary(data).and_then(|text| {
-                self.get_topic(&text)
-                    .map(|topic| (topic, Message::Text(text.into())))
-            }),
-            _ => None,
-        }
-    }
-
-    /// Decode binary data to text (e.g., decompress)
-    fn decode_binary(&self, data: &[u8]) -> Option<String> {
-        String::from_utf8(data.to_vec()).ok()
-    }
-
-    /// Extract topic from text message
-    fn get_topic(&self, message: &str) -> Option<String>;
-
-    /// Build a subscribe message for the given topic.
-    fn build_subscribe_message(&self, topic: &str) -> Message;
-
-    /// Build an unsubscribe message for the given topic.
-    fn build_unsubscribe_message(&self, topic: &str) -> Message;
-
-    /// Called when the connection is established.
-    /// Returns a list of messages to send immediately (e.g. authentication).
-    fn on_open(&self) -> Vec<Message> {
-        vec![]
-    }
-}
-
 /// Configuration for the WebSocket client.
 #[derive(Debug, Clone)]
 pub struct WebSocketConfig {
+    /// WebSocket URL
     pub url: String,
+    /// Initial delay before first reconnection attempt
     pub reconnect_initial_delay: Duration,
+    /// Maximum delay between reconnection attempts
     pub reconnect_max_delay: Duration,
+    /// Backoff multiplier for reconnection delay
     pub reconnect_backoff_factor: f64,
+    /// Interval between ping messages
+    pub ping_interval: Duration,
+    /// Timeout for pong response
+    pub pong_timeout: Duration,
+    /// Channel capacity for subscriptions
     pub channel_capacity: usize,
 }
 
@@ -81,16 +46,73 @@ impl Default for WebSocketConfig {
             reconnect_initial_delay: Duration::from_millis(100),
             reconnect_max_delay: Duration::from_secs(30),
             reconnect_backoff_factor: 2.0,
+            ping_interval: Duration::from_secs(30),
+            pong_timeout: Duration::from_secs(90),
             channel_capacity: 1024,
         }
     }
 }
 
 impl WebSocketConfig {
+    /// Create a new configuration with the given URL.
     pub fn new(url: impl Into<String>) -> Self {
         Self {
             url: url.into(),
             ..Default::default()
+        }
+    }
+
+    /// Set reconnection initial delay.
+    pub fn reconnect_initial_delay(mut self, delay: Duration) -> Self {
+        self.reconnect_initial_delay = delay;
+        self
+    }
+
+    /// Set reconnection max delay.
+    pub fn reconnect_max_delay(mut self, delay: Duration) -> Self {
+        self.reconnect_max_delay = delay;
+        self
+    }
+
+    /// Set ping interval.
+    pub fn ping_interval(mut self, interval: Duration) -> Self {
+        self.ping_interval = interval;
+        self
+    }
+}
+
+/// Trait for exchange-specific WebSocket logic.
+pub trait ExchangeHandler: Send + Sync + 'static {
+    /// Extract topic from a text message.
+    fn get_topic(&self, message: &str) -> Option<String>;
+
+    /// Build a subscribe message for the given topic.
+    fn build_subscribe(&self, topic: &str) -> Message;
+
+    /// Build an unsubscribe message for the given topic.
+    fn build_unsubscribe(&self, topic: &str) -> Message;
+
+    /// Called when the connection is established.
+    /// Returns a list of messages to send immediately (e.g., authentication).
+    fn on_connect(&self) -> Vec<Message> {
+        vec![]
+    }
+
+    /// Decode binary data to text (e.g., decompress gzip).
+    fn decode_binary(&self, data: &[u8]) -> Option<String> {
+        String::from_utf8(data.to_vec()).ok()
+    }
+
+    /// Process incoming message and return routing info.
+    /// Returns (topic, processed_message) or None if message should be ignored.
+    fn process_message(&self, message: Message) -> Option<(String, Message)> {
+        match message {
+            Message::Text(ref text) => self.get_topic(text.as_str()).map(|topic| (topic, message)),
+            Message::Binary(ref data) => self.decode_binary(data).and_then(|text| {
+                self.get_topic(&text)
+                    .map(|topic| (topic, Message::Text(text.into())))
+            }),
+            _ => None,
         }
     }
 }
@@ -108,15 +130,15 @@ enum Command {
     Close,
 }
 
-/// The user-facing WebSocket client.
+/// The user-facing WebSocket client handle.
 #[derive(Debug, Clone)]
-pub struct WebSocketClient {
+pub struct WebSocketHandle {
     cmd_tx: mpsc::UnboundedSender<Command>,
 }
 
-impl WebSocketClient {
+impl WebSocketHandle {
     /// Create and start a new WebSocket client.
-    pub async fn new<H>(config: WebSocketConfig, handler: H) -> TransportResult<Self>
+    pub async fn connect<H>(config: WebSocketConfig, handler: H) -> TransportResult<Self>
     where
         H: ExchangeHandler,
     {
@@ -142,13 +164,11 @@ impl WebSocketClient {
                 topic: topic.clone(),
                 reply_tx,
             })
-            .map_err(|_| TransportError::Internal {
-                message: "WebSocket actor is closed".to_string(),
-            })?;
+            .map_err(|_| TransportError::internal("WebSocket actor is closed"))?;
 
-        reply_rx.await.map_err(|_| TransportError::Internal {
-            message: "Failed to receive subscription channel".to_string(),
-        })
+        reply_rx
+            .await
+            .map_err(|_| TransportError::internal("Failed to receive subscription channel"))
     }
 
     /// Unsubscribe from a topic.
@@ -157,9 +177,7 @@ impl WebSocketClient {
             .send(Command::Unsubscribe {
                 topic: topic.into(),
             })
-            .map_err(|_| TransportError::Internal {
-                message: "WebSocket actor is closed".to_string(),
-            })?;
+            .map_err(|_| TransportError::internal("WebSocket actor is closed"))?;
         Ok(())
     }
 
@@ -167,9 +185,7 @@ impl WebSocketClient {
     pub async fn send(&self, message: Message) -> TransportResult<()> {
         self.cmd_tx
             .send(Command::Send(message))
-            .map_err(|_| TransportError::Internal {
-                message: "WebSocket actor is closed".to_string(),
-            })?;
+            .map_err(|_| TransportError::internal("WebSocket actor is closed"))?;
         Ok(())
     }
 
@@ -192,22 +208,14 @@ struct WebSocketActor<H> {
     handler: H,
     cmd_rx: mpsc::UnboundedReceiver<Command>,
     subscriptions: HashMap<String, broadcast::Sender<Message>>,
-    active_topics: HashMap<String, ()>, // Track active subscriptions to resubscribe on reconnect
+    active_topics: HashMap<String, ()>,
     should_stop: bool,
-
-    // Connection health monitoring
     write: Option<WebSocketWrite>,
     last_pong: Option<std::time::Instant>,
-
-    // Metrics
-    messages_sent: Counter<u64>,
-    messages_received: Counter<u64>,
-    errors: Counter<u64>,
 }
 
 impl<H: ExchangeHandler> WebSocketActor<H> {
     fn new(config: WebSocketConfig, handler: H, cmd_rx: mpsc::UnboundedReceiver<Command>) -> Self {
-        let meter = global::meter("longtrader-transport");
         Self {
             config,
             handler,
@@ -217,38 +225,20 @@ impl<H: ExchangeHandler> WebSocketActor<H> {
             should_stop: false,
             write: None,
             last_pong: None,
-            messages_sent: meter
-                .u64_counter("transport.ws.messages_sent")
-                .with_description("Total number of WebSocket messages sent")
-                .build(),
-            messages_received: meter
-                .u64_counter("transport.ws.messages_received")
-                .with_description("Total number of WebSocket messages received")
-                .build(),
-            errors: meter
-                .u64_counter("transport.ws.errors")
-                .with_description("Total number of WebSocket errors")
-                .build(),
         }
     }
 
     async fn connect(url: &str) -> TransportResult<WebSocket> {
         let client = hpx::Client::builder()
             .build()
-            .map_err(|e| TransportError::Config {
-                message: format!("Failed to build client: {}", e),
-            })?;
+            .map_err(|e| TransportError::config(format!("Failed to build client: {}", e)))?;
 
         let req = client.get(url);
         let ws_req = hpx::ws::WebSocketRequestBuilder::new(req);
 
-        let resp = ws_req.send().await.map_err(|e| {
-            TransportError::Network(Box::new(crate::error::NetworkError::Hpx { source: e }))
-        })?;
+        let resp = ws_req.send().await.map_err(TransportError::Http)?;
 
-        resp.into_websocket().await.map_err(|e| {
-            TransportError::Network(Box::new(crate::error::NetworkError::Hpx { source: e }))
-        })
+        resp.into_websocket().await.map_err(TransportError::Http)
     }
 
     async fn run(mut self) {
@@ -260,28 +250,22 @@ impl<H: ExchangeHandler> WebSocketActor<H> {
             match Self::connect(&self.config.url).await {
                 Ok(ws_stream) => {
                     info!("Connected to {}", self.config.url);
-                    reconnect_delay = self.config.reconnect_initial_delay; // Reset backoff
+                    reconnect_delay = self.config.reconnect_initial_delay;
 
                     if let Err(e) = self.handle_connection(ws_stream).await {
-                        self.errors
-                            .add(1, &[KeyValue::new("type", "connection_error")]);
                         error!("Connection error: {}", e);
+                    } else if self.should_stop {
+                        info!("Client closed by user.");
+                        break;
                     } else {
-                        if self.should_stop {
-                            info!("Client closed by user.");
-                            break;
-                        }
                         info!("Connection closed by server, reconnecting...");
                     }
                 }
                 Err(e) => {
-                    self.errors
-                        .add(1, &[KeyValue::new("type", "connect_error")]);
                     error!("Failed to connect: {}", e);
                 }
             }
 
-            // Reconnect logic
             info!("Reconnecting in {:?}...", reconnect_delay);
             sleep(reconnect_delay).await;
             reconnect_delay = (reconnect_delay.mul_f64(self.config.reconnect_backoff_factor))
@@ -294,34 +278,30 @@ impl<H: ExchangeHandler> WebSocketActor<H> {
         self.write = Some(write);
         self.last_pong = Some(std::time::Instant::now());
 
-        // Setup ping timer
-        let mut ping_timer = tokio::time::interval(Duration::from_secs(30));
+        let mut ping_timer = tokio::time::interval(self.config.ping_interval);
         ping_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-        // Send on_open messages (e.g. auth)
-        for msg in self.handler.on_open() {
+        // Send on_connect messages (e.g., auth)
+        for msg in self.handler.on_connect() {
             self.send_message(msg).await?;
         }
 
         // Resubscribe to active topics
         let topics: Vec<String> = self.active_topics.keys().cloned().collect();
         for topic in topics {
-            let msg = self.handler.build_subscribe_message(&topic);
+            let msg = self.handler.build_subscribe(&topic);
             self.send_message(msg).await?;
         }
 
         loop {
             tokio::select! {
-                // Handle incoming WebSocket messages
                 msg = read.next() => {
                     match msg {
                         Some(Ok(msg)) => {
                             self.process_message(msg).await;
                         }
                         Some(Err(e)) => {
-                            return Err(TransportError::Network(Box::new(
-                                crate::error::NetworkError::Hpx { source: e }
-                            )));
+                            return Err(TransportError::websocket(e.to_string()));
                         }
                         None => {
                             info!("WebSocket stream ended");
@@ -330,123 +310,105 @@ impl<H: ExchangeHandler> WebSocketActor<H> {
                     }
                 }
 
-                // Periodic ping
                 _ = ping_timer.tick() => {
-                    if let Err(e) = self.send_message(Message::Ping(bytes::Bytes::from(vec![]))).await {
+                    if let Err(e) = self.send_message(Message::Ping(Bytes::new())).await {
                         error!("Failed to send ping: {}", e);
                         return Err(e);
                     }
 
-                    // Check for timeout
-                    if self.last_pong.is_some_and(|last_pong| last_pong.elapsed() > Duration::from_secs(90)) {
+                    if self.last_pong.is_some_and(|last| last.elapsed() > self.config.pong_timeout) {
                         error!("Ping timeout - no pong received");
-                        return Err(TransportError::Timeout {
-                            duration: Duration::from_secs(90),
-                        });
+                        return Err(TransportError::timeout(self.config.pong_timeout));
                     }
                 }
 
-                // Handle commands from Client
                 Some(cmd) = self.cmd_rx.recv() => {
-                    self.handle_command(cmd).await?;
-                }
-            }
-        }
-    }
-
-    async fn send_message(&mut self, msg: Message) -> TransportResult<()> {
-        if let Some(write) = self.write.as_mut() {
-            match write.send(msg).await {
-                Ok(_) => {
-                    self.messages_sent.add(1, &[]);
-                    Ok(())
-                }
-                Err(e) => {
-                    self.errors.add(1, &[KeyValue::new("type", "send_error")]);
-                    Err(TransportError::Network(Box::new(
-                        crate::error::NetworkError::Hpx { source: e },
-                    )))
-                }
-            }
-        } else {
-            self.errors
-                .add(1, &[KeyValue::new("type", "writer_unavailable")]);
-            Err(TransportError::Internal {
-                message: "WebSocket writer not available".to_string(),
-            })
-        }
-    }
-
-    async fn handle_command(&mut self, cmd: Command) -> TransportResult<()> {
-        match cmd {
-            Command::Subscribe { topic, reply_tx } => {
-                let rx = self.get_or_create_subscription(&topic);
-                let _ = reply_tx.send(rx);
-
-                let msg = self.handler.build_subscribe_message(&topic);
-                self.send_message(msg).await?;
-                self.active_topics.insert(topic, ());
-            }
-            Command::Unsubscribe { topic } => {
-                self.active_topics.remove(&topic);
-                let msg = self.handler.build_unsubscribe_message(&topic);
-                self.send_message(msg).await?;
-            }
-            Command::Send(msg) => {
-                self.send_message(msg).await?;
-            }
-            Command::Close => {
-                self.should_stop = true;
-                self.send_message(Message::Close(None)).await?;
-            }
-        }
-        Ok(())
-    }
-
-    async fn process_message(&mut self, msg: Message) {
-        self.messages_received.add(1, &[]);
-        match msg {
-            Message::Text(text) => {
-                if let Some(topic) = self.handler.get_topic(text.as_str()) {
-                    self.dispatch(&topic, Message::Text(text));
-                }
-            }
-            Message::Binary(data) => {
-                // Try to decode as text (for compressed messages)
-                if let Some(text) = self.handler.decode_binary(&data) {
-                    if let Some(topic) = self.handler.get_topic(&text) {
-                        self.dispatch(&topic, Message::Text(text.into()));
+                    match cmd {
+                        Command::Subscribe { topic, reply_tx } => {
+                            self.handle_subscribe(topic, reply_tx).await;
+                        }
+                        Command::Unsubscribe { topic } => {
+                            self.handle_unsubscribe(topic).await;
+                        }
+                        Command::Send(msg) => {
+                            if let Err(e) = self.send_message(msg).await {
+                                warn!("Failed to send message: {}", e);
+                            }
+                        }
+                        Command::Close => {
+                            self.should_stop = true;
+                            return Ok(());
+                        }
                     }
-                } else {
-                    warn!("Received unhandled binary message");
                 }
             }
-            Message::Ping(_) | Message::Pong(_) => {
-                // Auto-handled by fastwebsockets usually if configured, but we can handle here too
-                if let Message::Pong(_) = msg {
-                    self.last_pong = Some(std::time::Instant::now());
-                }
+        }
+    }
+
+    async fn process_message(&mut self, message: Message) {
+        match &message {
+            Message::Pong(_) => {
+                self.last_pong = Some(std::time::Instant::now());
+                return;
+            }
+            Message::Ping(data) => {
+                let _ = self.send_message(Message::Pong(data.clone())).await;
+                return;
             }
             Message::Close(_) => {
                 info!("Received close frame");
+                return;
             }
+            _ => {}
+        }
+
+        if let Some((topic, processed_msg)) = self.handler.process_message(message)
+            && let Some(tx) = self.subscriptions.get(&topic)
+        {
+            let _ = tx.send(processed_msg);
         }
     }
 
-    fn dispatch(&mut self, topic: &str, msg: Message) {
-        if let Some(tx) = self.subscriptions.get(topic) {
-            // Ignore send errors (no subscribers)
-            let _ = tx.send(msg);
-        }
-    }
-
-    fn get_or_create_subscription(&mut self, topic: &str) -> broadcast::Receiver<Message> {
-        if let Some(tx) = self.subscriptions.get(topic) {
+    async fn handle_subscribe(
+        &mut self,
+        topic: String,
+        reply_tx: oneshot::Sender<broadcast::Receiver<Message>>,
+    ) {
+        let rx = if let Some(tx) = self.subscriptions.get(&topic) {
             tx.subscribe()
         } else {
             let (tx, rx) = broadcast::channel(self.config.channel_capacity);
-            self.subscriptions.insert(topic.to_string(), tx);
+            self.subscriptions.insert(topic.clone(), tx);
+            self.active_topics.insert(topic.clone(), ());
+
+            let msg = self.handler.build_subscribe(&topic);
+            if let Err(e) = self.send_message(msg).await {
+                warn!("Failed to send subscribe message: {}", e);
+            }
+
             rx
+        };
+
+        let _ = reply_tx.send(rx);
+    }
+
+    async fn handle_unsubscribe(&mut self, topic: String) {
+        self.subscriptions.remove(&topic);
+        self.active_topics.remove(&topic);
+
+        let msg = self.handler.build_unsubscribe(&topic);
+        if let Err(e) = self.send_message(msg).await {
+            warn!("Failed to send unsubscribe message: {}", e);
         }
+    }
+
+    async fn send_message(&mut self, message: Message) -> TransportResult<()> {
+        if let Some(ref mut write) = self.write {
+            write
+                .send(message)
+                .await
+                .map_err(|e| TransportError::websocket(e.to_string()))?;
+        }
+        Ok(())
     }
 }
