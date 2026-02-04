@@ -24,3 +24,5 @@ check-cn:
   rg --line-number --column "\p{Han}"
 # Full CI check
 ci: lint test
+publish:
+  cargo publish --workspace
