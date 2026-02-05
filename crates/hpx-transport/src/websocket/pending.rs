@@ -65,7 +65,7 @@ impl PendingRequestStore {
         };
 
         // Insert returns Err if key already exists
-        if self.requests.insert(id, pending).is_err() {
+        if self.requests.insert_sync(id, pending).is_err() {
             return None;
         }
 
@@ -76,7 +76,7 @@ impl PendingRequestStore {
     ///
     /// Returns `true` if the request was found and resolved, `false` otherwise.
     pub fn resolve(&self, id: &RequestId, response: TransportResult<String>) -> bool {
-        if let Some((_, pending)) = self.requests.remove(id) {
+        if let Some((_, pending)) = self.requests.remove_sync(id) {
             // Send the response; ignore error (receiver may have dropped)
             let _ = pending.response_tx.send(response);
             return true;
@@ -90,7 +90,7 @@ impl PendingRequestStore {
     pub fn cleanup_stale(&self) {
         let now = Instant::now();
         self.requests
-            .retain(|_, pending| now.duration_since(pending.created_at) < pending.timeout);
+            .retain_sync(|_, pending| now.duration_since(pending.created_at) < pending.timeout);
     }
 
     /// Clean up stale requests and notify them of timeout.
@@ -101,15 +101,16 @@ impl PendingRequestStore {
         let mut expired = Vec::new();
 
         // First, collect expired IDs
-        self.requests.scan(|id, pending| {
+        self.requests.retain_sync(|id, pending| {
             if now.duration_since(pending.created_at) >= pending.timeout {
                 expired.push((id.clone(), pending.timeout));
             }
+            true
         });
 
         // Then remove and notify each one
         for (id, timeout) in expired {
-            if let Some((_, pending)) = self.requests.remove(&id) {
+            if let Some((_, pending)) = self.requests.remove_sync(&id) {
                 let _ = pending
                     .response_tx
                     .send(Err(TransportError::request_timeout(
@@ -140,12 +141,13 @@ impl PendingRequestStore {
     /// This should be called on connection close to notify all waiters.
     pub fn clear_with_error(&self, error_message: &str) {
         let mut ids = Vec::new();
-        self.requests.scan(|id, _| {
+        self.requests.retain_sync(|id, _| {
             ids.push(id.clone());
+            true
         });
 
         for id in ids {
-            if let Some((_, pending)) = self.requests.remove(&id) {
+            if let Some((_, pending)) = self.requests.remove_sync(&id) {
                 let _ = pending
                     .response_tx
                     .send(Err(TransportError::connection_closed(Some(
@@ -157,7 +159,7 @@ impl PendingRequestStore {
 
     /// Clear all pending requests without notification.
     pub fn clear(&self) {
-        self.requests.clear();
+        self.requests.clear_sync();
     }
 }
 

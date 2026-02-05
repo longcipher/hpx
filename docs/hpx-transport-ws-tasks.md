@@ -17,12 +17,14 @@ This document breaks down the WebSocket architecture implementation into concret
 **File**: `src/websocket/types.rs`
 
 **Subtasks**:
+
 - [x] Create `RequestId` struct with ULID-based generation
 - [x] Create `Topic` struct for subscription routing
 - [x] Implement `From<String>`, `From<&str>`, `Display` for both types
 - [x] Add unit tests for ID generation uniqueness
 
 **Acceptance Criteria**:
+
 - `RequestId::new()` generates unique IDs
 - Both types are `Clone`, `Debug`, `Hash`, `Eq`
 - Serialization/deserialization works correctly
@@ -36,11 +38,13 @@ This document breaks down the WebSocket architecture implementation into concret
 **File**: `src/websocket/types.rs`
 
 **Subtasks**:
+
 - [x] Create `MessageKind` enum with variants: `Response`, `Update`, `System`, `Control`, `Unknown`
 - [x] Document each variant's purpose
 - [x] Add helper methods for common checks
 
 **Acceptance Criteria**:
+
 - All message types are covered
 - Enum is non-exhaustive for future extensibility
 
@@ -53,12 +57,14 @@ This document breaks down the WebSocket architecture implementation into concret
 **File**: `src/websocket/protocol.rs`
 
 **Subtasks**:
+
 - [x] Define `ProtocolHandler` trait with all methods from design
 - [x] Add associated types: `Request`, `Response`, `Error`
 - [x] Provide default implementations where possible
 - [x] Document each method with examples
 
 **Methods to implement**:
+
 ```rust
 // Connection lifecycle
 fn on_connect(&self) -> Vec<Message>
@@ -85,6 +91,7 @@ fn should_reconnect(&self, message: &str) -> bool
 ```
 
 **Acceptance Criteria**:
+
 - Trait is object-safe where possible
 - All methods have documentation
 - Default implementations are sensible
@@ -98,6 +105,7 @@ fn should_reconnect(&self, message: &str) -> bool
 **File**: `src/websocket/config.rs`
 
 **Subtasks**:
+
 - [x] Define `WebSocketConfig` with all fields from design
 - [x] Implement `Default` with sensible values
 - [x] Add builder pattern methods for easy configuration
@@ -105,6 +113,7 @@ fn should_reconnect(&self, message: &str) -> bool
 - [x] Document all fields
 
 **Fields**:
+
 ```rust
 // URL
 url: String
@@ -137,6 +146,7 @@ max_message_size: usize
 ```
 
 **Acceptance Criteria**:
+
 - All fields have reasonable defaults
 - Builder methods return `Self` for chaining
 - Validation catches invalid configurations
@@ -150,11 +160,13 @@ max_message_size: usize
 **File**: `src/error.rs`
 
 **Subtasks**:
+
 - [x] Add WebSocket-specific error variants
 - [x] Add helper constructors for each variant
 - [x] Implement conversion from underlying error types
 
 **New variants**:
+
 ```rust
 RequestTimeout { duration: Duration, request_id: String }
 SubscriptionFailed { topic: String, message: String }
@@ -165,6 +177,7 @@ ConnectionClosed { reason: Option<String> }
 ```
 
 **Acceptance Criteria**:
+
 - Errors are descriptive and actionable
 - All errors implement `std::error::Error`
 - Preserves source error where applicable
@@ -178,11 +191,13 @@ ConnectionClosed { reason: Option<String> }
 **File**: `Cargo.toml`
 
 **Subtasks**:
+
 - [x] Add `scc` crate for lock-free concurrent HashMap
 - [x] Add `ulid` crate for unique ID generation (RequestId)
 - [x] Verify workspace inheritance is correct
 
 **Dependencies to add**:
+
 ```toml
 [dependencies]
 scc = { workspace = true }  # Lock-free concurrent HashMap
@@ -190,6 +205,7 @@ ulid = { workspace = true } # Unique Lexicographically Sortable Identifier
 ```
 
 **Root workspace Cargo.toml**:
+
 ```toml
 [workspace.dependencies]
 scc = "2"      # Lock-free concurrent data structures
@@ -197,12 +213,14 @@ ulid = "1"     # Unique ID generation
 ```
 
 **Why scc?**
+
 - Lock-free HashMap with wait-free reads
 - Better performance under high contention than `RwLock<HashMap>`
 - Built-in support for `entry`, `scan`, `retain` operations
 - No priority inversion or lock contention issues
 
 **Acceptance Criteria**:
+
 - `scc::HashMap` can be used in code
 - `ulid::Ulid` can be used for RequestId generation
 - `cargo build` succeeds
@@ -220,6 +238,7 @@ ulid = "1"     # Unique ID generation
 **File**: `src/websocket/pending.rs`
 
 **Subtasks**:
+
 - [x] Create `PendingRequest` struct with `response_tx`, `created_at`, `timeout`
 - [x] Create `PendingRequestStore` using `scc::HashMap` (lock-free)
 - [x] Implement `add()` method - uses lock-free insert
@@ -230,6 +249,7 @@ ulid = "1"     # Unique ID generation
 - [x] Add unit tests for all operations including concurrent access
 
 **API**:
+
 ```rust
 impl PendingRequestStore {
     pub fn new(config: Arc<WebSocketConfig>) -> Self;
@@ -245,6 +265,7 @@ impl PendingRequestStore {
 ```
 
 **Lock-Free Operations**:
+
 - `insert()` - wait-free under most conditions
 - `remove()` - lock-free removal with immediate value return
 - `retain()` - lock-free iteration with atomic removal
@@ -252,6 +273,7 @@ impl PendingRequestStore {
 - `len()` - wait-free count
 
 **Acceptance Criteria**:
+
 - Lock-free for concurrent access (no `RwLock` or `Mutex`)
 - Uses `scc::HashMap` instead of `std::collections::HashMap`
 - Cleanup correctly times out and removes stale requests
@@ -268,6 +290,7 @@ impl PendingRequestStore {
 **File**: `src/websocket/subscription.rs`
 
 **Subtasks**:
+
 - [x] Create `SubscriptionStore` using `scc::HashMap` (lock-free)
 - [x] Implement `subscribe()` - uses `scc::HashMap::entry` for atomic upsert
 - [x] Implement `add_subscriber()` - uses lock-free get for existing topics
@@ -279,6 +302,7 @@ impl PendingRequestStore {
 - [x] Add unit tests for subscription lifecycle with concurrent access
 
 **API**:
+
 ```rust
 impl SubscriptionStore {
     pub fn new(config: Arc<WebSocketConfig>) -> Self;
@@ -293,6 +317,7 @@ impl SubscriptionStore {
 ```
 
 **Lock-Free Operations**:
+
 - `entry()` - atomic get-or-insert with `Entry` API
 - `get()` - wait-free read access
 - `update()` - atomic update-in-place
@@ -300,6 +325,7 @@ impl SubscriptionStore {
 - `scan()` - wait-free iteration
 
 **Acceptance Criteria**:
+
 - Lock-free for concurrent access (no `RwLock` or `Mutex`)
 - Uses `scc::HashMap` instead of `std::collections::HashMap`
 - Multiple subscribers to same topic share channel
@@ -320,11 +346,13 @@ impl SubscriptionStore {
 **File**: `src/websocket/actor.rs`
 
 **Subtasks**:
+
 - [x] Create `ActorCommand` enum with all command variants
 - [x] Create `ConnectionState` enum for state machine
 - [x] Document state transitions
 
 **Types**:
+
 ```rust
 pub enum ActorCommand {
     Subscribe {
@@ -359,6 +387,7 @@ pub enum ConnectionState {
 ```
 
 **Acceptance Criteria**:
+
 - All commands have appropriate reply channels where needed
 - State enum covers all connection states
 
@@ -371,11 +400,13 @@ pub enum ConnectionState {
 **File**: `src/websocket/actor.rs`
 
 **Subtasks**:
+
 - [x] Create `ConnectionActor<H: ProtocolHandler>` struct
 - [x] Implement constructor with all required fields
 - [x] Add state transition methods
 
 **Fields**:
+
 ```rust
 struct ConnectionActor<H: ProtocolHandler> {
     config: Arc<WebSocketConfig>,
@@ -391,6 +422,7 @@ struct ConnectionActor<H: ProtocolHandler> {
 ```
 
 **Acceptance Criteria**:
+
 - Actor can be constructed with all dependencies
 - State is properly initialized
 
@@ -403,6 +435,7 @@ struct ConnectionActor<H: ProtocolHandler> {
 **File**: `src/websocket/actor.rs`
 
 **Subtasks**:
+
 - [x] Implement `connect()` method using `hpx::ws`
 - [x] Implement `disconnect()` method for clean shutdown
 - [x] Implement `try_connect()` with timeout handling
@@ -411,6 +444,7 @@ struct ConnectionActor<H: ProtocolHandler> {
 - [x] Add connection state change logging
 
 **Methods**:
+
 ```rust
 impl<H: ProtocolHandler> ConnectionActor<H> {
     async fn connect(&mut self) -> TransportResult<()>;
@@ -424,6 +458,7 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
 ```
 
 **Acceptance Criteria**:
+
 - Connection uses configured timeout
 - Backoff correctly increases with jitter
 - Max attempts is respected
@@ -438,12 +473,14 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
 **File**: `src/websocket/actor.rs`
 
 **Subtasks**:
+
 - [x] Implement `authenticate()` method
 - [x] Handle auth success/failure from protocol handler
 - [x] Set authenticated state on success
 - [x] Retry authentication on failure (configurable)
 
 **Methods**:
+
 ```rust
 impl<H: ProtocolHandler> ConnectionActor<H> {
     async fn authenticate(&mut self) -> bool;
@@ -452,6 +489,7 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
 ```
 
 **Acceptance Criteria**:
+
 - Authentication uses protocol handler's auth message
 - Success is determined by protocol handler
 - Failure triggers reconnect
@@ -465,12 +503,14 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
 **File**: `src/websocket/actor.rs`
 
 **Subtasks**:
+
 - [x] Implement ping sending (WebSocket frame or protocol-level)
 - [x] Implement pong timeout detection
 - [x] Track last pong time
 - [x] Trigger reconnect on pong timeout
 
 **Methods**:
+
 ```rust
 impl<H: ProtocolHandler> ConnectionActor<H> {
     async fn send_ping(&mut self) -> TransportResult<()>;
@@ -480,6 +520,7 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
 ```
 
 **Acceptance Criteria**:
+
 - Ping sent at configured interval
 - Pong timeout triggers reconnect
 - Both WebSocket and protocol-level ping supported
@@ -493,6 +534,7 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
 **File**: `src/websocket/actor.rs`
 
 **Subtasks**:
+
 - [x] Implement `read_message()` from WebSocket
 - [x] Implement `handle_message()` for routing
 - [x] Route responses to pending requests
@@ -501,6 +543,7 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
 - [x] Handle control messages (subscription confirmations)
 
 **Methods**:
+
 ```rust
 impl<H: ProtocolHandler> ConnectionActor<H> {
     async fn read_message(&mut self) -> TransportResult<Option<Message>>;
@@ -511,6 +554,7 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
 ```
 
 **Acceptance Criteria**:
+
 - Messages correctly classified using protocol handler
 - Responses resolve pending requests
 - Updates published to subscriptions
@@ -525,6 +569,7 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
 **File**: `src/websocket/actor.rs`
 
 **Subtasks**:
+
 - [x] Implement handler for `Subscribe` command
 - [x] Implement handler for `Unsubscribe` command
 - [x] Implement handler for `Send` command
@@ -533,6 +578,7 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
 - [x] Queue commands during reconnection
 
 **Methods**:
+
 ```rust
 impl<H: ProtocolHandler> ConnectionActor<H> {
     async fn handle_command(&mut self, cmd: ActorCommand) -> TransportResult<()>;
@@ -544,6 +590,7 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
 ```
 
 **Acceptance Criteria**:
+
 - Subscribe sends protocol message and confirms
 - Unsubscribe removes from store and sends message
 - Request registers in pending store before sending
@@ -558,12 +605,14 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
 **File**: `src/websocket/actor.rs`
 
 **Subtasks**:
+
 - [x] Implement `resubscribe_all()` method
 - [x] Get all topics from subscription store
 - [x] Send subscribe messages in batches
 - [x] Handle partial failures
 
 **Methods**:
+
 ```rust
 impl<H: ProtocolHandler> ConnectionActor<H> {
     async fn resubscribe_all(&mut self) -> TransportResult<()>;
@@ -571,6 +620,7 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
 ```
 
 **Acceptance Criteria**:
+
 - All previously subscribed topics are resubscribed
 - Batching respects protocol limits
 - Partial failure doesn't break entire resubscription
@@ -584,6 +634,7 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
 **File**: `src/websocket/actor.rs`
 
 **Subtasks**:
+
 - [x] Implement `run()` as the actor's main entry point
 - [x] Implement `run_ready_loop()` for the main event loop
 - [x] Use `tokio::select!` for concurrent event handling
@@ -591,6 +642,7 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
 - [x] Ensure clean shutdown on close
 
 **Methods**:
+
 ```rust
 impl<H: ProtocolHandler> ConnectionActor<H> {
     pub async fn run(mut self);
@@ -599,6 +651,7 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
 ```
 
 **Acceptance Criteria**:
+
 - Actor runs until closed or max retries exceeded
 - All events (ping, messages, commands) handled concurrently
 - Clean shutdown on Close command
@@ -617,12 +670,14 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
 **File**: `src/websocket/client.rs`
 
 **Subtasks**:
+
 - [x] Create `WebSocketClient<H: ProtocolHandler>` struct
 - [x] Implement `connect()` constructor that spawns actor
 - [x] Implement `Clone` for cheap sharing
 - [x] Add `is_connected()` health check
 
 **API**:
+
 ```rust
 #[derive(Clone)]
 pub struct WebSocketClient<H: ProtocolHandler> {
@@ -640,6 +695,7 @@ impl<H: ProtocolHandler> WebSocketClient<H> {
 ```
 
 **Acceptance Criteria**:
+
 - Client is cheap to clone
 - Actor is spawned on connect
 - Connection status is accurate
@@ -653,6 +709,7 @@ impl<H: ProtocolHandler> WebSocketClient<H> {
 **File**: `src/websocket/client.rs`
 
 **Subtasks**:
+
 - [x] Implement `request<R, T>()` for typed request/response
 - [x] Implement `request_with_timeout<R, T>()` for custom timeout
 - [x] Implement `request_raw()` for raw message exchange
@@ -660,6 +717,7 @@ impl<H: ProtocolHandler> WebSocketClient<H> {
 - [x] Handle serialization/deserialization
 
 **API**:
+
 ```rust
 impl<H: ProtocolHandler> WebSocketClient<H> {
     pub async fn request<R: Serialize, T: DeserializeOwned>(&self, request: &R) -> TransportResult<T>;
@@ -669,6 +727,7 @@ impl<H: ProtocolHandler> WebSocketClient<H> {
 ```
 
 **Acceptance Criteria**:
+
 - Request-response correlates correctly via request ID
 - Timeout is respected
 - Capacity exceeded returns appropriate error
@@ -683,12 +742,14 @@ impl<H: ProtocolHandler> WebSocketClient<H> {
 **File**: `src/websocket/client.rs`
 
 **Subtasks**:
+
 - [x] Implement `subscribe()` for single topic
 - [x] Implement `subscribe_many()` for multiple topics
 - [x] Implement `unsubscribe()` for single topic
 - [x] Return broadcast receivers for message streams
 
 **API**:
+
 ```rust
 impl<H: ProtocolHandler> WebSocketClient<H> {
     pub async fn subscribe(&self, topic: impl Into<Topic>) -> TransportResult<broadcast::Receiver<Message>>;
@@ -698,6 +759,7 @@ impl<H: ProtocolHandler> WebSocketClient<H> {
 ```
 
 **Acceptance Criteria**:
+
 - Subscription waits for confirmation
 - Multiple subscribers to same topic work correctly
 - Unsubscribe only sends message when last subscriber leaves
@@ -711,11 +773,13 @@ impl<H: ProtocolHandler> WebSocketClient<H> {
 **File**: `src/websocket/client.rs`
 
 **Subtasks**:
+
 - [x] Implement `send()` for raw message sending
 - [x] Implement `send_json<T>()` for JSON messages
 - [x] Implement `close()` for graceful shutdown
 
 **API**:
+
 ```rust
 impl<H: ProtocolHandler> WebSocketClient<H> {
     pub async fn send(&self, message: Message) -> TransportResult<()>;
@@ -725,6 +789,7 @@ impl<H: ProtocolHandler> WebSocketClient<H> {
 ```
 
 **Acceptance Criteria**:
+
 - Messages are sent without response expectation
 - Close gracefully shuts down the connection
 - Errors after close are handled gracefully
@@ -742,12 +807,14 @@ impl<H: ProtocolHandler> WebSocketClient<H> {
 **File**: `src/websocket/handlers/generic_json.rs`
 
 **Subtasks**:
+
 - [x] Create handler for generic JSON-based protocols
 - [x] Extract request_id from JSON field (configurable)
 - [x] Extract topic from JSON field (configurable)
 - [x] Build subscribe/unsubscribe messages
 
 **Configuration**:
+
 ```rust
 pub struct GenericJsonHandlerConfig {
     pub request_id_field: String,     // e.g., "id", "req_id"
@@ -760,6 +827,7 @@ pub struct GenericJsonHandlerConfig {
 ```
 
 **Acceptance Criteria**:
+
 - Works with common JSON WebSocket APIs
 - Configurable field names
 - Optional protocol-level ping/pong
@@ -773,12 +841,14 @@ pub struct GenericJsonHandlerConfig {
 **File**: `src/websocket/handlers/jsonrpc.rs`
 
 **Subtasks**:
+
 - [x] Implement JSON-RPC 2.0 protocol handler
 - [x] Handle `id` field for request-response
 - [x] Handle `method` field for notifications
 - [x] Build proper JSON-RPC request format
 
 **Acceptance Criteria**:
+
 - Compliant with JSON-RPC 2.0 spec
 - Handles both requests and notifications
 - Error responses are properly typed
@@ -792,11 +862,13 @@ pub struct GenericJsonHandlerConfig {
 **File**: `src/websocket/handlers/legacy.rs`
 
 **Subtasks**:
+
 - [x] Create adapter from `ExchangeHandler` to `ProtocolHandler`
 - [x] Maintain backward compatibility
 - [x] Deprecate old trait in favor of new
 
 **Acceptance Criteria**:
+
 - Existing code continues to work
 - Clear migration path documented
 - Deprecation warnings where appropriate
@@ -814,12 +886,14 @@ pub struct GenericJsonHandlerConfig {
 **File**: `tests/mock_server.rs`
 
 **Subtasks**:
+
 - [x] Create `MockWebSocketServer` for testing
 - [x] Support configurable response delays
 - [x] Support connection drops for reconnect testing
 - [x] Support auth simulation
 
 **Acceptance Criteria**:
+
 - Server can simulate various scenarios
 - Easy to configure for different test cases
 - Proper cleanup after tests
@@ -833,12 +907,14 @@ pub struct GenericJsonHandlerConfig {
 **File**: `tests/stores_test.rs`
 
 **Subtasks**:
+
 - [x] Test `PendingRequestStore` add/resolve/cleanup
 - [x] Test `SubscriptionStore` subscribe/unsubscribe/publish
 - [x] Test concurrent access patterns
 - [x] Test edge cases (empty stores, capacity limits)
 
 **Acceptance Criteria**:
+
 - All store operations tested
 - Concurrent access is safe
 - Edge cases handled correctly
@@ -852,6 +928,7 @@ pub struct GenericJsonHandlerConfig {
 **File**: `tests/websocket_integration.rs`
 
 **Subtasks**:
+
 - [x] Test request-response flow
 - [x] Test subscription flow
 - [x] Test reconnection after disconnect
@@ -859,6 +936,7 @@ pub struct GenericJsonHandlerConfig {
 - [x] Test timeout handling
 
 **Acceptance Criteria**:
+
 - Full flows tested end-to-end
 - Reconnection properly restores subscriptions
 - Timeouts work correctly
@@ -872,12 +950,14 @@ pub struct GenericJsonHandlerConfig {
 **File**: `tests/websocket_stress.rs`
 
 **Subtasks**:
+
 - [x] Test high message throughput
 - [x] Test many concurrent subscriptions
 - [x] Test many concurrent requests
 - [x] Test rapid connect/disconnect cycles
 
 **Acceptance Criteria**:
+
 - No memory leaks under load
 - Performance meets requirements
 - System remains stable
@@ -893,12 +973,14 @@ pub struct GenericJsonHandlerConfig {
 ### Task 7.1: Add Module Documentation
 
 **Subtasks**:
+
 - [x] Document `websocket` module overview
 - [x] Document each public type and trait
 - [x] Add usage examples in doc comments
 - [x] Document configuration options
 
 **Acceptance Criteria**:
+
 - All public APIs documented
 - Examples compile and run
 - Configuration explained clearly
@@ -912,12 +994,14 @@ pub struct GenericJsonHandlerConfig {
 **File**: `examples/ws_request_response.rs`
 
 **Subtasks**:
+
 - [x] Create example showing request-response pattern
 - [x] Show typed request/response usage
 - [x] Show timeout handling
 - [x] Show error handling
 
 **Acceptance Criteria**:
+
 - Example compiles and runs
 - Demonstrates key patterns
 - Well commented
@@ -931,12 +1015,14 @@ pub struct GenericJsonHandlerConfig {
 **File**: `examples/ws_subscription.rs`
 
 **Subtasks**:
+
 - [x] Create example showing subscription pattern
 - [x] Show subscribing to multiple topics
 - [x] Show handling reconnection
 - [x] Show graceful shutdown
 
 **Acceptance Criteria**:
+
 - Example compiles and runs
 - Demonstrates subscription lifecycle
 - Well commented
@@ -950,11 +1036,13 @@ pub struct GenericJsonHandlerConfig {
 **File**: `examples/ws_custom_handler.rs`
 
 **Subtasks**:
+
 - [x] Create example implementing ProtocolHandler
 - [x] Show all required methods
 - [x] Demonstrate exchange integration pattern
 
 **Acceptance Criteria**:
+
 - Example compiles and runs
 - Shows complete handler implementation
 - Well documented
@@ -972,12 +1060,14 @@ pub struct GenericJsonHandlerConfig {
 **File**: `src/lib.rs`
 
 **Subtasks**:
+
 - [x] Export all new public types
 - [x] Organize module structure
 - [x] Re-export commonly used types at crate root
 - [x] Add feature flags if needed
 
 **Acceptance Criteria**:
+
 - Clean public API surface
 - No unnecessary public items
 - Feature flags documented
@@ -989,6 +1079,7 @@ pub struct GenericJsonHandlerConfig {
 ### Task 8.2: Final Code Review and Cleanup
 
 **Subtasks**:
+
 - [x] Review all code for consistency
 - [x] Run `just format`
 - [x] Run `just lint` and fix all warnings
@@ -997,6 +1088,7 @@ pub struct GenericJsonHandlerConfig {
 - [x] Remove any debug code
 
 **Acceptance Criteria**:
+
 - All checks pass
 - No warnings
 - Code is production ready
@@ -1008,11 +1100,13 @@ pub struct GenericJsonHandlerConfig {
 ### Task 8.3: Update README and Changelog
 
 **Subtasks**:
+
 - [x] Update crate README with WebSocket features
 - [x] Add changelog entry for new features
 - [x] Update crate description if needed
 
 **Acceptance Criteria**:
+
 - Documentation is current
 - Changes are documented
 
@@ -1022,7 +1116,7 @@ pub struct GenericJsonHandlerConfig {
 
 ## Task Dependencies Graph
 
-```
+```text
 Phase 1 (Types & Traits)
     │
     ├── 1.1 Core Types

@@ -57,7 +57,7 @@ The bybit-api library implements several valuable patterns:
 
 ### 3.1 High-Level Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          User Application                                │
 │                                                                          │
@@ -141,82 +141,82 @@ The `ProtocolHandler` trait abstracts exchange-specific protocol details:
 pub trait ProtocolHandler: Send + Sync + 'static {
     /// The request type sent to the server
     type Request: Serialize + Send;
-    
+
     /// The response type received from the server
     type Response: DeserializeOwned + Send;
-    
+
     /// Error type for protocol-level errors
     type Error: std::error::Error + Send + Sync;
 
     // === Connection Lifecycle ===
-    
+
     /// Messages to send immediately after connection establishment.
     /// Typically used for authentication.
     fn on_connect(&self) -> Vec<Message> {
         vec![]
     }
-    
+
     /// Called when authentication is required.
     /// Returns the authentication message to send.
     fn build_auth_message(&self) -> Option<Message> {
         None
     }
-    
+
     /// Verify if an authentication response indicates success.
     fn is_auth_success(&self, message: &str) -> bool {
         false
     }
 
     // === Message Classification ===
-    
+
     /// Determine the message kind for routing purposes.
     fn classify_message(&self, message: &str) -> MessageKind;
 
     /// Extract request ID from a response message for request-response correlation.
     fn extract_request_id(&self, message: &str) -> Option<RequestId>;
-    
+
     /// Extract topic from a subscription message for pub/sub routing.
     fn extract_topic(&self, message: &str) -> Option<Topic>;
 
     // === Message Building ===
-    
+
     /// Build a subscribe message for the given topics.
     fn build_subscribe(&self, topics: &[Topic], request_id: RequestId) -> Message;
-    
+
     /// Build an unsubscribe message for the given topics.
     fn build_unsubscribe(&self, topics: &[Topic], request_id: RequestId) -> Message;
-    
+
     /// Build a ping message (protocol-level, not WebSocket ping frame).
     fn build_ping(&self) -> Option<Message> {
         None
     }
-    
+
     /// Build a pong message (protocol-level response to server ping).
     fn build_pong(&self, ping_data: &[u8]) -> Option<Message> {
         None
     }
 
     // === Message Processing ===
-    
+
     /// Decode binary message (e.g., decompress gzip/deflate).
     fn decode_binary(&self, data: &[u8]) -> Result<String, Self::Error> {
         String::from_utf8(data.to_vec())
             .map_err(|e| /* protocol error */)
     }
-    
+
     /// Check if this is a server ping message requiring a pong response.
     fn is_server_ping(&self, message: &str) -> bool {
         false
     }
-    
+
     /// Check if this is a pong response to our ping.
     fn is_pong_response(&self, message: &str) -> bool {
         false
     }
-    
+
     /// Check if the message indicates a successful subscription.
     fn is_subscription_success(&self, message: &str, topics: &[Topic]) -> bool;
-    
+
     /// Check if the message indicates the connection should be closed and reconnected.
     fn should_reconnect(&self, message: &str) -> bool {
         false
@@ -234,7 +234,7 @@ pub enum MessageKind {
     System,
     /// Control message (subscription confirmation, error, etc.)
     Control,
-    /// Unknown or unparseable message
+    /// Unknown or unparsable message
     Unknown,
 }
 ```
@@ -247,7 +247,7 @@ pub enum MessageKind {
 pub struct WebSocketConfig {
     /// WebSocket URL
     pub url: String,
-    
+
     // === Reconnection ===
     /// Initial delay before first reconnection attempt
     pub reconnect_initial_delay: Duration,
@@ -259,7 +259,7 @@ pub struct WebSocketConfig {
     pub reconnect_max_attempts: Option<u32>,
     /// Add random jitter to reconnection delay (0.0 - 1.0)
     pub reconnect_jitter: f64,
-    
+
     // === Heartbeat ===
     /// Interval between ping messages
     pub ping_interval: Duration,
@@ -267,7 +267,7 @@ pub struct WebSocketConfig {
     pub pong_timeout: Duration,
     /// Use WebSocket ping frames (true) or protocol-level ping (false)
     pub use_websocket_ping: bool,
-    
+
     // === Request Handling ===
     /// Default timeout for request-response operations
     pub request_timeout: Duration,
@@ -275,13 +275,13 @@ pub struct WebSocketConfig {
     pub max_pending_requests: usize,
     /// Cleanup interval for stale pending requests
     pub pending_cleanup_interval: Duration,
-    
+
     // === Channels ===
     /// Capacity for subscription broadcast channels
     pub subscription_channel_capacity: usize,
     /// Capacity for command channel
     pub command_channel_capacity: usize,
-    
+
     // === Connection ===
     /// Connection timeout
     pub connect_timeout: Duration,
@@ -295,28 +295,28 @@ impl Default for WebSocketConfig {
     fn default() -> Self {
         Self {
             url: String::new(),
-            
+
             // Reconnection with exponential backoff
             reconnect_initial_delay: Duration::from_millis(100),
             reconnect_max_delay: Duration::from_secs(30),
             reconnect_backoff_factor: 2.0,
             reconnect_max_attempts: None, // Infinite retries by default
             reconnect_jitter: 0.1,
-            
+
             // Heartbeat
             ping_interval: Duration::from_secs(30),
             pong_timeout: Duration::from_secs(10),
             use_websocket_ping: true,
-            
+
             // Request handling
             request_timeout: Duration::from_secs(30),
             max_pending_requests: 1000,
             pending_cleanup_interval: Duration::from_secs(60),
-            
+
             // Channels
             subscription_channel_capacity: 1024,
             command_channel_capacity: 256,
-            
+
             // Connection
             connect_timeout: Duration::from_secs(10),
             auth_on_connect: true,
@@ -337,7 +337,7 @@ impl RequestId {
     pub fn new() -> Self {
         Self(ulid::Ulid::new().to_string())
     }
-    
+
     pub fn from_string(s: impl Into<String>) -> Self {
         Self(s.into())
     }
@@ -380,25 +380,25 @@ impl PendingRequestStore {
             config,
         }
     }
-    
+
     /// Add a pending request and return a receiver for the response.
     pub fn add(&self, id: RequestId, timeout: Option<Duration>) 
         -> oneshot::Receiver<Result<String, TransportError>> 
     {
         let (tx, rx) = oneshot::channel();
         let timeout = timeout.unwrap_or(self.config.request_timeout);
-        
+
         let pending = PendingRequest {
             response_tx: tx,
             created_at: Instant::now(),
             timeout,
         };
-        
+
         // scc::HashMap::insert is lock-free
         let _ = self.requests.insert(id, pending);
         rx
     }
-    
+
     /// Resolve a pending request with a response.
     pub fn resolve(&self, id: &RequestId, response: Result<String, TransportError>) -> bool {
         // scc::HashMap::remove is lock-free and returns Option<(K, V)>
@@ -409,14 +409,14 @@ impl PendingRequestStore {
             false
         }
     }
-    
+
     /// Clean up timed-out requests.
     /// 
     /// Uses `scc::HashMap::retain` which provides lock-free iteration
     /// with atomic removal of entries that don't satisfy the predicate.
     pub fn cleanup_stale(&self) {
         let now = Instant::now();
-        
+
         self.requests.retain(|_id, pending| {
             if now.duration_since(pending.created_at) > pending.timeout {
                 // Note: We cannot send on the channel here because retain
@@ -427,21 +427,21 @@ impl PendingRequestStore {
             }
         });
     }
-    
+
     /// Clean up timed-out requests with timeout notification.
     /// 
     /// This variant sends timeout errors to waiting receivers.
     pub async fn cleanup_stale_with_notify(&self) {
         let now = Instant::now();
         let mut timed_out = Vec::new();
-        
+
         // First pass: identify timed-out requests
         self.requests.scan(|id, pending| {
             if now.duration_since(pending.created_at) > pending.timeout {
                 timed_out.push(id.clone());
             }
         });
-        
+
         // Second pass: remove and notify
         for id in timed_out {
             if let Some((_, pending)) = self.requests.remove(&id) {
@@ -451,7 +451,7 @@ impl PendingRequestStore {
             }
         }
     }
-    
+
     /// Check if the store has capacity for more requests.
     pub fn has_capacity(&self) -> bool {
         self.requests.len() < self.config.max_pending_requests
@@ -480,20 +480,20 @@ impl SubscriptionStore {
             config,
         }
     }
-    
+
     /// Subscribe to a topic. Returns a receiver for messages.
     /// 
     /// Uses `scc::HashMap::entry` for atomic upsert operation.
     pub fn subscribe(&self, topic: Topic) -> broadcast::Receiver<Message> {
         // Use entry API for atomic get-or-insert
         let capacity = self.config.subscription_channel_capacity;
-        
+
         // Try to get existing entry first
         if let Some(entry) = self.subscriptions.get(&topic) {
             let (sender, _) = entry.get();
             return sender.subscribe();
         }
-        
+
         // Create new subscription - use entry for atomic insert
         let (tx, rx) = broadcast::channel(capacity);
         match self.subscriptions.entry(topic) {
@@ -508,7 +508,7 @@ impl SubscriptionStore {
             }
         }
     }
-    
+
     /// Increment subscriber count for existing topic.
     pub fn add_subscriber(&self, topic: &Topic) -> Option<broadcast::Receiver<Message>> {
         self.subscriptions.get(topic).map(|entry| {
@@ -516,14 +516,14 @@ impl SubscriptionStore {
             entry.get().0.subscribe()
         })
     }
-    
+
     /// Unsubscribe from a topic. Returns true if this was the last subscriber.
     /// 
     /// Uses lock-free operations for concurrent safety.
     pub fn unsubscribe(&self, topic: &Topic) -> bool {
         // Use update_if to atomically decrement and check
         let mut should_remove = false;
-        
+
         self.subscriptions.update(topic, |_, (sender, count)| {
             if *count > 1 {
                 *count -= 1;
@@ -533,7 +533,7 @@ impl SubscriptionStore {
                 (sender.clone(), 0)
             }
         });
-        
+
         if should_remove {
             self.subscriptions.remove(topic);
             true
@@ -541,7 +541,7 @@ impl SubscriptionStore {
             false
         }
     }
-    
+
     /// Publish a message to a topic.
     /// 
     /// Lock-free read operation using `scc::HashMap::get`.
@@ -553,7 +553,7 @@ impl SubscriptionStore {
             false
         }
     }
-    
+
     /// Get all currently subscribed topics (for resubscription after reconnect).
     /// 
     /// Uses `scc::HashMap::scan` for lock-free iteration.
@@ -564,7 +564,7 @@ impl SubscriptionStore {
         });
         topics
     }
-    
+
     /// Get the current subscriber count for a topic.
     pub fn subscriber_count(&self, topic: &Topic) -> usize {
         self.subscriptions
@@ -572,7 +572,7 @@ impl SubscriptionStore {
             .map(|entry| entry.get().1)
             .unwrap_or(0)
     }
-    
+
     /// Clear all subscriptions.
     pub fn clear(&self) {
         self.subscriptions.clear();
@@ -584,7 +584,7 @@ impl SubscriptionStore {
 
 ### 5.1 Actor State Machine
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                       Connection State Machine                           │
 │                                                                          │
@@ -720,14 +720,14 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
             }
         }
     }
-    
+
     async fn run_ready_loop(&mut self) -> TransportResult<()> {
         let mut ping_timer = tokio::time::interval(self.config.ping_interval);
         let mut cleanup_timer = tokio::time::interval(self.config.pending_cleanup_interval);
-        
+
         ping_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         cleanup_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        
+
         loop {
             tokio::select! {
                 // Heartbeat
@@ -735,12 +735,12 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
                     self.send_ping().await?;
                     self.check_pong_timeout()?;
                 }
-                
+
                 // Cleanup stale requests
                 _ = cleanup_timer.tick() => {
                     self.pending_requests.cleanup_stale();
                 }
-                
+
                 // Incoming WebSocket message
                 msg = self.read_message() => {
                     match msg {
@@ -749,7 +749,7 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
                         Err(e) => return Err(e),
                     }
                 }
-                
+
                 // User commands
                 Some(cmd) = self.cmd_rx.recv() => {
                     match cmd {
@@ -763,20 +763,20 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
             }
         }
     }
-    
+
     async fn handle_message(&mut self, message: Message) -> TransportResult<()> {
         // Handle WebSocket-level pong
         if let Message::Pong(_) = &message {
             self.last_pong = Some(Instant::now());
             return Ok(());
         }
-        
+
         // Handle WebSocket-level ping
         if let Message::Ping(data) = &message {
             self.send_message(Message::Pong(data.clone())).await?;
             return Ok(());
         }
-        
+
         // Handle text/binary messages
         let text = match &message {
             Message::Text(t) => t.to_string(),
@@ -784,7 +784,7 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
             Message::Close(_) => return Ok(()),
             _ => return Ok(()),
         };
-        
+
         // Check for server-level ping
         if self.handler.is_server_ping(&text) {
             if let Some(pong) = self.handler.build_pong(text.as_bytes()) {
@@ -792,13 +792,13 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
             }
             return Ok(());
         }
-        
+
         // Check for pong response
         if self.handler.is_pong_response(&text) {
             self.last_pong = Some(Instant::now());
             return Ok(());
         }
-        
+
         // Classify and route the message
         match self.handler.classify_message(&text) {
             MessageKind::Response => {
@@ -821,7 +821,7 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
                 tracing::debug!("Received unknown message type: {}", text);
             }
         }
-        
+
         Ok(())
     }
 }
@@ -850,10 +850,10 @@ impl<H: ProtocolHandler> WebSocketClient<H> {
     pub async fn connect(config: WebSocketConfig, handler: H) -> TransportResult<Self> {
         let config = Arc::new(config);
         let (cmd_tx, cmd_rx) = mpsc::channel(config.command_channel_capacity);
-        
+
         let pending_requests = Arc::new(PendingRequestStore::new(config.clone()));
         let subscriptions = Arc::new(SubscriptionStore::new(config.clone()));
-        
+
         let actor = ConnectionActor::new(
             config.clone(),
             handler,
@@ -861,9 +861,9 @@ impl<H: ProtocolHandler> WebSocketClient<H> {
             pending_requests.clone(),
             subscriptions.clone(),
         );
-        
+
         tokio::spawn(actor.run());
-        
+
         Ok(Self {
             cmd_tx,
             pending_requests,
@@ -895,7 +895,7 @@ impl<H: ProtocolHandler> WebSocketClient<H> {
     ) -> TransportResult<T> {
         self.request_with_timeout(request, None).await
     }
-    
+
     /// Send a request with a custom timeout.
     pub async fn request_with_timeout<R: Serialize, T: DeserializeOwned>(
         &self,
@@ -906,18 +906,18 @@ impl<H: ProtocolHandler> WebSocketClient<H> {
         if !self.pending_requests.has_capacity() {
             return Err(TransportError::internal("Too many pending requests"));
         }
-        
+
         // Generate request ID
         let request_id = RequestId::new();
-        
+
         // Serialize request (implementation would include request_id)
         let message = Message::Text(
             serde_json::to_string(request)?.into()
         );
-        
+
         // Create response channel
         let (reply_tx, reply_rx) = oneshot::channel();
-        
+
         // Send command to actor
         self.cmd_tx.send(ActorCommand::Request {
             message,
@@ -925,27 +925,27 @@ impl<H: ProtocolHandler> WebSocketClient<H> {
             reply_tx,
             timeout,
         }).await.map_err(|_| TransportError::internal("Actor closed"))?;
-        
+
         // Await response
         let response = reply_rx.await
             .map_err(|_| TransportError::internal("Response channel closed"))??;
-        
+
         // Deserialize response
         serde_json::from_str(&response).map_err(Into::into)
     }
-    
+
     /// Send a raw request and get raw response.
     pub async fn request_raw(&self, message: Message) -> TransportResult<String> {
         let request_id = RequestId::new();
         let (reply_tx, reply_rx) = oneshot::channel();
-        
+
         self.cmd_tx.send(ActorCommand::Request {
             message,
             request_id,
             reply_tx,
             timeout: None,
         }).await.map_err(|_| TransportError::internal("Actor closed"))?;
-        
+
         reply_rx.await
             .map_err(|_| TransportError::internal("Response channel closed"))?
     }
@@ -971,58 +971,58 @@ impl<H: ProtocolHandler> WebSocketClient<H> {
         topic: impl Into<Topic>,
     ) -> TransportResult<broadcast::Receiver<Message>> {
         let topic = topic.into();
-        
+
         let (reply_tx, reply_rx) = oneshot::channel();
-        
+
         self.cmd_tx.send(ActorCommand::Subscribe {
             topics: vec![topic.clone()],
             reply_tx,
         }).await.map_err(|_| TransportError::internal("Actor closed"))?;
-        
+
         // Wait for subscription confirmation
         reply_rx.await
             .map_err(|_| TransportError::internal("Subscribe channel closed"))??;
-        
+
         // Return the receiver
         Ok(self.subscriptions.subscribe(topic))
     }
-    
+
     /// Subscribe to multiple topics at once.
     pub async fn subscribe_many(
         &self,
         topics: impl IntoIterator<Item = impl Into<Topic>>,
     ) -> TransportResult<Vec<broadcast::Receiver<Message>>> {
         let topics: Vec<Topic> = topics.into_iter().map(Into::into).collect();
-        
+
         let (reply_tx, reply_rx) = oneshot::channel();
-        
+
         self.cmd_tx.send(ActorCommand::Subscribe {
             topics: topics.clone(),
             reply_tx,
         }).await.map_err(|_| TransportError::internal("Actor closed"))?;
-        
+
         reply_rx.await
             .map_err(|_| TransportError::internal("Subscribe channel closed"))??;
-        
+
         Ok(topics.into_iter()
             .map(|t| self.subscriptions.subscribe(t))
             .collect())
     }
-    
+
     /// Unsubscribe from a topic.
     pub async fn unsubscribe(&self, topic: impl Into<Topic>) -> TransportResult<()> {
         let topic = topic.into();
-        
+
         // Remove from local store
         let should_send = self.subscriptions.unsubscribe(&topic);
-        
+
         // Only send unsubscribe if this was the last subscriber
         if should_send {
             self.cmd_tx.send(ActorCommand::Unsubscribe {
                 topics: vec![topic],
             }).await.map_err(|_| TransportError::internal("Actor closed"))?;
         }
-        
+
         Ok(())
     }
 }
@@ -1038,20 +1038,20 @@ impl<H: ProtocolHandler> WebSocketClient<H> {
             .await
             .map_err(|_| TransportError::internal("Actor closed"))
     }
-    
+
     /// Send a JSON message.
     pub async fn send_json<T: Serialize>(&self, payload: &T) -> TransportResult<()> {
         let text = serde_json::to_string(payload)?;
         self.send(Message::Text(text.into())).await
     }
-    
+
     /// Close the connection gracefully.
     pub async fn close(&self) -> TransportResult<()> {
         self.cmd_tx.send(ActorCommand::Close)
             .await
             .map_err(|_| TransportError::internal("Actor already closed"))
     }
-    
+
     /// Check if the connection is ready.
     pub fn is_connected(&self) -> bool {
         !self.cmd_tx.is_closed()
@@ -1108,27 +1108,27 @@ pub enum WebSocketError {
     /// Connection failed
     #[error("Connection failed: {message}")]
     ConnectionFailed { message: String },
-    
+
     /// Authentication failed
     #[error("Authentication failed: {message}")]
     AuthenticationFailed { message: String },
-    
+
     /// Request timed out
     #[error("Request timed out after {duration:?}")]
     RequestTimeout { duration: Duration },
-    
+
     /// Subscription failed
     #[error("Subscription failed for topic '{topic}': {message}")]
     SubscriptionFailed { topic: String, message: String },
-    
+
     /// Maximum reconnection attempts exceeded
     #[error("Maximum reconnection attempts ({attempts}) exceeded")]
     MaxReconnectAttempts { attempts: u32 },
-    
+
     /// Protocol error
     #[error("Protocol error: {message}")]
     Protocol { message: String },
-    
+
     /// Capacity exceeded
     #[error("Capacity exceeded: {message}")]
     CapacityExceeded { message: String },
@@ -1146,6 +1146,7 @@ pub enum WebSocketError {
 - Use `Arc` for sharing state across tasks
 
 **Why scc over parking_lot/std locks?**
+
 - Lock-free operations eliminate priority inversion and lock contention
 - Better scalability on multi-core systems
 - Wait-free reads provide consistent low latency
@@ -1203,7 +1204,7 @@ impl ProtocolHandler for JsonRpcHandler {
     type Request = JsonRpcRequest;
     type Response = JsonRpcResponse;
     type Error = JsonRpcError;
-    
+
     fn classify_message(&self, message: &str) -> MessageKind {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(message) {
             if v.get("id").is_some() && v.get("result").is_some() {
@@ -1215,7 +1216,7 @@ impl ProtocolHandler for JsonRpcHandler {
         }
         MessageKind::Unknown
     }
-    
+
     fn extract_request_id(&self, message: &str) -> Option<RequestId> {
         serde_json::from_str::<serde_json::Value>(message)
             .ok()?
@@ -1223,7 +1224,7 @@ impl ProtocolHandler for JsonRpcHandler {
             .as_str()
             .map(|s| RequestId::from_string(s))
     }
-    
+
     // ... rest of implementation
 }
 ```

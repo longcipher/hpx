@@ -41,16 +41,11 @@ impl SubscriptionStore {
     /// Returns `(receiver, is_new)` where `is_new` is true if this is
     /// a new subscription that needs to be sent to the server.
     pub fn subscribe(&self, topic: Topic) -> (broadcast::Receiver<WsMessage>, bool) {
-        // Try to get existing subscription first
-        if let Some(entry) = self.subscriptions.get(&topic) {
-            let receiver = entry.get().sender.subscribe();
-            drop(entry); // Release read lock before modifying
-
-            // Increment ref count
-            let _ = self.subscriptions.update(&topic, |_, entry| {
-                entry.ref_count += 1;
-            });
-
+        // Try to get existing subscription and increment ref count atomically
+        if let Some(receiver) = self.subscriptions.update_sync(&topic, |_, entry| {
+            entry.ref_count += 1;
+            entry.sender.subscribe()
+        }) {
             return (receiver, false);
         }
 
@@ -62,18 +57,14 @@ impl SubscriptionStore {
         };
 
         // Insert; if another thread beat us, subscribe to their channel
-        if let Err((_, _entry)) = self.subscriptions.insert(topic.clone(), entry) {
+        if let Err((_, _entry)) = self.subscriptions.insert_sync(topic.clone(), entry) {
             // Race: another thread inserted first
             // The entry we tried to insert is returned on error
 
-            if let Some(existing) = self.subscriptions.get(&topic) {
-                let receiver = existing.get().sender.subscribe();
-                drop(existing);
-
-                let _ = self.subscriptions.update(&topic, |_, entry| {
-                    entry.ref_count += 1;
-                });
-
+            if let Some(receiver) = self.subscriptions.update_sync(&topic, |_, entry| {
+                entry.ref_count += 1;
+                entry.sender.subscribe()
+            }) {
                 return (receiver, false);
             }
         }
@@ -85,17 +76,10 @@ impl SubscriptionStore {
     ///
     /// Returns `Some(receiver)` if the topic exists, `None` otherwise.
     pub fn add_subscriber(&self, topic: &Topic) -> Option<broadcast::Receiver<WsMessage>> {
-        if let Some(entry) = self.subscriptions.get(topic) {
-            let receiver = entry.get().sender.subscribe();
-            drop(entry);
-
-            let _ = self.subscriptions.update(topic, |_, entry| {
-                entry.ref_count += 1;
-            });
-
-            return Some(receiver);
-        }
-        None
+        self.subscriptions.update_sync(topic, |_, entry| {
+            entry.ref_count += 1;
+            entry.sender.subscribe()
+        })
     }
 
     /// Unsubscribe from a topic.
@@ -105,7 +89,7 @@ impl SubscriptionStore {
     pub fn unsubscribe(&self, topic: &Topic) -> bool {
         let mut should_remove = false;
 
-        let _ = self.subscriptions.update(topic, |_, entry| {
+        let _ = self.subscriptions.update_sync(topic, |_, entry| {
             entry.ref_count = entry.ref_count.saturating_sub(1);
             if entry.ref_count == 0 {
                 should_remove = true;
@@ -113,7 +97,7 @@ impl SubscriptionStore {
         });
 
         if should_remove {
-            self.subscriptions.remove(topic);
+            self.subscriptions.remove_sync(topic);
             return true;
         }
 
@@ -125,19 +109,20 @@ impl SubscriptionStore {
     /// Returns `true` if the topic exists (even if no active receivers),
     /// `false` if the topic doesn't exist.
     pub fn publish(&self, topic: &Topic, message: WsMessage) -> bool {
-        if let Some(entry) = self.subscriptions.get(topic) {
-            // Ignore send errors (no active receivers is fine)
-            let _ = entry.get().sender.send(message);
-            return true;
-        }
-        false
+        self.subscriptions
+            .update_sync(topic, |_, entry| {
+                // Ignore send errors (no active receivers is fine)
+                let _ = entry.sender.send(message.clone());
+            })
+            .is_some()
     }
 
     /// Get all currently subscribed topics.
     pub fn get_all_topics(&self) -> Vec<Topic> {
         let mut topics = Vec::new();
-        self.subscriptions.scan(|topic, _| {
+        self.subscriptions.retain_sync(|topic, _| {
             topics.push(topic.clone());
+            true
         });
         topics
     }
@@ -145,8 +130,7 @@ impl SubscriptionStore {
     /// Get the subscriber count for a topic.
     pub fn subscriber_count(&self, topic: &Topic) -> usize {
         self.subscriptions
-            .get(topic)
-            .map(|entry| entry.get().ref_count)
+            .update_sync(topic, |_, entry| entry.ref_count)
             .unwrap_or(0)
     }
 
@@ -162,7 +146,7 @@ impl SubscriptionStore {
 
     /// Clear all subscriptions.
     pub fn clear(&self) {
-        self.subscriptions.clear();
+        self.subscriptions.clear_sync();
     }
 }
 
