@@ -50,6 +50,33 @@ pub enum TransportError {
     /// Internal errors (should not happen in normal operation)
     #[error("Internal error: {message}")]
     Internal { message: String },
+
+    /// Request timed out waiting for response.
+    #[error("Request timed out after {duration:?}, request_id={request_id}")]
+    RequestTimeout {
+        duration: std::time::Duration,
+        request_id: String,
+    },
+
+    /// Subscription operation failed.
+    #[error("Subscription failed for topic '{topic}': {message}")]
+    SubscriptionFailed { topic: String, message: String },
+
+    /// Maximum reconnection attempts exceeded.
+    #[error("Max reconnection attempts exceeded ({attempts})")]
+    MaxReconnectAttempts { attempts: u32 },
+
+    /// Protocol-level error from the exchange.
+    #[error("Protocol error: {message}")]
+    ProtocolError { message: String },
+
+    /// Capacity limit exceeded.
+    #[error("Capacity exceeded: {message}")]
+    CapacityExceeded { message: String },
+
+    /// Connection was closed.
+    #[error("Connection closed: {}", reason.as_deref().unwrap_or("unknown reason"))]
+    ConnectionClosed { reason: Option<String> },
 }
 
 impl From<FromUtf8Error> for TransportError {
@@ -114,6 +141,46 @@ impl TransportError {
             status,
             body: body.into(),
         }
+    }
+
+    /// Create a request timeout error.
+    pub fn request_timeout(duration: std::time::Duration, request_id: impl Into<String>) -> Self {
+        Self::RequestTimeout {
+            duration,
+            request_id: request_id.into(),
+        }
+    }
+
+    /// Create a subscription failed error.
+    pub fn subscription_failed(topic: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::SubscriptionFailed {
+            topic: topic.into(),
+            message: message.into(),
+        }
+    }
+
+    /// Create a max reconnect attempts error.
+    pub fn max_reconnect_attempts(attempts: u32) -> Self {
+        Self::MaxReconnectAttempts { attempts }
+    }
+
+    /// Create a protocol error.
+    pub fn protocol_error(message: impl Into<String>) -> Self {
+        Self::ProtocolError {
+            message: message.into(),
+        }
+    }
+
+    /// Create a capacity exceeded error.
+    pub fn capacity_exceeded(message: impl Into<String>) -> Self {
+        Self::CapacityExceeded {
+            message: message.into(),
+        }
+    }
+
+    /// Create a connection closed error.
+    pub fn connection_closed(reason: Option<String>) -> Self {
+        Self::ConnectionClosed { reason }
     }
 }
 

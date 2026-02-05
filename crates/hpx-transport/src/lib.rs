@@ -58,4 +58,20 @@ pub use error::{TransportError, TransportResult};
 pub use exchange::{ExchangeClient, RestClient, RestConfig};
 pub use rate_limit::RateLimiter;
 pub use typed::{ApiError, TypedResponse};
-pub use websocket::{ExchangeHandler, WebSocketConfig, WebSocketHandle};
+pub use websocket::{
+    // Connection state
+    ConnectionState,
+    // Backward compatibility (legacy types)
+    ExchangeHandler,
+    MessageKind,
+    // Protocol abstraction
+    ProtocolHandler,
+    RequestId,
+    Topic,
+    WebSocketConfig,
+    WebSocketHandle,
+    // Core client types
+    WsClient,
+    WsConfig,
+    WsMessage,
+};

@@ -28,8 +28,10 @@ opentelemetry = { workspace = true, features = ["metrics"] }
 opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics"] }
 opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] }
 parking_lot.workspace = true
+rand.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+scc.workspace = true
 serde_urlencoded.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
@@ -41,6 +43,7 @@ tokio = { workspace = true, features = [
     "rt-multi-thread",
 ] }
 tracing.workspace = true
+ulid.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
