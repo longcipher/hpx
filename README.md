@@ -55,9 +55,9 @@ Add `hpx` and related crates to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hpx = "1.0.0"
-hpx-util = "1.0.0"
-hpx-transport = "1.0.0"  # Optional: for transport layer access
+hpx = "1.1.0"
+hpx-util = "1.1.0"
+hpx-transport = "1.1.0"  # Optional: for transport layer access
 ```
 
 ### Feature Flags
@@ -66,7 +66,7 @@ hpx-transport = "1.0.0"  # Optional: for transport layer access
 
 ```toml
 [dependencies]
-hpx = { version = "1.0.0", features = [
+hpx = { version = "1.1.0", features = [
     "json",           # JSON request/response support
     "stream",         # Streaming request/response bodies
     "cookies",        # Cookie store support
@@ -94,7 +94,7 @@ To achieve the best possible performance, consider enabling the following featur
 
 ```toml
 [dependencies]
-hpx = { version = "1.0.0", features = [
+hpx = { version = "1.1.0", features = [
     "simd-json",      # SIMD-accelerated JSON handling
     "hickory-dns",    # Async DNS resolver
     "zstd",           # Fast compression
@@ -113,7 +113,7 @@ To use BoringSSL, no additional configuration is needed if you are using the def
 
 ```toml
 [dependencies]
-hpx = "1.0.0"
+hpx = "1.1.0"
 ```
 
 ### Rustls
@@ -126,7 +126,7 @@ To use Rustls, you must disable the default features and explicitly enable `rust
 
 ```toml
 [dependencies]
-hpx = { version = "1.0.0", default-features = false, features = ["rustls-tls", "http1", "http2"] }
+hpx = { version = "1.1.0", default-features = false, features = ["rustls-tls", "http1", "http2"] }
 ```
 
 ## Usage Examples
