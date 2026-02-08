@@ -2,6 +2,7 @@
 
 use std::{convert::TryInto, fmt, sync::Arc, time::SystemTime};
 
+use arc_swap::ArcSwap;
 use bytes::Bytes;
 use cookie::{Cookie as RawCookie, CookieJar, Expiration, SameSite};
 use http::Uri;
@@ -12,7 +13,6 @@ use crate::{
     ext::UriExt,
     hash::{HASHER, HashMap},
     header::HeaderValue,
-    sync::RwLock,
 };
 
 /// Cookie header values in two forms.
@@ -67,9 +67,11 @@ pub struct Cookie<'a>(RawCookie<'a>);
 /// This is the implementation used when simply calling `cookie_store(true)`.
 /// This type is exposed to allow creating one and filling it with some
 /// existing cookies more easily, before creating a [`crate::Client`].
+///
+/// Uses `ArcSwap` for lock-free reads with copy-on-write for mutations.
 pub struct Jar {
     compression: bool,
-    store: Arc<RwLock<HashMap<String, HashMap<String, CookieJar>>>>,
+    store: Arc<ArcSwap<HashMap<String, HashMap<String, CookieJar>>>>,
 }
 
 // ===== impl CookieStore =====
@@ -247,7 +249,7 @@ impl Jar {
     pub fn new(compression: bool) -> Self {
         Self {
             compression,
-            store: Arc::new(RwLock::new(HashMap::with_hasher(HASHER))),
+            store: Arc::new(ArcSwap::from_pointee(HashMap::with_hasher(HASHER))),
         }
     }
 
@@ -285,9 +287,8 @@ impl Jar {
     /// ```
     pub fn get<U: IntoUri>(&self, name: &str, uri: U) -> Option<Cookie<'static>> {
         let uri = uri.into_uri().ok()?;
-        let cookie = self
-            .store
-            .read()
+        let store = self.store.load();
+        let cookie = store
             .get(uri.host()?)?
             .get(uri.path())?
             .get(name)?
@@ -311,8 +312,8 @@ impl Jar {
     /// }
     /// ```
     pub fn get_all(&self) -> impl Iterator<Item = Cookie<'static>> {
-        self.store
-            .read()
+        let store = self.store.load();
+        store
             .iter()
             .flat_map(|(_, path_map)| {
                 path_map.iter().flat_map(|(_, name_map)| {
@@ -374,24 +375,27 @@ impl Jar {
                 .unwrap_or_default();
             let path = cookie.path().unwrap_or_else(|| normalize_path(&uri));
 
-            let mut inner = self.store.write();
-            let name_map = inner
-                .entry(domain.to_owned())
-                .or_insert_with(|| HashMap::with_hasher(HASHER))
-                .entry(path.to_owned())
-                .or_default();
+            self.store.rcu(|current| {
+                let mut inner = (**current).clone();
+                let name_map = inner
+                    .entry(domain.to_owned())
+                    .or_insert_with(|| HashMap::with_hasher(HASHER))
+                    .entry(path.to_owned())
+                    .or_default();
 
-            // RFC 6265: If Max-Age=0 or Expires in the past, remove the cookie
-            let expired = cookie
-                .expires_datetime()
-                .is_some_and(|dt| dt <= SystemTime::now())
-                || cookie.max_age().is_some_and(|age| age.is_zero());
+                // RFC 6265: If Max-Age=0 or Expires in the past, remove the cookie
+                let expired = cookie
+                    .expires_datetime()
+                    .is_some_and(|dt| dt <= SystemTime::now())
+                    || cookie.max_age().is_some_and(|age| age.is_zero());
 
-            if expired {
-                name_map.remove(cookie);
-            } else {
-                name_map.add(cookie);
-            }
+                if expired {
+                    name_map.remove(cookie.clone());
+                } else {
+                    name_map.add(cookie.clone());
+                }
+                inner
+            });
         }
     }
 
@@ -425,24 +429,27 @@ impl Jar {
             .unwrap_or_default();
         let path = cookie.path().unwrap_or_else(|| normalize_path(&uri));
 
-        let mut inner = self.store.write();
-        let name_map = inner
-            .entry(domain.to_owned())
-            .or_insert_with(|| HashMap::with_hasher(HASHER))
-            .entry(path.to_owned())
-            .or_default();
+        self.store.rcu(|current| {
+            let mut inner = (**current).clone();
+            let name_map = inner
+                .entry(domain.to_owned())
+                .or_insert_with(|| HashMap::with_hasher(HASHER))
+                .entry(path.to_owned())
+                .or_default();
 
-        // RFC 6265: If Max-Age=0 or Expires in the past, remove the cookie
-        let expired = cookie
-            .expires_datetime()
-            .is_some_and(|dt| dt <= SystemTime::now())
-            || cookie.max_age().is_some_and(|age| age.is_zero());
+            // RFC 6265: If Max-Age=0 or Expires in the past, remove the cookie
+            let expired = cookie
+                .expires_datetime()
+                .is_some_and(|dt| dt <= SystemTime::now())
+                || cookie.max_age().is_some_and(|age| age.is_zero());
 
-        if expired {
-            name_map.remove(cookie);
-        } else {
-            name_map.add(cookie);
-        }
+            if expired {
+                name_map.remove(cookie.clone());
+            } else {
+                name_map.add(cookie.clone());
+            }
+            inner
+        });
     }
 
     /// Remove a cookie by name for a given Uri.
@@ -467,14 +474,19 @@ impl Jar {
         C: Into<RawCookie<'static>>,
         U: IntoUri,
     {
+        let cookie_raw = cookie.into();
         let uri = into_uri!(uri);
         if let Some(host) = uri.host() {
-            let mut inner = self.store.write();
-            if let Some(path_map) = inner.get_mut(host)
-                && let Some(name_map) = path_map.get_mut(uri.path())
-            {
-                name_map.remove(cookie.into());
-            }
+            let path = uri.path().to_owned();
+            self.store.rcu(|current| {
+                let mut inner = (**current).clone();
+                if let Some(path_map) = inner.get_mut(host)
+                    && let Some(name_map) = path_map.get_mut(&path)
+                {
+                    name_map.remove(cookie_raw.clone());
+                }
+                inner
+            });
         }
     }
 
@@ -492,7 +504,7 @@ impl Jar {
     /// assert_eq!(jar.get_all().count(), 0);
     /// ```
     pub fn clear(&self) {
-        self.store.write().clear();
+        self.store.store(Arc::new(HashMap::with_hasher(HASHER)));
     }
 }
 
@@ -514,7 +526,7 @@ impl CookieStore for Jar {
             None => return Cookies::Empty,
         };
 
-        let store = self.store.read();
+        let store = self.store.load();
         let iter = store
             .iter()
             .filter(|(domain, _)| domain_match(host, domain))
@@ -582,6 +594,15 @@ impl CookieStore for Jar {
 impl Default for Jar {
     fn default() -> Self {
         Self::new(true)
+    }
+}
+
+// Jar needs fmt::Debug since the store is ArcSwap now
+impl fmt::Debug for Jar {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Jar")
+            .field("compression", &self.compression)
+            .finish()
     }
 }
 

@@ -67,7 +67,7 @@ impl Error {
         Error::new(Kind::Upgrade, Some(e))
     }
 
-    #[cfg(feature = "ws")]
+    #[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
     pub(crate) fn websocket<E: Into<BoxError>>(e: E) -> Error {
         Error::new(Kind::WebSocket, Some(e))
     }
@@ -246,7 +246,7 @@ impl Error {
         matches!(self.inner.kind, Kind::Upgrade)
     }
 
-    #[cfg(feature = "ws")]
+    #[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
     /// Returns true if the error is related to WebSocket operations
     pub fn is_websocket(&self) -> bool {
         matches!(self.inner.kind, Kind::WebSocket)
@@ -313,7 +313,7 @@ impl fmt::Display for Error {
             Kind::Decode => f.write_str("error decoding response body")?,
             Kind::Redirect => f.write_str("error following redirect")?,
             Kind::Upgrade => f.write_str("error upgrading connection")?,
-            #[cfg(feature = "ws")]
+            #[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
             Kind::WebSocket => f.write_str("websocket error")?,
             Kind::Status(ref code, ref reason) => {
                 let prefix = if code.is_client_error() {
@@ -363,7 +363,7 @@ pub(crate) enum Kind {
     Body,
     Decode,
     Upgrade,
-    #[cfg(feature = "ws")]
+    #[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
     WebSocket,
 }
 

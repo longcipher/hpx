@@ -11,10 +11,20 @@ This project is a fork of [wreq](https://github.com/0x676e67/wreq) and indirectl
 
 An ergonomic all-in-one HTTP client for browser emulation with TLS, JA3/JA4, and HTTP/2 fingerprints.
 
+## Version
+
+| Crate | Version | Description |
+|-------|---------|-------------|
+| [`hpx`](https://crates.io/crates/hpx) | 1.2.0 | High Performance HTTP Client |
+| [`hpx-util`](https://crates.io/crates/hpx-util) | 1.2.0 | Browser emulation profiles & Tower middleware |
+| [`hpx-transport`](https://crates.io/crates/hpx-transport) | 1.2.0 | Exchange SDK toolkit (auth, WebSocket, rate limiting) |
+| [`hpx-yawc`](https://crates.io/crates/hpx-yawc) | 1.2.0 | WebSocket library (RFC 6455 + compression) |
+| [`hpx-fastwebsockets`](https://crates.io/crates/hpx-fastwebsockets) | 1.2.0 | Fast minimal WebSocket implementation |
+
 ## Features
 
-- **Browser Emulation**: Simulate various browser TLS/HTTP2 fingerprints (JA3/JA4).
-- **Content Handling**: Plain bodies, JSON, urlencoded, multipart, streaming.
+- **Browser Emulation**: Simulate various browser TLS/HTTP2 fingerprints (JA3/JA4)
+- **Content Handling**: Plain bodies, JSON, urlencoded, multipart, streaming
 - **Advanced Features**:
   - Cookies Store
   - Redirect Policy
@@ -26,8 +36,8 @@ An ergonomic all-in-one HTTP client for browser emulation with TLS, JA3/JA4, and
   - Retry Configuration
   - Compression (gzip, brotli, deflate, zstd)
   - Character Encoding Support
-- **WebSocket**: Upgrade support for WebSockets.
-- **TLS Backends**: Support for both BoringSSL (default) and Rustls.
+- **WebSocket**: Upgrade support with switchable backends (yawc or fastwebsockets)
+- **TLS Backends**: BoringSSL (default) and Rustls
 
 ## Architecture
 
@@ -36,97 +46,197 @@ An ergonomic all-in-one HTTP client for browser emulation with TLS, JA3/JA4, and
 |                        User API                           |
 | (Client, ClientBuilder, RequestBuilder, Response)         |
 +-----------------------------------------------------------+
-|                     Tower Middleware Stack                |
+|                     Tower Middleware Stack                 |
 | (HooksLayer, RetryLayer, TimeoutLayer, DecompressionLayer)|
 +---------------------------+-------------------------------+
-|        hpx-core           |      hpx-ws (fastwebsockets)  |
+|        hpx-core           |   hpx-ws (yawc/fastws)       |
 +---------------------------+                               |
 |      Connection Pool      |      WebSocket Handshake      |
 +-------------+-------------+-------------------------------+
-| TLS Backend | (Feature Switched: Rustls / BoringSSL)      |
+| TLS Backend | (Feature Switched: BoringSSL / Rustls)      |
 +-------------+---------------------------------------------+
-|                Transport (Tokio TCP Stream)               |
+|                Transport (Tokio TCP Stream)                |
 +-----------------------------------------------------------+
 ```
 
 ## Installation
 
-Add `hpx` and related crates to your `Cargo.toml`:
+Add `hpx` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hpx = "1.1.0"
-hpx-util = "1.1.0"
-hpx-transport = "1.1.0"  # Optional: for transport layer access
+hpx = "1.2.0"
 ```
 
-### Feature Flags
+The default features include **BoringSSL** TLS, **HTTP/1.1**, and **HTTP/2** support.
 
-`hpx` provides extensive feature flags for customization:
+For browser emulation, add the utility crate:
 
 ```toml
 [dependencies]
-hpx = { version = "1.1.0", features = [
-    "json",           # JSON request/response support
-    "stream",         # Streaming request/response bodies
-    "cookies",        # Cookie store support
-    "charset",        # Character encoding support
-    "gzip",           # Gzip compression
-    "brotli",         # Brotli compression
-    "zstd",           # Zstandard compression
-    "multipart",      # Multipart form data
-    "ws",             # WebSocket support
-    "socks",          # SOCKS proxy support
-    "hickory-dns",    # Alternative DNS resolver
-    "tracing",        # Logging support
+hpx = "1.2.0"
+hpx-util = "1.2.0"
+```
+
+For exchange/trading applications:
+
+```toml
+[dependencies]
+hpx = "1.2.0"
+hpx-transport = "1.2.0"
+```
+
+## Feature Flags
+
+### `hpx` Features
+
+The `hpx` crate uses feature flags for fine-grained control. **Default features: `boring`, `http1`, `http2`**.
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| **TLS** | | |
+| `boring` | **Yes** | BoringSSL TLS backend |
+| `rustls-tls` | No | Rustls TLS backend (pure Rust) |
+| `webpki-roots` | No | WebPKI root certificates |
+| **HTTP** | | |
+| `http1` | **Yes** | HTTP/1.1 support |
+| `http2` | **Yes** | HTTP/2 support |
+| **Content** | | |
+| `json` | No | JSON request/response support |
+| `simd-json` | No | SIMD-accelerated JSON (enables `json`) |
+| `form` | No | x-www-form-urlencoded support |
+| `query` | No | URL query string serialization |
+| `multipart` | No | Multipart form data |
+| `stream` | No | Streaming request/response bodies |
+| `charset` | No | Character encoding support |
+| **Compression** | | |
+| `gzip` | No | Gzip decompression |
+| `brotli` | No | Brotli decompression |
+| `zstd` | No | Zstandard decompression |
+| `deflate` | No | Deflate decompression |
+| **WebSocket** | | |
+| `ws` | No | WebSocket support (alias for `ws-yawc`) |
+| `ws-yawc` | No | WebSocket via hpx-yawc backend |
+| `ws-fastwebsockets` | No | WebSocket via fastwebsockets backend |
+| **Networking** | | |
+| `cookies` | No | Cookie store support |
+| `socks` | No | SOCKS proxy support |
+| `hickory-dns` | No | Async DNS resolver (Hickory) |
+| `system-proxy` | No | System proxy configuration |
+| **Observability** | | |
+| `tracing` | No | Tracing/logging support |
+| **Other** | | |
+| `macros` | No | Tokio macros re-export |
+
+### WebSocket Backend Selection
+
+The `ws` feature is an alias for `ws-yawc` (the default WebSocket backend). To use fastwebsockets instead:
+
+```toml
+[dependencies]
+hpx = { version = "1.2.0", features = ["ws-fastwebsockets"] }
+```
+
+When both `ws-yawc` and `ws-fastwebsockets` are enabled, fastwebsockets takes priority.
+
+### Common Feature Combinations
+
+**Minimal HTTP client:**
+
+```toml
+hpx = "1.2.0"  # default: boring + http1 + http2
+```
+
+**JSON API client:**
+
+```toml
+hpx = { version = "1.2.0", features = ["json", "cookies", "gzip"] }
+```
+
+**WebSocket client:**
+
+```toml
+hpx = { version = "1.2.0", features = ["ws"] }
+```
+
+**High-performance trading:**
+
+```toml
+hpx = { version = "1.2.0", features = ["simd-json", "hickory-dns", "zstd", "ws"] }
+```
+
+**Pure Rust (no C dependencies):**
+
+```toml
+hpx = { version = "1.2.0", default-features = false, features = ["rustls-tls", "http1", "http2"] }
+```
+
+**Full-featured:**
+
+```toml
+hpx = { version = "1.2.0", features = [
+    "json", "form", "query", "multipart", "stream",
+    "cookies", "charset",
+    "gzip", "brotli", "zstd", "deflate",
+    "ws", "socks", "hickory-dns",
+    "tracing",
 ] }
 ```
 
-### Performance Optimization
+### `hpx-util` Features
 
-To achieve the best possible performance, consider enabling the following features:
+Default: `emulation`.
 
-- **`simd-json`**: Replaces `serde_json` with `simd-json` for faster JSON serialization/deserialization (uses SIMD instructions where available).
-- **`hickory-dns`**: Enables the high-performance, async-native Hickory (formerly Trust-DNS) resolver, avoiding blocking system calls.
-- **`zstd` / `brotli`**: Use modern compression algorithms for better bandwidth efficiency. `zstd` usually offers the best balance of speed and compression ratio.
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `emulation` | **Yes** | Browser emulation profiles (Chrome, Firefox, Safari, Opera, OkHttp) |
+| `emulation-compression` | No | Compression settings for emulation profiles |
+| `emulation-rand` | No | Random emulation profile selection |
+| `emulation-serde` | No | Serde serialization for emulation types |
+| `tower-delay` | No | Delay/jitter Tower middleware layer |
 
-**Recommended configuration for high-performance applications:**
+### `hpx-transport` Features
 
-```toml
-[dependencies]
-hpx = { version = "1.1.0", features = [
-    "simd-json",      # SIMD-accelerated JSON handling
-    "hickory-dns",    # Async DNS resolver
-    "zstd",           # Fast compression
-] }
-```
+Default: `ws-yawc`.
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `ws-yawc` | **Yes** | WebSocket backend via hpx-yawc |
+| `ws-fastwebsockets` | No | WebSocket backend via fastwebsockets |
+
+### `hpx-yawc` Features
+
+Default: `rustls-ring`.
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `rustls-ring` | **Yes** | TLS via rustls with ring crypto |
+| `rustls-aws-lc-rs` | No | TLS via rustls with AWS LC crypto |
+| `axum` | No | Axum WebSocket extractor |
+| `simd` | No | SIMD-accelerated UTF-8 validation |
+| `smol` | No | smol async runtime support |
+| `zlib` | No | Native zlib compression backend |
 
 ## TLS Backend Configuration
 
-`hpx` supports two TLS backends: **BoringSSL** (default) and **Rustls**.
-
 ### BoringSSL (Default)
 
-BoringSSL is the default TLS backend, providing robust support for modern TLS features and extensive browser emulation capabilities. It is recommended for most use cases, especially when browser fingerprinting is required.
-
-To use BoringSSL, no additional configuration is needed if you are using the default features:
+BoringSSL is the default TLS backend, providing robust support for modern TLS features and extensive browser emulation capabilities. Recommended for most use cases, especially when browser fingerprinting is required.
 
 ```toml
 [dependencies]
-hpx = "1.1.0"
+hpx = "1.2.0"
 ```
 
 ### Rustls
 
-If you prefer a pure Rust TLS implementation, you can switch to Rustls. This might be useful for environments where C dependencies are difficult to manage or if you prefer the safety guarantees of a pure Rust stack.
+A pure Rust TLS implementation. Useful for environments where C dependencies are difficult to manage or when you prefer the safety guarantees of a pure Rust stack.
 
-**Note:** Switching to Rustls may affect the availability or behavior of certain browser emulation features that rely on specific BoringSSL capabilities.
-
-To use Rustls, you must disable the default features and explicitly enable `rustls-tls` along with the HTTP versions you need:
+> **Note:** Switching to Rustls may affect the availability or behavior of certain browser emulation features that rely on specific BoringSSL capabilities.
 
 ```toml
 [dependencies]
-hpx = { version = "1.1.0", default-features = false, features = ["rustls-tls", "http1", "http2"] }
+hpx = { version = "1.2.0", default-features = false, features = ["rustls-tls", "http1", "http2"] }
 ```
 
 ## Usage Examples
@@ -142,12 +252,14 @@ async fn main() -> hpx::Result<()> {
         .text()
         .await?;
 
-    println!("body = {:?}", body);
+    println!("body = {body:?}");
     Ok(())
 }
 ```
 
 ### JSON Requests
+
+Requires the `json` feature.
 
 ```rust
 use serde::{Deserialize, Serialize};
@@ -160,7 +272,6 @@ struct User {
 
 #[tokio::main]
 async fn main() -> hpx::Result<()> {
-    // POST with JSON body
     let user = User {
         name: "John Doe".to_string(),
         email: "john@example.com".to_string(),
@@ -177,105 +288,28 @@ async fn main() -> hpx::Result<()> {
 }
 ```
 
-### Request/Response Hooks
+### Browser Emulation
 
-Add lifecycle hooks to monitor and modify requests/responses:
+Requires the `hpx-util` crate with default features.
 
 ```rust
-use hpx::client::{layer::hooks::{Hooks, LoggingHook, RequestIdHook}, Client};
+use hpx_util::Emulation;
 
 #[tokio::main]
 async fn main() -> hpx::Result<()> {
-    let client = Client::builder()
-        .hooks(Hooks::new()
-            .before_request(|req| {
-                println!("Sending request to: {}", req.uri());
-                async { Ok(()) }
-            })
-            .after_response(|res| {
-                println!("Received response: {}", res.status());
-                async { Ok(()) }
-            })
-        )
-        .build()?;
-
-    let _response = client.get("https://httpbin.org/get").send().await?;
-    Ok(())
-}
-```
-
-### Retry Configuration
-
-Configure retry behavior for failed requests:
-
-```rust
-use hpx::{client::http::ClientBuilder, retry::RetryConfig};
-use std::time::Duration;
-
-#[tokio::main]
-async fn main() -> hpx::Result<()> {
-    let client = ClientBuilder::new()
-        .retry(RetryConfig::new()
-            .max_attempts(3)
-            .backoff(Duration::from_millis(100))
-            .max_backoff(Duration::from_secs(10))
-        )
-        .build()?;
-
-    let response = client.get("https://httpbin.org/status/500").send().await?;
-    println!("Final status: {}", response.status());
-    Ok(())
-}
-```
-
-### Streaming Response Bodies
-
-Efficiently stream large response bodies:
-
-```rust
-use tokio::io::AsyncReadExt;
-
-#[tokio::main]
-async fn main() -> hpx::Result<()> {
-    let mut reader = hpx::get("https://httpbin.org/stream/100")
+    let resp = hpx::get("https://tls.peet.ws/api/all")
+        .emulation(Emulation::Firefox136)
         .send()
-        .await?
-        .reader();
+        .await?;
 
-    let mut buffer = Vec::new();
-    reader.read_to_end(&mut buffer).await?;
-    println!("Read {} bytes", buffer.len());
-    Ok(())
-}
-```
-
-### Cookies
-
-Automatic cookie handling:
-
-```rust
-use hpx::cookie::Jar;
-
-#[tokio::main]
-async fn main() -> hpx::Result<()> {
-    let jar = Jar::default();
-
-    let client = hpx::Client::builder()
-        .cookie_provider(jar.clone())
-        .build()?;
-
-    // Cookies will be automatically stored and sent
-    let _resp = client.get("https://httpbin.org/cookies/set/session/123").send().await?;
-
-    // Check stored cookies
-    println!("Cookies: {:?}", jar.cookies("https://httpbin.org"));
+    println!("{}", resp.text().await?);
     Ok(())
 }
 ```
 
 ### WebSocket
 
-Upgrade a connection to a WebSocket.
+Requires the `ws` feature.
 
 ```rust
 use futures_util::{SinkExt, StreamExt, TryStreamExt};
@@ -306,48 +340,60 @@ async fn main() -> hpx::Result<()> {
 }
 ```
 
-### Browser Emulation
+### Cookies
 
-The `emulation` module allows you to simulate specific browser fingerprints.
+Requires the `cookies` feature.
 
 ```rust
-use hpx_util::Emulation;
+use hpx::cookie::Jar;
 
 #[tokio::main]
 async fn main() -> hpx::Result<()> {
-    let resp = hpx::get("https://tls.peet.ws/api/all")
-        .emulation(Emulation::Firefox136)
+    let jar = Jar::default();
+
+    let client = hpx::Client::builder()
+        .cookie_provider(jar.clone())
+        .build()?;
+
+    let _resp = client
+        .get("https://httpbin.org/cookies/set/session/123")
         .send()
         .await?;
 
-    println!("{}", resp.text().await?);
+    println!("Cookies: {:?}", jar.cookies("https://httpbin.org"));
     Ok(())
 }
 ```
 
-### Transport Layer
+### Transport Layer (Exchange SDK)
 
-For advanced use cases, you can work directly with the transport layer:
+For cryptocurrency exchange integrations, use the `hpx-transport` crate:
 
 ```rust
-use hpx_transport::{HttpClient, typed::TypedRequestBuilder};
-use std::time::Duration;
+use hpx_transport::{
+    auth::ApiKeyAuth,
+    exchange::{RestClient, RestConfig},
+};
 
 #[tokio::main]
-async fn main() -> hpx_transport::Result<()> {
-    let client = HttpClient::builder()
-        .timeout(Duration::from_secs(30))
-        .build()?;
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = RestConfig::new("https://api.example.com")
+        .timeout(std::time::Duration::from_secs(30));
 
-    let request = TypedRequestBuilder::get("https://httpbin.org/get")
-        .header("User-Agent", "hpx-transport")
-        .build()?;
+    let auth = ApiKeyAuth::header("X-API-Key", "my-api-key");
+    let client = RestClient::new(config, auth)?;
 
-    let response = client.send_request(request).await?;
-    println!("Status: {}", response.status());
+    // Use the client...
     Ok(())
 }
 ```
+
+## Performance Optimization Tips
+
+- **`simd-json`**: Replaces `serde_json` with SIMD-accelerated JSON parsing
+- **`hickory-dns`**: High-performance async DNS resolver, avoids blocking system calls
+- **`zstd`**: Fastest compression/decompression ratio for most workloads
+- **Lock-free internals**: Uses `scc` concurrent containers and `arc-swap` for hot-path data
 
 ## License
 

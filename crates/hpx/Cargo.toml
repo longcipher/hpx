@@ -28,7 +28,7 @@ default = ["boring", "http1", "http2"]
 charset = ["dep:encoding_rs", "dep:mime"]
 
 # Enable cookies store support.
-cookies = ["dep:cookie"]
+cookies = ["dep:cookie", "dep:arc-swap"]
 
 # Enable gzip compression support.
 gzip = ["tower-http/decompression-gzip"]
@@ -66,8 +66,14 @@ stream = ["tokio/fs", "dep:tokio-util", "dep:sync_wrapper"]
 # Enable SOCKS proxy support.
 socks = ["dep:tokio-socks"]
 
-# Enable WebSocket support.
-ws = ["dep:sha1", "dep:fastwebsockets"]
+# Enable WebSocket support (defaults to yawc backend).
+ws = ["ws-yawc"]
+
+# Enable WebSocket support via yawc backend.
+ws-yawc = ["dep:hpx-yawc"]
+
+# Enable WebSocket support via fastwebsockets backend.
+ws-fastwebsockets = ["dep:sha1", "dep:fastwebsockets"]
 
 # Enable webpki-roots for TLS certificate validation.
 webpki-roots = ["dep:webpki-root-certs"]
@@ -106,6 +112,7 @@ macros = ["tokio/macros"]
 
 [dependencies]
 ahash = { workspace = true }
+arc-swap = { workspace = true, optional = true }
 boring = { workspace = true, optional = true }
 brotli = { workspace = true, optional = true }
 bytes = { workspace = true }
@@ -127,6 +134,7 @@ rustls = { workspace = true, optional = true, features = [
 ] }
 rustls-pemfile = { workspace = true, optional = true }
 rustls-pki-types = { workspace = true, optional = true }
+scc = { workspace = true }
 schnellru = { workspace = true }
 smallvec = { workspace = true, features = [
     "const_generics",
@@ -185,6 +193,7 @@ fastwebsockets = { workspace = true, features = [
     "upgrade",
     "unstable-split",
 ], optional = true }
+hpx-yawc = { workspace = true, optional = true }
 
 ## hickory-dns
 hickory-resolver = { workspace = true, optional = true }

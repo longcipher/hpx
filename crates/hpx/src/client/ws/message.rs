@@ -1,12 +1,12 @@
 //! WebSocket message types and utilities
 //!
-//! This module provides WebSocket message types that wrap the underlying
-//! fastwebsockets frame implementation, offering a more ergonomic API
+//! This module provides WebSocket message types offering an ergonomic API
 //! for working with WebSocket communications.
 
 use std::{fmt, ops::Deref};
 
 use bytes::Bytes;
+#[cfg(feature = "ws-fastwebsockets")]
 use fastwebsockets::{Frame, OpCode, Payload};
 
 use crate::Error;
@@ -133,8 +133,6 @@ pub struct CloseCode(pub(super) u16);
 
 impl CloseCode {
     //! Constants for [`CloseCode`]s.
-    //!
-    //! [`CloseCode`]: super::CloseCode
 
     /// Indicates a normal closure, meaning that the purpose for which the connection was
     /// established has been fulfilled.
@@ -241,6 +239,7 @@ pub enum Message {
 
 impl Message {
     /// Converts this `Message` into a `fastwebsockets::Frame`.
+    #[cfg(feature = "ws-fastwebsockets")]
     pub(crate) fn into_frame(self) -> Frame<'static> {
         match self {
             Self::Text(text) => Frame::text(Payload::Owned(text.0.into_bytes())),
@@ -255,6 +254,7 @@ impl Message {
     }
 
     /// Converts a `fastwebsockets::Frame` into a `Message`.
+    #[cfg(feature = "ws-fastwebsockets")]
     pub(crate) fn from_frame(frame: Frame) -> Self {
         let data = Vec::from(frame.payload);
         match frame.opcode {

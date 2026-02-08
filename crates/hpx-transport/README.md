@@ -1,0 +1,70 @@
+# hpx-transport
+
+[![crates.io](https://img.shields.io/crates/v/hpx-transport.svg)](https://crates.io/crates/hpx-transport)
+[![docs.rs](https://docs.rs/hpx-transport/badge.svg)](https://docs.rs/hpx-transport)
+[![License](https://img.shields.io/crates/l/hpx-transport.svg)](https://github.com/longcipher/hpx)
+
+Exchange SDK toolkit for cryptocurrency trading with authentication, WebSocket, and rate limiting.
+
+This crate is part of the [hpx](https://github.com/longcipher/hpx) project and builds on the `hpx` HTTP client to provide exchange-specific functionality.
+
+## Features
+
+- **Authentication**: API key, Bearer token, HMAC signing, and composable auth strategies
+- **REST Client**: Generic exchange REST client with typed responses
+- **WebSocket**: Actor-based WebSocket client with automatic reconnection and subscription management
+- **Rate Limiting**: Token bucket rate limiter using lock-free `scc` containers
+- **Typed Responses**: Generic response wrapper with metadata and error handling
+- **Metrics**: OpenTelemetry OTLP gRPC metrics integration
+
+## Quick Start
+
+```rust
+use hpx_transport::{
+    auth::ApiKeyAuth,
+    exchange::{RestClient, RestConfig},
+};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = RestConfig::new("https://api.example.com")
+        .timeout(std::time::Duration::from_secs(30));
+
+    let auth = ApiKeyAuth::header("X-API-Key", "my-api-key");
+    let client = RestClient::new(config, auth)?;
+
+    // Use the client...
+    Ok(())
+}
+```
+
+## Rate Limiting
+
+```rust
+use hpx_transport::rate_limit::RateLimiter;
+
+let limiter = RateLimiter::new();
+limiter.add_limit("orders", 10, 1.0); // 10 capacity, 1/sec refill
+
+if limiter.try_acquire("orders") {
+    println!("Request allowed");
+}
+```
+
+## Feature Flags
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `ws-yawc` | **Yes** | WebSocket backend via hpx-yawc |
+| `ws-fastwebsockets` | No | WebSocket backend via fastwebsockets |
+
+## Key Dependencies
+
+- [`hpx`](https://crates.io/crates/hpx) — HTTP client (with `json`, `tracing`, `boring`, `http1`, `http2`)
+- [`opentelemetry`](https://crates.io/crates/opentelemetry) — Metrics via OTLP gRPC
+- [`scc`](https://crates.io/crates/scc) — Lock-free concurrent containers
+- [`tracing`](https://crates.io/crates/tracing) — Structured logging
+
+## License
+
+Apache-2.0

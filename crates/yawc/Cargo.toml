@@ -1,0 +1,183 @@
+[package]
+name = "hpx-yawc"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Yet another websocket library. A fast, secure WebSocket implementation with RFC 6455 compliance and compression support"
+documentation = "https://docs.rs/hpx-yawc"
+repository.workspace = true
+license.workspace = true
+keywords = ["websocket", "websockets", "ws", "networking", "wasm"]
+categories = [
+    "network-programming",
+    "asynchronous",
+    "web-programming",
+    "web-programming::websocket",
+    "wasm",
+]
+readme = "README.md"
+
+# Package build settings
+exclude = ["/.github/*", "/examples/*", "/tests/*", "/.gitignore"]
+include = ["/src/**/*", "/Cargo.toml", "/README.md", "/LICENSE"]
+
+# Documentation settings
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+# Optional feature configurations
+[features]
+axum = ["axum-core", "http"]
+default = ["rustls-ring"]
+rustls-aws-lc-rs = ["tokio-rustls/aws-lc-rs"]
+rustls-ring = ["tokio-rustls/ring"]
+simd = ["simdutf8"]
+smol = ["dep:smol"]
+zlib = ["flate2/any_zlib", "flate2/zlib-rs"]
+
+# Examples configuration
+[[example]]
+name = "axum"
+required-features = ["axum"]
+test = false
+
+[[example]]
+name = "autobahn_client"
+test = false
+
+[[example]]
+name = "autobahn_server"
+required-features = ["axum"]
+test = false
+
+[[example]]
+name = "client"
+test = false
+
+[[example]]
+name = "custom_dns"
+test = false
+
+[[example]]
+name = "echo_server"
+required-features = ["axum"]
+test = false
+
+[[example]]
+name = "client_smol"
+path = "examples/client_smol.rs"
+required-features = ["smol"]
+test = false
+
+[[example]]
+name = "echo_server_smol"
+path = "examples/echo_server_smol.rs"
+required-features = ["smol"]
+test = false
+
+[[example]]
+name = "proxy"
+test = false
+
+# ==============================================================================
+# Common dependencies (shared across all targets)
+# ==============================================================================
+[dependencies]
+bytes = { workspace = true }
+futures = { workspace = true }
+rand = "0.8"
+thiserror = { workspace = true }
+url = { workspace = true }
+
+# ==============================================================================
+# WebAssembly target-specific dependencies
+# ==============================================================================
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", default-features = false, features = [
+    "console",
+    "WebSocket",
+    "BinaryType",
+    "CloseEvent",
+    "MessageEvent",
+] }
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+getrandom = { version = "0.2", features = ["js"] }
+# Tokio without net features for WASM
+tokio = { workspace = true }
+
+# ==============================================================================
+# Native target-specific dependencies
+# ==============================================================================
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# HTTP clients
+hyper = { workspace = true, features = ["client", "http1"] }
+hyper-util = { workspace = true, features = ["tokio"] }
+tokio-rustls = { workspace = true, features = [
+    "logging",
+    "tls12",
+] }
+webpki-roots = { workspace = true }
+http-body-util = { workspace = true }
+
+# HTTP servers (optional)
+axum-core = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
+
+# Async runtime and utilities
+tokio = { workspace = true, features = [
+    "rt",
+    "macros",
+    "net",
+    "time",
+    "io-util",
+] }
+tokio-util = { workspace = true, features = ["codec"] }
+
+# Encoding and cryptography
+base64 = { workspace = true }
+sha1 = { workspace = true }
+
+# Utilities
+nom = { workspace = true }
+pin-project = { workspace = true }
+tracing = { workspace = true }
+
+# Optional dependencies
+simdutf8 = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+smol = { version = "2.0.2", optional = true }
+
+# Compression
+flate2 = { workspace = true }
+
+# ==============================================================================
+# Development dependencies
+# ==============================================================================
+[dev-dependencies]
+eyre = { workspace = true }
+serde_json = { workspace = true }
+wasm-bindgen-test = "0.3"
+
+# ==============================================================================
+# Development dependencies (native only)
+# ==============================================================================
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+eyre = { workspace = true }
+axum = { workspace = true }
+hyper = { workspace = true, features = ["http1", "server", "client"] }
+tracing = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+tracing-subscriber = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+webpki-roots = { workspace = true }
+criterion = { workspace = true }
+rand = "0.8"
+rustls = { workspace = true, features = ["ring"] }
+futures-rustls = "0.26"
+rustls-native-certs = "0.8"
+rustls-pki-types = { workspace = true }
+smol = "2.0.2"

@@ -88,6 +88,7 @@ impl From<FromUtf8Error> for TransportError {
     }
 }
 
+#[cfg(feature = "ws-fastwebsockets")]
 impl From<fastwebsockets::WebSocketError> for TransportError {
     fn from(e: fastwebsockets::WebSocketError) -> Self {
         Self::WebSocket {
