@@ -222,10 +222,10 @@
 
 ### Task 2.11: Run full validation
 
-- [ ] `cargo fmt --all -- --check` — no formatting issues.
-- [ ] `cargo clippy -p hpx-transport -- -D warnings` — zero warnings.
-- [ ] `cargo test -p hpx-transport --lib --tests` — all tests pass.
-- [ ] `cargo doc -p hpx-transport --no-deps` — docs build cleanly.
+- [x] `cargo fmt --all -- --check` — no formatting issues.
+- [x] `cargo clippy -p hpx-transport -- -D warnings` — zero warnings.
+- [x] `cargo test -p hpx-transport --lib --tests` — all tests pass.
+- [x] `cargo doc -p hpx-transport --no-deps` — docs build cleanly.
 
 **Acceptance**: All CI commands pass with zero errors.
 
