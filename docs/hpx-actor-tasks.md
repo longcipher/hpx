@@ -3,6 +3,8 @@
 > Performance-first refactoring: single-owner WebSocket, zero-spawn requests, RAII subscriptions, targeted lock optimizations.
 >
 > Reference design: [docs/hpx-actor-design.md](hpx-actor-design.md)
+>
+> Reference implementation: `::hypercore::ws` (single-task loop + reconnect + resubscribe)
 
 ---
 
@@ -153,11 +155,15 @@
 - [ ] On disconnect/error:
   - Emit `Event::Disconnected { epoch, reason }`.
   - Resolve all pending requests for current epoch with error.
-  - Calculate backoff using `WsConfig`: `initial_delay`, `max_delay`, `backoff_factor`, `jitter`.
+  - Calculate backoff using `WsConfig`: `reconnect_initial_delay`, `reconnect_max_delay`, `reconnect_backoff_factor`, `reconnect_jitter`.
+  - Use full-jitter (recommended): `sleep = rand(0..=delay)` where `delay` is the exponential backoff.
   - Sleep for backoff duration.
   - Attempt reconnection.
   - On success: reset attempt counter; re-authenticate; re-subscribe; resume loop.
   - On max attempts exceeded: emit error, shut down.
+- [ ] Add tests:
+  - Unit test for backoff calculation with `reconnect_jitter = 0.0` (deterministic).
+  - Integration test: disconnect → backoff → reconnect → resubscribe → `Event::Connected` emitted.
 
 **Acceptance**: Reconnection works with configured backoff; integration test passes.
 
@@ -172,8 +178,10 @@
   - Spawn `connection_task(...)` via `tokio::spawn`.
   - Return `(ConnectionHandle, ConnectionStream)`.
 - [ ] Add `event_channel_capacity` to `WsConfig` with default `256`.
+- [ ] Implement event backpressure policy: `Event::Connected/Disconnected` use `send().await`, `Event::Message` uses `try_send` (drop + counter/log).
+- [ ] Optional: provide `Connection::split()` and/or implement `Stream` for `Connection` to match `::hypercore::ws` ergonomics.
 
-**Acceptance**: `Connection::connect()` returns handle + stream; connection task is running.
+**Acceptance**: `Connection::connect()` returns handle + stream; connection task is running; event channel backpressure does not block lifecycle events.
 
 ### Task 2.8: Wire WsClient as compatibility wrapper
 
@@ -233,6 +241,7 @@
 
 **Files**: `crates/hpx-transport/src/websocket/connection.rs`, `crates/hpx-transport/src/websocket/pending.rs`
 
+- [ ] Note: base zero-spawn path exists in `ConnectionHandle::request`; ensure it is the only path by removing any remaining spawn-based forwarding from legacy code.
 - [ ] Ensure `PendingRequestStore::add()` returns `oneshot::Receiver<TransportResult<String>>` (already the case).
 - [ ] Add `PendingRequestStore::remove(id)` to cancel a pending request on timeout.
 - [ ] `ConnectionHandle::request()`:
@@ -412,9 +421,12 @@
 
 **Files**: `docs/hpx-actor-design.md`, `docs/hpx-actor-tasks.md`, `docs/hpx-transport-ws-design.md`
 
-- [ ] Update architecture diagrams to reflect single-task model.
-- [ ] Document the Connection/Handle/Stream split.
-- [ ] Document command priority (two-channel design).
+- [x] Update architecture diagrams to reflect single-task model.
+- [x] Document the Connection/Handle/Stream split.
+- [x] Document command priority (two-channel design).
+- [x] Document reconnect/backoff policy + event backpressure behavior.
+- [x] Document  parity and the kameo decision (why not in hot paths).
+- [ ] Update `docs/hpx-transport-ws-design.md` to reflect the driver loop, backoff, and event policy.
 
 **Acceptance**: Design docs reflect implemented architecture.
 
