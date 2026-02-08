@@ -89,8 +89,6 @@ pub use websocket::{
     ConnectionState,
     ConnectionStream,
     Event,
-    // Backward compatibility (legacy types)
-    ExchangeHandler,
     MessageKind,
     // Protocol abstraction
     ProtocolHandler,
@@ -98,8 +96,6 @@ pub use websocket::{
     // Subscription guard
     SubscriptionGuard,
     Topic,
-    WebSocketConfig,
-    WebSocketHandle,
     // Core client types
     WsClient,
     WsConfig,

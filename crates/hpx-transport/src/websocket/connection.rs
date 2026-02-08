@@ -1,5 +1,4 @@
 use std::{
-    ops::Deref,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -13,7 +12,7 @@ use hpx::{
     Client,
     ws::{WebSocket, WebSocketRead, WebSocketRequestBuilder, WebSocketWrite, message::Message},
 };
-use rand::Rng;
+use rand::RngExt;
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::{
     sync::{broadcast, mpsc},
@@ -138,19 +137,16 @@ impl SubscriptionGuard {
         self.rx.take().expect("subscription receiver already taken")
     }
 
+    /// Receive the next message from this subscription.
     pub async fn recv(&mut self) -> Option<WsMessage> {
         let rx = self.rx.as_mut()?;
         rx.recv().await.ok()
     }
-}
 
-impl Deref for SubscriptionGuard {
-    type Target = broadcast::Receiver<WsMessage>;
-
-    fn deref(&self) -> &Self::Target {
-        self.rx
-            .as_ref()
-            .expect("subscription receiver already taken")
+    /// Try to receive a message without blocking.
+    pub fn try_recv(&mut self) -> Option<WsMessage> {
+        let rx = self.rx.as_mut()?;
+        rx.try_recv().ok()
     }
 }
 
@@ -754,6 +750,21 @@ where
             msg = ws_read.next() => {
                 match msg {
                     Some(Ok(msg)) => {
+                        // Enforce max_message_size.
+                        let msg_size = match &msg {
+                            Message::Text(t) => t.len(),
+                            Message::Binary(b) => b.len(),
+                            _ => 0,
+                        };
+                        if config.max_message_size > 0 && msg_size > config.max_message_size {
+                            warn!(
+                                size = msg_size,
+                                max = config.max_message_size,
+                                "Dropping oversized WebSocket message"
+                            );
+                            continue;
+                        }
+
                         match &msg {
                             Message::Pong(_) => {
                                 last_pong = Instant::now();

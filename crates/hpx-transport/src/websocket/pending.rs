@@ -16,6 +16,9 @@ use tokio::sync::oneshot;
 use super::{config::WsConfig, types::RequestId};
 use crate::error::{TransportError, TransportResult};
 
+/// Alias for pending response sender extracted during cleanup.
+type ResponseSender = oneshot::Sender<TransportResult<String>>;
+
 /// A pending request awaiting a response.
 pub struct PendingRequest {
     /// Channel to send the response.
@@ -122,30 +125,36 @@ impl PendingRequestStore {
 
     /// Clean up stale requests and notify them of timeout.
     ///
-    /// This sends timeout errors to all expired requests.
+    /// This sends timeout errors to all expired requests using a single pass
+    /// through the map, removing expired entries and collecting their senders.
     pub fn cleanup_stale_with_notify(&self) {
         let now = Instant::now();
-        let mut expired = Vec::new();
+        let mut expired_senders: Vec<(ResponseSender, Duration, RequestId)> = Vec::new();
 
-        // First, collect expired IDs
         self.requests.retain_sync(|id, pending| {
             if now.duration_since(pending.created_at) >= pending.timeout {
-                expired.push((id.clone(), pending.timeout));
+                let tx = std::mem::replace(
+                    &mut pending.response_tx,
+                    oneshot::channel().0,
+                );
+                expired_senders.push((tx, pending.timeout, id.clone()));
+                false // remove this entry
+            } else {
+                true // keep
             }
-            true
         });
 
-        // Then remove and notify each one
-        for (id, timeout) in expired {
-            if let Some((_, pending)) = self.requests.remove_sync(&id) {
-                self.count.fetch_sub(1, Ordering::AcqRel);
-                let _ = pending
-                    .response_tx
-                    .send(Err(TransportError::request_timeout(
-                        timeout,
-                        id.to_string(),
-                    )));
-            }
+        let removed = expired_senders.len();
+        if removed > 0 {
+            self.count.fetch_sub(removed, Ordering::AcqRel);
+        }
+
+        // Send timeout errors outside the lock (senders collected above).
+        for (tx, timeout_dur, id) in expired_senders {
+            let _ = tx.send(Err(TransportError::request_timeout(
+                timeout_dur,
+                id.to_string(),
+            )));
         }
     }
 
@@ -168,21 +177,27 @@ impl PendingRequestStore {
     ///
     /// This should be called on connection close to notify all waiters.
     pub fn clear_with_error(&self, error_message: &str) {
-        let mut ids = Vec::new();
-        self.requests.retain_sync(|id, _| {
-            ids.push(id.clone());
-            true
+        let mut senders: Vec<ResponseSender> = Vec::new();
+
+        self.requests.retain_sync(|_, pending| {
+            let tx = std::mem::replace(
+                &mut pending.response_tx,
+                oneshot::channel().0,
+            );
+            senders.push(tx);
+            false // remove all entries
         });
 
-        for id in ids {
-            if let Some((_, pending)) = self.requests.remove_sync(&id) {
-                self.count.fetch_sub(1, Ordering::AcqRel);
-                let _ = pending
-                    .response_tx
-                    .send(Err(TransportError::connection_closed(Some(
-                        error_message.to_string(),
-                    ))));
-            }
+        let removed = senders.len();
+        if removed > 0 {
+            self.count.fetch_sub(removed, Ordering::AcqRel);
+        }
+
+        let error_message = error_message.to_string();
+        for tx in senders {
+            let _ = tx.send(Err(TransportError::connection_closed(Some(
+                error_message.clone(),
+            ))));
         }
     }
 

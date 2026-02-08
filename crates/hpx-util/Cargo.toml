@@ -75,6 +75,10 @@ path = "tests/emulation_firefox.rs"
 name = "emulation_safari"
 path = "tests/emulation_safari.rs"
 
+[[test]]
+name = "emulation_opera"
+path = "tests/emulation_opera.rs"
+
 [[example]]
 name = "hpx_util_emulation"
 path = "examples/hpx_util_emulation.rs"

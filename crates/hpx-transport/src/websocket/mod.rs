@@ -164,11 +164,10 @@
 //! - `protocol`: Protocol handler trait for exchange abstraction
 //! - [`handlers`]: Ready-to-use protocol handler implementations
 //! - `connection`: Single-task connection driver/task implementation
-//! - `ws_client`: Backward-compatible client wrapper
+//! - `ws_client`: High-level client wrapper
 //! - `pending`: Lock-free pending request management
 //! - `subscription`: Lock-free subscription management
 
-mod client;
 mod config;
 pub mod connection;
 pub mod handlers;
@@ -179,9 +178,6 @@ mod types;
 mod ws_client;
 
 // Re-export config types
-// Re-export new connection API types
-// Re-export client types
-pub use client::{ExchangeHandler, WebSocketConfig, WebSocketHandle};
 pub use config::WsConfig;
 pub use connection::{
     Connection, ConnectionEpoch, ConnectionHandle, ConnectionState, ConnectionStream, Event,

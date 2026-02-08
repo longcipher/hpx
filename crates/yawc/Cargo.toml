@@ -97,17 +97,17 @@ url = { workspace = true }
 # WebAssembly target-specific dependencies
 # ==============================================================================
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-web-sys = { version = "0.3", default-features = false, features = [
+web-sys = { workspace = true, features = [
     "console",
     "WebSocket",
     "BinaryType",
     "CloseEvent",
     "MessageEvent",
 ] }
-js-sys = "0.3"
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-getrandom = { version = "0.2", features = ["js"] }
+js-sys = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+getrandom = { workspace = true, features = ["js"] }
 # Tokio without net features for WASM
 tokio = { workspace = true }
 
@@ -151,7 +151,7 @@ tracing = { workspace = true }
 # Optional dependencies
 simdutf8 = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
-smol = { version = "2.0.2", optional = true }
+smol = { workspace = true, optional = true }
 
 # Compression
 flate2 = { workspace = true }
@@ -162,7 +162,7 @@ flate2 = { workspace = true }
 [dev-dependencies]
 eyre = { workspace = true }
 serde_json = { workspace = true }
-wasm-bindgen-test = "0.3"
+wasm-bindgen-test = { workspace = true }
 
 # ==============================================================================
 # Development dependencies (native only)
@@ -175,12 +175,12 @@ tracing = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tracing-subscriber = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
-tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-stream = { workspace = true }
 webpki-roots = { workspace = true }
 criterion = { workspace = true }
-rand = "0.8"
+rand = { workspace = true }
 rustls = { workspace = true, features = ["ring"] }
-futures-rustls = "0.26"
-rustls-native-certs = "0.8"
+futures-rustls = { workspace = true }
+rustls-native-certs = { workspace = true }
 rustls-pki-types = { workspace = true }
-smol = "2.0.2"
+smol = { workspace = true }

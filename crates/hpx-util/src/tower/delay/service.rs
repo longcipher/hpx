@@ -105,10 +105,13 @@ where
     }
 
     fn call(&mut self, req: Req) -> Self::Future {
-        if !(self.predicate)(&req) {
-            self.inner.delay = Duration::ZERO;
-        }
-        self.inner.call(req)
+        let delay = if (self.predicate)(&req) {
+            self.inner.delay
+        } else {
+            Duration::ZERO
+        };
+        let response = self.inner.inner.call(req);
+        ResponseFuture::new(response, tokio::time::sleep(delay))
     }
 }
 

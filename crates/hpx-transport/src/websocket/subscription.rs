@@ -87,43 +87,37 @@ impl SubscriptionStore {
     /// Returns `true` if this was the last subscriber (topic removed),
     /// `false` if there are remaining subscribers.
     pub fn unsubscribe(&self, topic: &Topic) -> bool {
-        let mut should_remove = false;
-
-        let _ = self.subscriptions.update_sync(topic, |_, entry| {
-            entry.ref_count = entry.ref_count.saturating_sub(1);
-            if entry.ref_count == 0 {
-                should_remove = true;
-            }
-        });
-
-        if should_remove {
-            self.subscriptions.remove_sync(topic);
-            return true;
-        }
-
-        false
+        // Atomically decrement and remove if zero — no TOCTOU race.
+        self.subscriptions
+            .remove_if_sync(topic, |entry| {
+                entry.ref_count = entry.ref_count.saturating_sub(1);
+                entry.ref_count == 0
+            })
+            .is_some()
     }
 
     /// Decrement the ref count for a topic.
     ///
     /// Returns the remaining count, or `None` if the topic was not found.
     pub fn decrement_ref(&self, topic: &Topic) -> Option<usize> {
-        let mut should_remove = false;
         let mut remaining = None;
 
-        self.subscriptions.update_sync(topic, |_, entry| {
+        // Try atomic conditional removal first.
+        let removed = self.subscriptions.remove_if_sync(topic, |entry| {
             entry.ref_count = entry.ref_count.saturating_sub(1);
             remaining = Some(entry.ref_count);
-            if entry.ref_count == 0 {
-                should_remove = true;
-            }
-        })?;
+            entry.ref_count == 0
+        });
 
-        if should_remove {
-            self.subscriptions.remove_sync(topic);
+        // If remove_if_sync returned None, it could mean:
+        //  - topic doesn't exist, OR
+        //  - topic exists but ref_count > 0 after decrement (so not removed)
+        // In the latter case `remaining` is already set.
+        if removed.is_some() || remaining.is_some() {
+            remaining
+        } else {
+            None
         }
-
-        remaining
     }
 
     /// Publish a message to a topic.
