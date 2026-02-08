@@ -171,15 +171,15 @@
 
 **File**: `crates/hpx-transport/src/websocket/connection.rs`
 
-- [ ] Implement `Connection::connect(config, handler) -> Result<(ConnectionHandle, ConnectionStream)>`:
+- [x] Implement `Connection::connect(config, handler) -> Result<(ConnectionHandle, ConnectionStream)>`:
   - Validate config.
   - Create channels: `ctrl_tx/ctrl_rx`, `cmd_tx/cmd_rx`, `event_tx/event_rx`.
   - Create `PendingRequestStore` and `SubscriptionStore`.
-  - Spawn `connection_task(...)` via `tokio::spawn`.
+  - Spawn `connection_driver(...)` via `tokio::spawn` (driver runs `connection_task`).
   - Return `(ConnectionHandle, ConnectionStream)`.
-- [ ] Add `event_channel_capacity` to `WsConfig` with default `256`.
-- [ ] Implement event backpressure policy: `Event::Connected/Disconnected` use `send().await`, `Event::Message` uses `try_send` (drop + counter/log).
-- [ ] Optional: provide `Connection::split()` and/or implement `Stream` for `Connection` to match `::hypercore::ws` ergonomics.
+- [x] Add `event_channel_capacity` to `WsConfig` with default `256`.
+- [x] Implement event backpressure policy: `Event::Connected/Disconnected` use `send().await`, `Event::Message` uses `try_send` (drop + counter/log).
+- [x] Optional: provide `Connection::split()` and/or implement `Stream` for `Connection` to match `::hypercore::ws` ergonomics.
 
 **Acceptance**: `Connection::connect()` returns handle + stream; connection task is running; event channel backpressure does not block lifecycle events.
 

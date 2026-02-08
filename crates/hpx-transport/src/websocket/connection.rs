@@ -233,6 +233,77 @@ impl Stream for ConnectionStream {
     }
 }
 
+pub struct Connection {
+    handle: ConnectionHandle,
+    stream: ConnectionStream,
+}
+
+impl Connection {
+    pub async fn connect<H>(
+        config: WsConfig,
+        handler: H,
+    ) -> TransportResult<(ConnectionHandle, ConnectionStream)>
+    where
+        H: ProtocolHandler,
+    {
+        let connection = Self::connect_stream(config, handler).await?;
+        Ok(connection.split())
+    }
+
+    pub async fn connect_stream<H>(config: WsConfig, handler: H) -> TransportResult<Self>
+    where
+        H: ProtocolHandler,
+    {
+        config.validate().map_err(TransportError::config)?;
+
+        let config = Arc::new(config);
+        let (ctrl_tx, ctrl_rx) = mpsc::channel(config.command_channel_capacity);
+        let (cmd_tx, cmd_rx) = mpsc::channel(config.command_channel_capacity);
+        let (event_tx, event_rx) = mpsc::channel(config.event_channel_capacity);
+        let pending = Arc::new(PendingRequestStore::new(Arc::clone(&config)));
+        let subs = Arc::new(SubscriptionStore::new(Arc::clone(&config)));
+
+        let handle = ConnectionHandle {
+            ctrl_tx,
+            cmd_tx,
+            pending: Arc::clone(&pending),
+            subs: Arc::clone(&subs),
+            config: Arc::clone(&config),
+        };
+
+        tokio::spawn(connection_driver(
+            Arc::clone(&config),
+            handler,
+            ctrl_rx,
+            cmd_rx,
+            event_tx,
+            pending,
+            subs,
+        ));
+
+        let stream = ConnectionStream::new(event_rx);
+
+        Ok(Self { handle, stream })
+    }
+
+    pub fn split(self) -> (ConnectionHandle, ConnectionStream) {
+        (self.handle, self.stream)
+    }
+
+    pub fn handle(&self) -> &ConnectionHandle {
+        &self.handle
+    }
+}
+
+impl Stream for Connection {
+    type Item = Event;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        Pin::new(&mut this.stream).poll_next(cx)
+    }
+}
+
 #[async_trait]
 pub(crate) trait WsWriter: Send {
     async fn send_ws(&mut self, message: Message) -> TransportResult<()>;
@@ -596,7 +667,9 @@ where
                                     kind,
                                     topic,
                                 };
-                                let _ = event_tx.send(Event::Message(incoming)).await;
+                                if let Err(err) = event_tx.try_send(Event::Message(incoming)) {
+                                    warn!(error = %err, "Dropping event message due to backpressure");
+                                }
                             }
                         }
                     }
@@ -858,6 +931,87 @@ mod tests {
         drop(ctrl_tx);
         drop(cmd_tx);
         let _ = task.await;
+    }
+
+    #[tokio::test]
+    async fn connection_task_event_backpressure_does_not_block() {
+        struct TestHandler;
+
+        impl ProtocolHandler for TestHandler {
+            fn classify_message(&self, message: &str) -> MessageKind {
+                if message == "control" {
+                    MessageKind::Control
+                } else {
+                    MessageKind::Unknown
+                }
+            }
+
+            fn extract_request_id(&self, _message: &str) -> Option<RequestId> {
+                None
+            }
+
+            fn extract_topic(&self, _message: &str) -> Option<Topic> {
+                None
+            }
+
+            fn build_subscribe(&self, _topics: &[Topic], _request_id: RequestId) -> WsMessage {
+                WsMessage::text("sub")
+            }
+
+            fn build_unsubscribe(&self, _topics: &[Topic], _request_id: RequestId) -> WsMessage {
+                WsMessage::text("unsub")
+            }
+        }
+
+        let mut config = WsConfig::new("wss://test");
+        config.ping_interval = Duration::from_secs(60);
+        config.pending_cleanup_interval = Duration::from_secs(60);
+        let config = Arc::new(config);
+
+        let (ctrl_tx, mut ctrl_rx) = mpsc::channel(1);
+        let (cmd_tx, mut cmd_rx) = mpsc::channel(1);
+        let (event_tx, _event_rx) = mpsc::channel(1);
+        let pending = Arc::new(PendingRequestStore::new(Arc::clone(&config)));
+        let subs = Arc::new(SubscriptionStore::new(Arc::clone(&config)));
+
+        event_tx
+            .send(Event::Connected {
+                epoch: ConnectionEpoch(1),
+            })
+            .await
+            .expect("seed event");
+
+        let ws_read = futures_util::stream::iter(vec![Ok(Message::text("control"))]);
+        let ws_write = SinkWriter::new(
+            futures_util::sink::drain()
+                .sink_map_err(|_| TransportError::internal("drain sink should not error")),
+        );
+
+        let handler = TestHandler;
+        let task = tokio::spawn(async move {
+            connection_task(
+                &config,
+                &handler,
+                &mut ctrl_rx,
+                &mut cmd_rx,
+                &event_tx,
+                &pending,
+                &subs,
+                ws_read,
+                ws_write,
+            )
+            .await
+        });
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        let _ = ctrl_tx.send(ControlCommand::Close).await;
+
+        let task_result = timeout(Duration::from_secs(1), task)
+            .await
+            .expect("task should not block on full event channel");
+        let _ = task_result.expect("task join failed");
+
+        drop(cmd_tx);
     }
 
     struct AuthServerState {

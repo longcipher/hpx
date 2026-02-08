@@ -42,6 +42,8 @@ pub struct WsConfig {
     pub subscription_channel_capacity: usize,
     /// Capacity of command channel.
     pub command_channel_capacity: usize,
+    /// Capacity of event channel.
+    pub event_channel_capacity: usize,
 
     // Connection
     /// Timeout for initial connection.
@@ -69,6 +71,7 @@ impl Default for WsConfig {
             pending_cleanup_interval: Duration::from_secs(5),
             subscription_channel_capacity: 256,
             command_channel_capacity: 64,
+            event_channel_capacity: 256,
             connect_timeout: Duration::from_secs(10),
             auth_on_connect: false,
             max_message_size: 16 * 1024 * 1024, // 16 MB
@@ -145,6 +148,12 @@ impl WsConfig {
         self
     }
 
+    /// Set the event channel capacity.
+    pub fn event_channel_capacity(mut self, capacity: usize) -> Self {
+        self.event_channel_capacity = capacity;
+        self
+    }
+
     /// Set whether to authenticate on connect.
     pub fn auth_on_connect(mut self, auth: bool) -> Self {
         self.auth_on_connect = auth;
@@ -164,6 +173,9 @@ impl WsConfig {
         }
         if self.max_pending_requests == 0 {
             return Err("Max pending requests must be > 0".to_string());
+        }
+        if self.event_channel_capacity == 0 {
+            return Err("Event channel capacity must be > 0".to_string());
         }
         Ok(())
     }
@@ -186,6 +198,7 @@ mod tests {
         assert!(config.use_websocket_ping);
         assert_eq!(config.request_timeout, Duration::from_secs(30));
         assert_eq!(config.max_pending_requests, 1000);
+        assert_eq!(config.event_channel_capacity, 256);
         assert_eq!(config.connect_timeout, Duration::from_secs(10));
         assert!(!config.auth_on_connect);
         assert_eq!(config.max_message_size, 16 * 1024 * 1024);
@@ -240,6 +253,7 @@ mod tests {
             .use_websocket_ping(false)
             .request_timeout(Duration::from_secs(45))
             .max_pending_requests(500)
+            .event_channel_capacity(128)
             .connect_timeout(Duration::from_secs(15))
             .auth_on_connect(true);
 
@@ -253,6 +267,7 @@ mod tests {
         assert!(!config.use_websocket_ping);
         assert_eq!(config.request_timeout, Duration::from_secs(45));
         assert_eq!(config.max_pending_requests, 500);
+        assert_eq!(config.event_channel_capacity, 128);
         assert_eq!(config.connect_timeout, Duration::from_secs(15));
         assert!(config.auth_on_connect);
     }
