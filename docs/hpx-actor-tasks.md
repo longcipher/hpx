@@ -467,6 +467,36 @@
 
 ---
 
+## Phase 6: Test Stability & Tooling (Post-Refactor)
+
+### Task 6.1: Stabilize subscription lifecycle tests
+
+**File**: `crates/hpx-transport/tests/subscription_lifecycle.rs`
+
+- [x] Increase timeouts for connection and message expectations to avoid CI flakiness.
+- [x] Ensure no unexpected unsubscribe messages during guard drops.
+
+**Acceptance**: `cargo nextest run -p hpx-transport --filter-expr 'binary(/subscription_lifecycle/)'` is stable with retries disabled.
+
+### Task 6.2: Stabilize actor shutdown test
+
+**File**: `crates/hpx-transport/tests/websocket_actor_shutdown_on_drop_test.rs`
+
+- [x] Increase connect/shutdown timeouts to handle loaded test runs.
+
+**Acceptance**: `cargo nextest run -p hpx-transport --filter-expr 'binary(/websocket_actor_shutdown_on_drop_test/)'` is stable with retries disabled.
+
+### Task 6.3: Resolve example output filename collisions
+
+**Files**: `crates/yawc/Cargo.toml`, `crates/yawc/autobahn/client-test.js`, `crates/yawc/benches/run.js`, `crates/yawc/benches/Makefile`, `crates/yawc/examples/custom_dns.rs`
+
+- [ ] Rename yawc examples that collide with fastwebsockets (`axum`, `autobahn_client`, `echo_server`).
+- [ ] Update yawc scripts and docs to reference the new example names.
+
+**Acceptance**: `just test` emits no cargo example filename collision warnings.
+
+---
+
 ## Task Dependency Graph
 
 ```text

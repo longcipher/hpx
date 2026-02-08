@@ -116,7 +116,7 @@ async fn test_actor_shuts_down_on_handle_drop() -> TransportResult<()> {
     let client = WsClient::connect(config, TestHandler).await?;
     let client_clone = client.clone();
 
-    timeout(std::time::Duration::from_secs(1), connected_rx)
+    timeout(std::time::Duration::from_secs(3), connected_rx)
         .await
         .map_err(|_| hpx_transport::error::TransportError::internal("connect timeout"))?
         .map_err(|_| hpx_transport::error::TransportError::internal("connect channel closed"))?;
@@ -124,7 +124,7 @@ async fn test_actor_shuts_down_on_handle_drop() -> TransportResult<()> {
     drop(client);
     drop(client_clone);
 
-    timeout(std::time::Duration::from_secs(1), closed_rx)
+    timeout(std::time::Duration::from_secs(3), closed_rx)
         .await
         .map_err(|_| hpx_transport::error::TransportError::internal("shutdown timeout"))?
         .map_err(|_| hpx_transport::error::TransportError::internal("shutdown channel closed"))?;

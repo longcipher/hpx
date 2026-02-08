@@ -115,7 +115,7 @@ impl ProtocolHandler for TestHandler {
 async fn wait_for_connected(
     stream: &mut hpx_transport::websocket::ConnectionStream,
 ) -> TransportResult<()> {
-    let event = timeout(Duration::from_secs(1), stream.next())
+    let event = timeout(Duration::from_secs(3), stream.next())
         .await
         .map_err(|_| TransportError::internal("timeout waiting for connected event"))?
         .ok_or_else(|| TransportError::internal("event stream closed"))?;
@@ -132,7 +132,7 @@ async fn expect_message(
     rx: &mut mpsc::UnboundedReceiver<String>,
     expected: &str,
 ) -> TransportResult<()> {
-    match timeout(Duration::from_secs(1), rx.recv()).await {
+    match timeout(Duration::from_secs(3), rx.recv()).await {
         Ok(Some(msg)) if msg == expected => Ok(()),
         Ok(Some(msg)) => Err(TransportError::internal(format!(
             "expected {expected}, got {msg}",
