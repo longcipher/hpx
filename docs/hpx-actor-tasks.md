@@ -439,6 +439,15 @@
 
 **Acceptance**: Everything green.
 
+### Task 5.6: Fix doc link warnings
+
+**File**: `crates/hpx/src/lib.rs`
+
+- [x] Remove broken `multipart` intra-doc link in the overview list.
+- [x] Avoid linking to `ClientBuilder::cookie_store` when the `cookies` feature is off.
+
+**Acceptance**: `cargo doc --workspace --no-deps` has no new link warnings.
+
 ---
 
 ## Task Dependency Graph

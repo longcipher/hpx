@@ -11,7 +11,7 @@
 //! An ergonomic all-in-one HTTP client for browser emulation with TLS, JA3/JA4, and HTTP/2
 //! fingerprints.
 //!
-//! - Plain bodies, [JSON](#json), [urlencoded](#forms), [multipart]
+//! - Plain bodies, [JSON](#json), [urlencoded](#forms), multipart
 //! - Cookies Store
 //! - [Redirect Policy](#redirect-policies)
 //! - Original Header
@@ -191,7 +191,7 @@
 //! ## Cookies
 //!
 //! The automatic storing and sending of session cookies can be enabled with
-//! the [`cookie_store`][ClientBuilder::cookie_store] method on `ClientBuilder`.
+//! the `cookie_store` method on `ClientBuilder` (requires the `cookies` feature).
 //!
 //! ## Proxies
 //!
