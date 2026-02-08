@@ -160,11 +160,17 @@ impl<T, K: Key> Pool<T, K> {
         M: Timer + Send + Sync + Clone + 'static,
     {
         let inner = if config.is_enabled() {
+            // Preserve global max_pool_size semantics when a cap is configured.
+            let shard_count = if config.max_pool_size.is_some() {
+                1
+            } else {
+                DEFAULT_SHARD_COUNT
+            };
             Some(Arc::new(ShardedPool::new(
                 &config,
                 executor,
                 timer,
-                DEFAULT_SHARD_COUNT,
+                shard_count,
             )))
         } else {
             None

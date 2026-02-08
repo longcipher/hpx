@@ -372,10 +372,10 @@
 
 ### Task 4.6: Run full validation
 
-- [ ] `cargo fmt --all -- --check` — clean.
-- [ ] `cargo clippy -p hpx -- -D warnings` — clean.
-- [ ] `cargo test -p hpx --lib --tests` — all pass.
-- [ ] `cargo test -p hpx-transport --lib --tests` — all pass (no regression).
+- [x] `cargo fmt --all -- --check` — clean.
+- [x] `cargo clippy -p hpx -- -D warnings` — clean.
+- [x] `cargo test -p hpx --lib --tests` — all pass.
+- [x] `cargo test -p hpx-transport --lib --tests` — all pass (no regression).
 
 **Acceptance**: All CI commands pass with zero errors.
 
