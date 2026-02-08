@@ -182,6 +182,8 @@ pub use actor::{ActorCommand, ConnectionActor, ConnectionState};
 // Re-export client types
 pub use client::{ExchangeHandler, WebSocketConfig, WebSocketHandle};
 pub use config::WsConfig;
+// Re-export new connection API types
+pub use connection::{Connection, ConnectionEpoch, ConnectionHandle, ConnectionStream, Event};
 // Re-export state management stores
 pub use pending::PendingRequestStore;
 // Re-export protocol types

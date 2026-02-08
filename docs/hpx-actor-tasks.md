@@ -202,9 +202,9 @@
 
 **File**: `crates/hpx-transport/src/websocket/mod.rs`
 
-- [ ] Add `pub mod connection;`.
-- [ ] Re-export: `Connection`, `ConnectionHandle`, `ConnectionStream`, `Event`, `ConnectionEpoch`.
-- [ ] Keep all existing exports (`WsClient`, `WsConfig`, `ProtocolHandler`, `ConnectionState`, etc.).
+- [x] Add `pub mod connection;`.
+- [x] Re-export: `Connection`, `ConnectionHandle`, `ConnectionStream`, `Event`, `ConnectionEpoch`.
+- [x] Keep all existing exports (`WsClient`, `WsConfig`, `ProtocolHandler`, `ConnectionState`, etc.).
 
 **Acceptance**: `use hpx_transport::websocket::*` works with both old and new APIs.
 
