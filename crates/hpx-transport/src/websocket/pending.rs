@@ -133,10 +133,7 @@ impl PendingRequestStore {
 
         self.requests.retain_sync(|id, pending| {
             if now.duration_since(pending.created_at) >= pending.timeout {
-                let tx = std::mem::replace(
-                    &mut pending.response_tx,
-                    oneshot::channel().0,
-                );
+                let tx = std::mem::replace(&mut pending.response_tx, oneshot::channel().0);
                 expired_senders.push((tx, pending.timeout, id.clone()));
                 false // remove this entry
             } else {
@@ -180,10 +177,7 @@ impl PendingRequestStore {
         let mut senders: Vec<ResponseSender> = Vec::new();
 
         self.requests.retain_sync(|_, pending| {
-            let tx = std::mem::replace(
-                &mut pending.response_tx,
-                oneshot::channel().0,
-            );
+            let tx = std::mem::replace(&mut pending.response_tx, oneshot::channel().0);
             senders.push(tx);
             false // remove all entries
         });
