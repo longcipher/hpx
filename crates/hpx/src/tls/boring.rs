@@ -23,6 +23,7 @@ use boring::{
 };
 use cache::{SessionCache, SessionKey};
 use http::Uri;
+use parking_lot::Mutex;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio_boring::SslStream;
 use tower::Service;
@@ -32,7 +33,6 @@ use crate::{
     Error,
     client::{ConnectIdentity, ConnectRequest, Connected, Connection},
     error::BoxError,
-    sync::Mutex,
     tls::{AlpnProtocol, AlpsProtocol, CertStore, Identity, KeyLog, TlsOptions, TlsVersion},
 };
 

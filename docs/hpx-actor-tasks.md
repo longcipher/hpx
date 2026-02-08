@@ -354,9 +354,9 @@
 
 **File**: `crates/hpx/src/tls/boring.rs`
 
-- [ ] Replace `use crate::sync::Mutex` with `use parking_lot::Mutex`.
-- [ ] Update `.lock()` calls (no `.unwrap()` needed — `parking_lot` doesn't poison).
-- [ ] Verify TLS handshake still works (manual test with HTTPS request).
+- [x] Replace `use crate::sync::Mutex` with `use parking_lot::Mutex`.
+- [x] Update `.lock()` calls (no `.unwrap()` needed — `parking_lot` doesn't poison).
+- [x] Verify TLS handshake still works (manual test with HTTPS request).
 
 **Acceptance**: TLS session cache uses `parking_lot::Mutex`; HTTPS works.
 
