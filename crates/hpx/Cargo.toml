@@ -125,6 +125,7 @@ http-body-util = { workspace = true }
 http2 = { workspace = true, features = ["unstable"], optional = true }
 httparse = { workspace = true, optional = true }
 ipnet = { workspace = true }
+parking_lot = { workspace = true }
 percent-encoding = { workspace = true }
 pin-project-lite = { workspace = true }
 rustls = { workspace = true, optional = true, features = [
@@ -226,7 +227,6 @@ hyper-util = { workspace = true, features = [
     "server-graceful",
     "tokio",
 ] }
-parking_lot = { workspace = true }
 pretty_env_logger = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

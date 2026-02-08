@@ -274,6 +274,7 @@
 
 #[cfg(feature = "cookies")]
 use arc_swap as _;
+use parking_lot as _;
 #[cfg(feature = "rustls-tls")]
 use rustls as _;
 #[cfg(feature = "rustls-tls")]

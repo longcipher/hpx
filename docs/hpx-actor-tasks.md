@@ -308,9 +308,9 @@
 
 **Workspace**: `Cargo.toml`
 
-- [ ] `cargo add parking_lot --workspace`
-- [ ] `cargo add parking_lot -p hpx --workspace`
-- [ ] Verify workspace builds.
+- [x] `cargo add parking_lot --workspace`
+- [x] `cargo add parking_lot -p hpx --workspace`
+- [x] Verify workspace builds.
 
 **Acceptance**: `parking_lot` in workspace deps; `cargo build` passes.
 
