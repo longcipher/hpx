@@ -290,9 +290,9 @@
 
 ### Task 3.5: Run full validation
 
-- [ ] `cargo fmt --all -- --check` — clean.
-- [ ] `cargo clippy -p hpx-transport -- -D warnings` — clean.
-- [ ] `cargo test -p hpx-transport --lib --tests` — all pass.
+- [x] `cargo fmt --all -- --check` — clean.
+- [x] `cargo clippy -p hpx-transport -- -D warnings` — clean.
+- [x] `cargo test -p hpx-transport --lib --tests` — all pass.
 
 **Acceptance**: All CI commands pass.
 

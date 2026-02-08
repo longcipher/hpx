@@ -4,7 +4,10 @@
 //! timeout cleanup and capacity management.
 
 use std::{
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -30,6 +33,7 @@ pub struct PendingRequest {
 pub struct PendingRequestStore {
     requests: scc::HashMap<RequestId, PendingRequest>,
     config: Arc<WsConfig>,
+    count: AtomicUsize,
 }
 
 impl PendingRequestStore {
@@ -38,6 +42,7 @@ impl PendingRequestStore {
         Self {
             requests: scc::HashMap::new(),
             config,
+            count: AtomicUsize::new(0),
         }
     }
 
@@ -50,8 +55,7 @@ impl PendingRequestStore {
         id: RequestId,
         timeout: Option<Duration>,
     ) -> Option<oneshot::Receiver<TransportResult<String>>> {
-        // Check capacity first
-        if self.requests.len() >= self.config.max_pending_requests {
+        if !self.reserve_slot() {
             return None;
         }
 
@@ -66,6 +70,7 @@ impl PendingRequestStore {
 
         // Insert returns Err if key already exists
         if self.requests.insert_sync(id, pending).is_err() {
+            self.count.fetch_sub(1, Ordering::AcqRel);
             return None;
         }
 
@@ -77,6 +82,7 @@ impl PendingRequestStore {
     /// Returns `true` if the request was found and resolved, `false` otherwise.
     pub fn resolve(&self, id: &RequestId, response: TransportResult<String>) -> bool {
         if let Some((_, pending)) = self.requests.remove_sync(id) {
+            self.count.fetch_sub(1, Ordering::AcqRel);
             // Send the response; ignore error (receiver may have dropped)
             let _ = pending.response_tx.send(response);
             return true;
@@ -88,7 +94,11 @@ impl PendingRequestStore {
     ///
     /// Returns `true` if the request was present, `false` otherwise.
     pub fn remove(&self, id: &RequestId) -> bool {
-        self.requests.remove_sync(id).is_some()
+        if self.requests.remove_sync(id).is_some() {
+            self.count.fetch_sub(1, Ordering::AcqRel);
+            return true;
+        }
+        false
     }
 
     /// Clean up stale (timed out) requests without notification.
@@ -96,8 +106,18 @@ impl PendingRequestStore {
     /// Use this for periodic cleanup during normal operation.
     pub fn cleanup_stale(&self) {
         let now = Instant::now();
-        self.requests
-            .retain_sync(|_, pending| now.duration_since(pending.created_at) < pending.timeout);
+        let removed = AtomicUsize::new(0);
+        self.requests.retain_sync(|_, pending| {
+            let keep = now.duration_since(pending.created_at) < pending.timeout;
+            if !keep {
+                removed.fetch_add(1, Ordering::Relaxed);
+            }
+            keep
+        });
+        let removed = removed.load(Ordering::Relaxed);
+        if removed > 0 {
+            self.count.fetch_sub(removed, Ordering::AcqRel);
+        }
     }
 
     /// Clean up stale requests and notify them of timeout.
@@ -118,6 +138,7 @@ impl PendingRequestStore {
         // Then remove and notify each one
         for (id, timeout) in expired {
             if let Some((_, pending)) = self.requests.remove_sync(&id) {
+                self.count.fetch_sub(1, Ordering::AcqRel);
                 let _ = pending
                     .response_tx
                     .send(Err(TransportError::request_timeout(
@@ -130,17 +151,17 @@ impl PendingRequestStore {
 
     /// Check if there's capacity for more requests.
     pub fn has_capacity(&self) -> bool {
-        self.requests.len() < self.config.max_pending_requests
+        self.count.load(Ordering::Acquire) < self.config.max_pending_requests
     }
 
     /// Get the current number of pending requests.
     pub fn len(&self) -> usize {
-        self.requests.len()
+        self.count.load(Ordering::Acquire)
     }
 
     /// Check if the store is empty.
     pub fn is_empty(&self) -> bool {
-        self.requests.is_empty()
+        self.len() == 0
     }
 
     /// Clear all pending requests.
@@ -155,6 +176,7 @@ impl PendingRequestStore {
 
         for id in ids {
             if let Some((_, pending)) = self.requests.remove_sync(&id) {
+                self.count.fetch_sub(1, Ordering::AcqRel);
                 let _ = pending
                     .response_tx
                     .send(Err(TransportError::connection_closed(Some(
@@ -167,6 +189,20 @@ impl PendingRequestStore {
     /// Clear all pending requests without notification.
     pub fn clear(&self) {
         self.requests.clear_sync();
+        self.count.store(0, Ordering::Release);
+    }
+
+    fn reserve_slot(&self) -> bool {
+        let max = self.config.max_pending_requests;
+        self.count
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                if current >= max {
+                    None
+                } else {
+                    Some(current + 1)
+                }
+            })
+            .is_ok()
     }
 }
 
