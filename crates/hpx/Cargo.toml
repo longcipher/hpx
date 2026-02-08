@@ -362,3 +362,7 @@ harness = false
 [[bench]]
 name = "connection_pool"
 harness = false
+
+[[bench]]
+name = "contention"
+harness = false

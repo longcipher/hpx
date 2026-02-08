@@ -364,9 +364,9 @@
 
 **File**: `crates/hpx/benches/contention.rs` (new)
 
-- [ ] Benchmark: Pool checkout/checkin with 1/4/16 concurrent tasks across 10 hosts (before/after sharding).
-- [ ] Benchmark: H2 `record_data()` with 1/4/16 threads (before: Mutex, after: atomic).
-- [ ] Document results in benchmark output.
+- [x] Benchmark: Pool checkout/checkin with 1/4/16 concurrent tasks across 10 hosts (before/after sharding).
+- [x] Benchmark: H2 `record_data()` with 1/4/16 threads (before: Mutex, after: atomic).
+- [x] Document results in benchmark output.
 
 **Acceptance**: Benchmarks compile and run; results show improvement under contention.
 
