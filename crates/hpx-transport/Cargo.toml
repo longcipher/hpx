@@ -55,6 +55,11 @@ ulid.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+futures = { workspace = true }
+hpx-yawc = { workspace = true, features = ["axum"] }
+http-body-util = { workspace = true }
+hyper = { workspace = true, features = ["http1", "server"] }
+hyper-util = { workspace = true, features = ["tokio"] }
 tempfile.workspace = true
 tokio-test.workspace = true
 tracing-subscriber.workspace = true

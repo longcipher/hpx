@@ -256,7 +256,7 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
 
     /// Run the connection loop with established WebSocket.
     async fn run_connection(&mut self, ws: WebSocket) -> TransportResult<()> {
-        let (write, read) = ws.split();
+        let (write, mut read) = ws.split();
         self.ws_write = Some(write);
 
         // Send on_connect messages
@@ -268,7 +268,7 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
 
         // Handle authentication if needed
         if self.state == ConnectionState::Authenticating {
-            if !self.authenticate(read).await? {
+            if !self.authenticate(&mut read).await? {
                 warn!("Authentication failed, reconnecting");
                 return Err(TransportError::auth("Authentication failed"));
             }
@@ -280,10 +280,8 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
             warn!(error = %e, "Failed to resubscribe topics");
         }
 
-        // Run the ready loop - need to get read handle back
-        // For now, we'll create a new connection for the ready loop
-        // This is a limitation; in practice we'd need to restructure
-        self.run_ready_loop_internal().await
+        // Run the ready loop using the same authenticated connection.
+        self.run_ready_loop_internal(read).await
     }
 
     /// Disconnect the WebSocket.
@@ -345,7 +343,7 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
     }
 
     /// Perform authentication.
-    async fn authenticate(&mut self, mut read: WebSocketRead) -> TransportResult<bool> {
+    async fn authenticate(&mut self, read: &mut WebSocketRead) -> TransportResult<bool> {
         let auth_msg = match self.handler.build_auth_message() {
             Some(msg) => msg,
             None => return Ok(true), // No auth required
@@ -422,14 +420,8 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
 
     /// The main event loop when the connection is ready.
     ///
-    /// This version reconnects to get a fresh read handle.
-    async fn run_ready_loop_internal(&mut self) -> TransportResult<()> {
-        // We need to reconnect to get the read half
-        // This is a workaround; ideally we'd pass the read half through
-        let ws = Self::connect_websocket(&self.config.url).await?;
-        let (write, mut read) = ws.split();
-        self.ws_write = Some(write);
-
+    /// Uses the authenticated read half from the active WebSocket connection.
+    async fn run_ready_loop_internal(&mut self, mut read: WebSocketRead) -> TransportResult<()> {
         let mut ping_interval = tokio::time::interval(self.config.ping_interval);
         let mut cleanup_interval = tokio::time::interval(self.config.pending_cleanup_interval);
 

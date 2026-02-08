@@ -1,11 +1,14 @@
 [files]
-extend-exclude = ["specs/**", "target/**"]
+extend-exclude = [
+  "",
+  "crates/fastwebsockets",
+  "crates/yawc/benches",
+  "crates/hpx-util/src/emulation",
+  "crates/hpx/tests/badssl.rs",
+]
+
 [default.extend-words]
-# Names
 Divy = "Divy"
-# Technical terms
-EDE = "EDE"
+divy = "divy"
 WRK = "WRK"
-RQUEST = "RQUEST"
-ba = "ba"
-flate = "flate"
+EDE = "EDE"
