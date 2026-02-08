@@ -1,21 +1,21 @@
 //! Rate limiting for exchange APIs.
 //!
 //! This module provides a token bucket rate limiter for managing
-//! API request rates to exchanges.
+//! API request rates to exchanges. Uses lock-free `scc::HashMap` for
+//! high-performance concurrent access.
 
 use std::time::{Duration, Instant};
 
-use parking_lot::Mutex;
+use scc::HashMap as SccHashMap;
 
-/// A token bucket rate limiter.
+/// A token bucket rate limiter backed by lock-free `scc::HashMap`.
 #[derive(Debug)]
 pub struct RateLimiter {
-    buckets: Mutex<Vec<TokenBucket>>,
+    buckets: SccHashMap<String, TokenBucket>,
 }
 
 #[derive(Debug)]
 struct TokenBucket {
-    name: String,
     capacity: f64,
     tokens: f64,
     refill_rate: f64, // tokens per second
@@ -32,7 +32,7 @@ impl RateLimiter {
     /// Create a new rate limiter.
     pub fn new() -> Self {
         Self {
-            buckets: Mutex::new(Vec::new()),
+            buckets: SccHashMap::new(),
         }
     }
 
@@ -43,24 +43,23 @@ impl RateLimiter {
     /// * `capacity` - Maximum tokens in the bucket
     /// * `refill_rate` - Tokens added per second
     pub fn add_limit(&self, name: impl Into<String>, capacity: u32, refill_rate: f64) {
-        let mut buckets = self.buckets.lock();
-        buckets.push(TokenBucket {
-            name: name.into(),
+        let name = name.into();
+        let bucket = TokenBucket {
             capacity: f64::from(capacity),
             tokens: f64::from(capacity),
             refill_rate,
             last_update: Instant::now(),
-        });
+        };
+        // Insert or update the bucket
+        let _ = self.buckets.insert_sync(name, bucket);
     }
 
     /// Try to acquire a token without blocking.
     ///
     /// Returns `true` if a token was acquired, `false` if rate limited.
     pub fn try_acquire(&self, name: &str) -> bool {
-        let mut buckets = self.buckets.lock();
-
-        for bucket in buckets.iter_mut() {
-            if bucket.name == name {
+        self.buckets
+            .update_sync(name, |_, bucket| {
                 // Refill tokens based on elapsed time
                 let now = Instant::now();
                 let elapsed = now.duration_since(bucket.last_update).as_secs_f64();
@@ -70,14 +69,13 @@ impl RateLimiter {
                 // Try to consume a token
                 if bucket.tokens >= 1.0 {
                     bucket.tokens -= 1.0;
-                    return true;
+                    true
+                } else {
+                    false
                 }
-                return false;
-            }
-        }
-
-        // No matching rule, allow by default
-        true
+            })
+            // No matching rule, allow by default
+            .unwrap_or(true)
     }
 
     /// Acquire a token, waiting if necessary.
@@ -92,62 +90,42 @@ impl RateLimiter {
 
     /// Get the time until a token will be available.
     pub fn time_until_available(&self, name: &str) -> Option<Duration> {
-        let mut buckets = self.buckets.lock();
+        self.buckets.read_sync(name, |_, bucket| {
+            let now = Instant::now();
+            let elapsed = now.duration_since(bucket.last_update).as_secs_f64();
+            let current_tokens =
+                (bucket.tokens + elapsed * bucket.refill_rate).min(bucket.capacity);
 
-        for bucket in buckets.iter_mut() {
-            if bucket.name == name {
-                // Refill tokens based on elapsed time
-                let now = Instant::now();
-                let elapsed = now.duration_since(bucket.last_update).as_secs_f64();
-                let current_tokens =
-                    (bucket.tokens + elapsed * bucket.refill_rate).min(bucket.capacity);
-
-                if current_tokens >= 1.0 {
-                    return Some(Duration::ZERO);
-                }
-
-                // Calculate time until we have 1 token
+            if current_tokens >= 1.0 {
+                Duration::ZERO
+            } else {
                 let needed = 1.0 - current_tokens;
                 let wait_secs = needed / bucket.refill_rate;
-                return Some(Duration::from_secs_f64(wait_secs));
+                Duration::from_secs_f64(wait_secs)
             }
-        }
-
-        None
+        })
     }
 
     /// Get current available tokens for a bucket.
     pub fn available_tokens(&self, name: &str) -> Option<f64> {
-        let mut buckets = self.buckets.lock();
-
-        for bucket in buckets.iter_mut() {
-            if bucket.name == name {
-                let now = Instant::now();
-                let elapsed = now.duration_since(bucket.last_update).as_secs_f64();
-                return Some((bucket.tokens + elapsed * bucket.refill_rate).min(bucket.capacity));
-            }
-        }
-
-        None
+        self.buckets.read_sync(name, |_, bucket| {
+            let now = Instant::now();
+            let elapsed = now.duration_since(bucket.last_update).as_secs_f64();
+            (bucket.tokens + elapsed * bucket.refill_rate).min(bucket.capacity)
+        })
     }
 
     /// Reset a bucket to full capacity.
     pub fn reset(&self, name: &str) {
-        let mut buckets = self.buckets.lock();
-
-        for bucket in buckets.iter_mut() {
-            if bucket.name == name {
-                bucket.tokens = bucket.capacity;
-                bucket.last_update = Instant::now();
-                return;
-            }
-        }
+        self.buckets.update_sync(name, |_, bucket| {
+            bucket.tokens = bucket.capacity;
+            bucket.last_update = Instant::now();
+        });
     }
 
     /// Remove all rate limit rules.
     pub fn clear(&self) {
-        let mut buckets = self.buckets.lock();
-        buckets.clear();
+        self.buckets.retain_sync(|_, _| false);
     }
 }
 

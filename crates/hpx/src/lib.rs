@@ -272,6 +272,8 @@
 //! [Proxy]: ./struct.Proxy.html
 //! [cargo-features]: https://doc.rust-lang.org/stable/cargo/reference/manifest.html#the-features-section
 
+#[cfg(feature = "cookies")]
+use arc_swap as _;
 #[cfg(feature = "rustls-tls")]
 use rustls as _;
 #[cfg(feature = "rustls-tls")]
@@ -320,7 +322,7 @@ pub use self::client::http1;
 pub use self::client::http2;
 #[cfg(feature = "multipart")]
 pub use self::client::multipart;
-#[cfg(feature = "ws")]
+#[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
 pub use self::client::ws;
 pub use self::{
     client::{
@@ -344,13 +346,13 @@ fn _assert_impls() {
 
     assert_send::<Request>();
     assert_send::<RequestBuilder>();
-    #[cfg(feature = "ws")]
+    #[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
     assert_send::<ws::WebSocketRequestBuilder>();
 
     assert_send::<Response>();
-    #[cfg(feature = "ws")]
+    #[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
     assert_send::<ws::WebSocketResponse>();
-    #[cfg(feature = "ws")]
+    #[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
     assert_send::<ws::WebSocket>();
 
     assert_send::<Error>();
@@ -596,8 +598,11 @@ pub fn request<T: IntoUri>(method: Method, uri: T) -> RequestBuilder {
 /// # }
 /// ```
 #[inline]
-#[cfg(feature = "ws")]
-#[cfg_attr(docsrs, doc(cfg(feature = "ws")))]
+#[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets")))
+)]
 pub fn websocket<T: IntoUri>(uri: T) -> ws::WebSocketRequestBuilder {
     Client::new().websocket(uri)
 }

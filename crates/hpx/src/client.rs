@@ -10,7 +10,7 @@ mod response;
 pub mod layer;
 #[cfg(feature = "multipart")]
 pub mod multipart;
-#[cfg(feature = "ws")]
+#[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
 pub mod ws;
 
 #[allow(unused_imports)]

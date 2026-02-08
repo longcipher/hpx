@@ -1,180 +1,78 @@
-[![Crates.io](https://img.shields.io/crates/v/fastwebsockets.svg)](https://crates.io/crates/fastwebsockets)
+# hpx-fastwebsockets
 
-[Documentation](https://docs.rs/fastwebsockets) | [Benchmarks](benches/)
+[![crates.io](https://img.shields.io/crates/v/hpx-fastwebsockets.svg)](https://crates.io/crates/hpx-fastwebsockets)
+[![docs.rs](https://docs.rs/hpx-fastwebsockets/badge.svg)](https://docs.rs/hpx-fastwebsockets)
+[![License](https://img.shields.io/crates/l/hpx-fastwebsockets.svg)](https://github.com/longcipher/hpx)
 
-_fastwebsockets_ is a fast WebSocket protocol implementation.
+A fast, minimal RFC 6455 WebSocket implementation.
 
-Passes the
-Autobahn|TestSuite<sup><a href="https://denoland.github.io/fastwebsockets/servers/">1</a></sup>
-and fuzzed with LLVM's libfuzzer.
+This crate is part of the [hpx](https://github.com/longcipher/hpx) project. It is a fork of [fastwebsockets](https://github.com/denoland/fastwebsockets) by Divy Srivastava.
 
-You can use it as a raw websocket frame parser and deal with spec compliance
-yourself, or you can use it as a full-fledged websocket client/server.
+Passes the Autobahn test suite and fuzzed with LLVM's libfuzzer. Can be used as a raw WebSocket frame parser or as a full-fledged WebSocket server/client.
+
+## Quick Start
 
 ```rust
-use fastwebsockets::{Frame, OpCode, WebSocket};
+use tokio::net::TcpStream;
+use hpx_fastwebsockets::{WebSocket, OpCode, Role};
+use eyre::Result;
 
-async fn handle_client(
-  mut socket: TcpStream,
-) -> Result<(), WebSocketError> {
-  handshake(&mut socket).await?;
-
-  let mut ws = WebSocket::after_handshake(socket);
-  ws.set_writev(true);
-  ws.set_auto_close(true);
-  ws.set_auto_pong(true);
-
-  loop {
-    let frame = ws.read_frame().await?;
-
-    match frame {
-      OpCode::Close => break,
-      OpCode::Text | OpCode::Binary => {
-        let frame = Frame::new(true, frame.opcode, None, frame.payload);
-        ws.write_frame(frame).await?;
-      }
+async fn handle(mut ws: WebSocket<TcpStream>) -> Result<()> {
+    loop {
+        let frame = ws.read_frame().await?;
+        match frame.opcode {
+            OpCode::Close => break,
+            OpCode::Text | OpCode::Binary => {
+                ws.write_frame(frame).await?;
+            }
+            _ => {}
+        }
     }
-  }
-
-  Ok(())
+    Ok(())
 }
 ```
 
-**Fragmentation**
-
-By default, fastwebsockets will give the application raw frames with FIN set.
-To get a single message with all frames concatenated, use `FragmentCollector`.
-
-For concanated frames, use `FragmentCollector`:
+## HTTP Upgrade (with hyper)
 
 ```rust
-let mut ws = WebSocket::after_handshake(socket);
-let mut ws = FragmentCollector::new(ws);
-
-let incoming = ws.read_frame().await?;
-// Always returns full messages
-assert!(incoming.fin);
-```
-
-> permessage-deflate is not supported yet.
-
-**HTTP Upgrade**
-
-Enable the `upgrade` feature to do server-side upgrades and client-side
-handshakes.
-
-This feature is powered by [hyper](https://docs.rs/hyper).
-
-```rust
-use fastwebsockets::upgrade::upgrade;
-use hyper::{Request, body::{Incoming, Bytes}, Response};
+use hpx_fastwebsockets::upgrade;
+use hyper::{Request, Response, body::Incoming};
 use http_body_util::Empty;
-use anyhow::Result;
+use hyper::body::Bytes;
 
 async fn server_upgrade(
-  mut req: Request<Incoming>,
-) -> Result<Response<Empty<Bytes>>> {
-  let (response, fut) = upgrade::upgrade(&mut req)?;
+    mut req: Request<Incoming>,
+) -> Result<Response<Empty<Bytes>>, hpx_fastwebsockets::WebSocketError> {
+    let (response, fut) = upgrade::upgrade(&mut req)?;
 
-  tokio::spawn(async move {
-    if let Err(e) = handle_client(fut).await {
-      eprintln!("Error in websocket connection: {}", e);
-    }
-  });
+    tokio::spawn(async move {
+        let mut ws = fut
+            .await
+            .expect("Failed to complete WebSocket upgrade");
+        // Use ws.read_frame() / ws.write_frame() ...
+    });
 
-  Ok(response)
+    Ok(response)
 }
 ```
 
-Use the `handshake` module for client-side handshakes.
+## Feature Flags
 
-```rust
-use fastwebsockets::handshake;
-use fastwebsockets::WebSocket;
-use hyper::{Request, body::Bytes, upgrade::Upgraded, header::{UPGRADE, CONNECTION}};
-use http_body_util::Empty;
-use tokio::net::TcpStream;
-use std::future::Future;
-use anyhow::Result;
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `simd` | **Yes** | SIMD-accelerated UTF-8 validation |
+| `upgrade` | **Yes** | HTTP upgrade support (requires hyper) |
+| `unstable-split` | No | Split WebSocket into read/write halves |
+| `with_axum` | No | Axum WebSocket extractor integration |
 
-async fn connect() -> Result<WebSocket<Upgraded>> {
-  let stream = TcpStream::connect("localhost:9001").await?;
+## Key Types
 
-  let req = Request::builder()
-    .method("GET")
-    .uri("http://localhost:9001/")
-    .header("Host", "localhost:9001")
-    .header(UPGRADE, "websocket")
-    .header(CONNECTION, "upgrade")
-    .header(
-      "Sec-WebSocket-Key",
-      fastwebsockets::handshake::generate_key(),
-    )
-    .header("Sec-WebSocket-Version", "13")
-    .body(Empty::<Bytes>::new())?;
+- `WebSocket<S>` — Main WebSocket struct for reading/writing frames
+- `Frame` — A WebSocket frame with opcode and payload
+- `OpCode` — Frame opcodes (Text, Binary, Close, Ping, Pong, Continuation)
+- `FragmentCollector<S>` — Aggregates fragmented messages into complete frames
+- `Role` — Server or Client role (controls masking behavior)
 
-  let (ws, _) = handshake::client(&SpawnExecutor, req, stream).await?;
-  Ok(ws)
-}
+## License
 
-// Tie hyper's executor to tokio runtime
-struct SpawnExecutor;
-
-impl<Fut> hyper::rt::Executor<Fut> for SpawnExecutor
-where
-  Fut: Future + Send + 'static,
-  Fut::Output: Send + 'static,
-{
-  fn execute(&self, fut: Fut) {
-    tokio::task::spawn(fut);
-  }
-}
-```
-
-**Usage with Axum**
-
-Enable the Axum integration with `features = ["upgrade", "with_axum"]` in Cargo.toml.
-
-```rust
-use axum::{response::IntoResponse, routing::get, Router};
-use fastwebsockets::upgrade;
-use fastwebsockets::OpCode;
-use fastwebsockets::WebSocketError;
-
-#[tokio::main]
-async fn main() {
-  let app = Router::new().route("/", get(ws_handler));
-
-  let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-  axum::serve(listener, app).await.unwrap();
-}
-
-async fn handle_client(fut: upgrade::UpgradeFut) -> Result<(), WebSocketError> {
-  let mut ws = fastwebsockets::FragmentCollector::new(fut.await?);
-
-  loop {
-    let frame = ws.read_frame().await?;
-    match frame.opcode {
-      OpCode::Close => break,
-      OpCode::Text | OpCode::Binary => {
-        ws.write_frame(frame).await?;
-      }
-      _ => {}
-    }
-  }
-
-  Ok(())
-}
-
-async fn ws_handler(ws: upgrade::IncomingUpgrade) -> impl IntoResponse {
-  let (response, fut) = ws.upgrade().unwrap();
-
-  tokio::task::spawn(async move {
-    if let Err(e) = handle_client(fut).await {
-      eprintln!("Error in websocket connection: {}", e);
-    }
-  });
-
-  response
-}
-```
+Apache-2.0

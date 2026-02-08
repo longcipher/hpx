@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! _fastwebsockets_ is a minimal, fast WebSocket server implementation.
+//! _hpx-fastwebsockets_ is a minimal, fast WebSocket server implementation.
 //!
-//! [https://github.com/denoland/fastwebsockets](https://github.com/denoland/fastwebsockets)
+//! Fork of [fastwebsockets](https://github.com/denoland/fastwebsockets) by Divy Srivastava.
 //!
 //! Passes the _Autobahn|TestSuite_ and fuzzed with LLVM's _libfuzzer_.
 //!

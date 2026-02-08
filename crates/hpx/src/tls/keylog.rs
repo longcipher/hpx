@@ -14,15 +14,13 @@ mod handle;
 
 use std::{
     borrow::Cow,
-    collections::{HashMap, hash_map::Entry},
     io::{Error, ErrorKind, Result},
     path::{Component, Path, PathBuf},
     sync::{Arc, OnceLock},
 };
 
 use handle::Handle;
-
-use crate::sync::RwLock;
+use scc::HashMap as SccHashMap;
 
 /// Specifies the intent for a (TLS) keylogger.
 #[derive(Debug, Clone)]
@@ -46,22 +44,25 @@ impl KeyLog {
 
     /// Creates a new key log file [`Handle`] based on the policy.
     pub(crate) fn handle(self) -> Result<Handle> {
-        static GLOBAL_KEYLOG_CACHE: OnceLock<RwLock<HashMap<Arc<Path>, Handle>>> = OnceLock::new();
+        static GLOBAL_KEYLOG_CACHE: OnceLock<SccHashMap<Arc<Path>, Handle>> = OnceLock::new();
 
         let path = self
             .0
             .ok_or_else(|| Error::new(ErrorKind::NotFound, "KeyLog: file path is not specified"))?;
 
-        let cache = GLOBAL_KEYLOG_CACHE.get_or_init(Default::default);
-        if let Some(handle) = cache.read().get(path.as_ref()).cloned() {
-            return Ok(handle);
+        let cache = GLOBAL_KEYLOG_CACHE.get_or_init(SccHashMap::new);
+
+        // Fast path: check if already cached
+        if let Some(entry) = cache.get_sync(path.as_ref()) {
+            return Ok(entry.get().clone());
         }
 
-        match cache.write().entry(path.clone()) {
-            Entry::Occupied(entry) => Ok(entry.get().clone()),
-            Entry::Vacant(entry) => {
-                let handle = Handle::new(path)?;
-                entry.insert(handle.clone());
+        // Slow path: insert if absent
+        let handle = Handle::new(path.clone())?;
+        match cache.entry_sync(path) {
+            scc::hash_map::Entry::Occupied(entry) => Ok(entry.get().clone()),
+            scc::hash_map::Entry::Vacant(entry) => {
+                entry.insert_entry(handle.clone());
                 Ok(handle)
             }
         }

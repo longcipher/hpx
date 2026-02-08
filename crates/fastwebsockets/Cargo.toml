@@ -5,7 +5,7 @@ version.workspace = true
 authors = ["Divy Srivastava <dj.srivastava23@gmail.com>"]
 license = "Apache-2.0"
 edition.workspace = true
-repository = "https://github.com/denoland/fastwebsockets"
+repository.workspace = true
 
 [[example]]
 name = "echo_server"

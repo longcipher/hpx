@@ -1,0 +1,12 @@
+/target
+/yawcc/target
+/Cargo.lock
+tags*
+.bacon*
+
+# Benchmark dependencies (auto-downloaded)
+/benches/*
+!/benches/run.js
+!/benches/README.md
+!/benches/load_test.c
+!/benches/Makefile

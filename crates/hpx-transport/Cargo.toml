@@ -8,15 +8,24 @@ license.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = ["ws-yawc"]
+
+# WebSocket backend selection (choose one).
+ws-fastwebsockets = ["hpx/ws-fastwebsockets", "dep:fastwebsockets"]
+ws-yawc = ["hpx/ws-yawc"]
+
 [dependencies]
 async-trait = { workspace = true }
 bytes.workspace = true
-fastwebsockets = { workspace = true, features = ["upgrade", "unstable-split"] }
+fastwebsockets = { workspace = true, features = [
+    "upgrade",
+    "unstable-split",
+], optional = true }
 futures-util.workspace = true
 hex.workspace = true
 hmac.workspace = true
 hpx = { workspace = true, features = [
-    "ws",
     "json",
     "tracing",
     "boring",
@@ -27,7 +36,6 @@ http = { workspace = true }
 opentelemetry = { workspace = true, features = ["metrics"] }
 opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics"] }
 opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] }
-parking_lot.workspace = true
 rand.workspace = true
 scc.workspace = true
 serde = { workspace = true, features = ["derive"] }
