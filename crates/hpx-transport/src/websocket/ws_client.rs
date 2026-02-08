@@ -6,18 +6,16 @@
 use std::{marker::PhantomData, sync::Arc, time::Duration};
 
 use serde::{Serialize, de::DeserializeOwned};
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::{sync::broadcast, task::JoinHandle};
 use tracing::info;
 
 use super::{
-    actor::{ActorCommand, ConnectionActor},
     config::WsConfig,
-    pending::PendingRequestStore,
+    connection::Connection,
     protocol::{ProtocolHandler, WsMessage},
-    subscription::SubscriptionStore,
-    types::{RequestId, Topic},
+    types::Topic,
 };
-use crate::error::{TransportError, TransportResult};
+use crate::error::TransportResult;
 
 /// WebSocket client for dual-pattern communication.
 ///
@@ -47,14 +45,10 @@ use crate::error::{TransportError, TransportResult};
 /// ```
 #[derive(Clone)]
 pub struct WsClient<H: ProtocolHandler> {
-    /// Channel to send commands to the actor.
-    cmd_tx: mpsc::Sender<ActorCommand>,
-    /// Shared pending request store.
-    pending_requests: Arc<PendingRequestStore>,
-    /// Shared subscription store.
-    subscriptions: Arc<SubscriptionStore>,
-    /// Configuration (for reading settings).
-    config: Arc<WsConfig>,
+    /// Handle to the underlying connection.
+    handle: super::connection::ConnectionHandle,
+    /// Background task draining the event stream.
+    _stream_task: Arc<JoinHandle<()>>,
     /// Protocol handler marker.
     _marker: PhantomData<H>,
 }
@@ -64,32 +58,18 @@ impl<H: ProtocolHandler> WsClient<H> {
     ///
     /// Spawns a background actor to manage the connection lifecycle.
     pub async fn connect(config: WsConfig, handler: H) -> TransportResult<Self> {
-        // Validate configuration
-        config.validate().map_err(TransportError::config)?;
+        let url = config.url.clone();
+        let (handle, stream) = Connection::connect(config, handler).await?;
+        let stream_task = tokio::spawn(async move {
+            let mut stream = stream;
+            while let Some(_event) = stream.next().await {}
+        });
 
-        let config = Arc::new(config);
-        let (cmd_tx, cmd_rx) = mpsc::channel(config.command_channel_capacity);
-        let pending_requests = Arc::new(PendingRequestStore::new(Arc::clone(&config)));
-        let subscriptions = Arc::new(SubscriptionStore::new(Arc::clone(&config)));
-
-        // Create and spawn the actor
-        let actor = ConnectionActor::new(
-            Arc::clone(&config),
-            handler,
-            cmd_rx,
-            Arc::clone(&pending_requests),
-            Arc::clone(&subscriptions),
-        );
-
-        tokio::spawn(actor.run());
-
-        info!(url = %config.url, "WebSocket client created");
+        info!(url = %url, "WebSocket client created");
 
         Ok(Self {
-            cmd_tx,
-            pending_requests,
-            subscriptions,
-            config,
+            handle,
+            _stream_task: Arc::new(stream_task),
             _marker: PhantomData,
         })
     }
@@ -98,7 +78,7 @@ impl<H: ProtocolHandler> WsClient<H> {
     ///
     /// Returns `false` if the actor has shut down.
     pub fn is_connected(&self) -> bool {
-        !self.cmd_tx.is_closed()
+        self.handle.is_connected()
     }
 
     // ========================================================================
@@ -126,17 +106,12 @@ impl<H: ProtocolHandler> WsClient<H> {
         R: Serialize,
         T: DeserializeOwned,
     {
-        let json = serde_json::to_string(request)?;
-        let response = self
-            .request_raw_with_timeout(WsMessage::text(json), timeout)
-            .await?;
-        let parsed: T = serde_json::from_str(&response)?;
-        Ok(parsed)
+        self.handle.request_with_timeout(request, timeout).await
     }
 
     /// Send a raw message and await a raw response.
     pub async fn request_raw(&self, message: WsMessage) -> TransportResult<String> {
-        self.request_raw_with_timeout(message, None).await
+        self.handle.request_raw(message).await
     }
 
     /// Send a raw message with a custom timeout.
@@ -145,37 +120,7 @@ impl<H: ProtocolHandler> WsClient<H> {
         message: WsMessage,
         timeout: Option<Duration>,
     ) -> TransportResult<String> {
-        // Check capacity
-        if !self.pending_requests.has_capacity() {
-            return Err(TransportError::capacity_exceeded(
-                "Too many pending requests",
-            ));
-        }
-
-        let request_id = RequestId::new();
-        let (reply_tx, reply_rx) = oneshot::channel();
-
-        // Send command to actor
-        self.cmd_tx
-            .send(ActorCommand::Request {
-                message,
-                request_id: request_id.clone(),
-                reply_tx,
-                timeout,
-            })
-            .await
-            .map_err(|_| TransportError::connection_closed(Some("Actor shut down".to_string())))?;
-
-        // Wait for response
-        let effective_timeout = timeout.unwrap_or(self.config.request_timeout);
-        match tokio::time::timeout(effective_timeout, reply_rx).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(TransportError::internal("Response channel dropped")),
-            Err(_) => Err(TransportError::request_timeout(
-                effective_timeout,
-                request_id.to_string(),
-            )),
-        }
+        self.handle.request_raw_with_timeout(message, timeout).await
     }
 
     // ========================================================================
@@ -189,34 +134,8 @@ impl<H: ProtocolHandler> WsClient<H> {
         &self,
         topic: impl Into<Topic>,
     ) -> TransportResult<broadcast::Receiver<WsMessage>> {
-        let topic = topic.into();
-
-        // Register in local store first
-        let (rx, is_new) = self.subscriptions.subscribe(topic.clone());
-
-        // If new, tell the actor to send subscribe message
-        if is_new {
-            let (reply_tx, reply_rx) = oneshot::channel();
-
-            self.cmd_tx
-                .send(ActorCommand::Subscribe {
-                    topics: vec![topic],
-                    reply_tx,
-                })
-                .await
-                .map_err(|_| {
-                    TransportError::connection_closed(Some("Actor shut down".to_string()))
-                })?;
-
-            // Wait for confirmation
-            match reply_rx.await {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => return Err(e),
-                Err(_) => return Err(TransportError::internal("Subscribe channel dropped")),
-            }
-        }
-
-        Ok(rx)
+        let guard = self.handle.subscribe(topic).await?;
+        Ok(guard.into_receiver())
     }
 
     /// Subscribe to multiple topics.
@@ -224,62 +143,16 @@ impl<H: ProtocolHandler> WsClient<H> {
         &self,
         topics: impl IntoIterator<Item = impl Into<Topic>>,
     ) -> TransportResult<Vec<broadcast::Receiver<WsMessage>>> {
-        let topics: Vec<Topic> = topics.into_iter().map(Into::into).collect();
-        let mut receivers = Vec::with_capacity(topics.len());
-        let mut new_topics = Vec::new();
-
-        for topic in &topics {
-            let (rx, is_new) = self.subscriptions.subscribe(topic.clone());
-            receivers.push(rx);
-            if is_new {
-                new_topics.push(topic.clone());
-            }
-        }
-
-        // Send subscribe for new topics
-        if !new_topics.is_empty() {
-            let (reply_tx, reply_rx) = oneshot::channel();
-
-            self.cmd_tx
-                .send(ActorCommand::Subscribe {
-                    topics: new_topics,
-                    reply_tx,
-                })
-                .await
-                .map_err(|_| {
-                    TransportError::connection_closed(Some("Actor shut down".to_string()))
-                })?;
-
-            match reply_rx.await {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => return Err(e),
-                Err(_) => return Err(TransportError::internal("Subscribe channel dropped")),
-            }
-        }
-
-        Ok(receivers)
+        let guards = self.handle.subscribe_many(topics).await?;
+        Ok(guards
+            .into_iter()
+            .map(|guard| guard.into_receiver())
+            .collect())
     }
 
     /// Unsubscribe from a topic.
     pub async fn unsubscribe(&self, topic: impl Into<Topic>) -> TransportResult<()> {
-        let topic = topic.into();
-
-        // Decrement ref count locally
-        let was_last = self.subscriptions.unsubscribe(&topic);
-
-        // If last subscriber, tell actor to unsubscribe
-        if was_last {
-            self.cmd_tx
-                .send(ActorCommand::Unsubscribe {
-                    topics: vec![topic],
-                })
-                .await
-                .map_err(|_| {
-                    TransportError::connection_closed(Some("Actor shut down".to_string()))
-                })?;
-        }
-
-        Ok(())
+        self.handle.unsubscribe(topic).await
     }
 
     // ========================================================================
@@ -288,10 +161,7 @@ impl<H: ProtocolHandler> WsClient<H> {
 
     /// Send a message without expecting a response.
     pub async fn send(&self, message: WsMessage) -> TransportResult<()> {
-        self.cmd_tx
-            .send(ActorCommand::Send { message })
-            .await
-            .map_err(|_| TransportError::connection_closed(Some("Actor shut down".to_string())))
+        self.handle.send(message).await
     }
 
     /// Send a JSON message without expecting a response.
@@ -302,29 +172,28 @@ impl<H: ProtocolHandler> WsClient<H> {
 
     /// Close the connection gracefully.
     pub async fn close(&self) -> TransportResult<()> {
-        let _ = self.cmd_tx.send(ActorCommand::Close).await;
-        Ok(())
+        self.handle.close().await
     }
 
     /// Get the number of pending requests.
     pub fn pending_count(&self) -> usize {
-        self.pending_requests.len()
+        self.handle.pending_count()
     }
 
     /// Get the number of active subscriptions.
     pub fn subscription_count(&self) -> usize {
-        self.subscriptions.len()
+        self.handle.subscription_count()
     }
 
     /// Get all subscribed topics.
     pub fn subscribed_topics(&self) -> Vec<Topic> {
-        self.subscriptions.get_all_topics()
+        self.handle.subscribed_topics()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{super::types::RequestId, *};
 
     /// A minimal protocol handler for testing.
     struct TestHandler;
@@ -359,5 +228,14 @@ mod tests {
         // Verify WsClient is Send + Sync (required for sharing across tasks)
         assert_send::<WsClient<TestHandler>>();
         assert_sync::<WsClient<TestHandler>>();
+    }
+
+    #[test]
+    fn ws_client_exposes_connection_handle() {
+        fn assert_has_handle<H: ProtocolHandler>(client: &WsClient<H>) {
+            let _ = &client.handle;
+        }
+
+        let _ = assert_has_handle::<TestHandler>;
     }
 }

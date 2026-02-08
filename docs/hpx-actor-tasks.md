@@ -187,14 +187,14 @@
 
 **File**: `crates/hpx-transport/src/websocket/ws_client.rs`
 
-- [ ] Refactor `WsClient<H>` to hold `ConnectionHandle` internally.
-- [ ] `WsClient::connect()`:
+- [x] Refactor `WsClient<H>` to hold `ConnectionHandle` internally.
+- [x] `WsClient::connect()`:
   - Call `Connection::connect(config, handler)`.
   - Spawn a background task that drains `ConnectionStream` (discard events for compat).
   - Store handle + stream task handle.
-- [ ] Delegate all public methods (`request`, `subscribe`, `send`, `close`, `is_connected`) to `self.handle`.
-- [ ] Keep `PhantomData<H>` for type parameter (or remove if no longer needed).
-- [ ] Maintain exact same public API signatures.
+- [x] Delegate all public methods (`request`, `subscribe`, `send`, `close`, `is_connected`) to `self.handle`.
+- [x] Keep `PhantomData<H>` for type parameter (or remove if no longer needed).
+- [x] Maintain exact same public API signatures.
 
 **Acceptance**: All existing `WsClient` consumers compile without changes.
 

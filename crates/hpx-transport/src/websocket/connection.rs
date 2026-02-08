@@ -85,6 +85,10 @@ impl SubscriptionGuard {
         Self { rx }
     }
 
+    pub fn into_receiver(self) -> broadcast::Receiver<WsMessage> {
+        self.rx
+    }
+
     pub async fn recv(&mut self) -> Option<WsMessage> {
         self.rx.recv().await.ok()
     }
@@ -105,13 +109,35 @@ impl ConnectionHandle {
         R: Serialize,
         T: DeserializeOwned,
     {
+        self.request_with_timeout(req, None).await
+    }
+
+    pub async fn request_with_timeout<R, T>(
+        &self,
+        req: &R,
+        timeout_override: Option<Duration>,
+    ) -> TransportResult<T>
+    where
+        R: Serialize,
+        T: DeserializeOwned,
+    {
         let json = serde_json::to_string(req)?;
-        let response = self.request_raw(WsMessage::text(json)).await?;
+        let response = self
+            .request_raw_with_timeout(WsMessage::text(json), timeout_override)
+            .await?;
         let parsed = serde_json::from_str(&response)?;
         Ok(parsed)
     }
 
-    async fn request_raw(&self, message: WsMessage) -> TransportResult<String> {
+    pub async fn request_raw(&self, message: WsMessage) -> TransportResult<String> {
+        self.request_raw_with_timeout(message, None).await
+    }
+
+    pub async fn request_raw_with_timeout(
+        &self,
+        message: WsMessage,
+        timeout_override: Option<Duration>,
+    ) -> TransportResult<String> {
         if !self.pending.has_capacity() {
             return Err(TransportError::capacity_exceeded(
                 "Too many pending requests",
@@ -119,7 +145,7 @@ impl ConnectionHandle {
         }
 
         let request_id = RequestId::new();
-        let rx = match self.pending.add(request_id.clone(), None) {
+        let rx = match self.pending.add(request_id.clone(), timeout_override) {
             Some(rx) => rx,
             None => {
                 return Err(TransportError::capacity_exceeded(
@@ -139,7 +165,7 @@ impl ConnectionHandle {
                 TransportError::connection_closed(Some("Connection task shut down".to_string()))
             })?;
 
-        let timeout_duration = self.config.request_timeout;
+        let timeout_duration = timeout_override.unwrap_or(self.config.request_timeout);
         match timeout(timeout_duration, rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(TransportError::internal("Request channel dropped")),
@@ -170,6 +196,40 @@ impl ConnectionHandle {
         }
 
         Ok(SubscriptionGuard::new(rx))
+    }
+
+    pub async fn subscribe_many(
+        &self,
+        topics: impl IntoIterator<Item = impl Into<Topic>>,
+    ) -> TransportResult<Vec<SubscriptionGuard>> {
+        let topics: Vec<Topic> = topics.into_iter().map(Into::into).collect();
+        let mut guards = Vec::with_capacity(topics.len());
+        let mut new_topics = Vec::new();
+
+        for topic in &topics {
+            let (rx, is_new) = self.subs.subscribe(topic.clone());
+            guards.push(SubscriptionGuard::new(rx));
+            if is_new {
+                new_topics.push(topic.clone());
+            }
+        }
+
+        if !new_topics.is_empty() {
+            let topics_to_send = new_topics.clone();
+            self.cmd_tx
+                .send(DataCommand::Subscribe {
+                    topics: topics_to_send,
+                })
+                .await
+                .map_err(|_| {
+                    for topic in &new_topics {
+                        self.subs.unsubscribe(topic);
+                    }
+                    TransportError::connection_closed(Some("Connection task shut down".to_string()))
+                })?;
+        }
+
+        Ok(guards)
     }
 
     pub async fn unsubscribe(&self, topic: impl Into<Topic>) -> TransportResult<()> {
@@ -207,6 +267,18 @@ impl ConnectionHandle {
 
     pub fn is_connected(&self) -> bool {
         !self.ctrl_tx.is_closed()
+    }
+
+    pub fn pending_count(&self) -> usize {
+        self.pending.len()
+    }
+
+    pub fn subscription_count(&self) -> usize {
+        self.subs.len()
+    }
+
+    pub fn subscribed_topics(&self) -> Vec<Topic> {
+        self.subs.get_all_topics()
     }
 }
 
