@@ -241,16 +241,16 @@
 
 **Files**: `crates/hpx-transport/src/websocket/connection.rs`, `crates/hpx-transport/src/websocket/pending.rs`
 
-- [ ] Note: base zero-spawn path exists in `ConnectionHandle::request`; ensure it is the only path by removing any remaining spawn-based forwarding from legacy code.
-- [ ] Ensure `PendingRequestStore::add()` returns `oneshot::Receiver<TransportResult<String>>` (already the case).
-- [ ] Add `PendingRequestStore::remove(id)` to cancel a pending request on timeout.
-- [ ] `ConnectionHandle::request()`:
+- [x] Note: base zero-spawn path exists in `ConnectionHandle::request`; ensure it is the only path by removing any remaining spawn-based forwarding from legacy code.
+- [x] Ensure `PendingRequestStore::add()` returns `oneshot::Receiver<TransportResult<String>>` (already the case).
+- [x] Add `PendingRequestStore::remove(id)` to cancel a pending request on timeout.
+- [x] `ConnectionHandle::request()`:
   - Call `pending.add(id)` → get receiver.
   - Send `DataCommand::Request { message, request_id }` (no oneshot in the command).
   - `tokio::select!` on receiver + timeout.
   - On timeout: call `pending.remove(id)`.
-- [ ] Connection task: on incoming response, call `pending.resolve(id, result)` → completes the receiver.
-- [ ] Remove any `tokio::spawn(...)` used to forward request responses.
+- [x] Connection task: on incoming response, call `pending.resolve(id, result)` → completes the receiver.
+- [x] Remove any `tokio::spawn(...)` used to forward request responses.
 
 **Acceptance**: Requests work end-to-end with zero intermediate tasks; latency improves.
 
@@ -258,13 +258,13 @@
 
 **Files**: `crates/hpx-transport/src/websocket/connection.rs`, `crates/hpx-transport/src/websocket/subscription.rs`
 
-- [ ] Define `SubscriptionGuard` in `connection.rs` (needs `DataCommand` + `cmd_tx`).
-- [ ] Add `SubscriptionStore::decrement_ref(&self, topic) -> usize` in `subscription.rs`.
-- [ ] `Drop for SubscriptionGuard`:
+- [x] Define `SubscriptionGuard` in `connection.rs` (needs `DataCommand` + `cmd_tx`).
+- [x] Add `SubscriptionStore::decrement_ref(&self, topic) -> Option<usize>` in `subscription.rs`.
+- [x] `Drop for SubscriptionGuard`:
   - Decrement ref.
   - If ref hits 0, `try_send(DataCommand::Unsubscribe { topics })`.
-- [ ] Implement `SubscriptionGuard::recv(&mut self) -> Option<WsMessage>`.
-- [ ] Implement `Deref<Target = broadcast::Receiver<WsMessage>>` for compatibility.
+- [x] Implement `SubscriptionGuard::recv(&mut self) -> Option<WsMessage>`.
+- [x] Implement `Deref<Target = broadcast::Receiver<WsMessage>>` for compatibility.
 
 **Acceptance**: `SubscriptionGuard` compiles; dropping it sends unsubscribe when last.
 

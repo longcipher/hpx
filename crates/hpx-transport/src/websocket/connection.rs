@@ -1,4 +1,5 @@
 use std::{
+    ops::Deref,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -111,22 +112,61 @@ pub enum Event {
     Message(IncomingMessage),
 }
 
-#[derive(Debug)]
 pub struct SubscriptionGuard {
-    rx: broadcast::Receiver<WsMessage>,
+    topic: Topic,
+    subs: Arc<SubscriptionStore>,
+    cmd_tx: mpsc::Sender<DataCommand>,
+    rx: Option<broadcast::Receiver<WsMessage>>,
 }
 
 impl SubscriptionGuard {
-    fn new(rx: broadcast::Receiver<WsMessage>) -> Self {
-        Self { rx }
+    fn new(
+        topic: Topic,
+        subs: Arc<SubscriptionStore>,
+        cmd_tx: mpsc::Sender<DataCommand>,
+        rx: broadcast::Receiver<WsMessage>,
+    ) -> Self {
+        Self {
+            topic,
+            subs,
+            cmd_tx,
+            rx: Some(rx),
+        }
     }
 
-    pub fn into_receiver(self) -> broadcast::Receiver<WsMessage> {
-        self.rx
+    pub fn into_receiver(mut self) -> broadcast::Receiver<WsMessage> {
+        self.rx.take().expect("subscription receiver already taken")
     }
 
     pub async fn recv(&mut self) -> Option<WsMessage> {
-        self.rx.recv().await.ok()
+        let rx = self.rx.as_mut()?;
+        rx.recv().await.ok()
+    }
+}
+
+impl Deref for SubscriptionGuard {
+    type Target = broadcast::Receiver<WsMessage>;
+
+    fn deref(&self) -> &Self::Target {
+        self.rx
+            .as_ref()
+            .expect("subscription receiver already taken")
+    }
+}
+
+impl Drop for SubscriptionGuard {
+    fn drop(&mut self) {
+        if self.rx.is_none() {
+            return;
+        }
+
+        if let Some(remaining) = self.subs.decrement_ref(&self.topic)
+            && remaining == 0
+        {
+            let _ = self.cmd_tx.try_send(DataCommand::Unsubscribe {
+                topics: vec![self.topic.clone()],
+            });
+        }
     }
 }
 
@@ -231,7 +271,12 @@ impl ConnectionHandle {
                 })?;
         }
 
-        Ok(SubscriptionGuard::new(rx))
+        Ok(SubscriptionGuard::new(
+            topic,
+            Arc::clone(&self.subs),
+            self.cmd_tx.clone(),
+            rx,
+        ))
     }
 
     pub async fn subscribe_many(
@@ -244,7 +289,12 @@ impl ConnectionHandle {
 
         for topic in &topics {
             let (rx, is_new) = self.subs.subscribe(topic.clone());
-            guards.push(SubscriptionGuard::new(rx));
+            guards.push(SubscriptionGuard::new(
+                topic.clone(),
+                Arc::clone(&self.subs),
+                self.cmd_tx.clone(),
+                rx,
+            ));
             if is_new {
                 new_topics.push(topic.clone());
             }

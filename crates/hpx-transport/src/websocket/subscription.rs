@@ -104,6 +104,28 @@ impl SubscriptionStore {
         false
     }
 
+    /// Decrement the ref count for a topic.
+    ///
+    /// Returns the remaining count, or `None` if the topic was not found.
+    pub fn decrement_ref(&self, topic: &Topic) -> Option<usize> {
+        let mut should_remove = false;
+        let mut remaining = None;
+
+        self.subscriptions.update_sync(topic, |_, entry| {
+            entry.ref_count = entry.ref_count.saturating_sub(1);
+            remaining = Some(entry.ref_count);
+            if entry.ref_count == 0 {
+                should_remove = true;
+            }
+        })?;
+
+        if should_remove {
+            self.subscriptions.remove_sync(topic);
+        }
+
+        remaining
+    }
+
     /// Publish a message to a topic.
     ///
     /// Returns `true` if the topic exists (even if no active receivers),
@@ -199,6 +221,30 @@ mod tests {
         let removed = store.unsubscribe(&topic);
         assert!(removed);
         assert_eq!(store.len(), 0);
+    }
+
+    #[test]
+    fn test_decrement_ref_removes_on_zero() {
+        let store = SubscriptionStore::new(test_config());
+        let topic = Topic::new("orderbook.BTC");
+
+        store.subscribe(topic.clone());
+        store.subscribe(topic.clone());
+
+        assert_eq!(store.decrement_ref(&topic), Some(1));
+        assert_eq!(store.subscriber_count(&topic), 1);
+
+        assert_eq!(store.decrement_ref(&topic), Some(0));
+        assert_eq!(store.subscriber_count(&topic), 0);
+        assert!(store.is_empty());
+    }
+
+    #[test]
+    fn test_decrement_ref_missing_returns_none() {
+        let store = SubscriptionStore::new(test_config());
+        let topic = Topic::new("orderbook.BTC");
+
+        assert_eq!(store.decrement_ref(&topic), None);
     }
 
     #[test]
