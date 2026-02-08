@@ -318,15 +318,15 @@
 
 **File**: `crates/hpx/src/client/http/client/pool.rs`
 
-- [ ] Define `ShardedPool<T, K>` struct with `Vec<parking_lot::Mutex<PoolShard<T, K>>>`.
-- [ ] Implement `shard_for(key) -> &Mutex<PoolShard>` using hash of key.
-- [ ] Implement `checkout(key) -> Option<T>` — lock only the relevant shard.
-- [ ] Implement `checkin(key, conn)` — lock only the relevant shard; wake waiters.
-- [ ] Replace `Pool::inner: Option<Arc<Mutex<PoolInner>>>` with `Option<Arc<ShardedPool>>`.
-- [ ] Update `Checkout` future to work with sharded pool.
-- [ ] Update `Pooled<T, K>` Drop impl for sharded pool.
-- [ ] Default shard count: 16 (or configurable).
-- [ ] Consider feature flag `sharded-pool` if risk mitigation is needed.
+- [x] Define `ShardedPool<T, K>` struct with `Vec<parking_lot::Mutex<PoolShard<T, K>>>`.
+- [x] Implement `shard_for(key) -> &Mutex<PoolShard>` using hash of key.
+- [x] Implement `checkout(key) -> Option<T>` — lock only the relevant shard.
+- [x] Implement `checkin(key, conn)` — lock only the relevant shard; wake waiters.
+- [x] Replace `Pool::inner: Option<Arc<Mutex<PoolInner>>>` with `Option<Arc<ShardedPool>>`.
+- [x] Update `Checkout` future to work with sharded pool.
+- [x] Update `Pooled<T, K>` Drop impl for sharded pool.
+- [x] Default shard count: 16 (or configurable).
+- [x] Consider feature flag `sharded-pool` if risk mitigation is needed.
 
 **Acceptance**: Pool checkout/checkin uses per-shard locking; existing pool tests pass.
 

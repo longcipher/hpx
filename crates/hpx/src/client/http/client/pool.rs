@@ -13,6 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use parking_lot::Mutex;
 use schnellru::ByLength;
 use tokio::sync::oneshot;
 
@@ -20,12 +21,13 @@ use super::exec::{self, Exec};
 use crate::{
     client::core::rt::{ArcTimer, Executor, Timer},
     hash::{HASHER, HashMap, HashSet, LruMap},
-    sync::Mutex,
 };
+
+const DEFAULT_SHARD_COUNT: usize = 16;
 
 pub struct Pool<T, K: Key> {
     // If the pool is disabled, this is None.
-    inner: Option<Arc<Mutex<PoolInner<T, K>>>>,
+    inner: Option<Arc<ShardedPool<T, K>>>,
 }
 
 // Before using a pooled connection, make sure the sender is not dead.
@@ -72,7 +74,7 @@ pub enum Reservation<T> {
 
 /// Simple type alias in case the key type needs to be adjusted.
 // pub type Key = (http::uri::Scheme, http::uri::Authority); //Arc<String>;
-struct PoolInner<T, K: Eq + Hash> {
+struct PoolShard<T, K: Eq + Hash> {
     // A flag that a connection is being established, and the connection
     // should be shared. This prevents making multiple HTTP/2 connections
     // to the same host.
@@ -99,6 +101,11 @@ struct PoolInner<T, K: Eq + Hash> {
     timeout: Option<Duration>,
 }
 
+struct ShardedPool<T, K: Key> {
+    shards: Vec<Mutex<PoolShard<T, K>>>,
+    shard_count: usize,
+}
+
 // This is because `Weak::new()` *allocates* space for `T`, even if it
 // doesn't need it!
 struct WeakOpt<T>(Option<Weak<T>>);
@@ -116,6 +123,36 @@ impl Config {
     }
 }
 
+impl<T, K: Key> ShardedPool<T, K> {
+    fn new<E, M>(config: &Config, executor: E, timer: Option<M>, shard_count: usize) -> Self
+    where
+        E: Executor<exec::BoxSendFuture> + Send + Sync + Clone + 'static,
+        M: Timer + Send + Sync + Clone + 'static,
+    {
+        let shard_count = shard_count.max(1);
+        let shards = (0..shard_count)
+            .map(|_| Mutex::new(PoolShard::new(config, executor.clone(), timer.clone())))
+            .collect();
+        Self {
+            shards,
+            shard_count,
+        }
+    }
+
+    fn shard_for(&self, key: &K) -> (&Mutex<PoolShard<T, K>>, usize) {
+        let index = self.shard_index(key);
+        (&self.shards[index], index)
+    }
+
+    fn shard_for_index(&self, index: usize) -> &Mutex<PoolShard<T, K>> {
+        &self.shards[index]
+    }
+
+    fn shard_index(&self, key: &K) -> usize {
+        (HASHER.hash_one(key) as usize) % self.shard_count
+    }
+}
+
 impl<T, K: Key> Pool<T, K> {
     pub fn new<E, M>(config: Config, executor: E, timer: Option<M>) -> Pool<T, K>
     where
@@ -123,19 +160,12 @@ impl<T, K: Key> Pool<T, K> {
         M: Timer + Send + Sync + Clone + 'static,
     {
         let inner = if config.is_enabled() {
-            Some(Arc::new(Mutex::new(PoolInner {
-                connecting: HashSet::with_hasher(HASHER),
-                idle: LruMap::with_hasher(
-                    ByLength::new(config.max_pool_size.map_or(u32::MAX, NonZero::get)),
-                    HASHER,
-                ),
-                idle_interval_ref: None,
-                max_idle_per_host: config.max_idle_per_host,
-                waiters: HashMap::with_hasher(HASHER),
-                exec: Exec::new(executor),
-                timer: timer.map(ArcTimer::new),
-                timeout: config.idle_timeout,
-            })))
+            Some(Arc::new(ShardedPool::new(
+                &config,
+                executor,
+                timer,
+                DEFAULT_SHARD_COUNT,
+            )))
         } else {
             None
         };
@@ -165,7 +195,8 @@ impl<T: Poolable, K: Key> Pool<T, K> {
         if ver == Ver::Http2
             && let Some(ref enabled) = self.inner
         {
-            let mut inner = enabled.lock();
+            let (shard, _shard_index) = enabled.shard_for(&key);
+            let mut inner = shard.lock();
             return if inner.connecting.insert(key.clone()) {
                 let connecting = Connecting {
                     key,
@@ -191,8 +222,9 @@ impl<T: Poolable, K: Key> Pool<T, K> {
         let (value, pool_ref) = if let Some(ref enabled) = self.inner {
             match value.reserve() {
                 Reservation::Shared(to_insert, to_return) => {
-                    let mut inner = enabled.lock();
-                    inner.put(&connecting.key, to_insert, enabled);
+                    let (shard, shard_index) = enabled.shard_for(&connecting.key);
+                    let mut inner = shard.lock();
+                    inner.put(&connecting.key, to_insert, enabled, shard_index);
                     // Do this here instead of Drop for Connecting because we
                     // already have a lock, no need to lock the mutex twice.
                     inner.connected(&connecting.key);
@@ -302,8 +334,30 @@ impl<'a, T: Poolable + 'a, K: Debug> IdlePopper<'a, T, K> {
     }
 }
 
-impl<T: Poolable, K: Key> PoolInner<T, K> {
-    fn put(&mut self, key: &K, value: T, __pool_ref: &Arc<Mutex<PoolInner<T, K>>>) {
+impl<T, K: Key> PoolShard<T, K> {
+    fn new<E, M>(config: &Config, executor: E, timer: Option<M>) -> Self
+    where
+        E: Executor<exec::BoxSendFuture> + Send + Sync + Clone + 'static,
+        M: Timer + Send + Sync + Clone + 'static,
+    {
+        Self {
+            connecting: HashSet::with_hasher(HASHER),
+            idle: LruMap::with_hasher(
+                ByLength::new(config.max_pool_size.map_or(u32::MAX, NonZero::get)),
+                HASHER,
+            ),
+            idle_interval_ref: None,
+            max_idle_per_host: config.max_idle_per_host,
+            waiters: HashMap::with_hasher(HASHER),
+            exec: Exec::new(executor),
+            timer: timer.map(ArcTimer::new),
+            timeout: config.idle_timeout,
+        }
+    }
+}
+
+impl<T: Poolable, K: Key> PoolShard<T, K> {
+    fn put(&mut self, key: &K, value: T, pool_ref: &Arc<ShardedPool<T, K>>, shard_index: usize) {
         if value.can_share() && self.idle.peek(key).is_some() {
             trace!("put; existing idle HTTP/2 connection for {:?}", key);
             return;
@@ -366,7 +420,7 @@ impl<T: Poolable, K: Key> PoolInner<T, K> {
                 }
             }
 
-            self.spawn_idle_interval(__pool_ref);
+            self.spawn_idle_interval(pool_ref, shard_index);
         } else {
             trace!("put; found waiter for {:?}", key)
         }
@@ -383,7 +437,7 @@ impl<T: Poolable, K: Key> PoolInner<T, K> {
         self.waiters.remove(key);
     }
 
-    fn spawn_idle_interval(&mut self, pool_ref: &Arc<Mutex<PoolInner<T, K>>>) {
+    fn spawn_idle_interval(&mut self, pool_ref: &Arc<ShardedPool<T, K>>, shard_index: usize) {
         if self.idle_interval_ref.is_some() {
             return;
         }
@@ -424,6 +478,7 @@ impl<T: Poolable, K: Key> PoolInner<T, K> {
             timer: timer.clone(),
             duration: dur,
             pool: WeakOpt::downgrade(pool_ref),
+            shard_index,
             pool_drop_notifier: rx,
         };
 
@@ -431,7 +486,7 @@ impl<T: Poolable, K: Key> PoolInner<T, K> {
     }
 }
 
-impl<T, K: Eq + Hash> PoolInner<T, K> {
+impl<T, K: Key> PoolShard<T, K> {
     /// Any `FutureResponse`s that were created will have made a `Checkout`,
     /// and possibly inserted into the pool that it is waiting for an idle
     /// connection. If a user ever dropped that future, we need to clean out
@@ -448,7 +503,7 @@ impl<T, K: Eq + Hash> PoolInner<T, K> {
     }
 }
 
-impl<T: Poolable, K: Key> PoolInner<T, K> {
+impl<T: Poolable, K: Key> PoolShard<T, K> {
     /// This should *only* be called by the IdleTask
     fn clear_expired(&mut self) {
         let dur = self.timeout.expect("interval assumes timeout");
@@ -499,7 +554,7 @@ pub struct Pooled<T: Poolable, K: Key> {
     value: Option<T>,
     is_reused: bool,
     key: K,
-    pool: WeakOpt<Mutex<PoolInner<T, K>>>,
+    pool: WeakOpt<ShardedPool<T, K>>,
 }
 
 impl<T: Poolable, K: Key> Pooled<T, K> {
@@ -543,8 +598,9 @@ impl<T: Poolable, K: Key> Drop for Pooled<T, K> {
             }
 
             if let Some(pool) = self.pool.upgrade() {
-                let mut inner = pool.lock();
-                inner.put(&self.key, value, &pool);
+                let (shard, shard_index) = pool.shard_for(&self.key);
+                let mut inner = shard.lock();
+                inner.put(&self.key, value, &pool, shard_index);
             } else if !value.can_share() {
                 trace!("pool dropped, dropping pooled ({:?})", self.key);
             }
@@ -626,7 +682,9 @@ impl<T: Poolable, K: Key> Checkout<T, K> {
 
     fn checkout(&mut self, cx: &mut task::Context<'_>) -> Option<Pooled<T, K>> {
         let entry = {
-            let mut inner = self.pool.inner.as_ref()?.lock();
+            let pool = self.pool.inner.as_ref()?;
+            let (shard, _shard_index) = pool.shard_for(&self.key);
+            let mut inner = shard.lock();
             let expiration = Expiration::new(inner.timeout);
             let maybe_entry = inner.idle.get(&self.key).and_then(|list| {
                 trace!("take? {:?}: expiration = {:?}", self.key, expiration.0);
@@ -698,7 +756,9 @@ impl<T, K: Key> Drop for Checkout<T, K> {
     fn drop(&mut self) {
         if self.waiter.take().is_some() {
             trace!("checkout dropped for {:?}", self.key);
-            if let Some(mut inner) = self.pool.inner.as_ref().map(|i| i.lock()) {
+            if let Some(pool) = self.pool.inner.as_ref() {
+                let (shard, _shard_index) = pool.shard_for(&self.key);
+                let mut inner = shard.lock();
                 inner.clean_waiters(&self.key);
             }
         }
@@ -707,7 +767,7 @@ impl<T, K: Key> Drop for Checkout<T, K> {
 
 pub struct Connecting<T: Poolable, K: Key> {
     key: K,
-    pool: WeakOpt<Mutex<PoolInner<T, K>>>,
+    pool: WeakOpt<ShardedPool<T, K>>,
 }
 
 impl<T: Poolable, K: Key> Connecting<T, K> {
@@ -725,7 +785,8 @@ impl<T: Poolable, K: Key> Drop for Connecting<T, K> {
     fn drop(&mut self) {
         if let Some(pool) = self.pool.upgrade() {
             // No need to panic on drop, that could abort!
-            let mut inner = pool.lock();
+            let (shard, _shard_index) = pool.shard_for(&self.key);
+            let mut inner = shard.lock();
             inner.connected(&self.key);
         }
     }
@@ -750,7 +811,8 @@ impl Expiration {
 struct IdleTask<T, K: Key> {
     timer: ArcTimer,
     duration: Duration,
-    pool: WeakOpt<Mutex<PoolInner<T, K>>>,
+    pool: WeakOpt<ShardedPool<T, K>>,
+    shard_index: usize,
     // This allows the IdleTask to be notified as soon as the entire
     // Pool is fully dropped, and shutdown. This channel is never sent on,
     // but Err(Canceled) will be received when the Pool is dropped.
@@ -771,7 +833,7 @@ impl<T: Poolable + 'static, K: Key> IdleTask<T, K> {
                 }
                 future::Either::Right(((), _)) => {
                     if let Some(inner) = self.pool.upgrade() {
-                        let mut inner = inner.lock();
+                        let mut inner = inner.shard_for_index(self.shard_index).lock();
                         trace!("idle interval checking for expired");
                         inner.clear_expired();
                         drop(inner);
@@ -813,12 +875,10 @@ mod tests {
         time::Duration,
     };
 
-    use super::{Connecting, Key, Pool, Poolable, Reservation, WeakOpt};
-    use crate::{
-        client::core::rt::{ArcTimer, TokioExecutor, TokioTimer},
-        sync::MutexGuard,
-    };
+    use parking_lot::MutexGuard;
 
+    use super::{Connecting, Key, Pool, Poolable, Reservation, WeakOpt};
+    use crate::client::core::rt::{ArcTimer, TokioExecutor, TokioTimer};
     #[derive(Clone, Debug, PartialEq, Eq, Hash)]
     struct KeyImpl(http::uri::Scheme, http::uri::Authority);
 
@@ -868,8 +928,10 @@ mod tests {
     }
 
     impl<T: Poolable, K: Key> Pool<T, K> {
-        fn locked(&self) -> MutexGuard<'_, super::PoolInner<T, K>> {
-            self.inner.as_ref().expect("enabled").lock()
+        fn locked(&self, key: &K) -> MutexGuard<'_, super::PoolShard<T, K>> {
+            let pool = self.inner.as_ref().expect("enabled");
+            let (shard, _shard_index) = pool.shard_for(key);
+            shard.lock()
         }
     }
 
@@ -912,7 +974,7 @@ mod tests {
         let pooled = pool.pooled(c(key.clone()), Uniq(41));
 
         drop(pooled);
-        let timeout = pool.locked().timeout.unwrap();
+        let timeout = pool.locked(&key).timeout.unwrap();
         tokio::time::sleep(timeout).await;
         let mut checkout = pool.checkout(key);
         let poll_once = PollOnce(&mut checkout);
@@ -930,17 +992,20 @@ mod tests {
         pool.pooled(c(key.clone()), Uniq(99));
 
         assert_eq!(
-            pool.locked().idle.get(&key).map(|entries| entries.len()),
+            pool.locked(&key)
+                .idle
+                .get(&key)
+                .map(|entries| entries.len()),
             Some(3)
         );
-        let timeout = pool.locked().timeout.unwrap();
+        let timeout = pool.locked(&key).timeout.unwrap();
         tokio::time::sleep(timeout).await;
 
         let mut checkout = pool.checkout(key.clone());
         let poll_once = PollOnce(&mut checkout);
         // checkout.await should clean out the expired
         poll_once.await;
-        assert!(pool.locked().idle.get(&key).is_none());
+        assert!(pool.locked(&key).idle.get(&key).is_none());
     }
 
     #[test]
@@ -954,7 +1019,10 @@ mod tests {
 
         // pooled and dropped 3, max_idle should only allow 2
         assert_eq!(
-            pool.locked().idle.get(&key).map(|entries| entries.len()),
+            pool.locked(&key)
+                .idle
+                .get(&key)
+                .map(|entries| entries.len()),
             Some(2)
         );
     }
@@ -978,7 +1046,10 @@ mod tests {
         pool.pooled(c(key.clone()), Uniq(99));
 
         assert_eq!(
-            pool.locked().idle.get(&key).map(|entries| entries.len()),
+            pool.locked(&key)
+                .idle
+                .get(&key)
+                .map(|entries| entries.len()),
             Some(3)
         );
 
@@ -987,14 +1058,17 @@ mod tests {
 
         // But minimum interval is higher, so nothing should have been reaped
         assert_eq!(
-            pool.locked().idle.get(&key).map(|entries| entries.len()),
+            pool.locked(&key)
+                .idle
+                .get(&key)
+                .map(|entries| entries.len()),
             Some(3)
         );
 
         // Now wait passed the minimum interval more
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        assert!(pool.locked().idle.get(&key).is_none());
+        assert!(pool.locked(&key).idle.get(&key).is_none());
     }
 
     #[tokio::test]
@@ -1031,16 +1105,16 @@ mod tests {
 
         // first poll needed to get into Pool's parked
         poll_once1.await;
-        assert_eq!(pool.locked().waiters.get(&key).unwrap().len(), 1);
+        assert_eq!(pool.locked(&key).waiters.get(&key).unwrap().len(), 1);
         poll_once2.await;
-        assert_eq!(pool.locked().waiters.get(&key).unwrap().len(), 2);
+        assert_eq!(pool.locked(&key).waiters.get(&key).unwrap().len(), 2);
 
         // on drop, clean up Pool
         drop(checkout1);
-        assert_eq!(pool.locked().waiters.get(&key).unwrap().len(), 1);
+        assert_eq!(pool.locked(&key).waiters.get(&key).unwrap().len(), 1);
 
         drop(checkout2);
-        assert!(!pool.locked().waiters.contains_key(&key));
+        assert!(!pool.locked(&key).waiters.contains_key(&key));
     }
 
     #[derive(Debug)]
@@ -1076,7 +1150,7 @@ mod tests {
             },
         );
 
-        assert!(pool.locked().idle.get(&key).is_none());
+        assert!(pool.locked(&key).idle.get(&key).is_none());
     }
 
     #[tokio::test]
@@ -1098,8 +1172,8 @@ mod tests {
         pool.pooled(c(key2.clone()), Uniq(5));
         pool.pooled(c(key3.clone()), Uniq(99));
 
-        assert!(pool.locked().idle.get(&key1).is_none());
-        assert!(pool.locked().idle.get(&key2).is_some());
-        assert!(pool.locked().idle.get(&key3).is_some());
+        assert!(pool.locked(&key1).idle.get(&key1).is_none());
+        assert!(pool.locked(&key2).idle.get(&key2).is_some());
+        assert!(pool.locked(&key3).idle.get(&key3).is_some());
     }
 }
