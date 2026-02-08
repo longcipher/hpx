@@ -334,19 +334,19 @@
 
 **File**: `crates/hpx/src/client/core/proto/h2/ping.rs`
 
-- [ ] Split `Shared` into hot-path atomics and cold-path `parking_lot::Mutex`:
+- [x] Split `Shared` into hot-path atomics and cold-path `parking_lot::Mutex`:
   - `bytes: AtomicU64`
   - `last_read_at: AtomicU64`
   - `is_keep_alive_timed_out: AtomicBool`
   - `inner: parking_lot::Mutex<PingInner>` (ping_pong, ping_sent_at, next_bdp_at)
-- [ ] Update `Recorder::record_data(len)`:
+- [x] Update `Recorder::record_data(len)`:
   - `self.shared.bytes.fetch_add(len, Ordering::Relaxed)`
   - `self.shared.last_read_at.store(now_ticks, Ordering::Release)`
-- [ ] Update `Recorder::record_non_data()`:
+- [x] Update `Recorder::record_non_data()`:
   - `self.shared.last_read_at.store(now_ticks, Ordering::Release)`
-- [ ] Update `Ponger` methods to read atomics for fast checks, lock `inner` only for BDP/ping operations.
-- [ ] Keep `Ordering::SeqCst` initially if unsure; optimize ordering after benchmarking.
-- [ ] Consider feature flag `atomic-ping` if risk mitigation is needed.
+- [x] Update `Ponger` methods to read atomics for fast checks, lock `inner` only for BDP/ping operations.
+- [x] Keep `Ordering::SeqCst` initially if unsure; optimize ordering after benchmarking.
+- [x] Consider feature flag `atomic-ping` if risk mitigation is needed.
 
 **Acceptance**: H2 ping works correctly; DATA frame recording is lock-free.
 
