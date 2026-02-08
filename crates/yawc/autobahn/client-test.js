@@ -7,7 +7,7 @@ const AUTOBAHN_TESTSUITE_DOCKER =
   "crossbario/autobahn-testsuite:25.10.1@sha256:519915fb568b04c9383f70a1c405ae3ff44ab9e35835b085239c258b6fac3074";
 
 const CONTAINER_NAME = "fuzzingserver";
-const CLIENT_EXE = "target/release/examples/autobahn_client";
+const CLIENT_EXE = "target/release/examples/yawc_autobahn_client";
 const WITH_ZLIB = Deno.args[0] === "zlib";
 
 async function containerExists(name) {
@@ -23,13 +23,13 @@ async function containerRunning(name) {
 }
 
 async function ensureClientBuilt() {
-  console.log("Building autobahn_client...");
+  console.log("Building yawc_autobahn_client...");
   if (WITH_ZLIB) {
     console.log("Building with zlib compression support");
-    await $`cargo build --release --example autobahn_client --features zlib`;
+    await $`cargo build --release --example yawc_autobahn_client --features zlib`;
   } else {
     console.log("Building without zlib compression support");
-    await $`cargo build --release --example autobahn_client`;
+    await $`cargo build --release --example yawc_autobahn_client`;
   }
 }
 

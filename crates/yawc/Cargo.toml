@@ -38,12 +38,14 @@ zlib = ["flate2/any_zlib", "flate2/zlib-rs"]
 
 # Examples configuration
 [[example]]
-name = "axum"
+name = "yawc_axum"
+path = "examples/axum.rs"
 required-features = ["axum"]
 test = false
 
 [[example]]
-name = "autobahn_client"
+name = "yawc_autobahn_client"
+path = "examples/autobahn_client.rs"
 test = false
 
 [[example]]
@@ -60,7 +62,8 @@ name = "custom_dns"
 test = false
 
 [[example]]
-name = "echo_server"
+name = "yawc_echo_server"
+path = "examples/echo_server.rs"
 required-features = ["axum"]
 test = false
 

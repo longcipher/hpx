@@ -34,7 +34,7 @@ setup-all: setup
 
 	# 1. Build yawc echo_server
 	@echo "==> Building yawc echo_server..."
-	@cd .. && cargo build --release --example echo_server
+	@cd .. && cargo build --release --example yawc_echo_server
 
 	# 2. Clone and build fastwebsockets
 	@echo ""

@@ -490,8 +490,8 @@
 
 **Files**: `crates/yawc/Cargo.toml`, `crates/yawc/autobahn/client-test.js`, `crates/yawc/benches/run.js`, `crates/yawc/benches/Makefile`, `crates/yawc/examples/custom_dns.rs`
 
-- [ ] Rename yawc examples that collide with fastwebsockets (`axum`, `autobahn_client`, `echo_server`).
-- [ ] Update yawc scripts and docs to reference the new example names.
+- [x] Rename yawc examples that collide with fastwebsockets (`axum`, `autobahn_client`, `echo_server`).
+- [x] Update yawc scripts and docs to reference the new example names.
 
 **Acceptance**: `just test` emits no cargo example filename collision warnings.
 

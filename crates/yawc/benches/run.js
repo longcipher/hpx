@@ -17,7 +17,7 @@ const targets = [
   {
     port: 9002,
     name: "yawc",
-    server: "../target/release/examples/echo_server",
+    server: "../target/release/examples/yawc_echo_server",
   },
   // https://github.com/denoland/fastwebsockets
   {

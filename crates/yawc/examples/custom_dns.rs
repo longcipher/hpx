@@ -25,7 +25,7 @@ async fn main() {
             vec![
                 // this one should fail :(
                 "127.0.0.1:9090".parse().unwrap(),
-                // this one should not (if you run the echo_server.rs example)
+                // this one should not (if you run the yawc_echo_server example)
                 "127.0.0.1:8080".parse().unwrap(),
             ],
         )]),
