@@ -282,9 +282,9 @@
 
 **File**: `crates/hpx-transport/tests/subscription_lifecycle.rs` (new)
 
-- [ ] Test: subscribe → drop guard → verify unsubscribe command sent.
-- [ ] Test: subscribe twice to same topic → drop one guard → no unsubscribe sent; drop second → unsubscribe sent.
-- [ ] Test: subscribe → explicit unsubscribe → drop guard → no double unsubscribe.
+- [x] Test: subscribe → drop guard → verify unsubscribe command sent.
+- [x] Test: subscribe twice to same topic → drop one guard → no unsubscribe sent; drop second → unsubscribe sent.
+- [x] Test: subscribe → explicit unsubscribe → drop guard → no double unsubscribe.
 
 **Acceptance**: All subscription lifecycle tests pass.
 
