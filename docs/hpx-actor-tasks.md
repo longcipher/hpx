@@ -212,11 +212,11 @@
 
 **File**: `crates/hpx-transport/src/websocket/actor.rs`
 
-- [ ] Remove `ActorCommand` enum.
-- [ ] Remove `ConnectionActor` struct and all `impl` blocks.
-- [ ] Remove manual `run()` / `run_connection()` / `run_ready_loop_internal()` methods.
-- [ ] Clean up imports.
-- [ ] Either delete `actor.rs` entirely or repurpose for connection task internals.
+- [x] Remove `ActorCommand` enum.
+- [x] Remove `ConnectionActor` struct and all `impl` blocks.
+- [x] Remove manual `run()` / `run_connection()` / `run_ready_loop_internal()` methods.
+- [x] Clean up imports.
+- [x] Either delete `actor.rs` entirely or repurpose for connection task internals.
 
 **Acceptance**: No dead code warnings; `cargo clippy` clean.
 

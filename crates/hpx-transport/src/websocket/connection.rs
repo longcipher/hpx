@@ -32,6 +32,42 @@ use crate::error::{TransportError, TransportResult};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ConnectionEpoch(pub u64);
 
+/// Connection state machine states.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ConnectionState {
+    /// Not connected.
+    Disconnected,
+    /// Attempting to connect.
+    Connecting,
+    /// WebSocket connection established.
+    Connected,
+    /// Performing authentication.
+    Authenticating,
+    /// Fully connected and authenticated, ready for traffic.
+    Ready,
+    /// Reconnecting after a disconnect.
+    Reconnecting {
+        /// Current attempt number.
+        attempt: u32,
+    },
+    /// Gracefully closing.
+    Closing,
+    /// Fully closed, will not reconnect.
+    Closed,
+}
+
+impl ConnectionState {
+    /// Check if the connection is ready for traffic.
+    pub fn is_ready(&self) -> bool {
+        matches!(self, Self::Ready)
+    }
+
+    /// Check if the connection is closed (terminal state).
+    pub fn is_closed(&self) -> bool {
+        matches!(self, Self::Closed)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ControlCommand {
     Close,
