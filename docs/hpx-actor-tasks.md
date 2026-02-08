@@ -4,7 +4,7 @@
 >
 > Reference design: [docs/hpx-actor-design.md](hpx-actor-design.md)
 >
-> Reference implementation: `::hypercore::ws` (single-task loop + reconnect + resubscribe)
+> Reference implementation: single-task loop + reconnect + resubscribe (proven baseline)
 
 ---
 
@@ -179,7 +179,7 @@
   - Return `(ConnectionHandle, ConnectionStream)`.
 - [x] Add `event_channel_capacity` to `WsConfig` with default `256`.
 - [x] Implement event backpressure policy: `Event::Connected/Disconnected` use `send().await`, `Event::Message` uses `try_send` (drop + counter/log).
-- [x] Optional: provide `Connection::split()` and/or implement `Stream` for `Connection` to match `::hypercore::ws` ergonomics.
+- [x] Optional: provide `Connection::split()` and/or implement `Stream` for `Connection` to match proven baseline ergonomics.
 
 **Acceptance**: `Connection::connect()` returns handle + stream; connection task is running; event channel backpressure does not block lifecycle events.
 
@@ -425,7 +425,7 @@
 - [x] Document the Connection/Handle/Stream split.
 - [x] Document command priority (two-channel design).
 - [x] Document reconnect/backoff policy + event backpressure behavior.
-- [x] Document  parity and the kameo decision (why not in hot paths).
+- [x] Document reference implementation parity and the kameo decision (why not in hot paths).
 - [x] Update `docs/hpx-transport-ws-design.md` to reflect the driver loop, backoff, and event policy.
 
 **Acceptance**: Design docs reflect implemented architecture.

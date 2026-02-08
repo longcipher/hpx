@@ -8,7 +8,7 @@ This document describes the design for extending `hpx-transport` with advanced W
 
 The current implementation uses a **single-owner connection task** with a lightweight driver
 (`Connection`/`ConnectionHandle`/`ConnectionStream` split API), typed command channels, and
-RAII subscriptions, mirroring the proven `` loop while keeping hot paths lock-free.
+RAII subscriptions, mirroring the proven reference loop while keeping hot paths lock-free.
 
 ### Key Features
 

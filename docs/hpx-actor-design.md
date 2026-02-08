@@ -1,12 +1,12 @@
 # hpx Concurrency Refactor — Performance-First Design
 
-> Replace correctness bugs and unnecessary contention with a **single-owner WebSocket state machine**, zero-spawn request paths, RAII subscriptions, and targeted lock optimizations. This design does **not** mandate an external actor framework; it favors a minimal, single-task model (proven in ``) with typed commands and explicit lifecycle events.
+> Replace correctness bugs and unnecessary contention with a **single-owner WebSocket state machine**, zero-spawn request paths, RAII subscriptions, and targeted lock optimizations. This design does **not** mandate an external actor framework; it favors a minimal, single-task model (proven in the reference implementation) with typed commands and explicit lifecycle events.
 
 ---
 
 ## 0. Design Options and Decision
 
-An earlier revision proposed converting **all** Mutex-protected subsystems (WebSocket, Pool, H2 Ping, TLS Session Cache) to kameo actors. After code-driven analysis and comparing against `::hypercore::ws`, we select a performance-first design with optional hybrid use of kameo only where it adds clear value.
+An earlier revision proposed converting **all** Mutex-protected subsystems (WebSocket, Pool, H2 Ping, TLS Session Cache) to kameo actors. After code-driven analysis and comparing against the reference implementation, we select a performance-first design with optional hybrid use of kameo only where it adds clear value.
 
 ### Options Considered
 
@@ -43,9 +43,9 @@ An earlier revision proposed converting **all** Mutex-protected subsystems (WebS
 - **scc::HashMap stays** for PendingRequestStore, SubscriptionStore, RateLimiter (already optimal)
 - **Split API** concept (`ConnectionHandle` + `ConnectionStream`)
 
-### Reference: ::hypercore::ws (Proven Baseline)
+### Reference: Proven Baseline
 
-`` already uses a single-task connection loop with explicit lifecycle events, auto-reconnect, ping/pong management, and subscription rehydration. Our design intentionally mirrors these proven mechanics while extending them with:
+The reference implementation already uses a single-task connection loop with explicit lifecycle events, auto-reconnect, ping/pong management, and subscription rehydration. Our design intentionally mirrors these proven mechanics while extending them with:
 
 - Typed command channels (control + data).
 - Request/response correlation via `PendingRequestStore`.
@@ -123,7 +123,7 @@ A single `Arc<Mutex<PoolInner>>` protects all hosts' connection pools. Under con
 
 ### 4.1 Overview
 
-The WebSocket runtime is split into an **outer connection driver** and an **inner connection task**. The driver owns reconnect/backoff, while the task owns the hot-path select loop. This mirrors the proven shape in `::hypercore::ws` while adding typed command channels and request routing.
+The WebSocket runtime is split into an **outer connection driver** and an **inner connection task**. The driver owns reconnect/backoff, while the task owns the hot-path select loop. This mirrors the proven reference shape while adding typed command channels and request routing.
 
 ```text
 ┌──────────────────────────────────────────────────────────────────┐
@@ -268,7 +268,7 @@ On disconnect or read/write error, the **connection driver** performs a determin
 5. Attempt reconnect. On success: reset attempt counter, increment epoch, re-auth, re-subscribe.
 6. If `reconnect_max_attempts` is exceeded: emit terminal error and shut down.
 
-This matches ’s reconnect loop, but adds explicit epoch accounting and pending-request cleanup.
+This matches the reference reconnect loop, but adds explicit epoch accounting and pending-request cleanup.
 
 ### 4.6 Zero-Spawn Request Path
 
@@ -575,12 +575,12 @@ No structural change required.
 
 ### 8.1 New API (Preferred for new code)
 
-For parity with `::hypercore::ws`, we can optionally expose a `Connection` that implements `Stream` and supports `split()`. If we want to keep the API minimal, `Connection::connect()` can still return `(ConnectionHandle, ConnectionStream)` directly; both shapes are compatible and can coexist.
+For parity with the reference implementation, we can optionally expose a `Connection` that implements `Stream` and supports `split()`. If we want to keep the API minimal, `Connection::connect()` can still return `(ConnectionHandle, ConnectionStream)` directly; both shapes are compatible and can coexist.
 
 ```rust
 use hpx_transport::websocket::{Connection, ConnectionHandle, ConnectionStream, Event};
 
-// Option A: explicit split (-style)
+// Option A: explicit split
 let connection = Connection::connect(config, handler).await?;
 let (handle, stream) = connection.split();
 
@@ -744,4 +744,4 @@ The optimal design is **not** "actorize everything," but rather:
 9. **TLS**: Swap to `parking_lot::Mutex` — minimal change.
 10. **Keep kameo optional**: only for future supervision/control-plane, not in hot paths.
 
-This delivers the largest real-world latency and determinism gains with the lowest complexity and risk, while matching the proven `::hypercore::ws` shape where it matters.
+This delivers the largest real-world latency and determinism gains with the lowest complexity and risk, while matching the proven reference shape where it matters.

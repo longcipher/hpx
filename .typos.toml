@@ -1,6 +1,5 @@
 [files]
 extend-exclude = [
-  "",
   "crates/fastwebsockets",
   "crates/yawc/benches",
   "crates/hpx-util/src/emulation",

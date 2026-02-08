@@ -18,7 +18,7 @@
 - **Per-task verification**: `cargo build` and `just lint` must pass before marking task complete.
 - **Commits**: one conventional commit per task; concise, impact-oriented.
 - **Progress tracking**: update checkboxes in `docs/hpx-actor-tasks.md` after each task.
-- **Do not stage `/`.**
+- **Only stage hpx workspace files.**
 
 ---
 
