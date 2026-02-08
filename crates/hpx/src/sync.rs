@@ -6,6 +6,10 @@
 //!
 //! This is useful in high-availability systems where panic recovery is done externally,
 //! or poisoning is not meaningful in context.
+//!
+//! **Preferred for new code:** use `parking_lot::Mutex` (faster, no poisoning) or lock-free
+//! structures such as `scc::HashMap` on hot paths. These wrappers remain for compatibility
+//! and cases where matching the `std::sync` API is helpful.
 
 use std::{
     ops::{Deref, DerefMut},

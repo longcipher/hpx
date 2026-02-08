@@ -402,8 +402,8 @@
 
 **File**: `crates/hpx/src/sync.rs`
 
-- [ ] Add module doc: note that new code should prefer `parking_lot::Mutex` or lock-free structures.
-- [ ] Keep the non-poisoning wrappers (may be used by downstream code).
+- [x] Add module doc: note that new code should prefer `parking_lot::Mutex` or lock-free structures.
+- [x] Keep the non-poisoning wrappers (may be used by downstream code).
 
 **Acceptance**: Documentation updated.
 
