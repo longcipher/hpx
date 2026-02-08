@@ -432,10 +432,10 @@
 
 ### Task 5.5: Final validation
 
-- [ ] `cargo fmt --all -- --check` — clean.
-- [ ] `cargo clippy --workspace -- -D warnings` — clean (or known pre-existing exceptions).
-- [ ] `cargo test -p hpx -p hpx-transport --lib --tests` — all pass.
-- [ ] `cargo doc --workspace --no-deps` — no new warnings.
+- [x] `cargo fmt --all -- --check` — clean.
+- [x] `cargo clippy --workspace -- -D warnings` — clean (or known pre-existing exceptions).
+- [x] `cargo test -p hpx -p hpx-transport --lib --tests` — all pass.
+- [x] `cargo doc --workspace --no-deps` — no new warnings.
 
 **Acceptance**: Everything green.
 
