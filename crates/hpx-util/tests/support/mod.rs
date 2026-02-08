@@ -27,6 +27,13 @@ macro_rules! test_emulation {
     ($test_name:ident, $emulation:expr, $ja4:expr, $akamai_hash:expr) => {
         #[tokio::test]
         async fn $test_name() {
+            if std::env::var("HPX_NETWORK_TESTS").is_err() {
+                eprintln!(
+                    "skipping {}: set HPX_NETWORK_TESTS=1 to run network emulation tests",
+                    stringify!($test_name)
+                );
+                return;
+            }
             let _permit = crate::support::TEST_SEMAPHORE.acquire().await.unwrap();
 
             let resp = crate::support::CLIENT

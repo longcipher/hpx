@@ -456,6 +456,15 @@
 
 **Acceptance**: `just test` no longer warns about unused imports in yawc examples.
 
+### Task 5.8: Gate network emulation tests
+
+**Files**: `crates/hpx/tests/emulation.rs`, `crates/hpx-util/tests/support/mod.rs`
+
+- [x] Skip network emulation tests unless `HPX_NETWORK_TESTS=1` is set.
+- [x] Ensure just test no longer fails on flaky external connections by default.
+
+**Acceptance**: `just test` passes without requiring external network access.
+
 ---
 
 ## Task Dependency Graph

@@ -190,6 +190,10 @@ async fn test_emulation() -> hpx::Result<()> {
 
 #[tokio::test]
 async fn test_request_with_emulation() -> hpx::Result<()> {
+    if std::env::var("HPX_NETWORK_TESTS").is_err() {
+        eprintln!("skipping test_request_with_emulation: set HPX_NETWORK_TESTS=1");
+        return Ok(());
+    }
     let client = Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .cert_verification(false)
@@ -220,6 +224,10 @@ async fn test_request_with_emulation() -> hpx::Result<()> {
 
 #[tokio::test]
 async fn test_request_with_emulation_tls() -> hpx::Result<()> {
+    if std::env::var("HPX_NETWORK_TESTS").is_err() {
+        eprintln!("skipping test_request_with_emulation_tls: set HPX_NETWORK_TESTS=1");
+        return Ok(());
+    }
     let client = Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .cert_verification(false)
