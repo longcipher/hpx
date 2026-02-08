@@ -54,16 +54,16 @@
 
 **File**: `crates/hpx-transport/src/websocket/connection.rs` (new)
 
-- [ ] Define `ConnectionEpoch(u64)`.
-- [ ] Define `ControlCommand` enum: `Close`, `Reconnect { reason }`.
-- [ ] Define `DataCommand` enum: `Subscribe`, `Unsubscribe`, `Send`, `Request`.
-- [ ] Define `IncomingMessage`:
+- [x] Define `ConnectionEpoch(u64)`.
+- [x] Define `ControlCommand` enum: `Close`, `Reconnect { reason }`.
+- [x] Define `DataCommand` enum: `Subscribe`, `Unsubscribe`, `Send`, `Request`.
+- [x] Define `IncomingMessage`:
   - `raw: WsMessage`
   - `text: Option<String>`
   - `kind: MessageKind`
   - `topic: Option<Topic>`
-- [ ] Define `Event` enum: `Connected { epoch }`, `Disconnected { epoch, reason }`, `Message(IncomingMessage)`.
-- [ ] All types: derive `Debug`; `Event` and commands: derive `Clone` where appropriate.
+- [x] Define `Event` enum: `Connected { epoch }`, `Disconnected { epoch, reason }`, `Message(IncomingMessage)`.
+- [x] All types: derive `Debug`; `Event` and commands: derive `Clone` where appropriate.
 
 **Acceptance**: Types compile; `cargo clippy -p hpx-transport` passes.
 
