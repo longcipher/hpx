@@ -5,7 +5,7 @@
 //! This crate builds on `hpx` to provide exchange-specific functionality:
 //!
 //! - **Authentication**: API key, HMAC signing, and custom auth strategies
-//! - **WebSocket**: Actor-based WebSocket with automatic reconnection
+//! - **WebSocket**: Single-task connection with `Connection`/`Handle`/`Stream` split API
 //! - **Typed Responses**: Generic response wrapper with metadata
 //! - **Rate Limiting**: Token bucket rate limiter
 //! - **Metrics**: OpenTelemetry metrics integration
@@ -29,6 +29,28 @@
 //!     // Use the client...
 //!     Ok(())
 //! }
+//! ```
+//!
+//! ## WebSocket Quick Start (Split API)
+//!
+//! ```rust,no_run
+//! use hpx_transport::websocket::{Connection, Event, WsConfig, handlers::GenericJsonHandler};
+//!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let config = WsConfig::new("wss://api.exchange.com/ws");
+//! let handler = GenericJsonHandler::new();
+//!
+//! let connection = Connection::connect_stream(config, handler).await?;
+//! let (handle, mut stream) = connection.split();
+//!
+//! handle.subscribe("trades.BTC").await?;
+//! while let Some(event) = stream.next().await {
+//!     if let Event::Message(msg) = event {
+//!         println!("Control/unknown message: {:?}", msg.kind);
+//!     }
+//! }
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Rate Limiting Example
@@ -59,14 +81,22 @@ pub use exchange::{ExchangeClient, RestClient, RestConfig};
 pub use rate_limit::RateLimiter;
 pub use typed::{ApiError, TypedResponse};
 pub use websocket::{
+    // Core connection API
+    Connection,
+    ConnectionEpoch,
+    ConnectionHandle,
     // Connection state
     ConnectionState,
+    ConnectionStream,
+    Event,
     // Backward compatibility (legacy types)
     ExchangeHandler,
     MessageKind,
     // Protocol abstraction
     ProtocolHandler,
     RequestId,
+    // Subscription guard
+    SubscriptionGuard,
     Topic,
     WebSocketConfig,
     WebSocketHandle,

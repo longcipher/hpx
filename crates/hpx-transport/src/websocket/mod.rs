@@ -11,20 +11,21 @@
 //!
 //! # Architecture
 //!
-//! The WebSocket system uses an actor-based architecture:
+//! The WebSocket system uses a single-owner connection loop with a lightweight driver:
 //!
 //! ```text
-//! ┌─────────────┐     ┌─────────────────┐     ┌──────────────┐
-//! │  WsClient   │────▶│ ConnectionActor │────▶│   Exchange   │
-//! │  (Clone)    │     │   (Background)  │     │   Server     │
-//! └─────────────┘     └───────┬─────────┘     └──────────────┘
-//!                             │
-//!          ┌──────────────────┴────────────────────┐
-//!          ▼                                       ▼
-//! ┌─────────────────────┐             ┌────────────────────────┐
-//! │ PendingRequestStore │             │   SubscriptionStore    │
-//! │   (scc::HashMap)    │             │    (scc::HashMap)      │
-//! └─────────────────────┘             └────────────────────────┘
+//! ┌──────────────────┐    Commands     ┌────────────────────────┐
+//! │ ConnectionHandle │───────────────▶ │ Connection Driver      │
+//! │ (Clone)          │                 │ (reconnect/backoff)    │
+//! └────────┬─────────┘                 └─────────┬──────────────┘
+//!          │ Events                                   │
+//!          ▼                                          ▼
+//! ┌──────────────────┐                       ┌──────────────────┐
+//! │ ConnectionStream │◀──────────────────────│ Connection Task  │
+//! │ (Stream<Event>)  │                       │ (select! loop)   │
+//! └──────────────────┘                       └───────┬──────────┘
+//!                                                   ▼
+//!                                    PendingRequestStore / SubscriptionStore
 //! ```
 //!
 //! # Quick Start
@@ -32,7 +33,7 @@
 //! ## Request-Response Example
 //!
 //! ```rust,ignore
-//! use hpx_transport::websocket::{WsClient, WsConfig};
+//! use hpx_transport::websocket::{Connection, WsConfig};
 //! use hpx_transport::websocket::handlers::GenericJsonHandler;
 //!
 //! #[tokio::main]
@@ -45,11 +46,12 @@
 //!     // Create a protocol handler
 //!     let handler = GenericJsonHandler::new();
 //!
-//!     // Connect
-//!     let client = WsClient::connect(config, handler).await?;
+//!     // Connect and split into handle + stream
+//!     let connection = Connection::connect_stream(config, handler).await?;
+//!     let (handle, mut _stream) = connection.split();
 //!
 //!     // Send a request and await response
-//!     let response: serde_json::Value = client.request(&serde_json::json!({
+//!     let response: serde_json::Value = handle.request(&serde_json::json!({
 //!         "method": "getOrderBook",
 //!         "params": {"symbol": "BTCUSD"}
 //!     })).await?;
@@ -62,17 +64,18 @@
 //! ## Subscription Example
 //!
 //! ```rust,ignore
-//! use hpx_transport::websocket::{WsClient, WsConfig, Topic};
+//! use hpx_transport::websocket::{Connection, WsConfig};
 //! use hpx_transport::websocket::handlers::GenericJsonHandler;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let config = WsConfig::new("wss://api.exchange.com/ws");
 //!     let handler = GenericJsonHandler::new();
-//!     let client = WsClient::connect(config, handler).await?;
+//!     let connection = Connection::connect_stream(config, handler).await?;
+//!     let (handle, mut _stream) = connection.split();
 //!
 //!     // Subscribe to a topic
-//!     let mut guard = client.subscribe("orderbook.BTC").await?;
+//!     let mut guard = handle.subscribe("orderbook.BTC").await?;
 //!
 //!     // Receive updates
 //!     while let Some(msg) = guard.recv().await {
@@ -141,7 +144,7 @@
 //!
 //! All types in this module are designed for concurrent use:
 //!
-//! - [`WsClient`] is `Clone` and can be shared across tasks
+//! - [`ConnectionHandle`] is `Clone` and can be shared across tasks
 //! - [`PendingRequestStore`] uses lock-free `scc::HashMap`
 //! - [`SubscriptionStore`] uses lock-free `scc::HashMap`
 //!
@@ -160,8 +163,8 @@
 //! - `types`: Core type definitions (RequestId, Topic, MessageKind)
 //! - `protocol`: Protocol handler trait for exchange abstraction
 //! - [`handlers`]: Ready-to-use protocol handler implementations
-//! - `actor`: Connection actor for WebSocket lifecycle management
-//! - `client`: Actor-based WebSocket client implementation
+//! - `connection`: Single-task connection driver/task implementation
+//! - `ws_client`: Backward-compatible client wrapper
 //! - `pending`: Lock-free pending request management
 //! - `subscription`: Lock-free subscription management
 
@@ -182,6 +185,7 @@ pub use client::{ExchangeHandler, WebSocketConfig, WebSocketHandle};
 pub use config::WsConfig;
 pub use connection::{
     Connection, ConnectionEpoch, ConnectionHandle, ConnectionState, ConnectionStream, Event,
+    SubscriptionGuard,
 };
 // Re-export state management stores
 pub use pending::PendingRequestStore;

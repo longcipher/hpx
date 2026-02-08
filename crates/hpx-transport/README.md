@@ -12,7 +12,7 @@ This crate is part of the [hpx](https://github.com/longcipher/hpx) project and b
 
 - **Authentication**: API key, Bearer token, HMAC signing, and composable auth strategies
 - **REST Client**: Generic exchange REST client with typed responses
-- **WebSocket**: Actor-based WebSocket client with automatic reconnection and subscription management
+- **WebSocket**: Single-task connection with `Connection`/`Handle`/`Stream` split API and auto-reconnect
 - **Rate Limiting**: Token bucket rate limiter using lock-free `scc` containers
 - **Typed Responses**: Generic response wrapper with metadata and error handling
 - **Metrics**: OpenTelemetry OTLP gRPC metrics integration
@@ -36,6 +36,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Use the client...
     Ok(())
 }
+```
+
+## WebSocket (Split API)
+
+```rust,no_run
+use hpx_transport::websocket::{Connection, Event, WsConfig};
+use hpx_transport::websocket::handlers::GenericJsonHandler;
+
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+let config = WsConfig::new("wss://api.exchange.com/ws");
+let handler = GenericJsonHandler::new();
+
+let connection = Connection::connect_stream(config, handler).await?;
+let (handle, mut stream) = connection.split();
+
+handle.subscribe("trades.BTC").await?;
+while let Some(event) = stream.next().await {
+    if let Event::Message(msg) = event {
+        println!("Control/unknown message: {:?}", msg.kind);
+    }
+}
+# Ok(())
+# }
 ```
 
 ## Rate Limiting

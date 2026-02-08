@@ -411,9 +411,9 @@
 
 **Files**: `crates/hpx-transport/src/lib.rs`, `crates/hpx-transport/README.md`
 
-- [ ] Add documentation for new `Connection` / `ConnectionHandle` / `ConnectionStream` API.
-- [ ] Add usage example showing the split API.
-- [ ] Update WebSocket module documentation.
+- [x] Add documentation for new `Connection` / `ConnectionHandle` / `ConnectionStream` API.
+- [x] Add usage example showing the split API.
+- [x] Update WebSocket module documentation.
 
 **Acceptance**: `cargo doc -p hpx-transport --no-deps` builds clean; docs include new API.
 
