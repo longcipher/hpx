@@ -95,9 +95,9 @@
 
 **File**: `crates/hpx-transport/src/websocket/connection.rs`
 
-- [ ] Define `ConnectionStream` struct wrapping `mpsc::Receiver<Event>`.
-- [ ] Implement `futures::Stream<Item = Event>` for `ConnectionStream`.
-- [ ] Implement `ConnectionStream::next(&mut self) -> Option<Event>` convenience method.
+- [x] Define `ConnectionStream` struct wrapping `mpsc::Receiver<Event>`.
+- [x] Implement `futures::Stream<Item = Event>` for `ConnectionStream`.
+- [x] Implement `ConnectionStream::next(&mut self) -> Option<Event>` convenience method.
 
 **Acceptance**: `ConnectionStream` implements `Stream`.
 

@@ -1,5 +1,10 @@
-use std::sync::Arc;
+use std::{
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
 
+use futures_util::Stream;
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::{
     sync::{broadcast, mpsc},
@@ -196,6 +201,29 @@ impl ConnectionHandle {
     }
 }
 
+pub struct ConnectionStream {
+    rx: mpsc::Receiver<Event>,
+}
+
+impl ConnectionStream {
+    pub fn new(rx: mpsc::Receiver<Event>) -> Self {
+        Self { rx }
+    }
+
+    pub async fn next(&mut self) -> Option<Event> {
+        self.rx.recv().await
+    }
+}
+
+impl Stream for ConnectionStream {
+    type Item = Event;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        Pin::new(&mut this.rx).poll_recv(cx)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -290,5 +318,22 @@ mod tests {
             cmd,
             DataCommand::Unsubscribe { topics } if topics == vec![Topic::from("trades.BTC")]
         ));
+    }
+
+    #[tokio::test]
+    async fn connection_stream_yields_events() {
+        let (tx, rx) = mpsc::channel(2);
+        let mut stream = ConnectionStream::new(rx);
+
+        tx.send(Event::Connected {
+            epoch: ConnectionEpoch(1),
+        })
+        .await
+        .expect("send");
+
+        match stream.next().await {
+            Some(Event::Connected { epoch }) => assert_eq!(epoch.0, 1),
+            other => panic!("unexpected event: {other:?}"),
+        }
     }
 }
