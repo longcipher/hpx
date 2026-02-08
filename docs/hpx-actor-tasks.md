@@ -448,6 +448,14 @@
 
 **Acceptance**: `cargo doc --workspace --no-deps` has no new link warnings.
 
+### Task 5.7: Clean up example warning
+
+**File**: `crates/yawc/examples/axum.rs`
+
+- [x] Remove unused `Frame` import.
+
+**Acceptance**: `just test` no longer warns about unused imports in yawc examples.
+
 ---
 
 ## Task Dependency Graph

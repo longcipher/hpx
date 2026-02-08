@@ -1,7 +1,7 @@
 // Required imports for axum web framework, futures, and websocket operations
 use axum::{Router, response::IntoResponse, routing::get};
 use futures::SinkExt;
-use hpx_yawc::{Frame, OpCode};
+use hpx_yawc::OpCode;
 
 // Main entry point using tokio async runtime
 #[tokio::main]
