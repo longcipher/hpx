@@ -174,7 +174,7 @@ async fn test_actor_reuses_authenticated_connection() -> TransportResult<()> {
         .request_timeout(std::time::Duration::from_secs(2));
 
     let client = WsClient::connect(config, TestHandler).await?;
-    let mut sub_rx = client.subscribe("trades.BTC").await?;
+    let mut sub_guard = client.subscribe("trades.BTC").await?;
 
     let update = tokio::select! {
         _ = &mut second_rx => {
@@ -182,7 +182,7 @@ async fn test_actor_reuses_authenticated_connection() -> TransportResult<()> {
                 "observed unexpected second connection",
             ));
         }
-        update = sub_rx.recv() => update.map_err(|_| {
+        update = sub_guard.recv() => update.ok_or_else(|| {
             hpx_transport::error::TransportError::internal("subscription channel closed")
         })?,
         _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {

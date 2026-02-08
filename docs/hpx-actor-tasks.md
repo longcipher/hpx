@@ -272,9 +272,9 @@
 
 **File**: `crates/hpx-transport/src/websocket/connection.rs`
 
-- [ ] `subscribe()` returns `SubscriptionGuard` instead of bare `broadcast::Receiver`.
-- [ ] Wire `cmd_tx` clone into the guard for unsubscribe-on-drop.
-- [ ] Update `WsClient::subscribe()` wrapper accordingly.
+- [x] `subscribe()` returns `SubscriptionGuard` instead of bare `broadcast::Receiver`.
+- [x] Wire `cmd_tx` clone into the guard for unsubscribe-on-drop.
+- [x] Update `WsClient::subscribe()` wrapper accordingly.
 
 **Acceptance**: Subscribe returns guard; unsubscribe fires on drop.
 

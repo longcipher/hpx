@@ -31,10 +31,10 @@ fn main() {
     let client = WsClient::connect(config, handler).await?;
 
     // Subscribe to a single topic
-    let mut orderbook_rx = client.subscribe("orderbook.BTC").await?;
+    let mut orderbook_guard = client.subscribe("orderbook.BTC").await?;
 
     // Subscribe to multiple topics
-    let receivers = client.subscribe_many([
+    let guards = client.subscribe_many([
         "trades.BTC",
         "trades.ETH",
         "ticker.BTC",
@@ -43,7 +43,7 @@ fn main() {
     // Process updates
     loop {{
         tokio::select! {{
-            Ok(msg) = orderbook_rx.recv() => {{
+            Some(msg) = orderbook_guard.recv() => {{
                 println!("Orderbook update: {{:?}}", msg);
             }}
             // Handle other receivers...

@@ -6,12 +6,12 @@
 use std::{marker::PhantomData, sync::Arc, time::Duration};
 
 use serde::{Serialize, de::DeserializeOwned};
-use tokio::{sync::broadcast, task::JoinHandle};
+use tokio::task::JoinHandle;
 use tracing::info;
 
 use super::{
     config::WsConfig,
-    connection::Connection,
+    connection::{Connection, SubscriptionGuard},
     protocol::{ProtocolHandler, WsMessage},
     types::Topic,
 };
@@ -33,13 +33,13 @@ use crate::error::TransportResult;
 /// let client = WsClient::connect(config, handler).await?;
 ///
 /// // Subscribe to a topic
-/// let mut rx = client.subscribe("orderbook.BTC").await?;
+/// let mut guard = client.subscribe("orderbook.BTC").await?;
 ///
 /// // Send a request
 /// let response: MyResponse = client.request(&MyRequest::new()).await?;
 ///
 /// // Receive subscription updates
-/// while let Ok(msg) = rx.recv().await {
+/// while let Some(msg) = guard.recv().await {
 ///     println!("Update: {:?}", msg);
 /// }
 /// ```
@@ -129,25 +129,17 @@ impl<H: ProtocolHandler> WsClient<H> {
 
     /// Subscribe to a topic.
     ///
-    /// Returns a broadcast receiver for subscription updates.
-    pub async fn subscribe(
-        &self,
-        topic: impl Into<Topic>,
-    ) -> TransportResult<broadcast::Receiver<WsMessage>> {
-        let guard = self.handle.subscribe(topic).await?;
-        Ok(guard.into_receiver())
+    /// Returns a `SubscriptionGuard` for subscription updates.
+    pub async fn subscribe(&self, topic: impl Into<Topic>) -> TransportResult<SubscriptionGuard> {
+        self.handle.subscribe(topic).await
     }
 
     /// Subscribe to multiple topics.
     pub async fn subscribe_many(
         &self,
         topics: impl IntoIterator<Item = impl Into<Topic>>,
-    ) -> TransportResult<Vec<broadcast::Receiver<WsMessage>>> {
-        let guards = self.handle.subscribe_many(topics).await?;
-        Ok(guards
-            .into_iter()
-            .map(|guard| guard.into_receiver())
-            .collect())
+    ) -> TransportResult<Vec<SubscriptionGuard>> {
+        self.handle.subscribe_many(topics).await
     }
 
     /// Unsubscribe from a topic.

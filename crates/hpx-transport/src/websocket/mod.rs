@@ -72,10 +72,10 @@
 //!     let client = WsClient::connect(config, handler).await?;
 //!
 //!     // Subscribe to a topic
-//!     let mut rx = client.subscribe("orderbook.BTC").await?;
+//!     let mut guard = client.subscribe("orderbook.BTC").await?;
 //!
 //!     // Receive updates
-//!     while let Ok(msg) = rx.recv().await {
+//!     while let Some(msg) = guard.recv().await {
 //!         println!("Update: {:?}", msg);
 //!     }
 //!
