@@ -526,7 +526,6 @@ fn calculate_backoff(config: &WsConfig, attempt: u32) -> Duration {
     Duration::from_secs_f64(blended)
 }
 
-#[allow(dead_code)]
 async fn establish_connection<H>(
     config: &WsConfig,
     handler: &H,
@@ -600,7 +599,6 @@ where
     Ok((ws_read, ws_write))
 }
 
-#[allow(dead_code)]
 async fn connection_driver<H>(
     config: Arc<WsConfig>,
     handler: H,
@@ -688,7 +686,7 @@ where
     }
 }
 
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn connection_task<H, R, W>(
     config: &WsConfig,
     handler: &H,

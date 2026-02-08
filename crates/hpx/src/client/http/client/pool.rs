@@ -294,7 +294,6 @@ impl<T: Poolable, K: Key> Pool<T, K> {
 
 /// Pop off this list, looking for a usable connection that hasn't expired.
 struct IdlePopper<'a, T, K> {
-    #[allow(dead_code)]
     key: &'a K,
     list: &'a mut Vec<Idle<T>>,
 }

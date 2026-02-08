@@ -391,10 +391,10 @@
 
 **Files**: Various
 
-- [ ] Remove unused `ActorCommand` references if any remain.
-- [ ] Remove old `ConnectionActor` if not already done in Phase 2.
-- [ ] Remove any `#[allow(dead_code)]` that was added temporarily.
-- [ ] Run `cargo clippy` — verify zero dead code warnings.
+- [x] Remove unused `ActorCommand` references if any remain.
+- [x] Remove old `ConnectionActor` if not already done in Phase 2.
+- [x] Remove any `#[allow(dead_code)]` that was added temporarily.
+- [x] Run `cargo clippy` — verify zero dead code warnings.
 
 **Acceptance**: No dead code.
 
