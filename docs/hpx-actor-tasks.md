@@ -105,7 +105,7 @@
 
 **File**: `crates/hpx-transport/src/websocket/connection.rs`
 
-- [ ] Implement `async fn connection_task(...)` — the single-owner loop:
+- [x] Implement `async fn connection_task(...)` — the single-owner loop:
 
   ```rust
   loop {
@@ -120,11 +120,11 @@
   }
   ```
 
-- [ ] Handle `ctrl_rx.recv() => None` (all handles dropped) → graceful shutdown.
-- [ ] Handle `cmd_rx.recv() => None` → same as above.
-- [ ] Handle `ws_read.next() => None` (connection closed) → initiate reconnect.
-- [ ] Handle `ws_read.next() => Err(e)` → log error, initiate reconnect.
-- [ ] Emit `Event::Message` only for `MessageKind::System | Control | Unknown` (avoid duplicating response/update routing).
+- [x] Handle `ctrl_rx.recv() => None` (all handles dropped) → graceful shutdown.
+- [x] Handle `cmd_rx.recv() => None` → same as above.
+- [x] Handle `ws_read.next() => None` (connection closed) → initiate reconnect.
+- [x] Handle `ws_read.next() => Err(e)` → log error, initiate reconnect.
+- [x] Emit `Event::Message` only for `MessageKind::System | Control | Unknown` (avoid duplicating response/update routing).
 
 **Acceptance**: Connection task compiles; handles all select branches.
 

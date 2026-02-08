@@ -2,19 +2,23 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Instant,
 };
 
-use futures_util::Stream;
+use bytes::Bytes;
+use futures_util::{SinkExt, Stream, StreamExt};
+use hpx::ws::message::Message;
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::{
     sync::{broadcast, mpsc},
     time::timeout,
 };
+use tracing::warn;
 
 use super::{
     config::WsConfig,
     pending::PendingRequestStore,
-    protocol::WsMessage,
+    protocol::{ProtocolHandler, WsMessage},
     subscription::SubscriptionStore,
     types::{MessageKind, RequestId, Topic},
 };
@@ -224,14 +228,196 @@ impl Stream for ConnectionStream {
     }
 }
 
+async fn send_ws_message<W>(ws_write: &mut W, msg: &WsMessage) -> TransportResult<()>
+where
+    W: futures_util::Sink<Message, Error = TransportError> + Unpin,
+{
+    let message = match msg {
+        WsMessage::Text(text) => Message::text(text),
+        WsMessage::Binary(data) => Message::binary(data.clone()),
+    };
+
+    ws_write.send(message).await
+}
+
+#[allow(clippy::too_many_arguments, dead_code)]
+pub(crate) async fn connection_task<H, R, W>(
+    config: Arc<WsConfig>,
+    handler: H,
+    mut ctrl_rx: mpsc::Receiver<ControlCommand>,
+    mut cmd_rx: mpsc::Receiver<DataCommand>,
+    event_tx: mpsc::Sender<Event>,
+    pending: Arc<PendingRequestStore>,
+    subs: Arc<SubscriptionStore>,
+    mut ws_read: R,
+    mut ws_write: W,
+) -> TransportResult<()>
+where
+    H: ProtocolHandler,
+    R: Stream<Item = TransportResult<Message>> + Unpin,
+    W: futures_util::Sink<Message, Error = TransportError> + Unpin,
+{
+    let mut ping_interval = tokio::time::interval(config.ping_interval);
+    let mut cleanup_interval = tokio::time::interval(config.pending_cleanup_interval);
+    let mut last_pong = Instant::now();
+
+    loop {
+        tokio::select! {
+            biased;
+            ctrl = ctrl_rx.recv() => {
+                match ctrl {
+                    Some(ControlCommand::Close) => {
+                        return Ok(());
+                    }
+                    Some(ControlCommand::Reconnect { reason }) => {
+                        return Err(TransportError::websocket(reason));
+                    }
+                    None => return Ok(()),
+                }
+            }
+            cmd = cmd_rx.recv() => {
+                match cmd {
+                    Some(DataCommand::Subscribe { topics }) => {
+                        let request_id = handler.generate_request_id();
+                        let msg = handler.build_subscribe(&topics, request_id);
+                        if let Err(err) = send_ws_message(&mut ws_write, &msg).await {
+                            warn!(error = %err, "Failed to send subscribe");
+                        }
+                    }
+                    Some(DataCommand::Unsubscribe { topics }) => {
+                        let request_id = handler.generate_request_id();
+                        let msg = handler.build_unsubscribe(&topics, request_id);
+                        if let Err(err) = send_ws_message(&mut ws_write, &msg).await {
+                            warn!(error = %err, "Failed to send unsubscribe");
+                        }
+                    }
+                    Some(DataCommand::Send { message }) => {
+                        if let Err(err) = send_ws_message(&mut ws_write, &message).await {
+                            warn!(error = %err, "Failed to send message");
+                        }
+                    }
+                    Some(DataCommand::Request { message, request_id }) => {
+                        let message = handler.inject_request_id(message, &request_id);
+                        if let Err(err) = send_ws_message(&mut ws_write, &message).await {
+                            pending.resolve(&request_id, Err(TransportError::websocket(err.to_string())));
+                        }
+                    }
+                    None => return Ok(()),
+                }
+            }
+            msg = ws_read.next() => {
+                match msg {
+                    Some(Ok(msg)) => {
+                        match &msg {
+                            Message::Pong(_) => {
+                                last_pong = Instant::now();
+                                continue;
+                            }
+                            Message::Ping(data) => {
+                                let _ = ws_write.send(Message::Pong(data.clone())).await;
+                                continue;
+                            }
+                            Message::Close(_) => {
+                                return Err(TransportError::connection_closed(None));
+                            }
+                            _ => {}
+                        }
+
+                        let (raw, text) = match msg {
+                            Message::Text(text) => {
+                                let text = text.to_string();
+                                (WsMessage::Text(text.clone()), Some(text))
+                            }
+                            Message::Binary(data) => {
+                                let text = handler.decode_binary(&data).ok();
+                                (WsMessage::Binary(data.to_vec()), text)
+                            }
+                            _ => {
+                                continue;
+                            }
+                        };
+
+                        let Some(text) = text else {
+                            continue;
+                        };
+
+                        if handler.is_server_ping(&text) {
+                            if let Some(pong) = handler.build_pong(text.as_bytes()) {
+                                let _ = send_ws_message(&mut ws_write, &pong).await;
+                            }
+                            continue;
+                        }
+
+                        if handler.is_pong_response(&text) {
+                            last_pong = Instant::now();
+                            continue;
+                        }
+
+                        if handler.should_reconnect(&text) {
+                            return Err(TransportError::websocket("Server requested reconnect"));
+                        }
+
+                        let kind = handler.classify_message(&text);
+                        match kind {
+                            MessageKind::Response => {
+                                if let Some(request_id) = handler.extract_request_id(&text) {
+                                    pending.resolve(&request_id, Ok(text));
+                                }
+                            }
+                            MessageKind::Update => {
+                                if let Some(topic) = handler.extract_topic(&text) {
+                                    subs.publish(&topic, WsMessage::Text(text));
+                                }
+                            }
+                            MessageKind::System | MessageKind::Control | MessageKind::Unknown => {
+                                let topic = handler.extract_topic(&text);
+                                let incoming = IncomingMessage {
+                                    raw,
+                                    text: Some(text),
+                                    kind,
+                                    topic,
+                                };
+                                let _ = event_tx.send(Event::Message(incoming)).await;
+                            }
+                        }
+                    }
+                    Some(Err(err)) => {
+                        warn!(error = %err, "WebSocket read error");
+                        return Err(err);
+                    }
+                    None => {
+                        return Err(TransportError::connection_closed(None));
+                    }
+                }
+            }
+            _ = ping_interval.tick() => {
+                if config.use_websocket_ping {
+                    let _ = ws_write.send(Message::Ping(Bytes::new())).await;
+                } else if let Some(ping) = handler.build_ping() {
+                    let _ = send_ws_message(&mut ws_write, &ping).await;
+                }
+
+                if last_pong.elapsed() > config.pong_timeout {
+                    return Err(TransportError::connection_closed(Some("Pong timeout".to_string())));
+                }
+            }
+            _ = cleanup_interval.tick() => {
+                pending.cleanup_stale_with_notify();
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
 
+    use futures_util::SinkExt;
     use serde_json::json;
     use tokio::sync::mpsc;
 
     use super::*;
+    use crate::{error::TransportError, websocket::protocol::ProtocolHandler};
 
     fn test_config() -> Arc<WsConfig> {
         Arc::new(
@@ -335,5 +521,73 @@ mod tests {
             Some(Event::Connected { epoch }) => assert_eq!(epoch.0, 1),
             other => panic!("unexpected event: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn connection_task_emits_control_events() {
+        struct TestHandler;
+
+        impl ProtocolHandler for TestHandler {
+            fn classify_message(&self, message: &str) -> MessageKind {
+                if message == "control" {
+                    MessageKind::Control
+                } else {
+                    MessageKind::Unknown
+                }
+            }
+
+            fn extract_request_id(&self, _message: &str) -> Option<RequestId> {
+                None
+            }
+
+            fn extract_topic(&self, _message: &str) -> Option<Topic> {
+                None
+            }
+
+            fn build_subscribe(&self, _topics: &[Topic], _request_id: RequestId) -> WsMessage {
+                WsMessage::text("sub")
+            }
+
+            fn build_unsubscribe(&self, _topics: &[Topic], _request_id: RequestId) -> WsMessage {
+                WsMessage::text("unsub")
+            }
+        }
+
+        let mut config = WsConfig::new("wss://test");
+        config.ping_interval = Duration::from_secs(60);
+        config.pending_cleanup_interval = Duration::from_secs(60);
+        let config = Arc::new(config);
+
+        let (ctrl_tx, ctrl_rx) = mpsc::channel(1);
+        let (cmd_tx, cmd_rx) = mpsc::channel(1);
+        let (event_tx, mut event_rx) = mpsc::channel(2);
+        let pending = Arc::new(PendingRequestStore::new(Arc::clone(&config)));
+        let subs = Arc::new(SubscriptionStore::new(Arc::clone(&config)));
+
+        let ws_read = futures_util::stream::iter(vec![Ok(Message::text("control"))]);
+        let ws_write = futures_util::sink::drain()
+            .sink_map_err(|_| TransportError::internal("drain sink should not error"));
+
+        let task = tokio::spawn(connection_task(
+            config,
+            TestHandler,
+            ctrl_rx,
+            cmd_rx,
+            event_tx,
+            pending,
+            subs,
+            ws_read,
+            ws_write,
+        ));
+
+        let event = event_rx.recv().await.expect("event");
+        match event {
+            Event::Message(msg) => assert_eq!(msg.kind, MessageKind::Control),
+            other => panic!("unexpected event: {other:?}"),
+        }
+
+        drop(ctrl_tx);
+        drop(cmd_tx);
+        let _ = task.await;
     }
 }
