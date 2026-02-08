@@ -2,7 +2,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use async_trait::async_trait;
@@ -12,10 +12,11 @@ use hpx::{
     Client,
     ws::{WebSocket, WebSocketRead, WebSocketRequestBuilder, WebSocketWrite, message::Message},
 };
+use rand::Rng;
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::{
     sync::{broadcast, mpsc},
-    time::timeout,
+    time::{sleep, timeout},
 };
 use tracing::warn;
 
@@ -278,6 +279,24 @@ async fn connect_websocket(url: &str) -> TransportResult<WebSocket> {
     resp.into_websocket().await.map_err(TransportError::Http)
 }
 
+fn calculate_backoff(config: &WsConfig, attempt: u32) -> Duration {
+    let initial = config.reconnect_initial_delay.as_secs_f64();
+    let max = config.reconnect_max_delay.as_secs_f64();
+    let factor = config.reconnect_backoff_factor.max(1.0);
+    let exponent = factor.powi(attempt as i32);
+    let base = (initial * exponent).min(max);
+
+    let jitter = config.reconnect_jitter.clamp(0.0, 1.0);
+    if jitter == 0.0 {
+        return Duration::from_secs_f64(base);
+    }
+
+    let mut rng = rand::rng();
+    let randomized = rng.random_range(0.0..=base);
+    let blended = base * (1.0 - jitter) + randomized * jitter;
+    Duration::from_secs_f64(blended)
+}
+
 #[allow(dead_code)]
 async fn establish_connection<H>(
     config: &WsConfig,
@@ -352,8 +371,8 @@ where
     Ok((ws_read, ws_write))
 }
 
-#[allow(clippy::too_many_arguments, dead_code)]
-pub(crate) async fn connection_task<H, R, W>(
+#[allow(dead_code)]
+async fn connection_driver<H>(
     config: Arc<WsConfig>,
     handler: H,
     mut ctrl_rx: mpsc::Receiver<ControlCommand>,
@@ -361,6 +380,94 @@ pub(crate) async fn connection_task<H, R, W>(
     event_tx: mpsc::Sender<Event>,
     pending: Arc<PendingRequestStore>,
     subs: Arc<SubscriptionStore>,
+) -> TransportResult<()>
+where
+    H: ProtocolHandler,
+{
+    let mut attempt: u32 = 0;
+    let mut epoch = ConnectionEpoch(0);
+
+    loop {
+        let connection =
+            establish_connection(&config, &handler, &subs, &event_tx, &mut epoch).await;
+        let (ws_read, ws_write) = match connection {
+            Ok(parts) => {
+                attempt = 0;
+                parts
+            }
+            Err(err) => {
+                let reason = err.to_string();
+                let _ = event_tx
+                    .send(Event::Disconnected {
+                        epoch,
+                        reason: reason.clone(),
+                    })
+                    .await;
+                pending.clear_with_error(&reason);
+
+                if let Some(max) = config.reconnect_max_attempts
+                    && attempt >= max
+                {
+                    return Err(err);
+                }
+
+                let delay = calculate_backoff(&config, attempt);
+                attempt = attempt.saturating_add(1);
+                sleep(delay).await;
+                continue;
+            }
+        };
+
+        let ws_read =
+            ws_read.map(|result| result.map_err(|err| TransportError::websocket(err.to_string())));
+
+        match connection_task(
+            &config,
+            &handler,
+            &mut ctrl_rx,
+            &mut cmd_rx,
+            &event_tx,
+            &pending,
+            &subs,
+            ws_read,
+            ws_write,
+        )
+        .await
+        {
+            Ok(()) => return Ok(()),
+            Err(err) => {
+                let reason = err.to_string();
+                let _ = event_tx
+                    .send(Event::Disconnected {
+                        epoch,
+                        reason: reason.clone(),
+                    })
+                    .await;
+                pending.clear_with_error(&reason);
+
+                if let Some(max) = config.reconnect_max_attempts
+                    && attempt >= max
+                {
+                    return Err(err);
+                }
+
+                let delay = calculate_backoff(&config, attempt);
+                attempt = attempt.saturating_add(1);
+                sleep(delay).await;
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments, dead_code)]
+pub(crate) async fn connection_task<H, R, W>(
+    config: &WsConfig,
+    handler: &H,
+    ctrl_rx: &mut mpsc::Receiver<ControlCommand>,
+    cmd_rx: &mut mpsc::Receiver<DataCommand>,
+    event_tx: &mpsc::Sender<Event>,
+    pending: &PendingRequestStore,
+    subs: &SubscriptionStore,
     mut ws_read: R,
     mut ws_write: W,
 ) -> TransportResult<()>
@@ -523,6 +630,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::{
+        collections::VecDeque,
         sync::{
             Arc, Mutex,
             atomic::{AtomicU64, Ordering},
@@ -713,8 +821,8 @@ mod tests {
         config.pending_cleanup_interval = Duration::from_secs(60);
         let config = Arc::new(config);
 
-        let (ctrl_tx, ctrl_rx) = mpsc::channel(1);
-        let (cmd_tx, cmd_rx) = mpsc::channel(1);
+        let (ctrl_tx, mut ctrl_rx) = mpsc::channel(1);
+        let (cmd_tx, mut cmd_rx) = mpsc::channel(1);
         let (event_tx, mut event_rx) = mpsc::channel(2);
         let pending = Arc::new(PendingRequestStore::new(Arc::clone(&config)));
         let subs = Arc::new(SubscriptionStore::new(Arc::clone(&config)));
@@ -725,17 +833,21 @@ mod tests {
                 .sink_map_err(|_| TransportError::internal("drain sink should not error")),
         );
 
-        let task = tokio::spawn(connection_task(
-            config,
-            TestHandler,
-            ctrl_rx,
-            cmd_rx,
-            event_tx,
-            pending,
-            subs,
-            ws_read,
-            ws_write,
-        ));
+        let handler = TestHandler;
+        let task = tokio::spawn(async move {
+            connection_task(
+                &config,
+                &handler,
+                &mut ctrl_rx,
+                &mut cmd_rx,
+                &event_tx,
+                &pending,
+                &subs,
+                ws_read,
+                ws_write,
+            )
+            .await
+        });
 
         let event = event_rx.recv().await.expect("event");
         match event {
@@ -816,6 +928,81 @@ mod tests {
                 if text.starts_with("SUB:") {
                     if let Some(tx) = state.sub_tx.lock().unwrap().take() {
                         let _ = tx.send(());
+                    }
+                }
+            }
+        });
+
+        Ok(response)
+    }
+
+    struct ReconnectServerState {
+        conn_count: AtomicU64,
+        sub_txs: Mutex<VecDeque<oneshot::Sender<()>>>,
+    }
+
+    async fn start_reconnect_server(state: Arc<ReconnectServerState>) -> std::io::Result<String> {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let addr = listener.local_addr()?;
+
+        tokio::spawn(async move {
+            loop {
+                let (stream, _) = match listener.accept().await {
+                    Ok(pair) => pair,
+                    Err(_) => return,
+                };
+
+                let state = Arc::clone(&state);
+                tokio::spawn(async move {
+                    let io = TokioIo::new(stream);
+                    let conn_fut = http1::Builder::new()
+                        .serve_connection(
+                            io,
+                            service_fn(move |req| {
+                                reconnect_server_upgrade(req, Arc::clone(&state))
+                            }),
+                        )
+                        .with_upgrades();
+                    let _ = conn_fut.await;
+                });
+            }
+        });
+
+        Ok(format!("ws://{}", addr))
+    }
+
+    async fn reconnect_server_upgrade(
+        mut req: Request<Incoming>,
+        state: Arc<ReconnectServerState>,
+    ) -> hpx_yawc::Result<Response<Empty<Bytes>>> {
+        let (response, fut) = WebSocket::upgrade_with_options(&mut req, Options::default())?;
+
+        tokio::spawn(async move {
+            let mut ws = match fut.await {
+                Ok(ws) => ws,
+                Err(_) => return,
+            };
+
+            let conn_index = state.conn_count.fetch_add(1, Ordering::Relaxed);
+            let should_close_after_sub = conn_index == 0;
+
+            while let Some(frame) = ws.next().await {
+                if frame.opcode() != OpCode::Text {
+                    continue;
+                }
+
+                let text = match std::str::from_utf8(frame.payload()) {
+                    Ok(text) => text,
+                    Err(_) => continue,
+                };
+
+                if text.starts_with("SUB:") {
+                    if let Some(tx) = state.sub_txs.lock().unwrap().pop_front() {
+                        let _ = tx.send(());
+                    }
+
+                    if should_close_after_sub {
+                        return;
                     }
                 }
             }
@@ -911,6 +1098,122 @@ mod tests {
 
         assert_eq!(epoch.0, 1);
         assert_eq!(state.conn_count.load(Ordering::Relaxed), 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn calculate_backoff_without_jitter_is_deterministic() {
+        let mut config = WsConfig::new("wss://test");
+        config.reconnect_initial_delay = Duration::from_millis(100);
+        config.reconnect_max_delay = Duration::from_millis(1000);
+        config.reconnect_backoff_factor = 2.0;
+        config.reconnect_jitter = 0.0;
+
+        assert_eq!(calculate_backoff(&config, 0), Duration::from_millis(100));
+        assert_eq!(calculate_backoff(&config, 1), Duration::from_millis(200));
+        assert_eq!(calculate_backoff(&config, 2), Duration::from_millis(400));
+        assert_eq!(calculate_backoff(&config, 3), Duration::from_millis(800));
+        assert_eq!(calculate_backoff(&config, 4), Duration::from_millis(1000));
+    }
+
+    #[tokio::test]
+    async fn connection_driver_reconnects_and_resubscribes() -> TransportResult<()> {
+        struct ReconnectHandler;
+
+        impl ProtocolHandler for ReconnectHandler {
+            fn classify_message(&self, _message: &str) -> MessageKind {
+                MessageKind::Unknown
+            }
+
+            fn extract_request_id(&self, _message: &str) -> Option<RequestId> {
+                None
+            }
+
+            fn extract_topic(&self, _message: &str) -> Option<Topic> {
+                None
+            }
+
+            fn build_subscribe(&self, topics: &[Topic], _request_id: RequestId) -> WsMessage {
+                let topic = topics.first().map(|t| t.as_str()).unwrap_or("unknown");
+                WsMessage::text(format!("SUB:{topic}"))
+            }
+
+            fn build_unsubscribe(&self, topics: &[Topic], _request_id: RequestId) -> WsMessage {
+                let topic = topics.first().map(|t| t.as_str()).unwrap_or("unknown");
+                WsMessage::text(format!("UNSUB:{topic}"))
+            }
+        }
+
+        let (first_tx, first_rx) = oneshot::channel();
+        let (second_tx, second_rx) = oneshot::channel();
+        let state = Arc::new(ReconnectServerState {
+            conn_count: AtomicU64::new(0),
+            sub_txs: Mutex::new(VecDeque::from([first_tx, second_tx])),
+        });
+
+        let url = start_reconnect_server(Arc::clone(&state))
+            .await
+            .expect("server");
+        let mut config = WsConfig::new(url);
+        config.reconnect_initial_delay = Duration::from_millis(10);
+        config.reconnect_max_delay = Duration::from_millis(20);
+        config.reconnect_backoff_factor = 2.0;
+        config.reconnect_jitter = 0.0;
+        config.ping_interval = Duration::from_secs(60);
+        config.pending_cleanup_interval = Duration::from_secs(60);
+        let config = Arc::new(config);
+
+        let pending = Arc::new(PendingRequestStore::new(Arc::clone(&config)));
+        let subs = Arc::new(SubscriptionStore::new(Arc::clone(&config)));
+        let _ = subs.subscribe(Topic::from("trades.BTC"));
+
+        let (ctrl_tx, ctrl_rx) = mpsc::channel(1);
+        let (cmd_tx, cmd_rx) = mpsc::channel(1);
+        let (event_tx, mut event_rx) = mpsc::channel(4);
+
+        let driver = tokio::spawn(connection_driver(
+            Arc::clone(&config),
+            ReconnectHandler,
+            ctrl_rx,
+            cmd_rx,
+            event_tx,
+            Arc::clone(&pending),
+            Arc::clone(&subs),
+        ));
+
+        timeout(Duration::from_secs(1), first_rx)
+            .await
+            .map_err(|_| TransportError::internal("first subscribe timeout"))?
+            .map_err(|_| TransportError::internal("first subscribe channel closed"))?;
+
+        let mut saw_connected = false;
+        let mut saw_disconnected = false;
+        for _ in 0..3 {
+            if let Ok(Some(event)) = timeout(Duration::from_secs(1), event_rx.recv()).await {
+                match event {
+                    Event::Connected { .. } => saw_connected = true,
+                    Event::Disconnected { .. } => saw_disconnected = true,
+                    _ => {}
+                }
+            }
+            if saw_connected && saw_disconnected {
+                break;
+            }
+        }
+
+        timeout(Duration::from_secs(1), second_rx)
+            .await
+            .map_err(|_| TransportError::internal("second subscribe timeout"))?
+            .map_err(|_| TransportError::internal("second subscribe channel closed"))?;
+
+        assert!(saw_connected, "expected at least one Connected event");
+        assert!(saw_disconnected, "expected a Disconnected event after drop");
+        assert!(state.conn_count.load(Ordering::Relaxed) >= 2);
+
+        let _ = ctrl_tx.send(ControlCommand::Close).await;
+        drop(cmd_tx);
+        let _ = driver.await;
 
         Ok(())
     }

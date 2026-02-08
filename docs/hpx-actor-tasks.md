@@ -152,7 +152,7 @@
 
 **File**: `crates/hpx-transport/src/websocket/connection.rs`
 
-- [ ] On disconnect/error:
+- [x] On disconnect/error:
   - Emit `Event::Disconnected { epoch, reason }`.
   - Resolve all pending requests for current epoch with error.
   - Calculate backoff using `WsConfig`: `reconnect_initial_delay`, `reconnect_max_delay`, `reconnect_backoff_factor`, `reconnect_jitter`.
@@ -161,7 +161,7 @@
   - Attempt reconnection.
   - On success: reset attempt counter; re-authenticate; re-subscribe; resume loop.
   - On max attempts exceeded: emit error, shut down.
-- [ ] Add tests:
+- [x] Add tests:
   - Unit test for backoff calculation with `reconnect_jitter = 0.0` (deterministic).
   - Integration test: disconnect → backoff → reconnect → resubscribe → `Event::Connected` emitted.
 
