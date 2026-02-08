@@ -19,7 +19,7 @@ build-docs:
 test-coverage:
   cargo tarpaulin --all-features --workspace --timeout 300
 check-feature:
-  cargo hack check --each-feature --no-dev-deps
+  cargo hack check --each-feature --no-dev-deps --exclude-no-default-features
 check-cn:
   rg --line-number --column "\p{Han}"
 # Full CI check

@@ -12,46 +12,22 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  style:
-    name: Style
+  ci:
+    name: Lint & Check Features
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt, clippy
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-      - name: Check clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@nextest
-      - name: Run tests
-        run: cargo nextest run --workspace
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-hack,cargo-machete,taplo-cli,typos-cli,rumdl
 
-  docs:
-    name: Docs
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Build documentation
-        run: cargo doc --workspace --no-deps --document-private-items --all-features
-        env:
-          RUSTDOCFLAGS: "-D warnings"
+      - name: Lint
+        run: just lint
 
-  hack:
-    name: Feature Powerset
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@cargo-hack
       - name: Check features
-        run: cargo hack check --each-feature --no-dev-deps
+        run: just check-feature
