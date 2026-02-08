@@ -426,7 +426,7 @@
 - [x] Document command priority (two-channel design).
 - [x] Document reconnect/backoff policy + event backpressure behavior.
 - [x] Document  parity and the kameo decision (why not in hot paths).
-- [ ] Update `docs/hpx-transport-ws-design.md` to reflect the driver loop, backoff, and event policy.
+- [x] Update `docs/hpx-transport-ws-design.md` to reflect the driver loop, backoff, and event policy.
 
 **Acceptance**: Design docs reflect implemented architecture.
 

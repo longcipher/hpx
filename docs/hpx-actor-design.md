@@ -442,6 +442,13 @@ pub reconnect_jitter: f64,
 
 Default: `256` (align with subscription channel capacity). This is only for lifecycle/optional messages, so a modest bound is sufficient. Reconnect defaults should be safe and conservative, with jitter set to a small non-zero value to avoid thundering herds.
 
+### 4.12 Pending Request Capacity Enforcement
+
+`PendingRequestStore` remains `scc::HashMap`-backed, but capacity is enforced with an atomic
+counter to ensure `max_pending_requests` is respected under concurrency. On `add()` we reserve
+a slot; on `resolve()`, `remove()`, and cleanup we decrement. This avoids oversubscription
+while keeping the hot path lock-free.
+
 ---
 
 ## 5. Pool Optimization (Non-Actor)
@@ -496,6 +503,9 @@ Benefits:
 - Requests to different hosts never contend.
 - `parking_lot::Mutex` is faster than `std::sync::Mutex` (no poisoning, adaptive spinning).
 - No architectural change — just a data structure swap inside `Pool`.
+
+**Max pool size semantics**: when `max_pool_size` is configured, preserve global LRU behavior by
+collapsing to a single shard. This keeps the cap exact while still benefiting from `parking_lot`.
 
 ### 5.3 Alternative: scc::HashMap
 
@@ -653,6 +663,7 @@ The only potentially breaking change is `subscribe()` returning `SubscriptionGua
 | Reconnect time-to-recovery | integration test | < 2s average |
 | Pool checkout contention | `criterion` (multi-thread) | Linear scaling with hosts |
 | H2 ping overhead in data path | `criterion` | Reduced vs Mutex baseline |
+| Pool/H2 contention microbench | `criterion` (`crates/hpx/benches/contention.rs`) | Show improvement under 1/4/16 threads |
 
 ### Success Criteria
 
@@ -675,6 +686,7 @@ Before merging each phase:
 | Backpressure tuning needed | Medium | Medium | Start with bounded channels, expose capacity in `WsConfig` |
 | Event stream drops under pressure | Medium | Low | Best-effort `Event::Message`, reliable lifecycle events, counters/logs |
 | Pool sharding uneven distribution | Low | Low | Consistent hashing; benchmark distribution |
+| `max_pool_size` semantics across shards | Low | Low | Collapse to a single shard when a global cap is configured |
 | Atomic H2 ping ordering issues | Low | Medium | Use `Ordering::SeqCst` initially, relax after testing |
 
 ---

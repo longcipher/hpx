@@ -6,15 +6,20 @@
 
 This document describes the design for extending `hpx-transport` with advanced WebSocket capabilities. The design draws inspiration from the bybit-api Node.js library while addressing its limitations and leveraging Rust's type system and async runtime for improved safety and performance.
 
+The current implementation uses a **single-owner connection task** with a lightweight driver
+(`Connection`/`ConnectionHandle`/`ConnectionStream` split API), typed command channels, and
+RAII subscriptions, mirroring the proven `` loop while keeping hot paths lock-free.
+
 ### Key Features
 
 1. **Dual Interaction Patterns**: Support both request-response (Promise-like) and event-driven patterns
-2. **Smart Connection Management**: Automatic reconnection with exponential backoff, heartbeat monitoring, and silent disconnect detection
-3. **Subscription Persistence**: Automatic resubscription after reconnection with subscription state tracking
-4. **Exchange-Agnostic Design**: Protocol-level abstractions that work with any WebSocket-based API
-5. **Type-Safe API**: Leverage Rust's type system for compile-time safety
-6. **Zero-Copy Message Handling**: Efficient message routing without unnecessary allocations
-7. **Lock-Free Concurrency**: Use `scc::HashMap` for lock-free state management with wait-free reads
+2. **Split API + Lifecycle Events**: `ConnectionHandle` + `ConnectionStream` with `Connected/Disconnected` events
+3. **Smart Connection Management**: Automatic reconnection with exponential backoff, heartbeat monitoring, and silent disconnect detection
+4. **Subscription Persistence**: Automatic resubscription after reconnection with subscription state tracking
+5. **Exchange-Agnostic Design**: Protocol-level abstractions that work with any WebSocket-based API
+6. **Type-Safe API**: Leverage Rust's type system for compile-time safety
+7. **Zero-Copy Message Handling**: Efficient message routing without unnecessary allocations
+8. **Lock-Free Concurrency**: Use `scc::HashMap` for lock-free state management with wait-free reads
 
 ## 2. Design Analysis
 
@@ -46,7 +51,7 @@ The bybit-api library implements several valuable patterns:
 
 ### 2.3 Design Improvements for hpx-transport
 
-1. **Actor Model**: Use channels for thread-safe communication instead of shared state
+1. **Single-Owner Connection Task**: A dedicated driver + task with typed command channels
 2. **Lock-Free State Management**: Use `scc::HashMap` for lock-free concurrent access to pending requests and subscriptions
 3. **Generic Protocol Traits**: Define abstractions that any exchange can implement
 4. **Request Timeouts**: Per-request timeout with automatic cleanup
@@ -61,71 +66,60 @@ The bybit-api library implements several valuable patterns:
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          User Application                                │
 │                                                                          │
-│   ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐   │
-│   │  RequestClient  │     │SubscriptionClient│     │  RawClient     │   │
-│   │  (Req-Response) │     │ (Event-Driven)   │     │  (Low-level)   │   │
-│   └────────┬────────┘     └────────┬─────────┘     └────────┬───────┘   │
-└────────────┼───────────────────────┼───────────────────────┼────────────┘
-             │                       │                       │
-             ▼                       ▼                       ▼
+│  let connection = Connection::connect_stream(config, handler).await?;    │
+│  let (handle, stream) = connection.split();                              │
+└───────────────────────────────┬─────────────────────────────────────────┘
+                                │
+                Commands        │                         Events
+┌───────────────────────────────▼─────────────────────────────────────────┐
+│                         Connection Driver                                │
+│  - connect + auth + resubscribe                                           │
+│  - reconnect/backoff + epoch tracking                                    │
+│  - pending cleanup + lifecycle events                                    │
+└───────────────────────────────┬─────────────────────────────────────────┘
+                                │
+                                ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                         WebSocketManager                                 │
-│                                                                          │
-│  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │                         Connection Pool                          │    │
-│  │  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐     │    │
-│  │  │ Connection #1  │  │ Connection #2  │  │ Connection #N  │     │    │
-│  │  │  (wsKey: pub)  │  │  (wsKey: priv) │  │  (wsKey: ...)  │     │    │
-│  │  └────────────────┘  └────────────────┘  └────────────────┘     │    │
-│  └─────────────────────────────────────────────────────────────────┘    │
-│                                                                          │
-│  ┌─────────────────────┐  ┌─────────────────────┐                       │
-│  │  Pending Requests   │  │  Subscription Store │                       │
-│  │  scc::HashMap<ReqId,│  │  scc::HashMap<Topic,│                       │
-│  │    OneshotSender>   │  │    BroadcastSender> │                       │
-│  └─────────────────────┘  └─────────────────────┘                       │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         Connection Actor                                 │
-│                                                                          │
-│  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │  Event Loop (tokio::select!)                                     │    │
-│  │                                                                   │    │
-│  │  1. Heartbeat Timer ─────> Send Ping, Check Pong Timeout         │    │
-│  │  2. WebSocket Read  ─────> Route to Pending/Subscriptions        │    │
-│  │  3. Command Channel ─────> Subscribe/Unsubscribe/Send/Close      │    │
-│  │  4. Cleanup Timer   ─────> Remove stale pending requests         │    │
-│  └─────────────────────────────────────────────────────────────────┘    │
-│                                                                          │
-│  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │  Reconnection Logic                                               │    │
-│  │  - Exponential backoff with jitter                                │    │
-│  │  - Max retry attempts (configurable)                              │    │
-│  │  - Authentication replay                                          │    │
-│  │  - Subscription restoration                                       │    │
-│  └─────────────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                              hpx::ws                                     │
-│                    (Low-level WebSocket primitives)                      │
-└─────────────────────────────────────────────────────────────────────────┘
+│                        Connection Task (single loop)                     │
+│  select! { ctrl/data cmds, ws read, ping, cleanup }                      │
+└───────────────┬───────────────────────────────┬─────────────────────────┘
+                ▼                               ▼
+     PendingRequestStore                SubscriptionStore
 ```
 
 ### 3.2 Component Responsibilities
 
 | Component | Responsibility |
 |-----------|----------------|
-| `WebSocketManager` | High-level API, connection pool management, request routing |
-| `ConnectionActor` | Single connection lifecycle, heartbeat, reconnection |
-| `RequestClient` | Request-response pattern API (async/await) |
-| `SubscriptionClient` | Pub/Sub pattern API (streams/channels) |
+| `Connection` | Owns driver + task; connection lifecycle, reconnect/backoff |
+| `ConnectionHandle` | Command surface for requests, sends, subscriptions |
+| `ConnectionStream` | Event stream (`Connected`/`Disconnected`/`Message`) |
+| `WsClient` | Backward-compatible wrapper around `ConnectionHandle` |
 | `ProtocolHandler` | Exchange-specific message encoding/decoding |
 | `PendingRequestStore` | Track in-flight request-response pairs |
 | `SubscriptionStore` | Track active subscriptions for restoration |
+
+### 3.3 Connection Driver + Task (Current Implementation)
+
+The connection is split into two layers:
+
+- **Driver**: establishes the WebSocket, performs auth, replays subscriptions, increments the
+  connection epoch, and emits lifecycle events. On disconnect or error it clears pending requests,
+  computes backoff with jitter, and reconnects.
+- **Task**: owns the WebSocket read/write halves and runs a single `tokio::select!` loop to handle
+  control commands, data commands, inbound frames, ping/pong, and stale-pending cleanup.
+
+Key policies:
+
+- **Command priority**: control commands (Close/Reconnect) are polled first via a biased select;
+  data commands are handled on a separate channel.
+- **Event backpressure**: the event channel is bounded. `Connected`/`Disconnected` are delivered
+  reliably with `send().await`, while `Message` is best-effort (`try_send`, drop + counter/log).
+- **Reconnection**: full-jitter exponential backoff; on success, auth + resubscribe + epoch bump.
+- **Pending capacity**: `PendingRequestStore` uses `scc::HashMap` plus an atomic counter to enforce
+  `max_pending_requests` accurately under concurrency.
+- **RAII subscriptions**: `SubscriptionGuard` decrements refs on drop and sends `Unsubscribe` when
+  the last subscriber disappears.
 
 ## 4. Core Abstractions
 
@@ -580,7 +574,11 @@ impl SubscriptionStore {
 }
 ```
 
-## 5. Connection Actor
+## 5. Legacy Actor Design (Deprecated)
+
+> This section documents the earlier actor-based draft and is kept for historical context.
+> It is **not** the current implementation. See Section 3.3 and `docs/hpx-actor-design.md`
+> for the active design and behavior.
 
 ### 5.1 Actor State Machine
 
