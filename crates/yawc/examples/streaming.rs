@@ -16,7 +16,7 @@
 use std::{fs::File, io::Write};
 
 use futures::{SinkExt, StreamExt};
-use hpx_hpx_yawc::{Frame, OpCode, Options, WebSocket};
+use hpx_yawc::{Frame, Options, WebSocket, frame::OpCode};
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {

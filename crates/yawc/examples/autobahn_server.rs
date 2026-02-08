@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use axum::{Router, response::IntoResponse, routing::get};
-use hpx_yawc::{HttpStream, IncomingUpgrade, Options, WebSocket, frame::OpCode};
+use hpx_yawc::{Frame, HttpStream, IncomingUpgrade, Options, WebSocket, frame::OpCode};
 use tokio::net::TcpListener;
 
 async fn ws_handler(ws: IncomingUpgrade) -> impl IntoResponse {
@@ -36,7 +36,7 @@ async fn handle_socket(mut ws: WebSocket<HttpStream>) {
         // Echo back the message
         match opcode {
             OpCode::Text | OpCode::Binary => {
-                if let Err(e) = ws.send(yawc::Frame::from((opcode, body))).await {
+                if let Err(e) = ws.send(Frame::from((opcode, body))).await {
                     tracing::error!("Error sending message: {}", e);
                     break;
                 }
