@@ -132,17 +132,17 @@
 
 **File**: `crates/hpx-transport/src/websocket/connection.rs`
 
-- [ ] Implement `async fn establish_connection(config, handler) -> Result<(WsRead, WsWrite)>`:
+- [x] Implement `async fn establish_connection(config, handler) -> Result<(WsRead, WsWrite)>`:
   - Create WebSocket connection using existing `connect_websocket()` logic.
   - Split into read/write halves.
-- [ ] Implement on-connect messages: `for msg in handler.on_connect()` → send.
-- [ ] Implement auth flow with existing hooks:
+- [x] Implement on-connect messages: `for msg in handler.on_connect()` → send.
+- [x] Implement auth flow with existing hooks:
   - If `config.auth_on_connect` and `handler.build_auth_message()` is `Some`, send it.
   - Read frames until `is_auth_success` or `is_auth_failure` (respect `request_timeout`).
-- [ ] Implement re-subscription: iterate `SubscriptionStore` topics, send subscribe messages.
-- [ ] Increment `ConnectionEpoch` on successful connect.
-- [ ] Emit `Event::Connected { epoch }`.
-- [ ] **Critical**: Ensure the **same** read/write halves are used in the select loop (no double-connection).
+- [x] Implement re-subscription: iterate `SubscriptionStore` topics, send subscribe messages.
+- [x] Increment `ConnectionEpoch` on successful connect.
+- [x] Emit `Event::Connected { epoch }`.
+- [x] **Critical**: Ensure the **same** read/write halves are used in the select loop (no double-connection).
 
 **Acceptance**: Connection + auth + resubscribe all use the same WebSocket; no double-connection.
 

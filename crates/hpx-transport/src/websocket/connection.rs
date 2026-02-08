@@ -5,9 +5,13 @@ use std::{
     time::Instant,
 };
 
+use async_trait::async_trait;
 use bytes::Bytes;
-use futures_util::{SinkExt, Stream, StreamExt};
-use hpx::ws::message::Message;
+use futures_util::{Stream, StreamExt};
+use hpx::{
+    Client,
+    ws::{WebSocket, WebSocketRead, WebSocketRequestBuilder, WebSocketWrite, message::Message},
+};
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::{
     sync::{broadcast, mpsc},
@@ -228,16 +232,124 @@ impl Stream for ConnectionStream {
     }
 }
 
+#[async_trait]
+pub(crate) trait WsWriter: Send {
+    async fn send_ws(&mut self, message: Message) -> TransportResult<()>;
+}
+
+#[async_trait]
+impl WsWriter for WebSocketWrite {
+    async fn send_ws(&mut self, message: Message) -> TransportResult<()> {
+        self.send(message)
+            .await
+            .map_err(|e| TransportError::websocket(e.to_string()))
+    }
+}
+
 async fn send_ws_message<W>(ws_write: &mut W, msg: &WsMessage) -> TransportResult<()>
 where
-    W: futures_util::Sink<Message, Error = TransportError> + Unpin,
+    W: WsWriter,
 {
     let message = match msg {
         WsMessage::Text(text) => Message::text(text),
         WsMessage::Binary(data) => Message::binary(data.clone()),
     };
 
-    ws_write.send(message).await
+    ws_write.send_ws(message).await
+}
+
+fn message_to_text<H: ProtocolHandler>(handler: &H, msg: &Message) -> Option<String> {
+    match msg {
+        Message::Text(text) => Some(text.to_string()),
+        Message::Binary(data) => handler.decode_binary(data).ok(),
+        _ => None,
+    }
+}
+
+async fn connect_websocket(url: &str) -> TransportResult<WebSocket> {
+    let client = Client::builder()
+        .build()
+        .map_err(|e| TransportError::config(format!("Failed to build client: {e}")))?;
+
+    let req = client.get(url);
+    let ws_req = WebSocketRequestBuilder::new(req);
+    let resp = ws_req.send().await.map_err(TransportError::Http)?;
+
+    resp.into_websocket().await.map_err(TransportError::Http)
+}
+
+#[allow(dead_code)]
+async fn establish_connection<H>(
+    config: &WsConfig,
+    handler: &H,
+    subs: &SubscriptionStore,
+    event_tx: &mpsc::Sender<Event>,
+    epoch: &mut ConnectionEpoch,
+) -> TransportResult<(WebSocketRead, WebSocketWrite)>
+where
+    H: ProtocolHandler,
+{
+    let ws = connect_websocket(&config.url).await?;
+    let (mut ws_write, mut ws_read) = ws.split();
+
+    for msg in handler.on_connect() {
+        send_ws_message(&mut ws_write, &msg).await?;
+    }
+
+    if config.auth_on_connect
+        && let Some(auth_msg) = handler.build_auth_message()
+    {
+        send_ws_message(&mut ws_write, &auth_msg).await?;
+
+        let timeout_duration = config.request_timeout;
+        let start = Instant::now();
+
+        loop {
+            if start.elapsed() >= timeout_duration {
+                return Err(TransportError::auth("Authentication timed out"));
+            }
+
+            let remaining = timeout_duration.saturating_sub(start.elapsed());
+            match timeout(remaining, ws_read.next()).await {
+                Ok(Some(Ok(msg))) => {
+                    if let Some(text) = message_to_text(handler, &msg) {
+                        if handler.is_auth_success(&text) {
+                            break;
+                        }
+                        if handler.is_auth_failure(&text) {
+                            return Err(TransportError::auth("Authentication failed"));
+                        }
+                    }
+                }
+                Ok(Some(Err(err))) => {
+                    return Err(TransportError::websocket(err.to_string()));
+                }
+                Ok(None) => {
+                    return Err(TransportError::connection_closed(None));
+                }
+                Err(_) => {
+                    return Err(TransportError::auth("Authentication timed out"));
+                }
+            }
+        }
+    }
+
+    let topics = subs.get_all_topics();
+    if !topics.is_empty() {
+        let request_id = handler.generate_request_id();
+        let msg = handler.build_subscribe(&topics, request_id);
+        send_ws_message(&mut ws_write, &msg).await?;
+    }
+
+    epoch.0 += 1;
+    let connected_epoch = *epoch;
+    let _ = event_tx
+        .send(Event::Connected {
+            epoch: connected_epoch,
+        })
+        .await;
+
+    Ok((ws_read, ws_write))
 }
 
 #[allow(clippy::too_many_arguments, dead_code)]
@@ -255,7 +367,7 @@ pub(crate) async fn connection_task<H, R, W>(
 where
     H: ProtocolHandler,
     R: Stream<Item = TransportResult<Message>> + Unpin,
-    W: futures_util::Sink<Message, Error = TransportError> + Unpin,
+    W: WsWriter,
 {
     let mut ping_interval = tokio::time::interval(config.ping_interval);
     let mut cleanup_interval = tokio::time::interval(config.pending_cleanup_interval);
@@ -314,7 +426,7 @@ where
                                 continue;
                             }
                             Message::Ping(data) => {
-                                let _ = ws_write.send(Message::Pong(data.clone())).await;
+                                let _ = ws_write.send_ws(Message::Pong(data.clone())).await;
                                 continue;
                             }
                             Message::Close(_) => {
@@ -392,7 +504,7 @@ where
             }
             _ = ping_interval.tick() => {
                 if config.use_websocket_ping {
-                    let _ = ws_write.send(Message::Ping(Bytes::new())).await;
+                    let _ = ws_write.send_ws(Message::Ping(Bytes::new())).await;
                 } else if let Some(ping) = handler.build_ping() {
                     let _ = send_ws_message(&mut ws_write, &ping).await;
                 }
@@ -410,11 +522,34 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicU64, Ordering},
+        },
+        time::Duration,
+    };
 
-    use futures_util::SinkExt;
+    use async_trait::async_trait;
+    use futures_util::{SinkExt, StreamExt};
+    use hpx_yawc::{
+        Options, WebSocket,
+        frame::{Frame, OpCode},
+    };
+    use http_body_util::Empty;
+    use hyper::{
+        Request, Response,
+        body::{Bytes, Incoming},
+        server::conn::http1,
+        service::service_fn,
+    };
+    use hyper_util::rt::TokioIo;
     use serde_json::json;
-    use tokio::sync::mpsc;
+    use tokio::{
+        net::TcpListener,
+        sync::{mpsc, oneshot},
+        time::timeout,
+    };
 
     use super::*;
     use crate::{error::TransportError, websocket::protocol::ProtocolHandler};
@@ -445,6 +580,26 @@ mod tests {
             config,
         };
         (handle, cmd_rx, pending)
+    }
+
+    struct SinkWriter<W> {
+        inner: W,
+    }
+
+    impl<W> SinkWriter<W> {
+        fn new(inner: W) -> Self {
+            Self { inner }
+        }
+    }
+
+    #[async_trait]
+    impl<W> WsWriter for SinkWriter<W>
+    where
+        W: futures_util::Sink<Message, Error = TransportError> + Unpin + Send,
+    {
+        async fn send_ws(&mut self, message: Message) -> TransportResult<()> {
+            self.inner.send(message).await
+        }
     }
 
     #[test]
@@ -565,8 +720,10 @@ mod tests {
         let subs = Arc::new(SubscriptionStore::new(Arc::clone(&config)));
 
         let ws_read = futures_util::stream::iter(vec![Ok(Message::text("control"))]);
-        let ws_write = futures_util::sink::drain()
-            .sink_map_err(|_| TransportError::internal("drain sink should not error"));
+        let ws_write = SinkWriter::new(
+            futures_util::sink::drain()
+                .sink_map_err(|_| TransportError::internal("drain sink should not error")),
+        );
 
         let task = tokio::spawn(connection_task(
             config,
@@ -589,5 +746,172 @@ mod tests {
         drop(ctrl_tx);
         drop(cmd_tx);
         let _ = task.await;
+    }
+
+    struct AuthServerState {
+        conn_count: AtomicU64,
+        auth_tx: Mutex<Option<oneshot::Sender<()>>>,
+        sub_tx: Mutex<Option<oneshot::Sender<()>>>,
+    }
+
+    async fn start_auth_server(state: Arc<AuthServerState>) -> std::io::Result<String> {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let addr = listener.local_addr()?;
+
+        tokio::spawn(async move {
+            loop {
+                let (stream, _) = match listener.accept().await {
+                    Ok(pair) => pair,
+                    Err(_) => return,
+                };
+
+                let state = Arc::clone(&state);
+                tokio::spawn(async move {
+                    state.conn_count.fetch_add(1, Ordering::Relaxed);
+                    let io = TokioIo::new(stream);
+                    let conn_fut = http1::Builder::new()
+                        .serve_connection(
+                            io,
+                            service_fn(move |req| auth_server_upgrade(req, Arc::clone(&state))),
+                        )
+                        .with_upgrades();
+                    let _ = conn_fut.await;
+                });
+            }
+        });
+
+        Ok(format!("ws://{}", addr))
+    }
+
+    async fn auth_server_upgrade(
+        mut req: Request<Incoming>,
+        state: Arc<AuthServerState>,
+    ) -> hpx_yawc::Result<Response<Empty<Bytes>>> {
+        let (response, fut) = WebSocket::upgrade_with_options(&mut req, Options::default())?;
+
+        tokio::spawn(async move {
+            let mut ws = match fut.await {
+                Ok(ws) => ws,
+                Err(_) => return,
+            };
+
+            while let Some(frame) = ws.next().await {
+                if frame.opcode() != OpCode::Text {
+                    continue;
+                }
+
+                let text = match std::str::from_utf8(frame.payload()) {
+                    Ok(text) => text,
+                    Err(_) => continue,
+                };
+
+                if text == "AUTH" {
+                    let _ = ws.send(Frame::text("AUTH_OK")).await;
+                    if let Some(tx) = state.auth_tx.lock().unwrap().take() {
+                        let _ = tx.send(());
+                    }
+                    continue;
+                }
+
+                if text.starts_with("SUB:") {
+                    if let Some(tx) = state.sub_tx.lock().unwrap().take() {
+                        let _ = tx.send(());
+                    }
+                }
+            }
+        });
+
+        Ok(response)
+    }
+
+    #[tokio::test]
+    async fn establish_connection_auth_and_resubscribe() -> TransportResult<()> {
+        struct AuthHandler;
+
+        impl ProtocolHandler for AuthHandler {
+            fn build_auth_message(&self) -> Option<WsMessage> {
+                Some(WsMessage::text("AUTH"))
+            }
+
+            fn is_auth_success(&self, message: &str) -> bool {
+                message == "AUTH_OK"
+            }
+
+            fn is_auth_failure(&self, message: &str) -> bool {
+                message == "AUTH_FAIL"
+            }
+
+            fn classify_message(&self, _message: &str) -> MessageKind {
+                MessageKind::Unknown
+            }
+
+            fn extract_request_id(&self, _message: &str) -> Option<RequestId> {
+                None
+            }
+
+            fn extract_topic(&self, _message: &str) -> Option<Topic> {
+                None
+            }
+
+            fn build_subscribe(&self, topics: &[Topic], _request_id: RequestId) -> WsMessage {
+                let topic = topics.first().map(|t| t.as_str()).unwrap_or("unknown");
+                WsMessage::text(format!("SUB:{topic}"))
+            }
+
+            fn build_unsubscribe(&self, topics: &[Topic], _request_id: RequestId) -> WsMessage {
+                let topic = topics.first().map(|t| t.as_str()).unwrap_or("unknown");
+                WsMessage::text(format!("UNSUB:{topic}"))
+            }
+        }
+
+        let (auth_tx, auth_rx) = oneshot::channel();
+        let (sub_tx, sub_rx) = oneshot::channel();
+        let state = Arc::new(AuthServerState {
+            conn_count: AtomicU64::new(0),
+            auth_tx: Mutex::new(Some(auth_tx)),
+            sub_tx: Mutex::new(Some(sub_tx)),
+        });
+
+        let url = start_auth_server(Arc::clone(&state)).await.expect("server");
+        let mut config = WsConfig::new(url).auth_on_connect(true);
+        config.request_timeout = Duration::from_secs(1);
+        let config = Arc::new(config);
+
+        let subs = SubscriptionStore::new(Arc::clone(&config));
+        let _ = subs.subscribe(Topic::from("trades.BTC"));
+
+        let (event_tx, mut event_rx) = mpsc::channel(2);
+        let mut epoch = ConnectionEpoch(0);
+
+        let _ = establish_connection(&config, &AuthHandler, &subs, &event_tx, &mut epoch).await?;
+
+        timeout(Duration::from_secs(1), auth_rx)
+            .await
+            .map_err(|_| TransportError::internal("auth timeout"))?
+            .map_err(|_| TransportError::internal("auth channel closed"))?;
+
+        timeout(Duration::from_secs(1), sub_rx)
+            .await
+            .map_err(|_| TransportError::internal("subscribe timeout"))?
+            .map_err(|_| TransportError::internal("subscribe channel closed"))?;
+
+        let event = timeout(Duration::from_secs(1), event_rx.recv())
+            .await
+            .map_err(|_| TransportError::internal("event timeout"))?
+            .ok_or_else(|| TransportError::internal("event channel closed"))?;
+
+        match event {
+            Event::Connected {
+                epoch: connected_epoch,
+            } => {
+                assert_eq!(connected_epoch.0, 1);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+
+        assert_eq!(epoch.0, 1);
+        assert_eq!(state.conn_count.load(Ordering::Relaxed), 1);
+
+        Ok(())
     }
 }
