@@ -71,23 +71,23 @@
 
 **File**: `crates/hpx-transport/src/websocket/connection.rs`
 
-- [ ] Define `ConnectionHandle` struct:
+- [x] Define `ConnectionHandle` struct:
   - `ctrl_tx: mpsc::Sender<ControlCommand>`
   - `cmd_tx: mpsc::Sender<DataCommand>`
   - `pending: Arc<PendingRequestStore>`
   - `subs: Arc<SubscriptionStore>`
   - `config: Arc<WsConfig>`
-- [ ] Implement `Clone` for `ConnectionHandle`.
-- [ ] Implement `request<R, T>(&self, req: &R) -> TransportResult<T>`:
+- [x] Implement `Clone` for `ConnectionHandle`.
+- [x] Implement `request<R, T>(&self, req: &R) -> TransportResult<T>`:
   - Insert into pending store → get receiver.
   - Send `DataCommand::Request` via `cmd_tx`.
   - Await receiver with timeout.
   - On timeout: call `pending.remove(id)`.
-- [ ] Implement `subscribe(&self, topic) -> TransportResult<SubscriptionGuard>`.
-- [ ] Implement `unsubscribe(&self, topics)`.
-- [ ] Implement `send(&self, msg)` — fire-and-forget via `cmd_tx`.
-- [ ] Implement `close(&self)` — send `ControlCommand::Close` via `ctrl_tx`.
-- [ ] Implement `is_connected(&self) -> bool` — `!ctrl_tx.is_closed()`.
+- [x] Implement `subscribe(&self, topic) -> TransportResult<SubscriptionGuard>`.
+- [x] Implement `unsubscribe(&self, topics)`.
+- [x] Implement `send(&self, msg)` — fire-and-forget via `cmd_tx`.
+- [x] Implement `close(&self)` — send `ControlCommand::Close` via `ctrl_tx`.
+- [x] Implement `is_connected(&self) -> bool` — `!ctrl_tx.is_closed()`.
 
 **Acceptance**: `ConnectionHandle` compiles with all methods.
 

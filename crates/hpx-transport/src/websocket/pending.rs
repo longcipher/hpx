@@ -84,6 +84,13 @@ impl PendingRequestStore {
         false
     }
 
+    /// Remove a pending request without notifying the receiver.
+    ///
+    /// Returns `true` if the request was present, `false` otherwise.
+    pub fn remove(&self, id: &RequestId) -> bool {
+        self.requests.remove_sync(id).is_some()
+    }
+
     /// Clean up stale (timed out) requests without notification.
     ///
     /// Use this for periodic cleanup during normal operation.
