@@ -60,6 +60,14 @@ jobs:
 
       - name: Wait for index update
         run: sleep 30
+      
+      - name: Publish hpx-yawc
+        run: cargo publish -p hpx-yawc
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Wait for index update
+        run: sleep 30
 
       - name: Publish hpx
         run: cargo publish -p hpx
