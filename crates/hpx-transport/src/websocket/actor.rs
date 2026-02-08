@@ -428,26 +428,34 @@ impl<H: ProtocolHandler> ConnectionActor<H> {
         loop {
             tokio::select! {
                 // Handle incoming commands
-                Some(cmd) = self.cmd_rx.recv() => {
+                cmd = self.cmd_rx.recv() => {
                     match cmd {
-                        ActorCommand::Close => {
-                            self.state = ConnectionState::Closing;
-                            return Ok(());
-                        }
-                        ActorCommand::Subscribe { topics, reply_tx } => {
-                            let result = self.handle_subscribe(topics).await;
-                            let _ = reply_tx.send(result);
-                        }
-                        ActorCommand::Unsubscribe { topics } => {
-                            self.handle_unsubscribe(topics).await;
-                        }
-                        ActorCommand::Send { message } => {
-                            if let Err(e) = self.send_message_internal(&message).await {
-                                warn!(error = %e, "Failed to send message");
+                        Some(cmd) => match cmd {
+                            ActorCommand::Close => {
+                                self.state = ConnectionState::Closing;
+                                return Ok(());
                             }
-                        }
-                        ActorCommand::Request { message, request_id, reply_tx, timeout } => {
-                            self.handle_request(message, request_id, reply_tx, timeout).await;
+                            ActorCommand::Subscribe { topics, reply_tx } => {
+                                let result = self.handle_subscribe(topics).await;
+                                let _ = reply_tx.send(result);
+                            }
+                            ActorCommand::Unsubscribe { topics } => {
+                                self.handle_unsubscribe(topics).await;
+                            }
+                            ActorCommand::Send { message } => {
+                                if let Err(e) = self.send_message_internal(&message).await {
+                                    warn!(error = %e, "Failed to send message");
+                                }
+                            }
+                            ActorCommand::Request { message, request_id, reply_tx, timeout } => {
+                                self.handle_request(message, request_id, reply_tx, timeout).await;
+                            }
+                        },
+                        None => {
+                            info!("All command senders dropped; shutting down actor");
+                            self.disconnect().await;
+                            self.state = ConnectionState::Closed;
+                            return Ok(());
                         }
                     }
                 }
