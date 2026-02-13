@@ -77,6 +77,22 @@ pub enum TransportError {
     /// Connection was closed.
     #[error("Connection closed: {}", reason.as_deref().unwrap_or("unknown reason"))]
     ConnectionClosed { reason: Option<String> },
+
+    /// SSE: server returned an unexpected HTTP status.
+    #[error("SSE invalid status: {status}")]
+    SseInvalidStatus { status: http::StatusCode },
+
+    /// SSE: server returned an unexpected content type.
+    #[error("SSE invalid content type: {content_type}")]
+    SseInvalidContentType { content_type: String },
+
+    /// SSE: failed to parse an event from the stream.
+    #[error("SSE parse error: {message}")]
+    SseParse { message: String },
+
+    /// SSE: the event stream ended unexpectedly.
+    #[error("SSE stream ended")]
+    SseStreamEnded,
 }
 
 impl From<FromUtf8Error> for TransportError {
@@ -183,6 +199,30 @@ impl TransportError {
     pub fn connection_closed(reason: Option<String>) -> Self {
         Self::ConnectionClosed { reason }
     }
+
+    /// Create an SSE invalid status error.
+    pub fn sse_invalid_status(status: http::StatusCode) -> Self {
+        Self::SseInvalidStatus { status }
+    }
+
+    /// Create an SSE invalid content type error.
+    pub fn sse_invalid_content_type(content_type: impl Into<String>) -> Self {
+        Self::SseInvalidContentType {
+            content_type: content_type.into(),
+        }
+    }
+
+    /// Create an SSE parse error.
+    pub fn sse_parse(message: impl Into<String>) -> Self {
+        Self::SseParse {
+            message: message.into(),
+        }
+    }
+
+    /// Create an SSE stream ended error.
+    pub fn sse_stream_ended() -> Self {
+        Self::SseStreamEnded
+    }
 }
 
 #[cfg(test)]
@@ -199,5 +239,39 @@ mod tests {
 
         let err = TransportError::auth("Invalid API key");
         assert!(matches!(err, TransportError::Auth { .. }));
+    }
+
+    #[test]
+    fn test_sse_invalid_status() {
+        let err = TransportError::sse_invalid_status(http::StatusCode::FORBIDDEN);
+        assert!(matches!(
+            err,
+            TransportError::SseInvalidStatus { status } if status == http::StatusCode::FORBIDDEN
+        ));
+        assert_eq!(err.to_string(), "SSE invalid status: 403 Forbidden");
+    }
+
+    #[test]
+    fn test_sse_invalid_content_type() {
+        let err = TransportError::sse_invalid_content_type("application/json");
+        assert!(matches!(err, TransportError::SseInvalidContentType { .. }));
+        assert_eq!(
+            err.to_string(),
+            "SSE invalid content type: application/json"
+        );
+    }
+
+    #[test]
+    fn test_sse_parse() {
+        let err = TransportError::sse_parse("unexpected EOF");
+        assert!(matches!(err, TransportError::SseParse { .. }));
+        assert_eq!(err.to_string(), "SSE parse error: unexpected EOF");
+    }
+
+    #[test]
+    fn test_sse_stream_ended() {
+        let err = TransportError::sse_stream_ended();
+        assert!(matches!(err, TransportError::SseStreamEnded));
+        assert_eq!(err.to_string(), "SSE stream ended");
     }
 }

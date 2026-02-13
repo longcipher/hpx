@@ -6,6 +6,8 @@
 //!
 //! - **Authentication**: API key, HMAC signing, and custom auth strategies
 //! - **WebSocket**: Single-task connection with `Connection`/`Handle`/`Stream` split API
+//! - **SSE** *(feature `sse`)*: Server-Sent Events transport with auto-reconnection,
+//!   protocol handlers, and `SseConnection`/`SseHandle`/`SseStream` split API
 //! - **Typed Responses**: Generic response wrapper with metadata
 //! - **Rate Limiting**: Token bucket rate limiter
 //! - **Metrics**: OpenTelemetry metrics integration
@@ -71,6 +73,8 @@ pub mod error;
 pub mod exchange;
 pub mod metrics;
 pub mod rate_limit;
+#[cfg(feature = "sse")]
+pub mod sse;
 pub mod typed;
 pub mod websocket;
 

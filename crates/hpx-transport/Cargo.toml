@@ -12,16 +12,25 @@ license.workspace = true
 default = ["ws-yawc"]
 
 # WebSocket backend selection (choose one).
+sse = [
+    "dep:bytes-utils",
+    "dep:futures-core",
+    "dep:memchr",
+    "dep:pin-project-lite",
+    "hpx/stream",
+]
 ws-fastwebsockets = ["hpx/ws-fastwebsockets", "dep:fastwebsockets"]
 ws-yawc = ["hpx/ws-yawc"]
 
 [dependencies]
 async-trait = { workspace = true }
 bytes.workspace = true
+bytes-utils = { workspace = true, optional = true }
 fastwebsockets = { workspace = true, features = [
     "upgrade",
     "unstable-split",
 ], optional = true }
+futures-core = { workspace = true, optional = true }
 futures-util.workspace = true
 hex.workspace = true
 hmac.workspace = true
@@ -33,9 +42,11 @@ hpx = { workspace = true, features = [
     "http2",
 ] }
 http = { workspace = true }
+memchr = { workspace = true, optional = true }
 opentelemetry = { workspace = true, features = ["metrics"] }
 opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics"] }
 opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] }
+pin-project-lite = { workspace = true, optional = true }
 rand.workspace = true
 scc.workspace = true
 serde = { workspace = true, features = ["derive"] }
@@ -63,3 +74,7 @@ hyper-util = { workspace = true, features = ["tokio"] }
 tempfile.workspace = true
 tokio-test.workspace = true
 tracing-subscriber.workspace = true
+
+[[example]]
+name = "sse_stream"
+required-features = ["sse"]
