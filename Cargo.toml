@@ -64,6 +64,8 @@ trivially_copy_pass_by_ref = "allow"
 no_effect_underscore_binding = "allow"
 # Closure vs method reference - closure syntax is clearer: .map(|s| s.to_string())
 redundant_closure_for_method_calls = "allow"
+# Unnecessary unsafe blocks - can be intentional for documentation or future safety
+unnecessary_unsafe = "allow"
 
 # Panic safety - deny any operations that could panic
 unwrap_used = "deny"
@@ -191,7 +193,7 @@ hpx-yawc = { path = "crates/yawc", version = "1.4.0" }
 
 # external crates
 ahash = "0.8.12"
-arc-swap = "1.8.1"
+arc-swap = "1.8.2"
 assert2 = "0.3.4"
 async-trait = "0.1.80"
 axum = "0.8.8"
