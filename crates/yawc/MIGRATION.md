@@ -385,7 +385,7 @@ let options = Options::default()
 
 ```toml
 [dependencies]
-tokio-tungstenite = { version = "0.20", features = [
+tokio-tungstenite = { version = "0.28.0", features = [
     "native-tls",  # or "rustls-tls-native-roots"
 ] }
 ```
@@ -394,7 +394,7 @@ tokio-tungstenite = { version = "0.20", features = [
 
 ```toml
 [dependencies]
-yawc = { version = "0.3", features = [
+yawc = { version = "0.3.3", features = [
     "axum",         # Axum integration
     "reqwest",      # reqwest client support
     "logging",      # Debug logging

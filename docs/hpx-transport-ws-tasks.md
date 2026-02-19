@@ -208,8 +208,8 @@ ulid = { workspace = true } # Unique Lexicographically Sortable Identifier
 
 ```toml
 [workspace.dependencies]
-scc = "2"      # Lock-free concurrent data structures
-ulid = "1"     # Unique ID generation
+scc = "3.6.3"
+ulid = "1.2.1"
 ```
 
 **Why scc?**

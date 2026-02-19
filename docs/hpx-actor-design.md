@@ -697,7 +697,7 @@ Before merging each phase:
 
 ```toml
 [workspace.dependencies]
-parking_lot = "0.12"   # Faster mutex for Pool, H2 Ping, TLS
+parking_lot = "0.12.5"
 ```
 
 ### WsConfig Updates

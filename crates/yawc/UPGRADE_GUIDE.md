@@ -137,14 +137,14 @@ The `logging` feature flag has been removed. Logging is now always available thr
 
 ```toml
 [dependencies]
-yawc = { version = "0.1", features = ["logging"] }
+yawc = { version = "0.3.3", features = ["logging"] }
 ```
 
 **After (0.3.x):**
 
 ```toml
 [dependencies]
-yawc = "0.3"
+yawc = "0.3.3"
 # logging is now always available via the log crate
 ```
 
@@ -156,16 +156,16 @@ The `json` feature flag has been removed. If you need JSON serialization, add `s
 
 ```toml
 [dependencies]
-yawc = { version = "0.1", features = ["json"] }
+yawc = { version = "0.3.3", features = ["json"] }
 ```
 
 **After (0.3.x):**
 
 ```toml
 [dependencies]
-yawc = "0.3"
-serde_json = "1.0"  # Add directly if needed
-serde = { version = "1.0", features = ["derive"] }
+yawc = "0.3.3"
+serde_json = "1.0.149"
+serde = { version = "1.0.228", features = ["derive"] }
 ```
 
 #### New Features
@@ -182,16 +182,16 @@ If you're using the `reqwest` feature, update your `reqwest` dependency to 0.13.
 
 ```toml
 [dependencies]
-yawc = { version = "0.1", features = ["reqwest"] }
-reqwest = "0.12"
+yawc = { version = "0.3.3", features = ["reqwest"] }
+reqwest = "0.13.2"
 ```
 
 **After (0.3.x):**
 
 ```toml
 [dependencies]
-yawc = { version = "0.3", features = ["reqwest"] }
-reqwest = "0.13"
+yawc = { version = "0.3.3", features = ["reqwest"] }
+reqwest = "0.13.2"
 ```
 
 **Note:** reqwest 0.13 has its own breaking changes. Consult the [reqwest changelog](https://github.com/seanmonstar/reqwest/blob/master/CHANGELOG.md) if you use reqwest directly in your code.
@@ -281,9 +281,9 @@ Update your `Cargo.toml`:
 # yawc = { version = "0.2", features = ["logging", "json", "reqwest"] }
 
 # After
-yawc = { version = "0.3", features = ["reqwest"] }
-serde_json = "1.0"  # Only if you were using the json feature
-reqwest = "0.13"    # Only if you were using the reqwest feature
+yawc = { version = "0.3.3", features = ["reqwest"] }
+serde_json = "1.0.149"
+reqwest = "0.13.2"
 ```
 
 ### Step 2: Update Imports
