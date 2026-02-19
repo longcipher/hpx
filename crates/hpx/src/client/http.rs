@@ -1760,11 +1760,10 @@ impl ClientBuilder {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use hpx::Client;
-    /// use hpx_util::Emulation;
+    /// use hpx::{BrowserProfile, Client};
     ///
     /// let client = Client::builder()
-    ///     .emulation(Emulation::Firefox128)
+    ///     .emulation(BrowserProfile::Firefox)
     ///     .build()
     ///     .unwrap();
     /// ```

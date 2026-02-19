@@ -1,11 +1,14 @@
-use http::HeaderMap;
+use http::{HeaderMap, HeaderValue};
 
 #[cfg(feature = "http1")]
 use super::core::http1::Http1Options;
 #[cfg(feature = "http2")]
 use super::core::http2::Http2Options;
 use super::layer::config::TransportOptions;
-use crate::{header::OrigHeaderMap, tls::TlsOptions};
+use crate::{
+    header::{self, OrigHeaderMap},
+    tls::TlsOptions,
+};
 
 /// Factory trait for creating emulation configurations.
 ///
@@ -17,6 +20,59 @@ use crate::{header::OrigHeaderMap, tls::TlsOptions};
 pub trait EmulationFactory {
     /// Creates an [`Emulation`] instance from this factory.
     fn emulation(self) -> Emulation;
+}
+
+/// Built-in browser-style emulation profiles provided by `hpx`.
+///
+/// These profiles provide convenient header-level defaults for common client
+/// personas while keeping transport options configurable through
+/// [`EmulationBuilder`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
+pub enum BrowserProfile {
+    /// Chrome-like request headers.
+    #[default]
+    Chrome,
+    /// Firefox-like request headers.
+    Firefox,
+    /// Safari-like request headers.
+    Safari,
+    /// Edge-like request headers.
+    Edge,
+    /// OkHttp-like request headers.
+    OkHttp,
+}
+
+impl BrowserProfile {
+    #[inline]
+    const fn user_agent(self) -> &'static str {
+        match self {
+            Self::Chrome => {
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+            }
+            Self::Firefox => {
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 14.0; rv:146.0) Gecko/20100101 Firefox/146.0"
+            }
+            Self::Safari => {
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
+            }
+            Self::Edge => {
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0"
+            }
+            Self::OkHttp => "okhttp/5.0.0",
+        }
+    }
+
+    #[inline]
+    const fn accept(self) -> &'static str {
+        match self {
+            Self::Firefox => "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            Self::OkHttp => "*/*",
+            _ => {
+                "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+            }
+        }
+    }
 }
 
 /// Builder for creating an [`Emulation`] configuration.
@@ -144,6 +200,33 @@ impl EmulationFactory for Emulation {
     }
 }
 
+impl EmulationFactory for BrowserProfile {
+    #[inline]
+    fn emulation(self) -> Emulation {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::USER_AGENT,
+            HeaderValue::from_static(self.user_agent()),
+        );
+        headers.insert(header::ACCEPT, HeaderValue::from_static(self.accept()));
+        headers.insert(
+            header::ACCEPT_LANGUAGE,
+            HeaderValue::from_static("en-US,en;q=0.9"),
+        );
+
+        match self {
+            BrowserProfile::Chrome | BrowserProfile::Edge | BrowserProfile::Safari => {
+                headers.insert("sec-fetch-dest", HeaderValue::from_static("document"));
+                headers.insert("sec-fetch-mode", HeaderValue::from_static("navigate"));
+                headers.insert("sec-fetch-site", HeaderValue::from_static("none"));
+            }
+            BrowserProfile::Firefox | BrowserProfile::OkHttp => {}
+        }
+
+        Emulation::builder().headers(headers).build()
+    }
+}
+
 #[cfg(feature = "http1")]
 impl EmulationFactory for Http1Options {
     #[inline]
@@ -164,5 +247,17 @@ impl EmulationFactory for TlsOptions {
     #[inline]
     fn emulation(self) -> Emulation {
         Emulation::builder().tls_options(self).build()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browser_profile_sets_user_agent_header() {
+        let emulation = BrowserProfile::Firefox.emulation();
+        let headers = emulation.headers;
+        assert!(headers.contains_key(header::USER_AGENT));
     }
 }

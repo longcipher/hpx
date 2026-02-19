@@ -2,6 +2,8 @@
 
 use std::time::Duration;
 
+use crate::reconnect::BackoffConfig;
+
 /// Configuration for WebSocket connections.
 #[derive(Clone, Debug)]
 pub struct WsConfig {
@@ -165,14 +167,36 @@ impl WsConfig {
         if self.url.is_empty() {
             return Err("URL cannot be empty".to_string());
         }
-        if self.reconnect_backoff_factor < 1.0 {
-            return Err("Backoff factor must be >= 1.0".to_string());
+        BackoffConfig {
+            initial_delay: self.reconnect_initial_delay,
+            max_delay: self.reconnect_max_delay,
+            factor: self.reconnect_backoff_factor,
+            jitter: self.reconnect_jitter,
         }
-        if !(0.0..=1.0).contains(&self.reconnect_jitter) {
-            return Err("Jitter must be between 0.0 and 1.0".to_string());
+        .validate()?;
+        if self.ping_interval.is_zero() {
+            return Err("Ping interval must be > 0".to_string());
+        }
+        if self.pong_timeout.is_zero() {
+            return Err("Pong timeout must be > 0".to_string());
+        }
+        if self.request_timeout.is_zero() {
+            return Err("Request timeout must be > 0".to_string());
+        }
+        if self.pending_cleanup_interval.is_zero() {
+            return Err("Pending cleanup interval must be > 0".to_string());
+        }
+        if self.connect_timeout.is_zero() {
+            return Err("Connect timeout must be > 0".to_string());
         }
         if self.max_pending_requests == 0 {
             return Err("Max pending requests must be > 0".to_string());
+        }
+        if self.subscription_channel_capacity == 0 {
+            return Err("Subscription channel capacity must be > 0".to_string());
+        }
+        if self.command_channel_capacity == 0 {
+            return Err("Command channel capacity must be > 0".to_string());
         }
         if self.event_channel_capacity == 0 {
             return Err("Event channel capacity must be > 0".to_string());
@@ -270,5 +294,23 @@ mod tests {
         assert_eq!(config.event_channel_capacity, 128);
         assert_eq!(config.connect_timeout, Duration::from_secs(15));
         assert!(config.auth_on_connect);
+    }
+
+    #[test]
+    fn test_validation_zero_command_channel_capacity() {
+        let mut config = WsConfig::new("wss://test.com");
+        config.command_channel_capacity = 0;
+        let result = config.validate();
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Command channel capacity must be > 0");
+    }
+
+    #[test]
+    fn test_validation_zero_ping_interval() {
+        let mut config = WsConfig::new("wss://test.com");
+        config.ping_interval = Duration::ZERO;
+        let result = config.validate();
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Ping interval must be > 0");
     }
 }

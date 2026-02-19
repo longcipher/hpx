@@ -61,11 +61,12 @@
 //! use hpx_transport::rate_limit::RateLimiter;
 //!
 //! let limiter = RateLimiter::new();
-//! limiter.add_limit("orders", 10, 1.0); // 10 capacity, 1/sec refill
+//! limiter.add_limit("orders", 10, 1.0)?; // 10 capacity, 1/sec refill
 //!
 //! if limiter.try_acquire("orders") {
 //!     println!("Request allowed");
 //! }
+//! # Ok::<(), hpx_transport::rate_limit::RateLimitError>(())
 //! ```
 
 pub mod auth;
@@ -73,6 +74,7 @@ pub mod error;
 pub mod exchange;
 pub mod metrics;
 pub mod rate_limit;
+mod reconnect;
 #[cfg(feature = "sse")]
 pub mod sse;
 pub mod typed;
@@ -82,7 +84,7 @@ pub mod websocket;
 pub use auth::{ApiKeyAuth, Authentication, BearerAuth, HmacAuth, NoAuth};
 pub use error::{TransportError, TransportResult};
 pub use exchange::{ExchangeClient, RestClient, RestConfig};
-pub use rate_limit::RateLimiter;
+pub use rate_limit::{RateLimitError, RateLimiter};
 pub use typed::{ApiError, TypedResponse};
 pub use websocket::{
     // Core connection API

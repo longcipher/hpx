@@ -25,7 +25,7 @@ pub use self::{
     body::Body,
     conn::HttpInfo,
     core::upgrade::Upgraded,
-    emulation::{Emulation, EmulationBuilder, EmulationFactory},
+    emulation::{BrowserProfile, Emulation, EmulationBuilder, EmulationFactory},
     http::{Client, ClientBuilder},
     request::{Request, RequestBuilder},
     response::Response,

@@ -2,6 +2,8 @@
 
 use std::time::Duration;
 
+use crate::reconnect::BackoffConfig;
+
 /// Configuration for SSE connections.
 ///
 /// Follows the same builder pattern as
@@ -160,11 +162,15 @@ impl SseConfig {
         if self.url.is_empty() {
             return Err("URL cannot be empty".to_string());
         }
-        if self.reconnect_backoff_factor < 1.0 {
-            return Err("Backoff factor must be >= 1.0".to_string());
+        BackoffConfig {
+            initial_delay: self.reconnect_initial_delay,
+            max_delay: self.reconnect_max_delay,
+            factor: self.reconnect_backoff_factor,
+            jitter: self.reconnect_jitter,
         }
-        if !(0.0..=1.0).contains(&self.reconnect_jitter) {
-            return Err("Jitter must be between 0.0 and 1.0".to_string());
+        .validate()?;
+        if self.connect_timeout.is_zero() {
+            return Err("Connect timeout must be > 0".to_string());
         }
         if self.event_channel_capacity == 0 {
             return Err("Event channel capacity must be > 0".to_string());
@@ -327,6 +333,17 @@ mod tests {
         assert_eq!(
             result.expect_err("should fail"),
             "Command channel capacity must be > 0"
+        );
+    }
+
+    #[test]
+    fn test_validation_zero_connect_timeout() {
+        let config = SseConfig::new("https://example.com").connect_timeout(Duration::ZERO);
+        let result = config.validate();
+        assert!(result.is_err());
+        assert_eq!(
+            result.expect_err("should fail"),
+            "Connect timeout must be > 0"
         );
     }
 

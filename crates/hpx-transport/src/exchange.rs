@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use hpx::Client;
 use serde::{Serialize, de::DeserializeOwned};
+use url::{Url, form_urlencoded};
 
 use crate::{
     auth::Authentication,
@@ -147,6 +148,34 @@ impl<A: Authentication> RestClient<A> {
         }
     }
 
+    fn append_query(url: &mut String, query: &str) -> TransportResult<()> {
+        if query.is_empty() {
+            return Ok(());
+        }
+
+        let mut parsed =
+            Url::parse(url).map_err(|e| TransportError::config(format!("Invalid URL: {e}")))?;
+        {
+            let mut qp = parsed.query_pairs_mut();
+            for (k, v) in form_urlencoded::parse(query.as_bytes()) {
+                qp.append_pair(&k, &v);
+            }
+        }
+        *url = parsed.into();
+        Ok(())
+    }
+
+    fn path_and_query(url: &str) -> TransportResult<String> {
+        let parsed =
+            Url::parse(url).map_err(|e| TransportError::config(format!("Invalid URL: {e}")))?;
+        let mut path_and_query = parsed.path().to_string();
+        if let Some(query) = parsed.query() {
+            path_and_query.push('?');
+            path_and_query.push_str(query);
+        }
+        Ok(path_and_query)
+    }
+
     async fn send_request<T: DeserializeOwned>(
         &self,
         method: http::Method,
@@ -157,25 +186,20 @@ impl<A: Authentication> RestClient<A> {
         let start = Instant::now();
         let mut url = self.build_url(path);
 
-        // Sign request
-        let mut headers = http::header::HeaderMap::new();
-        if let Some(auth_query) = self.auth.sign(&method, path, &mut headers, body).await? {
-            if url.contains('?') {
-                url.push('&');
-            } else {
-                url.push('?');
-            }
-            url.push_str(&auth_query);
+        // Add query parameters first so auth signing can see the final request context.
+        if let Some(q) = query {
+            Self::append_query(&mut url, q)?;
         }
 
-        // Add query parameters
-        if let Some(q) = query {
-            if url.contains('?') {
-                url.push('&');
-            } else {
-                url.push('?');
-            }
-            url.push_str(q);
+        // Sign request
+        let mut headers = http::header::HeaderMap::new();
+        let signing_path = Self::path_and_query(&url)?;
+        if let Some(auth_query) = self
+            .auth
+            .sign(&method, &signing_path, &mut headers, body)
+            .await?
+        {
+            Self::append_query(&mut url, &auth_query)?;
         }
 
         // Build request
@@ -218,7 +242,11 @@ impl<A: Authentication> RestClient<A> {
 
         // Parse response
         let bytes = resp.bytes().await?;
-        let data: T = serde_json::from_slice(&bytes)?;
+        let data: T = if bytes.is_empty() {
+            serde_json::from_slice(b"null").or_else(|_| serde_json::from_slice(&bytes))?
+        } else {
+            serde_json::from_slice(&bytes)?
+        };
 
         Ok(TypedResponse::new(data, status, latency).with_raw_body(bytes))
     }
@@ -289,8 +317,10 @@ impl<A: Authentication + 'static> ExchangeClient for RestClient<A> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use super::*;
-    use crate::auth::NoAuth;
+    use crate::auth::{Authentication, NoAuth};
 
     #[test]
     fn test_rest_config() {
@@ -320,5 +350,87 @@ mod tests {
             client.build_url("https://other.com/path"),
             "https://other.com/path"
         );
+    }
+
+    #[test]
+    fn test_path_and_query() {
+        let path = RestClient::<NoAuth>::path_and_query(
+            "https://api.example.com/v1/orders?symbol=BTCUSDT&limit=5",
+        )
+        .unwrap();
+        assert_eq!(path, "/v1/orders?symbol=BTCUSDT&limit=5");
+    }
+
+    #[derive(Clone, Default)]
+    struct RecordingAuth {
+        path: Arc<Mutex<Option<String>>>,
+    }
+
+    #[async_trait]
+    impl Authentication for RecordingAuth {
+        async fn sign(
+            &self,
+            _method: &http::Method,
+            path: &str,
+            _headers: &mut http::HeaderMap,
+            _body: Option<&[u8]>,
+        ) -> TransportResult<Option<String>> {
+            *self.path.lock().expect("lock poisoned") = Some(path.to_string());
+            Ok(None)
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sign_receives_path_with_business_query() {
+        use std::convert::Infallible;
+
+        use http_body_util::Full;
+        use hyper::{Request, Response, body::Bytes, server::conn::http1, service::service_fn};
+        use hyper_util::rt::TokioIo;
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            loop {
+                let Ok((stream, _)) = listener.accept().await else {
+                    break;
+                };
+                tokio::spawn(async move {
+                    let io = TokioIo::new(stream);
+                    let svc = service_fn(|_req: Request<hyper::body::Incoming>| async move {
+                        Ok::<_, Infallible>(Response::new(Full::new(Bytes::from_static(b"{}"))))
+                    });
+                    let _ = http1::Builder::new().serve_connection(io, svc).await;
+                });
+            }
+        });
+
+        let auth = RecordingAuth::default();
+        let config = RestConfig::new(format!("http://{addr}"));
+        let client = RestClient::new(config, auth.clone()).unwrap();
+
+        #[derive(Serialize)]
+        struct Query {
+            symbol: &'static str,
+            limit: u32,
+        }
+
+        let _resp: TypedResponse<serde_json::Value> = client
+            .get_with_query(
+                "/v1/orders",
+                &Query {
+                    symbol: "BTCUSDT",
+                    limit: 5,
+                },
+            )
+            .await
+            .unwrap();
+
+        let signed_path = auth.path.lock().expect("lock poisoned").clone().unwrap();
+        assert!(signed_path.starts_with("/v1/orders?"));
+        assert!(signed_path.contains("symbol=BTCUSDT"));
+        assert!(signed_path.contains("limit=5"));
     }
 }

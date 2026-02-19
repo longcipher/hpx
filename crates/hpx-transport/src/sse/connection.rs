@@ -8,19 +8,18 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Duration,
 };
 
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
-use rand::RngExt;
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, time::timeout};
 use tracing::{debug, error, info, warn};
 
 use super::{config::SseConfig, protocol::SseProtocolHandler, types::SseEvent};
 use crate::{
     auth::Authentication,
     error::{TransportError, TransportResult},
+    reconnect::{BackoffConfig, calculate_backoff},
 };
 
 // ---------------------------------------------------------------------------
@@ -251,6 +250,7 @@ async fn establish_sse_connection(
     last_event_id: Option<&str>,
 ) -> TransportResult<super::parse::EventStream<impl Stream<Item = Result<Bytes, hpx::Error>> + use<>>>
 {
+    let mut request_url = config.url.clone();
     let client = hpx::Client::builder()
         .connect_timeout(config.connect_timeout)
         .build()
@@ -283,16 +283,15 @@ async fn establish_sse_connection(
         let path = url_path(&config.url);
         let body = config.body.as_deref();
         if let Some(qs) = a.sign(&config.method, &path, &mut headers, body).await? {
-            // Append query string — for SSE we log it but the URL is already
-            // fixed in config. Exchange-specific handlers may override.
-            debug!(query_string = %qs, "Auth returned query string (ignored for SSE URL)");
+            append_query_string(&mut request_url, &qs);
+            debug!(query_string = %qs, "Applied auth query string to SSE URL");
         }
     }
 
     // Build request.
     let mut req = match config.method {
-        http::Method::POST => client.post(&config.url),
-        _ => client.get(&config.url),
+        http::Method::POST => client.post(&request_url),
+        _ => client.get(&request_url),
     };
     req = req.headers(headers);
 
@@ -300,7 +299,10 @@ async fn establish_sse_connection(
         req = req.body(body.clone());
     }
 
-    let resp = req.send().await.map_err(TransportError::Http)?;
+    let resp = timeout(config.connect_timeout, req.send())
+        .await
+        .map_err(|_| TransportError::timeout(config.connect_timeout))?
+        .map_err(TransportError::Http)?;
 
     // Validate status.
     let status = resp.status();
@@ -332,27 +334,23 @@ fn url_path(url: &str) -> String {
         .unwrap_or_else(|| "/".to_string())
 }
 
+fn append_query_string(url: &mut String, query: &str) {
+    let query = query.trim_start_matches('?');
+    if query.is_empty() {
+        return;
+    }
+
+    if url.contains('?') {
+        url.push('&');
+    } else {
+        url.push('?');
+    }
+    url.push_str(query);
+}
+
 // ---------------------------------------------------------------------------
 // Internal: backoff calculation
 // ---------------------------------------------------------------------------
-
-fn calculate_backoff(config: &SseConfig, attempt: u32) -> Duration {
-    let initial = config.reconnect_initial_delay.as_secs_f64();
-    let max = config.reconnect_max_delay.as_secs_f64();
-    let factor = config.reconnect_backoff_factor.max(1.0);
-    let exponent = factor.powi(attempt as i32);
-    let base = (initial * exponent).min(max);
-
-    let jitter = config.reconnect_jitter.clamp(0.0, 1.0);
-    if jitter == 0.0 {
-        return Duration::from_secs_f64(base);
-    }
-
-    let mut rng = rand::rng();
-    let randomized = rng.random_range(0.0..=base);
-    let blended = base * (1.0 - jitter) + randomized * jitter;
-    Duration::from_secs_f64(blended)
-}
 
 // ---------------------------------------------------------------------------
 // Internal: background driver
@@ -400,7 +398,15 @@ async fn sse_connection_driver<H: SseProtocolHandler>(
                     return;
                 }
 
-                let delay = calculate_backoff(&config, attempt);
+                let delay = calculate_backoff(
+                    BackoffConfig {
+                        initial_delay: config.reconnect_initial_delay,
+                        max_delay: config.reconnect_max_delay,
+                        factor: config.reconnect_backoff_factor,
+                        jitter: config.reconnect_jitter,
+                    },
+                    attempt,
+                );
                 attempt = attempt.saturating_add(1);
                 warn!(
                     attempt,
@@ -495,7 +501,15 @@ async fn sse_connection_driver<H: SseProtocolHandler>(
             return;
         }
 
-        let delay = calculate_backoff(&config, attempt);
+        let delay = calculate_backoff(
+            BackoffConfig {
+                initial_delay: config.reconnect_initial_delay,
+                max_delay: config.reconnect_max_delay,
+                factor: config.reconnect_backoff_factor,
+                jitter: config.reconnect_jitter,
+            },
+            attempt,
+        );
         attempt = attempt.saturating_add(1);
         warn!(
             attempt,

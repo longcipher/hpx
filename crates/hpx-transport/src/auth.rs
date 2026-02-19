@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use http::header::HeaderMap;
+use url::{Url, form_urlencoded};
 
 use crate::error::{TransportError, TransportResult};
 
@@ -17,7 +18,7 @@ pub trait Authentication: Send + Sync {
     ///
     /// # Arguments
     /// * `method` - HTTP method
-    /// * `path` - Request path (without base URL)
+    /// * `path` - Request path (optionally including query, without base URL)
     /// * `headers` - Mutable headers to modify
     /// * `body` - Optional request body bytes
     ///
@@ -109,7 +110,11 @@ impl Authentication for ApiKeyAuth {
                 headers.insert(header_name, header_value);
                 Ok(None)
             }
-            ApiKeyLocation::Query => Ok(Some(format!("{}={}", self.key_name, self.key_value))),
+            ApiKeyLocation::Query => {
+                let mut serializer = form_urlencoded::Serializer::new(String::new());
+                serializer.append_pair(&self.key_name, &self.key_value);
+                Ok(Some(serializer.finish()))
+            }
         }
     }
 }
@@ -263,18 +268,62 @@ impl HmacAuth {
             }
         }
     }
+
+    fn canonical_path_and_query(path: &str) -> (String, String) {
+        if let Ok(url) = Url::parse(path) {
+            return (
+                if url.path().is_empty() {
+                    "/".to_string()
+                } else {
+                    url.path().to_string()
+                },
+                url.query().unwrap_or_default().to_string(),
+            );
+        }
+
+        if let Some((raw_path, raw_query)) = path.split_once('?') {
+            (
+                if raw_path.is_empty() {
+                    "/".to_string()
+                } else {
+                    raw_path.to_string()
+                },
+                raw_query.to_string(),
+            )
+        } else {
+            (
+                if path.is_empty() {
+                    "/".to_string()
+                } else {
+                    path.to_string()
+                },
+                String::new(),
+            )
+        }
+    }
+
+    fn join_query(left: &str, right: &str) -> String {
+        match (left.is_empty(), right.is_empty()) {
+            (true, true) => String::new(),
+            (false, true) => left.to_string(),
+            (true, false) => right.to_string(),
+            (false, false) => format!("{left}&{right}"),
+        }
+    }
 }
 
 #[async_trait]
 impl Authentication for HmacAuth {
     async fn sign(
         &self,
-        _method: &http::Method,
-        _path: &str,
+        method: &http::Method,
+        path: &str,
         headers: &mut HeaderMap,
         body: Option<&[u8]>,
     ) -> TransportResult<Option<String>> {
         let timestamp = Self::get_timestamp_ms();
+        let timestamp_str = timestamp.to_string();
+        let (canonical_path, request_query) = Self::canonical_path_and_query(path);
 
         // Add API key header
         let api_key_value = http::header::HeaderValue::from_str(&self.api_key)
@@ -288,13 +337,41 @@ impl Authentication for HmacAuth {
             .map(|b| String::from_utf8_lossy(b).into_owned())
             .unwrap_or_default();
 
-        let message = if self.timestamp_in_query {
-            format!("{}={}&{}", self.timestamp_param, timestamp, body_str)
+        let timestamp_query = if self.timestamp_in_query {
+            let mut serializer = form_urlencoded::Serializer::new(String::new());
+            serializer.append_pair(&self.timestamp_param, &timestamp_str);
+            serializer.finish()
         } else {
-            body_str.clone()
+            String::new()
+        };
+        let canonical_query = Self::join_query(&request_query, &timestamp_query);
+
+        let message = if body_str.is_empty() {
+            format!(
+                "{}\n{}\n{}",
+                method.as_str(),
+                canonical_path,
+                canonical_query
+            )
+        } else {
+            format!(
+                "{}\n{}\n{}\n{}",
+                method.as_str(),
+                canonical_path,
+                canonical_query,
+                body_str
+            )
         };
 
         let signature = self.sign_message(&message)?;
+
+        if !self.timestamp_in_query {
+            let ts_value = http::header::HeaderValue::from_str(&timestamp_str)
+                .map_err(|e| TransportError::auth(e.to_string()))?;
+            let ts_name = http::header::HeaderName::from_bytes(self.timestamp_param.as_bytes())
+                .map_err(|e| TransportError::auth(e.to_string()))?;
+            headers.insert(ts_name, ts_value);
+        }
 
         // Add signature
         if let Some(ref header_name) = self.signature_header {
@@ -303,22 +380,24 @@ impl Authentication for HmacAuth {
             let sig_name = http::header::HeaderName::from_bytes(header_name.as_bytes())
                 .map_err(|e| TransportError::auth(e.to_string()))?;
             headers.insert(sig_name, sig_value);
-
-            if !self.timestamp_in_query {
-                let ts_value = http::header::HeaderValue::from_str(&timestamp.to_string())
-                    .map_err(|e| TransportError::auth(e.to_string()))?;
-                let ts_name = http::header::HeaderName::from_bytes(self.timestamp_param.as_bytes())
-                    .map_err(|e| TransportError::auth(e.to_string()))?;
-                headers.insert(ts_name, ts_value);
+            if self.timestamp_in_query {
+                Ok(Some(timestamp_query))
+            } else {
+                Ok(None)
             }
-            Ok(None)
         } else if let Some(ref param_name) = self.signature_param {
-            Ok(Some(format!(
-                "{}={}&{}={}",
-                self.timestamp_param, timestamp, param_name, signature
-            )))
+            let mut serializer = form_urlencoded::Serializer::new(String::new());
+            if self.timestamp_in_query {
+                serializer.append_pair(&self.timestamp_param, &timestamp_str);
+            }
+            serializer.append_pair(param_name, &signature);
+            Ok(Some(serializer.finish()))
         } else {
-            Ok(None)
+            if self.timestamp_in_query {
+                Ok(Some(timestamp_query))
+            } else {
+                Ok(None)
+            }
         }
     }
 }
@@ -378,6 +457,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
 
     #[tokio::test]
@@ -422,5 +503,55 @@ mod tests {
             .await;
         assert!(result.is_ok());
         assert!(headers.contains_key(http::header::AUTHORIZATION));
+    }
+
+    #[tokio::test]
+    async fn test_hmac_sign_includes_method_path_and_query() {
+        let auth = HmacAuth::new("api-key", "secret")
+            .signature_header("X-SIGNATURE")
+            .timestamp_in_query(false);
+        let mut headers = HeaderMap::new();
+
+        let query = auth
+            .sign(
+                &http::Method::GET,
+                "/v1/order?symbol=BTCUSDT&recvWindow=5000",
+                &mut headers,
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert!(query.is_none());
+        assert!(headers.contains_key("X-SIGNATURE"));
+        assert!(headers.contains_key("timestamp"));
+
+        let expected_payload = "GET\n/v1/order\nsymbol=BTCUSDT&recvWindow=5000";
+        let expected_signature = auth.sign_message(expected_payload).unwrap();
+        assert_eq!(
+            headers.get("X-SIGNATURE").unwrap().to_str().unwrap(),
+            expected_signature
+        );
+    }
+
+    #[tokio::test]
+    async fn test_hmac_query_output_is_well_formed() {
+        let auth = HmacAuth::new("api-key", "secret");
+        let mut headers = HeaderMap::new();
+
+        let query = auth
+            .sign(&http::Method::GET, "/v1/account", &mut headers, None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert!(!query.ends_with('&'));
+        assert!(!query.contains("&&"));
+
+        let pairs: HashMap<_, _> = form_urlencoded::parse(query.as_bytes())
+            .into_owned()
+            .collect();
+        assert!(pairs.contains_key("timestamp"));
+        assert!(pairs.contains_key("signature"));
     }
 }

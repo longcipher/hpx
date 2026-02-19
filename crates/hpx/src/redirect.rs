@@ -144,10 +144,11 @@ impl Policy {
     /// # use hpx::{Error, redirect};
     /// #
     /// # fn run() -> Result<(), Error> {
+    /// # use http::Uri;
     /// let custom = redirect::Policy::custom(|attempt| {
-    ///     if attempt.previous().len() > 5 {
+    ///     if attempt.previous.len() > 5 {
     ///         attempt.error("too many redirects")
-    ///     } else if attempt.uri() == "example.domain" {
+    ///     } else if attempt.uri.as_ref() == &Uri::from_static("http://example.domain/") {
     ///         // prevent redirects to 'example.domain'
     ///         attempt.stop()
     ///     } else {
@@ -182,7 +183,7 @@ impl Policy {
     /// #
     /// # fn run() -> Result<(), Error> {
     /// let custom = redirect::Policy::custom(|attempt| {
-    ///     eprintln!("{}, Location: {:?}", attempt.status(), attempt.uri());
+    ///     eprintln!("{}, Location: {:?}", attempt.status, attempt.uri);
     ///     redirect::Policy::default().redirect(attempt)
     /// });
     /// # Ok(())

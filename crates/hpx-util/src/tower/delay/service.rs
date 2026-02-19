@@ -57,12 +57,12 @@ impl<S> Delay<S> {
 
 impl<S, Request> Service<Request> for Delay<S>
 where
-    S: Service<Request>,
+    S: Service<Request> + Clone,
     S::Error: Into<BoxError>,
 {
     type Response = S::Response;
     type Error = BoxError;
-    type Future = ResponseFuture<S::Future>;
+    type Future = ResponseFuture<S, Request>;
 
     #[inline]
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -70,9 +70,8 @@ where
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
-        let response = self.inner.call(req);
         let sleep = tokio::time::sleep(self.delay);
-        ResponseFuture::new(response, sleep)
+        ResponseFuture::new(self.inner.clone(), req, sleep)
     }
 }
 
@@ -91,13 +90,13 @@ impl<S, P> DelayWith<S, P> {
 
 impl<S, Req, P> Service<Req> for DelayWith<S, P>
 where
-    S: Service<Req>,
+    S: Service<Req> + Clone,
     S::Error: Into<BoxError>,
     P: Fn(&Req) -> bool,
 {
     type Response = S::Response;
     type Error = BoxError;
-    type Future = ResponseFuture<S::Future>;
+    type Future = ResponseFuture<S, Req>;
 
     #[inline]
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -110,8 +109,7 @@ where
         } else {
             Duration::ZERO
         };
-        let response = self.inner.inner.call(req);
-        ResponseFuture::new(response, tokio::time::sleep(delay))
+        ResponseFuture::new(self.inner.inner.clone(), req, tokio::time::sleep(delay))
     }
 }
 
@@ -131,12 +129,12 @@ impl<S> JitterDelay<S> {
 
 impl<S, Req> Service<Req> for JitterDelay<S>
 where
-    S: Service<Req>,
+    S: Service<Req> + Clone,
     S::Error: Into<BoxError>,
 {
     type Response = S::Response;
     type Error = BoxError;
-    type Future = ResponseFuture<S::Future>;
+    type Future = ResponseFuture<S, Req>;
 
     #[inline]
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -146,8 +144,7 @@ where
     fn call(&mut self, req: Req) -> Self::Future {
         let delay = jittered_duration(self.base, self.pct);
         let sleep = tokio::time::sleep(delay);
-        let fut = self.inner.call(req);
-        ResponseFuture::new(fut, sleep)
+        ResponseFuture::new(self.inner.clone(), req, sleep)
     }
 }
 
@@ -166,13 +163,13 @@ impl<S, P> JitterDelayWith<S, P> {
 
 impl<S, Req, P> Service<Req> for JitterDelayWith<S, P>
 where
-    S: Service<Req>,
+    S: Service<Req> + Clone,
     S::Error: Into<BoxError>,
     P: Fn(&Req) -> bool,
 {
     type Response = S::Response;
     type Error = BoxError;
-    type Future = ResponseFuture<S::Future>;
+    type Future = ResponseFuture<S, Req>;
 
     #[inline]
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -186,8 +183,65 @@ where
             Duration::ZERO
         };
 
-        let sleep = tokio::time::sleep(delay);
-        let fut = self.inner.inner.call(req);
-        ResponseFuture::new(fut, sleep)
+        ResponseFuture::new(self.inner.inner.clone(), req, tokio::time::sleep(delay))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        convert::Infallible,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+        task::{Context, Poll},
+        time::Duration,
+    };
+
+    use tower::Service;
+
+    use super::Delay;
+
+    #[derive(Clone)]
+    struct SideEffectService {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl Service<()> for SideEffectService {
+        type Response = ();
+        type Error = Infallible;
+        type Future = std::future::Ready<Result<(), Infallible>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _req: ()) -> Self::Future {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            std::future::ready(Ok(()))
+        }
+    }
+
+    #[tokio::test]
+    async fn test_delay_invokes_inner_service_after_sleep() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let inner = SideEffectService {
+            calls: Arc::clone(&calls),
+        };
+        let mut delayed = Delay::new(inner, Duration::from_millis(25));
+        let started = tokio::time::Instant::now();
+
+        let fut = delayed.call(());
+        tokio::pin!(fut);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+        // Initial poll should not invoke the inner service yet.
+        assert!(matches!(futures_util::poll!(fut.as_mut()), Poll::Pending));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+        let _ = fut.await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(started.elapsed() >= Duration::from_millis(25));
     }
 }

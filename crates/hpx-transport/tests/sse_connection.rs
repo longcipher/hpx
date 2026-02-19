@@ -18,7 +18,7 @@ use hyper::{
     service::service_fn,
 };
 use hyper_util::rt::TokioIo;
-use tokio::{net::TcpListener, sync::Notify, time::timeout};
+use tokio::{net::TcpListener, time::timeout};
 
 // ---------------------------------------------------------------------------
 // Mock SSE server helpers

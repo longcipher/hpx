@@ -7,6 +7,18 @@
 use std::time::{Duration, Instant};
 
 use scc::HashMap as SccHashMap;
+use thiserror::Error;
+
+/// Configuration errors for rate limit buckets.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum RateLimitError {
+    /// Bucket capacity must be greater than zero.
+    #[error("capacity must be > 0")]
+    InvalidCapacity,
+    /// Refill rate must be finite and greater than zero.
+    #[error("refill_rate must be finite and > 0")]
+    InvalidRefillRate,
+}
 
 /// A token bucket rate limiter backed by lock-free `scc::HashMap`.
 #[derive(Debug)]
@@ -42,7 +54,19 @@ impl RateLimiter {
     /// * `name` - Name of the rate limit (e.g., "orders", "public")
     /// * `capacity` - Maximum tokens in the bucket
     /// * `refill_rate` - Tokens added per second
-    pub fn add_limit(&self, name: impl Into<String>, capacity: u32, refill_rate: f64) {
+    pub fn add_limit(
+        &self,
+        name: impl Into<String>,
+        capacity: u32,
+        refill_rate: f64,
+    ) -> Result<(), RateLimitError> {
+        if capacity == 0 {
+            return Err(RateLimitError::InvalidCapacity);
+        }
+        if !refill_rate.is_finite() || refill_rate <= 0.0 {
+            return Err(RateLimitError::InvalidRefillRate);
+        }
+
         let name = name.into();
         let bucket = TokenBucket {
             capacity: f64::from(capacity),
@@ -52,6 +76,7 @@ impl RateLimiter {
         };
         // Insert or update the bucket
         let _ = self.buckets.insert_sync(name, bucket);
+        Ok(())
     }
 
     /// Try to acquire a token without blocking.
@@ -91,6 +116,10 @@ impl RateLimiter {
     /// Get the time until a token will be available.
     pub fn time_until_available(&self, name: &str) -> Option<Duration> {
         self.buckets.read_sync(name, |_, bucket| {
+            if !bucket.refill_rate.is_finite() || bucket.refill_rate <= 0.0 {
+                return Duration::MAX;
+            }
+
             let now = Instant::now();
             let elapsed = now.duration_since(bucket.last_update).as_secs_f64();
             let current_tokens =
@@ -136,7 +165,7 @@ mod tests {
     #[test]
     fn test_rate_limiter_basic() {
         let limiter = RateLimiter::new();
-        limiter.add_limit("test", 5, 1.0);
+        limiter.add_limit("test", 5, 1.0).unwrap();
 
         // Should allow 5 requests
         for _ in 0..5 {
@@ -157,7 +186,7 @@ mod tests {
     #[test]
     fn test_available_tokens() {
         let limiter = RateLimiter::new();
-        limiter.add_limit("test", 10, 1.0);
+        limiter.add_limit("test", 10, 1.0).unwrap();
 
         assert!(limiter.available_tokens("test").is_some());
         assert!(limiter.available_tokens("unknown").is_none());
@@ -166,7 +195,7 @@ mod tests {
     #[test]
     fn test_reset() {
         let limiter = RateLimiter::new();
-        limiter.add_limit("test", 5, 1.0);
+        limiter.add_limit("test", 5, 1.0).unwrap();
 
         // Consume all tokens
         for _ in 0..5 {
@@ -177,5 +206,19 @@ mod tests {
         // Reset
         limiter.reset("test");
         assert!(limiter.try_acquire("test"));
+    }
+
+    #[test]
+    fn test_add_limit_rejects_invalid_capacity() {
+        let limiter = RateLimiter::new();
+        let err = limiter.add_limit("test", 0, 1.0).unwrap_err();
+        assert_eq!(err, RateLimitError::InvalidCapacity);
+    }
+
+    #[test]
+    fn test_add_limit_rejects_invalid_refill_rate() {
+        let limiter = RateLimiter::new();
+        let err = limiter.add_limit("test", 1, 0.0).unwrap_err();
+        assert_eq!(err, RateLimitError::InvalidRefillRate);
     }
 }

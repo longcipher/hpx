@@ -67,7 +67,7 @@ while let Some(event) = stream.next().await {
 use hpx_transport::rate_limit::RateLimiter;
 
 let limiter = RateLimiter::new();
-limiter.add_limit("orders", 10, 1.0); // 10 capacity, 1/sec refill
+limiter.add_limit("orders", 10, 1.0).unwrap(); // 10 capacity, 1/sec refill
 
 if limiter.try_acquire("orders") {
     println!("Request allowed");

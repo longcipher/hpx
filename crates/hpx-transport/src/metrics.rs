@@ -4,13 +4,17 @@ use opentelemetry::global;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 
-pub fn init_metrics(endpoint: &str) -> SdkMeterProvider {
+use crate::error::{TransportError, TransportResult};
+
+pub fn init_metrics(endpoint: &str) -> TransportResult<SdkMeterProvider> {
     // Create the OTLP metrics exporter
     let exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_tonic()
         .with_endpoint(endpoint)
         .build()
-        .expect("Failed to create OTLP metrics exporter");
+        .map_err(|e| {
+            TransportError::config(format!("Failed to create OTLP metrics exporter: {e}"))
+        })?;
 
     // Create a periodic reader with 15-second interval
     let reader = PeriodicReader::builder(exporter)
@@ -23,5 +27,5 @@ pub fn init_metrics(endpoint: &str) -> SdkMeterProvider {
     // Set as global meter provider
     global::set_meter_provider(provider.clone());
 
-    provider
+    Ok(provider)
 }

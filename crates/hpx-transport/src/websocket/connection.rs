@@ -12,7 +12,6 @@ use hpx::{
     Client,
     ws::{WebSocket, WebSocketRead, WebSocketRequestBuilder, WebSocketWrite, message::Message},
 };
-use rand::RngExt;
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::{
     sync::{broadcast, mpsc},
@@ -27,7 +26,10 @@ use super::{
     subscription::SubscriptionStore,
     types::{MessageKind, RequestId, Topic},
 };
-use crate::error::{TransportError, TransportResult};
+use crate::{
+    error::{TransportError, TransportResult},
+    reconnect::{BackoffConfig, calculate_backoff},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ConnectionEpoch(pub u64);
@@ -159,9 +161,38 @@ impl Drop for SubscriptionGuard {
         if let Some(remaining) = self.subs.decrement_ref(&self.topic)
             && remaining == 0
         {
-            let _ = self.cmd_tx.try_send(DataCommand::Unsubscribe {
-                topics: vec![self.topic.clone()],
-            });
+            let cmd_tx = self.cmd_tx.clone();
+            let topic = self.topic.clone();
+            let unsubscribe = DataCommand::Unsubscribe {
+                topics: vec![topic],
+            };
+
+            match cmd_tx.try_send(unsubscribe) {
+                Ok(()) => {}
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    warn!("Connection task closed while dropping SubscriptionGuard");
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Full(unsubscribe)) => {
+                    match tokio::runtime::Handle::try_current() {
+                        Ok(handle) => {
+                            handle.spawn(async move {
+                                if cmd_tx.send(unsubscribe).await.is_err() {
+                                    warn!(
+                                        "Connection task closed while sending unsubscribe on drop"
+                                    );
+                                }
+                            });
+                        }
+                        Err(_) => {
+                            if cmd_tx.blocking_send(unsubscribe).is_err() {
+                                warn!(
+                                    "Connection task closed while blocking_send unsubscribe on drop"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -210,6 +241,8 @@ impl ConnectionHandle {
         message: WsMessage,
         timeout_override: Option<Duration>,
     ) -> TransportResult<String> {
+        let timeout_duration = timeout_override.unwrap_or(self.config.request_timeout);
+
         if !self.pending.has_capacity() {
             return Err(TransportError::capacity_exceeded(
                 "Too many pending requests",
@@ -226,19 +259,42 @@ impl ConnectionHandle {
             }
         };
 
-        self.cmd_tx
-            .send(DataCommand::Request {
+        let started = Instant::now();
+        match timeout(
+            timeout_duration,
+            self.cmd_tx.send(DataCommand::Request {
                 message,
                 request_id: request_id.clone(),
-            })
-            .await
-            .map_err(|_| {
+            }),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(_)) => {
                 self.pending.remove(&request_id);
-                TransportError::connection_closed(Some("Connection task shut down".to_string()))
-            })?;
+                return Err(TransportError::connection_closed(Some(
+                    "Connection task shut down".to_string(),
+                )));
+            }
+            Err(_) => {
+                self.pending.remove(&request_id);
+                return Err(TransportError::request_timeout(
+                    timeout_duration,
+                    request_id.to_string(),
+                ));
+            }
+        }
 
-        let timeout_duration = timeout_override.unwrap_or(self.config.request_timeout);
-        match timeout(timeout_duration, rx).await {
+        let remaining = timeout_duration.saturating_sub(started.elapsed());
+        if remaining.is_zero() {
+            self.pending.remove(&request_id);
+            return Err(TransportError::request_timeout(
+                timeout_duration,
+                request_id.to_string(),
+            ));
+        }
+
+        match timeout(remaining, rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(TransportError::internal("Request channel dropped")),
             Err(_) => {
@@ -492,34 +548,23 @@ fn message_to_text<H: ProtocolHandler>(handler: &H, msg: &Message) -> Option<Str
     }
 }
 
-async fn connect_websocket(url: &str) -> TransportResult<WebSocket> {
+async fn connect_websocket(config: &WsConfig) -> TransportResult<WebSocket> {
     let client = Client::builder()
+        .connect_timeout(config.connect_timeout)
         .build()
         .map_err(|e| TransportError::config(format!("Failed to build client: {e}")))?;
 
-    let req = client.get(url);
+    let req = client.get(&config.url);
     let ws_req = WebSocketRequestBuilder::new(req);
-    let resp = ws_req.send().await.map_err(TransportError::Http)?;
+    let resp = timeout(config.connect_timeout, ws_req.send())
+        .await
+        .map_err(|_| TransportError::timeout(config.connect_timeout))?
+        .map_err(TransportError::Http)?;
 
-    resp.into_websocket().await.map_err(TransportError::Http)
-}
-
-fn calculate_backoff(config: &WsConfig, attempt: u32) -> Duration {
-    let initial = config.reconnect_initial_delay.as_secs_f64();
-    let max = config.reconnect_max_delay.as_secs_f64();
-    let factor = config.reconnect_backoff_factor.max(1.0);
-    let exponent = factor.powi(attempt as i32);
-    let base = (initial * exponent).min(max);
-
-    let jitter = config.reconnect_jitter.clamp(0.0, 1.0);
-    if jitter == 0.0 {
-        return Duration::from_secs_f64(base);
-    }
-
-    let mut rng = rand::rng();
-    let randomized = rng.random_range(0.0..=base);
-    let blended = base * (1.0 - jitter) + randomized * jitter;
-    Duration::from_secs_f64(blended)
+    timeout(config.connect_timeout, resp.into_websocket())
+        .await
+        .map_err(|_| TransportError::timeout(config.connect_timeout))?
+        .map_err(TransportError::Http)
 }
 
 async fn establish_connection<H>(
@@ -532,7 +577,7 @@ async fn establish_connection<H>(
 where
     H: ProtocolHandler,
 {
-    let ws = connect_websocket(&config.url).await?;
+    let ws = connect_websocket(config).await?;
     let (mut ws_write, mut ws_read) = ws.split();
 
     for msg in handler.on_connect() {
@@ -634,7 +679,15 @@ where
                     return Err(err);
                 }
 
-                let delay = calculate_backoff(&config, attempt);
+                let delay = calculate_backoff(
+                    BackoffConfig {
+                        initial_delay: config.reconnect_initial_delay,
+                        max_delay: config.reconnect_max_delay,
+                        factor: config.reconnect_backoff_factor,
+                        jitter: config.reconnect_jitter,
+                    },
+                    attempt,
+                );
                 attempt = attempt.saturating_add(1);
                 sleep(delay).await;
                 continue;
@@ -674,7 +727,15 @@ where
                     return Err(err);
                 }
 
-                let delay = calculate_backoff(&config, attempt);
+                let delay = calculate_backoff(
+                    BackoffConfig {
+                        initial_delay: config.reconnect_initial_delay,
+                        max_delay: config.reconnect_max_delay,
+                        factor: config.reconnect_backoff_factor,
+                        jitter: config.reconnect_jitter,
+                    },
+                    attempt,
+                );
                 attempt = attempt.saturating_add(1);
                 sleep(delay).await;
             }
@@ -723,25 +784,34 @@ where
                         let request_id = handler.generate_request_id();
                         let msg = handler.build_subscribe(&topics, request_id);
                         if let Err(err) = send_ws_message(&mut ws_write, &msg).await {
-                            warn!(error = %err, "Failed to send subscribe");
+                            return Err(TransportError::websocket(format!(
+                                "Failed to send subscribe command: {err}"
+                            )));
                         }
                     }
                     Some(DataCommand::Unsubscribe { topics }) => {
                         let request_id = handler.generate_request_id();
                         let msg = handler.build_unsubscribe(&topics, request_id);
                         if let Err(err) = send_ws_message(&mut ws_write, &msg).await {
-                            warn!(error = %err, "Failed to send unsubscribe");
+                            return Err(TransportError::websocket(format!(
+                                "Failed to send unsubscribe command: {err}"
+                            )));
                         }
                     }
                     Some(DataCommand::Send { message }) => {
                         if let Err(err) = send_ws_message(&mut ws_write, &message).await {
-                            warn!(error = %err, "Failed to send message");
+                            return Err(TransportError::websocket(format!(
+                                "Failed to send message command: {err}"
+                            )));
                         }
                     }
                     Some(DataCommand::Request { message, request_id }) => {
                         let message = handler.inject_request_id(message, &request_id);
                         if let Err(err) = send_ws_message(&mut ws_write, &message).await {
                             pending.resolve(&request_id, Err(TransportError::websocket(err.to_string())));
+                            return Err(TransportError::websocket(format!(
+                                "Failed to send request command: {err}"
+                            )));
                         }
                     }
                     None => return Ok(()),
@@ -1006,6 +1076,26 @@ mod tests {
         assert!(matches!(
             cmd,
             DataCommand::Unsubscribe { topics } if topics == vec![Topic::from("trades.BTC")]
+        ));
+    }
+
+    #[test]
+    fn subscription_guard_drop_without_runtime_still_unsubscribes() {
+        let config = test_config();
+        let subs = Arc::new(SubscriptionStore::new(config));
+        let topic = Topic::from("trades.BTC");
+        let (rx, is_new) = subs.subscribe(topic.clone());
+        assert!(is_new);
+
+        let (cmd_tx, mut cmd_rx) = mpsc::channel(1);
+        {
+            let _guard = SubscriptionGuard::new(topic.clone(), Arc::clone(&subs), cmd_tx, rx);
+        }
+
+        let cmd = cmd_rx.try_recv().expect("expected unsubscribe command");
+        assert!(matches!(
+            cmd,
+            DataCommand::Unsubscribe { topics } if topics == vec![topic]
         ));
     }
 
@@ -1425,17 +1515,18 @@ mod tests {
 
     #[test]
     fn calculate_backoff_without_jitter_is_deterministic() {
-        let mut config = WsConfig::new("wss://test");
-        config.reconnect_initial_delay = Duration::from_millis(100);
-        config.reconnect_max_delay = Duration::from_millis(1000);
-        config.reconnect_backoff_factor = 2.0;
-        config.reconnect_jitter = 0.0;
+        let config = BackoffConfig {
+            initial_delay: Duration::from_millis(100),
+            max_delay: Duration::from_millis(1000),
+            factor: 2.0,
+            jitter: 0.0,
+        };
 
-        assert_eq!(calculate_backoff(&config, 0), Duration::from_millis(100));
-        assert_eq!(calculate_backoff(&config, 1), Duration::from_millis(200));
-        assert_eq!(calculate_backoff(&config, 2), Duration::from_millis(400));
-        assert_eq!(calculate_backoff(&config, 3), Duration::from_millis(800));
-        assert_eq!(calculate_backoff(&config, 4), Duration::from_millis(1000));
+        assert_eq!(calculate_backoff(config, 0), Duration::from_millis(100));
+        assert_eq!(calculate_backoff(config, 1), Duration::from_millis(200));
+        assert_eq!(calculate_backoff(config, 2), Duration::from_millis(400));
+        assert_eq!(calculate_backoff(config, 3), Duration::from_millis(800));
+        assert_eq!(calculate_backoff(config, 4), Duration::from_millis(1000));
     }
 
     #[tokio::test]

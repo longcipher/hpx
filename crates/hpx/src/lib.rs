@@ -31,13 +31,13 @@
 //! The `emulation` module provides a way to simulate various browser TLS/HTTP2 fingerprints.
 //!
 //! ```rust,no_run
-//! use hpx_util::Emulation;
+//! use hpx::BrowserProfile;
 //!
 //! #[tokio::main]
 //! async fn main() -> hpx::Result<()> {
 //!     // Use the API you're already familiar with
 //!     let resp = hpx::get("https://tls.peet.ws/api/all")
-//!         .emulation(Emulation::Firefox136)
+//!         .emulation(BrowserProfile::Firefox)
 //!         .send()
 //!         .await?;
 //!     println!("{}", resp.text().await?);
@@ -327,8 +327,8 @@ pub use self::client::multipart;
 pub use self::client::ws;
 pub use self::{
     client::{
-        Body, Client, ClientBuilder, Emulation, EmulationBuilder, EmulationFactory, HttpInfo,
-        Request, RequestBuilder, Response, Upgraded,
+        Body, BrowserProfile, Client, ClientBuilder, Emulation, EmulationBuilder, EmulationFactory,
+        HttpInfo, Request, RequestBuilder, Response, Upgraded,
     },
     error::{Error, Result},
     ext::{ResponseBuilderExt, ResponseExt},
