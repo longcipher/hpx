@@ -26,6 +26,10 @@ include = ["/src/**/*", "/Cargo.toml", "/README.md", "/LICENSE"]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[lints.rust]
+unused_unsafe = "allow"
+dead_code = "allow"
+
 # Optional feature configurations
 [features]
 axum = ["axum-core", "http"]
