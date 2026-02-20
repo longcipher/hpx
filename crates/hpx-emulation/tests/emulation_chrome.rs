@@ -1,7 +1,7 @@
 #[macro_use]
 mod support;
 
-use hpx_util::Emulation;
+use hpx_emulation::Emulation;
 
 // Enabling certain extensions will change the length during encryption. This is because TLS will
 // automatically use padding to fill the data and add a padding extension. At this time, the ja4

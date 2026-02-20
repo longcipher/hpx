@@ -197,8 +197,14 @@ impl PendingRequestStore {
 
     /// Clear all pending requests without notification.
     pub fn clear(&self) {
-        self.requests.clear_sync();
-        self.count.store(0, Ordering::Release);
+        let mut removed = 0usize;
+        self.requests.retain_sync(|_, _| {
+            removed += 1;
+            false
+        });
+        if removed > 0 {
+            self.count.fetch_sub(removed, Ordering::AcqRel);
+        }
     }
 
     fn reserve_slot(&self) -> bool {

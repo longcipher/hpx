@@ -349,6 +349,14 @@ path = "examples/keylog.rs"
 name = "unix_socket"
 path = "examples/unix_socket.rs"
 
+[[example]]
+name = "tower_delay"
+path = "examples/tower_delay.rs"
+
+[[example]]
+name = "tower_jitter_delay"
+path = "examples/tower_jitter_delay.rs"
+
 # Benchmarks
 [[bench]]
 name = "json_parsing"

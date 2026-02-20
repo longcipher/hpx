@@ -16,7 +16,7 @@ An ergonomic all-in-one HTTP client for browser emulation with TLS, JA3/JA4, and
 | Crate | Version | Description |
 |-------|---------|-------------|
 | [`hpx`](https://crates.io/crates/hpx) | 2.0.0 | High Performance HTTP Client |
-| [`hpx-util`](https://crates.io/crates/hpx-util) | 2.0.0 | Browser emulation profiles & Tower middleware |
+| [`hpx-emulation`](https://crates.io/crates/hpx-emulation) | 2.0.0 | Browser emulation profiles |
 | [`hpx-transport`](https://crates.io/crates/hpx-transport) | 2.0.0 | Exchange SDK toolkit (auth, WebSocket, rate limiting) |
 | [`hpx-yawc`](https://crates.io/crates/hpx-yawc) | 2.0.0 | WebSocket library (RFC 6455 + compression) |
 | [`hpx-fastwebsockets`](https://crates.io/crates/hpx-fastwebsockets) | 2.0.0 | Fast minimal WebSocket implementation |
@@ -75,7 +75,7 @@ For browser emulation, add the utility crate:
 ```toml
 [dependencies]
 hpx = "2.0.0"
-hpx-util = "2.0.0"
+hpx-emulation = "2.0.0"
 ```
 
 For exchange/trading applications:
@@ -183,7 +183,7 @@ hpx = { version = "2.0.0", features = [
 ] }
 ```
 
-### `hpx-util` Features
+### `hpx-emulation` Features
 
 Default: `emulation`.
 
@@ -193,16 +193,19 @@ Default: `emulation`.
 | `emulation-compression` | No | Compression settings for emulation profiles |
 | `emulation-rand` | No | Random emulation profile selection |
 | `emulation-serde` | No | Serde serialization for emulation types |
-| `tower-delay` | No | Delay/jitter Tower middleware layer |
 
 ### `hpx-transport` Features
 
-Default: `ws-yawc`.
+Default: `boring`, `ws-yawc`.
 
 | Feature | Default | Description |
 |---------|---------|-------------|
+| `boring` | **Yes** | TLS via BoringSSL |
+| `rustls` | No | TLS via Rustls |
 | `ws-yawc` | **Yes** | WebSocket backend via hpx-yawc |
 | `ws-fastwebsockets` | No | WebSocket backend via fastwebsockets |
+| `metrics` | No | OpenTelemetry OTLP gRPC metrics |
+| `sse` | No | Server-Sent Events transport |
 
 ### `hpx-yawc` Features
 
@@ -290,10 +293,10 @@ async fn main() -> hpx::Result<()> {
 
 ### Browser Emulation
 
-Requires the `hpx-util` crate with default features.
+Requires the `hpx-emulation` crate with default features.
 
 ```rust
-use hpx_util::Emulation;
+use hpx_emulation::Emulation;
 
 #[tokio::main]
 async fn main() -> hpx::Result<()> {

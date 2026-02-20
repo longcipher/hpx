@@ -1,7 +1,9 @@
 use std::time::{Duration, Instant};
 
-use hpx::Client;
-use hpx_util::tower::delay::{DelayLayer, JitterDelayLayer};
+use hpx::{
+    Client,
+    delay::{DelayLayer, JitterDelayLayer},
+};
 
 #[tokio::main]
 async fn main() -> Result<(), hpx::Error> {

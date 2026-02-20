@@ -91,72 +91,84 @@ impl WsConfig {
     }
 
     /// Set the reconnection initial delay.
+    #[must_use]
     pub fn reconnect_initial_delay(mut self, delay: Duration) -> Self {
         self.reconnect_initial_delay = delay;
         self
     }
 
     /// Set the maximum reconnection delay.
+    #[must_use]
     pub fn reconnect_max_delay(mut self, delay: Duration) -> Self {
         self.reconnect_max_delay = delay;
         self
     }
 
     /// Set the reconnection backoff factor.
+    #[must_use]
     pub fn reconnect_backoff_factor(mut self, factor: f64) -> Self {
         self.reconnect_backoff_factor = factor;
         self
     }
 
     /// Set the maximum reconnection attempts.
+    #[must_use]
     pub fn reconnect_max_attempts(mut self, attempts: Option<u32>) -> Self {
         self.reconnect_max_attempts = attempts;
         self
     }
 
     /// Set the ping interval.
+    #[must_use]
     pub fn ping_interval(mut self, interval: Duration) -> Self {
         self.ping_interval = interval;
         self
     }
 
     /// Set the pong timeout.
+    #[must_use]
     pub fn pong_timeout(mut self, timeout: Duration) -> Self {
         self.pong_timeout = timeout;
         self
     }
 
     /// Set whether to use WebSocket protocol-level pings.
+    #[must_use]
     pub fn use_websocket_ping(mut self, use_ws_ping: bool) -> Self {
         self.use_websocket_ping = use_ws_ping;
         self
     }
 
     /// Set the request timeout.
+    #[must_use]
     pub fn request_timeout(mut self, timeout: Duration) -> Self {
         self.request_timeout = timeout;
         self
     }
 
     /// Set the maximum pending requests.
+    #[must_use]
     pub fn max_pending_requests(mut self, max: usize) -> Self {
         self.max_pending_requests = max;
         self
     }
 
     /// Set the connection timeout.
+    #[must_use]
     pub fn connect_timeout(mut self, timeout: Duration) -> Self {
         self.connect_timeout = timeout;
         self
     }
 
     /// Set the event channel capacity.
+    #[must_use]
     pub fn event_channel_capacity(mut self, capacity: usize) -> Self {
         self.event_channel_capacity = capacity;
         self
     }
 
     /// Set whether to authenticate on connect.
+    #[must_use]
     pub fn auth_on_connect(mut self, auth: bool) -> Self {
         self.auth_on_connect = auth;
         self

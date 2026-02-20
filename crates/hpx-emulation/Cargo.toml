@@ -1,9 +1,9 @@
 [package]
-name = "hpx-util"
+name = "hpx-emulation"
 version.workspace = true
-description = "Common utilities for hpx"
+description = "Browser emulation profiles for hpx (TLS fingerprinting, HTTP/2 settings)"
 repository = "https://github.com/longcipher/hpx"
-documentation = "https://docs.rs/hpx-util"
+documentation = "https://docs.rs/hpx-emulation"
 keywords = ["http", "client", "emulation", "ja3", "ja4"]
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license.workspace = true
@@ -22,16 +22,11 @@ emulation-compression = []
 emulation-rand = ["emulation", "dep:strum_macros", "dep:strum"]
 emulation-serde = ["dep:serde"]
 
-tower-delay = ["dep:tower", "dep:pin-project-lite", "tokio/time"]
-
 [dependencies]
 hpx = { workspace = true }
-pin-project-lite = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 strum = { workspace = true, optional = true }
 strum_macros = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
-tower = { workspace = true, optional = true }
 typed-builder = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -80,7 +75,7 @@ name = "emulation_opera"
 path = "tests/emulation_opera.rs"
 
 [[example]]
-name = "hpx_util_emulation"
+name = "hpx_emulation"
 path = "examples/hpx_util_emulation.rs"
 required-features = ["emulation"]
 
@@ -93,13 +88,3 @@ required-features = ["emulation", "emulation-rand"]
 name = "emulation_option"
 path = "examples/emulation_option.rs"
 required-features = ["emulation"]
-
-[[example]]
-name = "tower_delay"
-path = "examples/tower_delay.rs"
-required-features = ["tower-delay"]
-
-[[example]]
-name = "tower_jitter_delay"
-path = "examples/tower_jitter_delay.rs"
-required-features = ["tower-delay"]

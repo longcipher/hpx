@@ -52,7 +52,7 @@ impl Emulation {
     /// # Examples
     ///
     /// ```
-    /// use hpx_util::Emulation;
+    /// use hpx_emulation::Emulation;
     ///
     /// let random_emulation = Emulation::random();
     /// println!("{:?}", random_emulation);

@@ -293,6 +293,8 @@ mod trace;
 #[macro_use]
 mod config;
 mod client;
+/// Request delay middleware for Tower services.
+pub mod delay;
 mod error;
 mod ext;
 mod hash;

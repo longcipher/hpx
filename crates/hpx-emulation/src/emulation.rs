@@ -91,7 +91,7 @@ define_enum!(
     /// version number, following the pattern `browser_version`. For example, `Chrome100` is
     /// serialized as `"chrome_100"`.
     with_dispatch,
-    Emulation, Chrome100,
+    Emulation, Chrome143,
 
     // Chrome versions
     Chrome100 => ("chrome_100", v100::emulation),

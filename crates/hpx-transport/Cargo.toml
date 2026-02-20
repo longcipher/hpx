@@ -9,7 +9,18 @@ license.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["ws-yawc"]
+default = ["boring", "ws-yawc"]
+
+# OpenTelemetry OTLP gRPC metrics integration.
+metrics = [
+    "dep:opentelemetry",
+    "dep:opentelemetry-otlp",
+    "dep:opentelemetry_sdk",
+]
+
+# TLS backend selection (choose one).
+boring = ["hpx/boring"]
+rustls = ["hpx/rustls-tls"]
 
 # WebSocket backend selection (choose one).
 sse = [
@@ -37,15 +48,19 @@ hmac.workspace = true
 hpx = { workspace = true, features = [
     "json",
     "tracing",
-    "boring",
     "http1",
     "http2",
 ] }
 http = { workspace = true }
 memchr = { workspace = true, optional = true }
-opentelemetry = { workspace = true, features = ["metrics"] }
-opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics"] }
-opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] }
+opentelemetry = { workspace = true, features = ["metrics"], optional = true }
+opentelemetry-otlp = { workspace = true, features = [
+    "grpc-tonic",
+    "metrics",
+], optional = true }
+opentelemetry_sdk = { workspace = true, features = [
+    "rt-tokio",
+], optional = true }
 pin-project-lite = { workspace = true, optional = true }
 rand.workspace = true
 scc.workspace = true

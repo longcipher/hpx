@@ -3,14 +3,13 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(test, deny(warnings))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-//! # hpx-util
+//! # hpx-emulation
 //!
-//! Utilities for hpx.
+//! Browser emulation utilities for hpx.
 //!
-//! This crate provides utility modules for the `hpx` HTTP client, including:
+//! This crate provides browser emulation capabilities for the `hpx` HTTP client:
 //!
-//! - **Emulation**: Browser emulation capabilities (TLS fingerprinting, HTTP/2 settings).
-//! - **Tower**: Middleware layers for `tower` services (e.g., delay, jitter).
+//! - **Emulation**: Browser emulation profiles (TLS fingerprinting, HTTP/2 settings).
 
 use hpx as _;
 #[cfg(feature = "emulation-serde")]
@@ -18,7 +17,6 @@ use serde as _;
 
 #[cfg(feature = "emulation")]
 pub mod emulation;
-pub mod tower;
 
 #[cfg(feature = "emulation")]
 pub use self::emulation::{Emulation, EmulationOS, EmulationOption};

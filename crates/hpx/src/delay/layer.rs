@@ -29,8 +29,7 @@ pub struct DelayLayerWith<P> {
 /// ```no_run
 /// use std::time::Duration;
 ///
-/// use hpx::Client;
-/// use hpx_util::tower::delay::JitterDelayLayer;
+/// use hpx::{Client, delay::JitterDelayLayer};
 ///
 /// // Creates delays in range [0.8s, 1.2s] (1s ± 20%)
 /// let client = Client::builder()
@@ -72,7 +71,7 @@ impl DelayLayer {
     /// ```ignore
     /// use std::time::Duration;
     /// use http::Request;
-    /// use hpx_util::tower::delay::DelayLayer;
+    /// use hpx::delay::DelayLayer;
     ///
     /// // Only delay POST requests
     /// let layer = DelayLayer::new(Duration::from_secs(1))
@@ -131,7 +130,7 @@ impl JitterDelayLayer {
     /// ```
     /// use std::time::Duration;
     ///
-    /// use hpx_util::tower::delay::JitterDelayLayer;
+    /// use hpx::delay::JitterDelayLayer;
     ///
     /// // Creates delays in range [800ms, 1200ms]
     /// let layer = JitterDelayLayer::new(Duration::from_secs(1), 0.2);
@@ -153,7 +152,7 @@ impl JitterDelayLayer {
     /// ```ignore
     /// use std::time::Duration;
     /// use http::Request;
-    /// use hpx_util::tower::delay::JitterDelayLayer;
+    /// use hpx::delay::JitterDelayLayer;
     ///
     /// // Only delay requests to paths starting with "/slow"
     /// let layer = JitterDelayLayer::new(Duration::from_secs(1), 0.2)

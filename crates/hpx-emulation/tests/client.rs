@@ -2,7 +2,7 @@
 mod support;
 
 use hpx::Client;
-use hpx_util::{Emulation, EmulationOS, EmulationOption};
+use hpx_emulation::{Emulation, EmulationOS, EmulationOption};
 use support::server;
 
 #[tokio::test]

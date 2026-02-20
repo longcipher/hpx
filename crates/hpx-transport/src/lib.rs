@@ -72,12 +72,15 @@
 pub mod auth;
 pub mod error;
 pub mod exchange;
+#[cfg(feature = "metrics")]
+#[cfg_attr(docsrs, doc(cfg(feature = "metrics")))]
 pub mod metrics;
 pub mod rate_limit;
 mod reconnect;
 #[cfg(feature = "sse")]
 pub mod sse;
 pub mod typed;
+#[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
 pub mod websocket;
 
 // Re-export commonly used types
@@ -86,6 +89,7 @@ pub use error::{TransportError, TransportResult};
 pub use exchange::{ExchangeClient, RestClient, RestConfig};
 pub use rate_limit::{RateLimitError, RateLimiter};
 pub use typed::{ApiError, TypedResponse};
+#[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
 pub use websocket::{
     // Core connection API
     Connection,

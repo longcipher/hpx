@@ -1,7 +1,7 @@
 #[macro_use]
 mod support;
 
-use hpx_util::Emulation;
+use hpx_emulation::Emulation;
 
 test_emulation!(
     test_safari_15_3,

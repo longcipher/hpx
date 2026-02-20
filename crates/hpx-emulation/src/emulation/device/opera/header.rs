@@ -14,6 +14,8 @@ pub fn header_initializer_with_zstd_priority(
         emulation_os.is_mobile()
     );
     header_chrome_ua!(headers, ua);
+    // Opera is Chromium-based and sends sec-fetch-* headers like Chrome.
+    header_chrome_sec_fetch!(headers);
 
     headers.insert(ACCEPT, HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9"));
     #[cfg(feature = "emulation-compression")]

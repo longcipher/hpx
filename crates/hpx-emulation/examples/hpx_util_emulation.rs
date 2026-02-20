@@ -1,5 +1,5 @@
 use hpx::Client;
-use hpx_util::Emulation;
+use hpx_emulation::Emulation;
 
 #[tokio::main]
 async fn main() -> Result<(), hpx::Error> {

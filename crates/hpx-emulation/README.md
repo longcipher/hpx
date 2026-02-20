@@ -1,8 +1,8 @@
-# hpx-util
+# hpx-emulation
 
-[![crates.io](https://img.shields.io/crates/v/hpx-util.svg)](https://crates.io/crates/hpx-util)
-[![docs.rs](https://docs.rs/hpx-util/badge.svg)](https://docs.rs/hpx-util)
-[![License](https://img.shields.io/crates/l/hpx-util.svg)](https://github.com/longcipher/hpx)
+[![crates.io](https://img.shields.io/crates/v/hpx-emulation.svg)](https://crates.io/crates/hpx-emulation)
+[![docs.rs](https://docs.rs/hpx-emulation/badge.svg)](https://docs.rs/hpx-emulation)
+[![License](https://img.shields.io/crates/l/hpx-emulation.svg)](https://github.com/longcipher/hpx)
 
 Common utilities for the [hpx](https://github.com/longcipher/hpx) HTTP client.
 
@@ -14,7 +14,7 @@ Common utilities for the [hpx](https://github.com/longcipher/hpx) HTTP client.
 ## Quick Start
 
 ```rust
-use hpx_util::Emulation;
+use hpx_emulation::Emulation;
 
 #[tokio::main]
 async fn main() -> hpx::Result<()> {

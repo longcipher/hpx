@@ -10,8 +10,7 @@
 //! ```no_run
 //! use std::time::Duration;
 //!
-//! use hpx::Client;
-//! use hpx_util::tower::delay::DelayLayer;
+//! use hpx::{Client, delay::DelayLayer};
 //!
 //! let client = Client::builder()
 //!     .layer(DelayLayer::new(Duration::from_secs(1)))
@@ -24,8 +23,7 @@
 //! ```no_run
 //! use std::time::Duration;
 //!
-//! use hpx::Client;
-//! use hpx_util::tower::delay::JitterDelayLayer;
+//! use hpx::{Client, delay::JitterDelayLayer};
 //!
 //! let client = Client::builder()
 //!     .layer(JitterDelayLayer::new(Duration::from_secs(1), 0.2))
@@ -53,6 +51,9 @@
 //! - Not a substitute for proper rate limiters — servers can still see timing patterns
 //! - Keep delays short in hot paths
 
+// pin_project_lite does not support doc comments on fields,
+// so we allow missing_docs for the future module.
+#[allow(missing_docs)]
 mod future;
 mod layer;
 mod service;
@@ -75,26 +76,50 @@ fn jittered_duration(base: Duration, pct: f64) -> Duration {
         return base;
     }
 
-    // Generate pseudo-random value using multiple entropy sources
-    let time_entropy = {
-        use std::time::SystemTime;
-        SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0)
-    };
-
-    // Use stack address as additional entropy source
-    let addr_entropy = (&time_entropy as *const u64 as u64).wrapping_mul(0x517cc1b727220a95);
-
-    // Mix entropy sources with a simple but effective hash
-    let mixed = time_entropy
-        .wrapping_add(addr_entropy)
-        .wrapping_mul(0x9e3779b97f4a7c15);
+    // XOR-Shift PRNG — same proven approach used in emulation::rand.
+    let rand = fast_random();
 
     // Convert to fraction in [0, 1)
-    let frac = (mixed as f64) / (u64::MAX as f64);
+    let frac = (rand as f64) / (u64::MAX as f64);
 
     let span = (high - low).as_secs_f64();
     low + Duration::from_secs_f64(span * frac)
+}
+
+/// Fast thread-local XOR-Shift PRNG seeded from `RandomState`.
+fn fast_random() -> u64 {
+    use std::{
+        cell::Cell,
+        collections::hash_map::RandomState,
+        hash::{BuildHasher, Hasher},
+        num::Wrapping,
+    };
+
+    thread_local! {
+        static RNG: Cell<Wrapping<u64>> = Cell::new(Wrapping(seed()));
+    }
+
+    #[inline]
+    fn seed() -> u64 {
+        let seed = RandomState::new();
+        let mut out = 0;
+        let mut cnt = 0;
+        while out == 0 {
+            cnt += 1;
+            let mut hasher = seed.build_hasher();
+            hasher.write_usize(cnt);
+            out = hasher.finish();
+        }
+        out
+    }
+
+    RNG.with(|rng| {
+        let mut n = rng.get();
+        debug_assert_ne!(n.0, 0);
+        n ^= n >> 12;
+        n ^= n << 25;
+        n ^= n >> 27;
+        rng.set(n);
+        n.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
+    })
 }
