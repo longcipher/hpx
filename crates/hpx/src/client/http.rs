@@ -1011,6 +1011,20 @@ impl ClientBuilder {
         self
     }
 
+    /// Configure a proxy pool middleware for request-level proxy rotation.
+    ///
+    /// This middleware selects a proxy for each request based on the configured
+    /// [`crate::proxy_pool::ProxyPoolStrategy`]. When this is set, automatic
+    /// system proxy detection is disabled.
+    #[inline]
+    pub fn proxy_pool(mut self, pool: crate::proxy_pool::ProxyPool) -> ClientBuilder {
+        self.config
+            .layers
+            .push(BoxCloneSyncServiceLayer::new(pool.layer()));
+        self.config.auto_sys_proxy = false;
+        self
+    }
+
     /// Clear all `Proxies`, so `Client` will use no proxy anymore.
     ///
     /// # Note

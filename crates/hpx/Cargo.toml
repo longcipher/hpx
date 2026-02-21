@@ -128,6 +128,7 @@ ipnet = { workspace = true }
 parking_lot = { workspace = true }
 percent-encoding = { workspace = true }
 pin-project-lite = { workspace = true }
+rand.workspace = true
 rustls = { workspace = true, optional = true, features = [
     "std",
     "tls12",

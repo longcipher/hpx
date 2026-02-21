@@ -50,6 +50,7 @@ hpx = { workspace = true, features = [
     "tracing",
     "http1",
     "http2",
+    "socks",
 ] }
 http = { workspace = true }
 memchr = { workspace = true, optional = true }

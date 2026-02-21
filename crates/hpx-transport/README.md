@@ -38,6 +38,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Live Proxy Pool Tests
+
+The repository includes an ignored live test that validates proxy pool behavior
+(`StickyFailover` and `RandomPerRequest`) against a real proxy list.
+
+Default proxy list path:
+
+```text
+docs/webshare_proxy_list.txt
+```
+
+You can override the file path with `HPX_PROXY_LIST_PATH`.
+
+```bash
+HPX_PROXY_LIST_PATH=/absolute/path/to/proxy_list.txt \
+cargo test -p hpx-transport --test proxy_pool_live_webshare -- --ignored --nocapture --test-threads=1
+```
+
 ## WebSocket (Split API)
 
 ```rust,no_run

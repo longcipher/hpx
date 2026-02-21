@@ -300,6 +300,7 @@ mod ext;
 mod hash;
 mod into_uri;
 mod proxy;
+pub mod proxy_pool;
 mod sync;
 mod util;
 
@@ -336,6 +337,7 @@ pub use self::{
     ext::{ResponseBuilderExt, ResponseExt},
     into_uri::IntoUri,
     proxy::{NoProxy, Proxy},
+    proxy_pool::{ProxyPool, ProxyPoolBuilder, ProxyPoolStrategy},
 };
 
 fn _assert_impls() {

@@ -25,6 +25,8 @@ pub struct RestConfig {
     pub timeout: Duration,
     /// User agent string
     pub user_agent: String,
+    /// Optional rotating proxy pool shared by all REST requests.
+    pub proxy_pool: Option<hpx::proxy_pool::ProxyPool>,
 }
 
 impl RestConfig {
@@ -34,6 +36,7 @@ impl RestConfig {
             base_url: base_url.into(),
             timeout: Duration::from_secs(30),
             user_agent: format!("hpx-transport/{}", env!("CARGO_PKG_VERSION")),
+            proxy_pool: None,
         }
     }
 
@@ -46,6 +49,12 @@ impl RestConfig {
     /// Set the user agent.
     pub fn user_agent(mut self, user_agent: impl Into<String>) -> Self {
         self.user_agent = user_agent.into();
+        self
+    }
+
+    /// Set a rotating proxy pool for this REST client.
+    pub fn proxy_pool(mut self, proxy_pool: hpx::proxy_pool::ProxyPool) -> Self {
+        self.proxy_pool = Some(proxy_pool);
         self
     }
 }
@@ -118,9 +127,15 @@ impl<A: Authentication> std::fmt::Debug for RestClient<A> {
 impl<A: Authentication> RestClient<A> {
     /// Create a new REST client.
     pub fn new(config: RestConfig, auth: A) -> TransportResult<Self> {
-        let client = Client::builder()
+        let mut builder = Client::builder()
             .timeout(config.timeout)
-            .user_agent(&config.user_agent)
+            .user_agent(&config.user_agent);
+
+        if let Some(proxy_pool) = config.proxy_pool.clone() {
+            builder = builder.proxy_pool(proxy_pool);
+        }
+
+        let client = builder
             .build()
             .map_err(|e| TransportError::config(e.to_string()))?;
 
@@ -331,6 +346,19 @@ mod tests {
         assert_eq!(config.base_url, "https://api.example.com");
         assert_eq!(config.timeout, Duration::from_secs(60));
         assert_eq!(config.user_agent, "test-agent");
+        assert!(config.proxy_pool.is_none());
+    }
+
+    #[test]
+    fn test_rest_config_proxy_pool() {
+        let pool = hpx::proxy_pool::ProxyPool::with_strategy(
+            vec![hpx::Proxy::all("http://proxy.local:8080").expect("proxy URI should parse")],
+            hpx::proxy_pool::ProxyPoolStrategy::StickyFailover,
+        )
+        .expect("proxy pool should build");
+
+        let config = RestConfig::new("https://api.example.com").proxy_pool(pool.clone());
+        assert!(config.proxy_pool.is_some());
     }
 
     #[test]
