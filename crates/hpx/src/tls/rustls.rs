@@ -66,7 +66,7 @@ impl HandshakeConfigBuilder {
     {
         if let Some(protos) = alpn_protocols.into() {
             self.settings.alpn_protocols =
-                Some(protos.iter().map(|p| p.encode().to_vec()).collect());
+                Some(protos.iter().map(|p| p.as_wire_bytes().to_vec()).collect());
         } else {
             self.settings.alpn_protocols = None;
         }
@@ -203,14 +203,15 @@ impl TlsConnectorBuilder {
             root_store
         };
 
-        // ALPN
+        // ALPN — use raw protocol name bytes for rustls (not wire-format
+        // length-prefixed encoding which is only correct for BoringSSL).
         let alpn_protocols = self
             .alpn_protocol
-            .map(|proto| vec![proto.encode().to_vec()])
+            .map(|proto| vec![proto.as_wire_bytes().to_vec()])
             .or_else(|| {
                 opts.alpn_protocols
                     .as_ref()
-                    .map(|protos| protos.iter().map(|p| p.encode().to_vec()).collect())
+                    .map(|protos| protos.iter().map(|p| p.as_wire_bytes().to_vec()).collect())
             });
 
         let create_config = |alpn: Option<Vec<Vec<u8>>>| {
@@ -233,8 +234,9 @@ impl TlsConnectorBuilder {
 
         let connector = create_config(alpn_protocols);
         let connector_no_alpn = create_config(None);
-        let connector_h2 = create_config(Some(vec![AlpnProtocol::HTTP2.encode().to_vec()]));
-        let connector_http1 = create_config(Some(vec![AlpnProtocol::HTTP1.encode().to_vec()]));
+        let connector_h2 = create_config(Some(vec![AlpnProtocol::HTTP2.as_wire_bytes().to_vec()]));
+        let connector_http1 =
+            create_config(Some(vec![AlpnProtocol::HTTP1.as_wire_bytes().to_vec()]));
 
         // TODO: Handle other options like min/max version, keylog, etc.
 
@@ -333,12 +335,18 @@ where
     }
 
     fn call(&mut self, uri: Uri) -> Self::Future {
+        let is_https = uri.scheme_str() == Some("https");
         let connect = self.http.call(uri.clone());
         let connector = self.connector.clone();
-        // let config = self.config.clone();
 
         Box::pin(async move {
             let conn = connect.await.map_err(Into::into)?;
+
+            // Skip TLS for plain http:// URIs (e.g. when connecting to an
+            // HTTP proxy before sending a CONNECT request).
+            if !is_https {
+                return Ok(MaybeHttpsStream::Http(conn));
+            }
 
             // Perform TLS handshake
             let domain = uri.host().ok_or("URI missing host")?;

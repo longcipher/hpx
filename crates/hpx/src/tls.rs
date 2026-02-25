@@ -139,11 +139,25 @@ impl AlpnProtocol {
         AlpnProtocol(value)
     }
 
+    /// Returns the raw protocol name bytes (e.g. `b"h2"`, `b"http/1.1"`).
+    ///
+    /// This is the format expected by rustls's `ClientConfig::alpn_protocols`.
+    #[inline]
+    pub fn as_wire_bytes(&self) -> &'static [u8] {
+        self.0
+    }
+
+    /// Encode a single protocol in TLS wire format (length-prefixed).
+    ///
+    /// This is the format expected by BoringSSL's `set_alpn_protos()`.
     #[inline]
     fn encode(self) -> Bytes {
         Self::encode_sequence(std::iter::once(&self))
     }
 
+    /// Encode a sequence of protocols in TLS wire format (each length-prefixed).
+    ///
+    /// This is the format expected by BoringSSL's `set_alpn_protos()`.
     fn encode_sequence<'a, I>(items: I) -> Bytes
     where
         I: IntoIterator<Item = &'a AlpnProtocol>,

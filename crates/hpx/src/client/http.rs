@@ -295,7 +295,7 @@ impl Client {
                 tcp_recv_buffer_size: None,
                 tcp_happy_eyeballs_timeout: Some(Duration::from_millis(300)),
                 proxies: Vec::new(),
-                auto_sys_proxy: false,
+                auto_sys_proxy: true,
                 retry_policy: retry::Policy::default(),
                 redirect_policy: redirect::Policy::none(),
                 referer: true,
@@ -995,8 +995,8 @@ impl ClientBuilder {
     /// variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`) and,
     /// when the `system-proxy` feature is active, OS-level proxy configuration.
     ///
-    /// System proxy detection is **disabled by default**. Call this method to
-    /// opt in.
+    /// System proxy detection is **enabled by default**. Call this method to
+    /// explicitly opt in (no-op if already enabled).
     ///
     /// # Example
     /// ```

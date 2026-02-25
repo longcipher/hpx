@@ -15,7 +15,6 @@ use std::net::Ipv6Addr;
 use tokio::net::TcpStream;
 
 use assert2::assert;
-use assert2::let_assert;
 
 struct TestExecutor;
 
@@ -32,11 +31,11 @@ where
 #[tokio::test]
 async fn hyper() {
   // Bind a TCP listener to an ephemeral port.
-  let_assert!(
-    Ok(listener) =
+  assert!(
+    let Ok(listener) =
       tokio::net::TcpListener::bind((Ipv6Addr::LOCALHOST, 0u16)).await
   );
-  let_assert!(Ok(bind_addr) = listener.local_addr());
+  assert!(let Ok(bind_addr) = listener.local_addr());
 
   // Spawn the server in a task.
   tokio::spawn(async move {
@@ -57,9 +56,9 @@ async fn hyper() {
   });
 
   // Try to create a websocket connection with the server.
-  let_assert!(Ok(stream) = TcpStream::connect(bind_addr).await);
-  let_assert!(
-    Ok(req) = Request::builder()
+  assert!(let Ok(stream) = TcpStream::connect(bind_addr).await);
+  assert!(
+    let Ok(req) = Request::builder()
       .method("GET")
       .uri("ws://localhost/foo")
       .header("Host", "localhost")
@@ -72,18 +71,18 @@ async fn hyper() {
       .header("Sec-WebSocket-Version", "13")
       .body(Empty::<Bytes>::new())
   );
-  let_assert!(Ok((mut stream, _response)) = hpx_fastwebsockets::handshake::client(&TestExecutor, req, stream).await);
+  assert!(let Ok((mut stream, _response)) = hpx_fastwebsockets::handshake::client(&TestExecutor, req, stream).await);
 
-  let_assert!(Ok(message) = stream.read_frame().await);
+  assert!(let Ok(message) = stream.read_frame().await);
   assert!(message.opcode == hpx_fastwebsockets::OpCode::Text);
   assert!(message.payload == b"Hello!");
 
-  let_assert!(
-    Ok(()) = stream
+  assert!(
+    let Ok(()) = stream
       .write_frame(hpx_fastwebsockets::Frame::text(b"Goodbye!".to_vec().into()))
       .await
   );
-  let_assert!(Ok(close_frame) = stream.read_frame().await);
+  assert!(let Ok(close_frame) = stream.read_frame().await);
   assert!(close_frame.opcode == hpx_fastwebsockets::OpCode::Close);
 }
 
@@ -94,9 +93,9 @@ async fn upgrade_websocket(
 
   let (response, stream) = hpx_fastwebsockets::upgrade::upgrade(&mut request)?;
   tokio::spawn(async move {
-    let_assert!(Ok(mut stream) = stream.await);
+    assert!(let Ok(mut stream) = stream.await);
     assert!(let Ok(()) = stream.write_frame(hpx_fastwebsockets::Frame::text(b"Hello!".to_vec().into())).await);
-    let_assert!(Ok(reply) = stream.read_frame().await);
+    assert!(let Ok(reply) = stream.read_frame().await);
     assert!(reply.opcode == hpx_fastwebsockets::OpCode::Text);
     assert!(reply.payload == b"Goodbye!");
 

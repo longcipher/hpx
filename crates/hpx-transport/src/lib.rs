@@ -76,6 +76,7 @@ pub mod exchange;
 #[cfg_attr(docsrs, doc(cfg(feature = "metrics")))]
 pub mod metrics;
 pub mod rate_limit;
+#[cfg(any(feature = "sse", feature = "ws-yawc", feature = "ws-fastwebsockets"))]
 mod reconnect;
 #[cfg(feature = "sse")]
 pub mod sse;
