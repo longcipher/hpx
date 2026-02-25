@@ -24,12 +24,11 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 ### Task 1.1: Add `sseer` Workspace Dependency and Feature Flag
 
 > **Context:** `sseer` already exists in the workspace but is not declared as a workspace dependency. We need to add it to root `Cargo.toml` `[workspace.dependencies]` and add an `sse` feature to `hpx-transport` that optionally depends on it. Reference: existing `ws-yawc`/`ws-fastwebsockets` feature patterns in `crates/hpx-transport/Cargo.toml`.
+>
 > **Verification:** `cargo check -p hpx-transport --features sse` compiles without errors.
-
 - **Priority:** P0
 - **Scope:** Cargo configuration
 - **Status:** � DONE
-
 - [x] **Step 1:** Add `sseer = { path = "sseer", version = "0.1.7" }` to root `Cargo.toml` `[workspace.dependencies]`.
 - [x] **Step 2:** Add `sseer` as a workspace member if not already (check `[workspace] members`).
 - [x] **Step 3:** In `crates/hpx-transport/Cargo.toml`, add `sseer = { workspace = true, optional = true }` under `[dependencies]`.
@@ -43,11 +42,9 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 
 > **Context:** Create the directory structure and empty module files for the SSE transport. Reference the `websocket/` module structure as a template.
 > **Verification:** `cargo check -p hpx-transport --features sse` compiles with the new (empty) modules.
-
 - **Priority:** P0
 - **Scope:** Module structure
 - **Status:** � DONE
-
 - [x] **Step 1:** Create `crates/hpx-transport/src/sse/mod.rs` with submodule declarations (`config`, `connection`, `protocol`, `types`, `handlers`).
 - [x] **Step 2:** Create `crates/hpx-transport/src/sse/config.rs` (empty struct placeholder).
 - [x] **Step 3:** Create `crates/hpx-transport/src/sse/connection.rs` (empty placeholder).
@@ -63,11 +60,9 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 
 > **Context:** Define the core types (`SseMessageKind`, `SseEvent`) and configuration struct (`SseConfig`) that will be used throughout the SSE module. Reference `websocket/types.rs` and `websocket/config.rs` for patterns.
 > **Verification:** Types compile, `SseConfig` builder methods work in a unit test.
-
 - **Priority:** P0
 - **Scope:** Type definitions
 - **Status:** � DONE
-
 - [x] **Step 1:** Implement `SseMessageKind` enum in `sse/types.rs` with variants: `Data`, `System`, `Retry`, `Unknown`.
 - [x] **Step 2:** Implement `SseEvent` struct in `sse/types.rs` wrapping `sseer::event::Event` with a `kind: SseMessageKind` field.
 - [x] **Step 3:** Implement `SseConfig` struct in `sse/config.rs` with all fields from the design doc (url, method, headers, body, timeouts, reconnection settings, channel capacities).
@@ -81,11 +76,9 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 
 > **Context:** Add SSE-specific error variants to `TransportError` behind `#[cfg(feature = "sse")]` or unconditionally (since they're just enum variants). Reference `error.rs` existing patterns.
 > **Verification:** SSE error variants compile and display correctly.
-
 - **Priority:** P0
 - **Scope:** Error handling
 - **Status:** � DONE
-
 - [x] **Step 1:** Add `SseInvalidStatus { status: http::StatusCode }` variant to `TransportError`.
 - [x] **Step 2:** Add `SseInvalidContentType { content_type: String }` variant.
 - [x] **Step 3:** Add `SseParse { message: String }` variant.
@@ -102,11 +95,9 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 
 > **Context:** This is the core of the SSE transport. Implement the background task that manages the HTTP connection, pipes the response body through `sseer::EventStream`, and sends parsed events to the `SseStream` consumer via an mpsc channel. Reference `sseer::reqwest::EventSource` for the state machine pattern, and `websocket/connection.rs` for the background task + channel architecture.
 > **Verification:** Unit test with a mock bytes stream → EventStream → channel pipeline works correctly.
-
 - **Priority:** P0
 - **Scope:** Connection driver
 - **Status:** 🔴 TODO
-
 - [ ] **Step 1:** Define `SseConnectionState` enum (Disconnected, Connecting, Connected, Reconnecting, Closed).
 - [ ] **Step 2:** Define `SseCommand` enum (Close, Reconnect).
 - [ ] **Step 3:** Implement internal `establish_connection()` function:
@@ -131,11 +122,9 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 
 > **Context:** Expose the public API for creating and interacting with SSE connections. `SseConnection` is the entry point, `split()` returns `SseHandle` (clone-able control) and `SseStream` (event consumer). Follows `websocket::Connection` / `ConnectionHandle` / `ConnectionStream` pattern.
 > **Verification:** Can create an `SseConnection`, split it, receive events on `SseStream`, and close via `SseHandle`.
-
 - **Priority:** P0
 - **Scope:** Public API
 - **Status:** 🔴 TODO
-
 - [ ] **Step 1:** Implement `SseConnection` struct holding config, handler, client, and internal state.
 - [ ] **Step 2:** Implement `SseConnection::connect()` — establishes initial connection, spawns background task.
 - [ ] **Step 3:** Implement `SseConnection::split()` → `(SseHandle, SseStream)`.
@@ -152,11 +141,9 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 
 > **Context:** The protocol handler abstraction allows exchange-specific event classification. `GenericSseHandler` is the default pass-through handler. Reference `websocket/protocol.rs` and `websocket/handlers/`.
 > **Verification:** `GenericSseHandler` correctly classifies all events as `Data` kind.
-
 - **Priority:** P1
 - **Scope:** Protocol abstraction
 - **Status:** 🔴 TODO
-
 - [ ] **Step 1:** Define `SseProtocolHandler` trait in `sse/protocol.rs` with methods: `classify_event()`, `on_connect()`, `on_disconnect()`, `should_retry()`.
 - [ ] **Step 2:** Implement `GenericSseHandler` in `sse/handlers/generic.rs` that classifies all non-empty events as `Data` and empty events as `System`.
 - [ ] **Step 3:** Re-export in `sse/handlers/mod.rs`.
@@ -169,11 +156,9 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 
 > **Context:** SSE requests need authentication for exchange APIs. Reuse `hpx-transport::auth::Authentication` trait to sign the initial HTTP request (and reconnect requests). The auth trait's `sign()` method modifies headers and optionally adds query params.
 > **Verification:** Mock test verifying auth headers are present on SSE requests.
-
 - **Priority:** P1
 - **Scope:** Auth integration
 - **Status:** 🔴 TODO
-
 - [ ] **Step 1:** Add an optional `Box<dyn Authentication>` field to `SseConnection` internals.
 - [ ] **Step 2:** In `establish_connection()`, call `auth.sign()` to modify request headers before sending.
 - [ ] **Step 3:** Add `SseConnection::connect_with_auth()` constructor that accepts an `Authentication` impl.
@@ -186,11 +171,9 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 
 > **Context:** The WebSocket module uses `tracing` for observability. Add equivalent spans and events for SSE connection lifecycle. Reference `connection.rs` tracing patterns.
 > **Verification:** Running with `RUST_LOG=debug` shows SSE connection lifecycle events.
-
 - **Priority:** P1
 - **Scope:** Observability
 - **Status:** 🔴 TODO
-
 - [ ] **Step 1:** Add `tracing::info!` for connection established and closed events.
 - [ ] **Step 2:** Add `tracing::warn!` for reconnection attempts with attempt number and delay.
 - [ ] **Step 3:** Add `tracing::debug!` for individual SSE events received (event type, id).
@@ -206,11 +189,9 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 
 > **Context:** Create a mock SSE server using `hyper` (already a dev-dependency) to test the full connection lifecycle. Reference existing WebSocket tests in `tests/` for patterns.
 > **Verification:** All integration tests pass.
-
 - **Priority:** P0
 - **Scope:** Testing
 - **Status:** 🔴 TODO
-
 - [ ] **Step 1:** Create `tests/sse_connection.rs` integration test file.
 - [ ] **Step 2:** Implement mock SSE server helper that serves `text/event-stream` responses with configurable events.
 - [ ] **Step 3:** Test: basic connection and event reception (TC-01).
@@ -227,11 +208,9 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 
 > **Context:** Add unit tests for types, config, error variants, and protocol handlers. Tests should be in-module (`#[cfg(test)] mod tests`).
 > **Verification:** All unit tests pass with full feature set.
-
 - **Priority:** P1
 - **Scope:** Unit testing
 - **Status:** 🔴 TODO
-
 - [ ] **Step 1:** Unit tests for `SseConfig` builder methods and defaults.
 - [ ] **Step 2:** Unit tests for `SseMessageKind` and `SseEvent` construction.
 - [ ] **Step 3:** Unit tests for SSE error variants (display, construction).
@@ -244,11 +223,9 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 
 > **Context:** Add an example demonstrating SSE transport usage, similar to `examples/ws_subscription.rs`. Reference existing examples for patterns.
 > **Verification:** Example compiles with `cargo build --example sse_stream -p hpx-transport --features sse`.
-
 - **Priority:** P2
 - **Scope:** Documentation / Examples
 - **Status:** 🔴 TODO
-
 - [ ] **Step 1:** Create `crates/hpx-transport/examples/sse_stream.rs` demonstrating basic SSE connection and event consumption.
 - [ ] **Step 2:** Add `[[example]]` entry to `crates/hpx-transport/Cargo.toml` with `required-features = ["sse"]`.
 - [ ] **Verification:** `cargo build --example sse_stream -p hpx-transport --features sse` compiles.
@@ -259,11 +236,9 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 
 > **Context:** Add comprehensive module-level docs for the SSE module and ensure all public types are properly re-exported from `hpx_transport::sse`. Update `lib.rs` doc comments to mention SSE. Reference `websocket/mod.rs` doc style.
 > **Verification:** `RUSTDOCFLAGS="-D warnings" cargo doc -p hpx-transport --features sse --no-deps` succeeds.
-
 - **Priority:** P2
 - **Scope:** Documentation
 - **Status:** 🔴 TODO
-
 - [ ] **Step 1:** Write module-level docs in `sse/mod.rs` with architecture diagram, quick start example, and module index.
 - [ ] **Step 2:** Ensure all public types have doc comments.
 - [ ] **Step 3:** Add SSE to `lib.rs` top-level doc comments and re-export list.
@@ -276,11 +251,9 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 
 > **Context:** Ensure all code passes the project's strict lint and formatting requirements. Reference `AGENTS.md` for exact commands.
 > **Verification:** Full CI chain passes.
-
 - **Priority:** P0
 - **Scope:** Quality assurance
 - **Status:** 🔴 TODO
-
 - [ ] **Step 1:** Run `cargo +nightly fmt --all`.
 - [ ] **Step 2:** Run `cargo +nightly clippy --all -- -D warnings` and fix any warnings.
 - [ ] **Step 3:** Run `cargo nextest run --workspace --all-features` and verify all tests pass.

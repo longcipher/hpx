@@ -195,9 +195,11 @@
 //!
 //! ## Proxies
 //!
-//! **NOTE**: System proxies are enabled by default.
+//! **NOTE**: System proxies are **disabled** by default. Call
+//! [`ClientBuilder::system_proxy()`] to opt in to automatic detection.
 //!
-//! System proxies look in environment variables to set HTTP or HTTPS proxies.
+//! When enabled, system proxies look in environment variables to set HTTP or
+//! HTTPS proxies.
 //!
 //! `HTTP_PROXY` or `http_proxy` provide HTTP proxies for HTTP connections while
 //! `HTTPS_PROXY` or `https_proxy` provide HTTPS proxies for HTTPS connections.

@@ -295,7 +295,7 @@ impl Client {
                 tcp_recv_buffer_size: None,
                 tcp_happy_eyeballs_timeout: Some(Duration::from_millis(300)),
                 proxies: Vec::new(),
-                auto_sys_proxy: true,
+                auto_sys_proxy: false,
                 retry_policy: retry::Policy::default(),
                 redirect_policy: redirect::Policy::none(),
                 referer: true,
@@ -990,6 +990,23 @@ impl ClientBuilder {
     }
 
     // Proxy options
+
+    /// Enable automatic detection of system proxy settings from environment
+    /// variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`) and,
+    /// when the `system-proxy` feature is active, OS-level proxy configuration.
+    ///
+    /// System proxy detection is **disabled by default**. Call this method to
+    /// opt in.
+    ///
+    /// # Example
+    /// ```
+    /// let client = hpx::Client::builder().system_proxy().build().unwrap();
+    /// ```
+    #[inline]
+    pub fn system_proxy(mut self) -> ClientBuilder {
+        self.config.auto_sys_proxy = true;
+        self
+    }
 
     /// Add a `Proxy` to the list of proxies the `Client` will use.
     ///
