@@ -2,7 +2,7 @@
 //!
 //! This type provides a way to distinguish between:
 //! - No automatic header (`None`)
-//! - Default behavior (e.g., `hpx/2.3.1`)
+//! - Default behavior (e.g., `hpx/2.4.0`)
 //! - User-provided value
 //!
 //! This enables clean management of headers like `User-Agent`, `Accept`,
