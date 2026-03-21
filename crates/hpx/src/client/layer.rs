@@ -1,5 +1,6 @@
 //! Middleware for the client.
 
+pub mod auto_header;
 pub mod config;
 #[cfg(feature = "cookies")]
 pub mod cookie;

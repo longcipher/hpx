@@ -368,3 +368,109 @@ mod tests {
         assert_eq!(stream_body.size_hint().exact(), Some(0));
     }
 }
+
+// ===== AsSendBody trait =====
+
+/// A trait for types that can be converted into an HTTP request body
+/// with optional size information.
+///
+/// Implementations return `Some(len)` when the body size is known
+/// ahead of time (allowing `Content-Length` to be set), or `None` when
+/// the size is unknown (requiring `Transfer-Encoding: chunked`).
+pub trait AsSendBody {
+    /// Convert this value into a [`Body`].
+    fn into_send_body(self) -> Body;
+
+    /// Returns the content length if known ahead of time.
+    fn content_length(&self) -> Option<u64> {
+        None
+    }
+}
+
+impl AsSendBody for Body {
+    #[inline]
+    fn into_send_body(self) -> Body {
+        self
+    }
+
+    #[inline]
+    fn content_length(&self) -> Option<u64> {
+        self.size_hint().exact()
+    }
+}
+
+impl AsSendBody for Bytes {
+    #[inline]
+    fn into_send_body(self) -> Body {
+        Body::from(self)
+    }
+
+    #[inline]
+    fn content_length(&self) -> Option<u64> {
+        Some(self.len() as u64)
+    }
+}
+
+impl AsSendBody for Vec<u8> {
+    #[inline]
+    fn into_send_body(self) -> Body {
+        Body::from(self)
+    }
+
+    #[inline]
+    fn content_length(&self) -> Option<u64> {
+        Some(self.len() as u64)
+    }
+}
+
+impl AsSendBody for String {
+    #[inline]
+    fn into_send_body(self) -> Body {
+        Body::from(self)
+    }
+
+    #[inline]
+    fn content_length(&self) -> Option<u64> {
+        Some(self.len() as u64)
+    }
+}
+
+impl AsSendBody for &'static str {
+    #[inline]
+    fn into_send_body(self) -> Body {
+        Body::from(self)
+    }
+
+    #[inline]
+    fn content_length(&self) -> Option<u64> {
+        Some(self.len() as u64)
+    }
+}
+
+impl AsSendBody for &'static [u8] {
+    #[inline]
+    fn into_send_body(self) -> Body {
+        Body::from(self)
+    }
+
+    #[inline]
+    fn content_length(&self) -> Option<u64> {
+        Some(self.len() as u64)
+    }
+}
+
+impl AsSendBody for () {
+    #[inline]
+    fn into_send_body(self) -> Body {
+        Body::empty()
+    }
+
+    #[inline]
+    fn content_length(&self) -> Option<u64> {
+        Some(0)
+    }
+}
+
+// Note: &str and &[u8] impls are intentionally omitted to avoid
+// conflicting implementations with &'static str and &'static [u8].
+// Use .to_owned() or Body::from() directly for non-static references.

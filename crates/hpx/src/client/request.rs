@@ -367,6 +367,96 @@ impl RequestBuilder {
         self
     }
 
+    /// Sets the global (end-to-end) timeout for this request.
+    pub fn timeout_global(mut self, timeout: Option<Duration>) -> RequestBuilder {
+        if let Ok(ref mut req) = self.request {
+            req.config_mut::<TimeoutOptions>()
+                .get_or_insert_default()
+                .timeout_global(timeout);
+        }
+        self
+    }
+
+    /// Sets the per-call timeout for this request (resets on redirect).
+    pub fn timeout_per_call(mut self, timeout: Option<Duration>) -> RequestBuilder {
+        if let Ok(ref mut req) = self.request {
+            req.config_mut::<TimeoutOptions>()
+                .get_or_insert_default()
+                .timeout_per_call(timeout);
+        }
+        self
+    }
+
+    /// Sets the DNS resolution timeout for this request.
+    pub fn timeout_resolve(mut self, timeout: Option<Duration>) -> RequestBuilder {
+        if let Ok(ref mut req) = self.request {
+            req.config_mut::<TimeoutOptions>()
+                .get_or_insert_default()
+                .timeout_resolve(timeout);
+        }
+        self
+    }
+
+    /// Sets the connect (TCP + TLS handshake) timeout for this request.
+    pub fn timeout_connect(mut self, timeout: Option<Duration>) -> RequestBuilder {
+        if let Ok(ref mut req) = self.request {
+            req.config_mut::<TimeoutOptions>()
+                .get_or_insert_default()
+                .timeout_connect(timeout);
+        }
+        self
+    }
+
+    /// Sets the send-request-headers timeout for this request.
+    pub fn timeout_send_request(mut self, timeout: Option<Duration>) -> RequestBuilder {
+        if let Ok(ref mut req) = self.request {
+            req.config_mut::<TimeoutOptions>()
+                .get_or_insert_default()
+                .timeout_send_request(timeout);
+        }
+        self
+    }
+
+    /// Sets the 100-continue await timeout for this request.
+    pub fn timeout_await_100(mut self, timeout: Option<Duration>) -> RequestBuilder {
+        if let Ok(ref mut req) = self.request {
+            req.config_mut::<TimeoutOptions>()
+                .get_or_insert_default()
+                .timeout_await_100(timeout);
+        }
+        self
+    }
+
+    /// Sets the send-body timeout for this request.
+    pub fn timeout_send_body(mut self, timeout: Option<Duration>) -> RequestBuilder {
+        if let Ok(ref mut req) = self.request {
+            req.config_mut::<TimeoutOptions>()
+                .get_or_insert_default()
+                .timeout_send_body(timeout);
+        }
+        self
+    }
+
+    /// Sets the receive-response-headers timeout for this request.
+    pub fn timeout_recv_response(mut self, timeout: Option<Duration>) -> RequestBuilder {
+        if let Ok(ref mut req) = self.request {
+            req.config_mut::<TimeoutOptions>()
+                .get_or_insert_default()
+                .timeout_recv_response(timeout);
+        }
+        self
+    }
+
+    /// Sets the receive-body timeout for this request.
+    pub fn timeout_recv_body(mut self, timeout: Option<Duration>) -> RequestBuilder {
+        if let Ok(ref mut req) = self.request {
+            req.config_mut::<TimeoutOptions>()
+                .get_or_insert_default()
+                .timeout_recv_body(timeout);
+        }
+        self
+    }
+
     /// Set the request body.
     pub fn body<T: Into<Body>>(mut self, body: T) -> RequestBuilder {
         if let Ok(ref mut req) = self.request {

@@ -1,4 +1,5 @@
 mod options;
+pub mod typestate;
 
 use std::{
     sync::Arc,

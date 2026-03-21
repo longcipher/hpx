@@ -1090,6 +1090,96 @@ impl ClientBuilder {
     #[inline]
     pub fn connect_timeout(mut self, timeout: Duration) -> ClientBuilder {
         self.config.connect_timeout = Some(timeout);
+        self.config.timeout_options.timeout_connect(Some(timeout));
+        self
+    }
+
+    /// Timeout for the entire request lifecycle (end-to-end).
+    ///
+    /// This is the global timeout covering all phases: DNS resolution,
+    /// connection, request sending, and response body reading.
+    ///
+    /// Default is `None`.
+    #[inline]
+    pub fn timeout_global(mut self, timeout: Option<Duration>) -> ClientBuilder {
+        self.config.timeout_options.timeout_global(timeout);
+        self
+    }
+
+    /// Timeout for a single call attempt when following redirects.
+    ///
+    /// Resets after each redirect.
+    ///
+    /// Default is `None`.
+    #[inline]
+    pub fn timeout_per_call(mut self, timeout: Option<Duration>) -> ClientBuilder {
+        self.config.timeout_options.timeout_per_call(timeout);
+        self
+    }
+
+    /// Timeout for DNS resolution.
+    ///
+    /// Default is `None`.
+    #[inline]
+    pub fn timeout_resolve(mut self, timeout: Option<Duration>) -> ClientBuilder {
+        self.config.timeout_options.timeout_resolve(timeout);
+        self
+    }
+
+    /// Timeout for sending request headers (not the body).
+    ///
+    /// Default is `None`.
+    #[inline]
+    pub fn timeout_send_request(mut self, timeout: Option<Duration>) -> ClientBuilder {
+        self.config.timeout_options.timeout_send_request(timeout);
+        self
+    }
+
+    /// Timeout for awaiting a `100 Continue` response.
+    ///
+    /// Default is 1 second.
+    #[inline]
+    pub fn timeout_await_100(mut self, timeout: Option<Duration>) -> ClientBuilder {
+        self.config.timeout_options.timeout_await_100(timeout);
+        self
+    }
+
+    /// Timeout for sending the request body.
+    ///
+    /// Default is `None`.
+    #[inline]
+    pub fn timeout_send_body(mut self, timeout: Option<Duration>) -> ClientBuilder {
+        self.config.timeout_options.timeout_send_body(timeout);
+        self
+    }
+
+    /// Timeout for receiving response headers (not the body).
+    ///
+    /// Default is `None`.
+    #[inline]
+    pub fn timeout_recv_response(mut self, timeout: Option<Duration>) -> ClientBuilder {
+        self.config.timeout_options.timeout_recv_response(timeout);
+        self
+    }
+
+    /// Timeout for receiving the response body.
+    ///
+    /// Default is `None`.
+    #[inline]
+    pub fn timeout_recv_body(mut self, timeout: Option<Duration>) -> ClientBuilder {
+        self.config.timeout_options.timeout_recv_body(timeout);
+        self
+    }
+
+    /// Set the maximum size of HTTP response headers in bytes.
+    ///
+    /// This protects against servers sending unreasonably large response headers.
+    /// Default is 64KB (65536 bytes). Set to `None` to disable the limit.
+    #[inline]
+    pub fn max_response_header_size(mut self, size: Option<usize>) -> ClientBuilder {
+        self.config
+            .timeout_options
+            .set_max_response_header_size(size);
         self
     }
 

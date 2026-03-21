@@ -22,7 +22,7 @@ pub use self::core::http2;
 #[cfg(feature = "boring")]
 pub(crate) use self::http::ConnectIdentity;
 pub use self::{
-    body::Body,
+    body::{AsSendBody, Body},
     conn::HttpInfo,
     core::upgrade::Upgraded,
     emulation::{BrowserProfile, Emulation, EmulationBuilder, EmulationFactory},

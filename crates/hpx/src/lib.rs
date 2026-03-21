@@ -317,6 +317,14 @@ pub mod hooks {
 pub mod redirect;
 pub mod retry;
 pub mod tls;
+/// Typestate-pattern configuration builders with scoped contexts.
+pub mod typestate {
+    pub use crate::client::layer::config::typestate::*;
+}
+/// Automatic header value management.
+pub mod auto_header {
+    pub use crate::client::layer::auto_header::*;
+}
 
 pub use http::{Method, StatusCode, Uri, Version};
 #[cfg(unix)]
@@ -332,8 +340,8 @@ pub use self::client::multipart;
 pub use self::client::ws;
 pub use self::{
     client::{
-        Body, BrowserProfile, Client, ClientBuilder, Emulation, EmulationBuilder, EmulationFactory,
-        HttpInfo, Request, RequestBuilder, Response, Upgraded,
+        AsSendBody, Body, BrowserProfile, Client, ClientBuilder, Emulation, EmulationBuilder,
+        EmulationFactory, HttpInfo, Request, RequestBuilder, Response, Upgraded,
     },
     error::{Error, Result},
     ext::{ResponseBuilderExt, ResponseExt},
