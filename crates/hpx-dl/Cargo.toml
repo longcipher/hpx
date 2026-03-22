@@ -1,0 +1,96 @@
+[package]
+name = "hpx-dl"
+version.workspace = true
+description = "High-performance download engine built on hpx"
+keywords = ["download", "http", "metalink", "segmented", "async"]
+categories = ["network-programming", "asynchronous"]
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+include = [
+    "README.md",
+    "LICENSE",
+    "src/**/*.rs",
+    "examples/**/*.rs",
+    "tests/**/*.rs",
+    "features/**/*.feature",
+]
+
+[[bin]]
+name = "hpx-dl"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[features]
+cli = ["dep:clap", "dep:tracing-subscriber", "dep:eyre"]
+default = ["http"]
+http = ["dep:hpx"]
+metalink = []
+progress = []
+sqlite = ["dep:sqlx"]
+storage = []
+test = []
+
+[dependencies]
+async-trait = { workspace = true }
+digest = { workspace = true }
+fastrand = { workspace = true }
+futures-util = { workspace = true }
+hex = { workspace = true }
+hpx = { workspace = true, optional = true, features = ["stream"] }
+md-5 = { workspace = true }
+quick-xml = { workspace = true }
+scc = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha1 = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = [
+    "sync",
+    "rt",
+    "macros",
+    "fs",
+    "io-util",
+    "time",
+] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, optional = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+
+# Optional dependencies
+clap = { workspace = true, optional = true, features = ["derive"] }
+eyre = { workspace = true, optional = true }
+sqlx = { workspace = true, optional = true, features = [
+    "runtime-tokio",
+    "sqlite",
+] }
+
+[dev-dependencies]
+cucumber = { workspace = true }
+proptest = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = [
+    "sync",
+    "rt",
+    "rt-multi-thread",
+    "macros",
+    "fs",
+    "io-util",
+    "net",
+    "test-util",
+] }
+tracing-subscriber = { workspace = true }
+
+[[test]]
+name = "cucumber"
+harness = false
+
+[lints]
+workspace = true
