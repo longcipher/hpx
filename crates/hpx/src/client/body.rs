@@ -1,11 +1,12 @@
 use std::{
+    fmt,
     pin::Pin,
     task::{Context, Poll, ready},
 };
 
 use bytes::Bytes;
 use http_body::{Body as HttpBody, SizeHint};
-use http_body_util::{BodyExt, Either, combinators::BoxBody};
+use http_body_util::{BodyExt, Either, Full, combinators::BoxBody};
 use pin_project_lite::pin_project;
 #[cfg(feature = "stream")]
 use {tokio::fs::File, tokio_util::io::ReaderStream};
@@ -15,6 +16,9 @@ use crate::error::{BoxError, Error};
 /// An request body.
 #[derive(Debug)]
 pub struct Body(Either<Bytes, BoxBody<Bytes, BoxError>>);
+
+/// A stable, erased response body type for client middleware boundaries.
+pub struct ClientResponseBody(BoxBody<Bytes, BoxError>);
 
 pin_project! {
     /// We can't use `map_frame()` because that loses the hint data (for good reason).
@@ -212,6 +216,66 @@ impl Default for Body {
     }
 }
 
+impl ClientResponseBody {
+    /// Wrap any compatible HTTP body into the stable client response body type.
+    pub fn wrap<B>(inner: B) -> Self
+    where
+        B: HttpBody + Send + Sync + 'static,
+        B::Data: Into<Bytes>,
+        B::Error: Into<BoxError>,
+    {
+        Self(IntoBytesBody { inner }.map_err(Into::into).boxed())
+    }
+}
+
+impl fmt::Debug for ClientResponseBody {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ClientResponseBody(..)")
+    }
+}
+
+impl Default for ClientResponseBody {
+    fn default() -> Self {
+        Self::from(Bytes::new())
+    }
+}
+
+impl From<BoxBody<Bytes, BoxError>> for ClientResponseBody {
+    fn from(body: BoxBody<Bytes, BoxError>) -> Self {
+        Self(body)
+    }
+}
+
+impl From<Bytes> for ClientResponseBody {
+    fn from(bytes: Bytes) -> Self {
+        Self(Full::new(bytes).map_err(|never| match never {}).boxed())
+    }
+}
+
+impl From<Vec<u8>> for ClientResponseBody {
+    fn from(vec: Vec<u8>) -> Self {
+        Self::from(Bytes::from(vec))
+    }
+}
+
+impl From<String> for ClientResponseBody {
+    fn from(string: String) -> Self {
+        Self::from(Bytes::from(string))
+    }
+}
+
+impl From<&'static [u8]> for ClientResponseBody {
+    fn from(bytes: &'static [u8]) -> Self {
+        Self::from(Bytes::from_static(bytes))
+    }
+}
+
+impl From<&'static str> for ClientResponseBody {
+    fn from(string: &'static str) -> Self {
+        Self::from(string.as_bytes())
+    }
+}
+
 impl From<BoxBody<Bytes, BoxError>> for Body {
     #[inline]
     fn from(body: BoxBody<Bytes, BoxError>) -> Self {
@@ -304,6 +368,26 @@ impl HttpBody for Body {
             Either::Left(ref bytes) => bytes.is_empty(),
             Either::Right(ref body) => body.is_end_stream(),
         }
+    }
+}
+
+impl HttpBody for ClientResponseBody {
+    type Data = Bytes;
+    type Error = BoxError;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context,
+    ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+        Pin::new(&mut self.0).poll_frame(cx)
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.0.size_hint()
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.0.is_end_stream()
     }
 }
 

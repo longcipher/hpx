@@ -48,6 +48,17 @@ type Req = Request<Body>;
 
 type Res = Response<Incoming>;
 
+pub(crate) fn clone_http_request(req: &Req) -> Option<Req> {
+    let body = req.body().try_clone()?;
+    let mut new = http::Request::new(body);
+    *new.method_mut() = req.method().clone();
+    *new.uri_mut() = req.uri().clone();
+    *new.version_mut() = req.version();
+    *new.headers_mut() = req.headers().clone();
+    *new.extensions_mut() = req.extensions().clone();
+    Some(new)
+}
+
 impl Policy<Req, Res, BoxError> for RetryPolicy {
     type Future = Ready<()>;
 
@@ -106,15 +117,7 @@ impl Policy<Req, Res, BoxError> for RetryPolicy {
             return None;
         }
 
-        let body = req.body().try_clone()?;
-        let mut new = http::Request::new(body);
-        *new.method_mut() = req.method().clone();
-        *new.uri_mut() = req.uri().clone();
-        *new.version_mut() = req.version();
-        *new.headers_mut() = req.headers().clone();
-        *new.extensions_mut() = req.extensions().clone();
-
-        Some(new)
+        clone_http_request(req)
     }
 }
 

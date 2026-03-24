@@ -3,13 +3,57 @@ mod support;
 use std::time::Duration;
 
 use futures_util::future::join_all;
-use hpx::Client;
+use hpx::{Body, Client, ClientResponseBody};
 use pretty_env_logger::env_logger;
 use support::{
     layer::{DelayLayer, SharedConcurrencyLimitLayer},
     server,
 };
-use tower::{layer::util::Identity, limit::ConcurrencyLimitLayer, timeout::TimeoutLayer};
+use tower::{Service, layer::util::Identity, limit::ConcurrencyLimitLayer, timeout::TimeoutLayer};
+
+#[derive(Clone)]
+struct ResponseBodyPassthroughLayer;
+
+impl<S> tower::Layer<S> for ResponseBodyPassthroughLayer {
+    type Service = ResponseBodyPassthrough<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        ResponseBodyPassthrough { inner }
+    }
+}
+
+#[derive(Clone)]
+struct ResponseBodyPassthrough<S> {
+    inner: S,
+}
+
+impl<S> Service<http::Request<Body>> for ResponseBodyPassthrough<S>
+where
+    S: Service<
+            http::Request<Body>,
+            Response = http::Response<ClientResponseBody>,
+            Error = tower::BoxError,
+        > + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = http::Response<ClientResponseBody>;
+    type Error = tower::BoxError;
+    type Future = futures_util::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: http::Request<Body>) -> Self::Future {
+        let mut inner = self.inner.clone();
+        Box::pin(async move { inner.call(req).await })
+    }
+}
 
 #[tokio::test]
 async fn non_op_layer() {
@@ -21,6 +65,25 @@ async fn non_op_layer() {
 
     let client = Client::builder()
         .layer(Identity::new())
+        .no_proxy()
+        .build()
+        .unwrap();
+
+    let res = client.get(url).send().await;
+
+    assert!(res.is_ok());
+}
+
+#[tokio::test]
+async fn layer_accepts_public_client_response_body() {
+    let _ = env_logger::try_init();
+
+    let server = server::http(move |_req| async { http::Response::default() });
+
+    let url = format!("http://{}", server.addr());
+
+    let client = Client::builder()
+        .layer(ResponseBodyPassthroughLayer)
         .no_proxy()
         .build()
         .unwrap();

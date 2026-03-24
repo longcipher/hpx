@@ -314,6 +314,10 @@ pub mod header;
 pub mod hooks {
     pub use crate::client::layer::hooks::*;
 }
+/// Response recovery hooks for buffered status-based retries.
+pub mod recovery {
+    pub use crate::client::layer::recovery::*;
+}
 pub mod redirect;
 pub mod retry;
 pub mod tls;
@@ -340,8 +344,8 @@ pub use self::client::multipart;
 pub use self::client::ws;
 pub use self::{
     client::{
-        AsSendBody, Body, BrowserProfile, Client, ClientBuilder, Emulation, EmulationBuilder,
-        EmulationFactory, HttpInfo, Request, RequestBuilder, Response, Upgraded,
+        AsSendBody, Body, BrowserProfile, Client, ClientBuilder, ClientResponseBody, Emulation,
+        EmulationBuilder, EmulationFactory, HttpInfo, Request, RequestBuilder, Response, Upgraded,
     },
     error::{Error, Result},
     ext::{ResponseBuilderExt, ResponseExt},

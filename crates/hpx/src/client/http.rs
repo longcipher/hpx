@@ -12,6 +12,7 @@ use std::{
     time::Duration,
 };
 
+use futures_util::FutureExt;
 use http::header::{HeaderMap, HeaderValue, USER_AGENT};
 use tower::{
     Layer, Service, ServiceBuilder, ServiceExt,
@@ -45,6 +46,7 @@ use super::{
     },
     layer::{
         config::{ConfigService, ConfigServiceLayer, TransportOptions},
+        recovery::{Recoveries, ResponseRecovery, ResponseRecoveryLayer},
         redirect::{FollowRedirect, FollowRedirectLayer},
         retry::RetryPolicy,
         timeout::{
@@ -105,7 +107,7 @@ type Decompression<T> = super::layer::decoder::Decompression<T>;
     feature = "brotli",
     feature = "deflate"
 ))]
-type ResponseBody = TimeoutBody<tower_http::decompression::DecompressionBody<Incoming>>;
+type InnerResponseBody = TimeoutBody<tower_http::decompression::DecompressionBody<Incoming>>;
 
 /// Response body type with timeout only (no compression features).
 #[cfg(not(any(
@@ -114,23 +116,25 @@ type ResponseBody = TimeoutBody<tower_http::decompression::DecompressionBody<Inc
     feature = "brotli",
     feature = "deflate"
 )))]
-type ResponseBody = TimeoutBody<Incoming>;
+type InnerResponseBody = TimeoutBody<Incoming>;
 
 /// The complete HTTP client service stack with all middleware layers.
 type ClientService = Timeout<
-    ResponseBodyTimeout<
-        ConfigService<
-            Decompression<
-                Retry<
-                    RetryPolicy,
-                    FollowRedirect<
-                        CookieService<
-                            MapErr<
-                                HttpClient<Connector, Body>,
-                                fn(client::error::Error) -> BoxError,
+    ResponseRecovery<
+        ResponseBodyTimeout<
+            ConfigService<
+                Decompression<
+                    Retry<
+                        RetryPolicy,
+                        FollowRedirect<
+                            CookieService<
+                                MapErr<
+                                    HttpClient<Connector, Body>,
+                                    fn(client::error::Error) -> BoxError,
+                                >,
                             >,
+                            FollowRedirectPolicy,
                         >,
-                        FollowRedirectPolicy,
                     >,
                 >,
             >,
@@ -140,13 +144,13 @@ type ClientService = Timeout<
 
 /// Type-erased client service for dynamic middleware composition.
 type BoxedClientService =
-    BoxCloneSyncService<http::Request<Body>, http::Response<ResponseBody>, BoxError>;
+    BoxCloneSyncService<http::Request<Body>, http::Response<super::ClientResponseBody>, BoxError>;
 
 /// Layer type for wrapping boxed client services with additional middleware.
 type BoxedClientLayer = BoxCloneSyncServiceLayer<
     BoxedClientService,
     http::Request<Body>,
-    http::Response<ResponseBody>,
+    http::Response<super::ClientResponseBody>,
     BoxError,
 >;
 
@@ -227,6 +231,7 @@ struct Config {
     http_version_pref: HttpVersionPref,
     https_only: bool,
     hooks: Option<super::layer::hooks::Hooks>,
+    recoveries: Recoveries,
     layers: Vec<BoxedClientLayer>,
     connector_layers: Vec<BoxedConnectorLayer>,
     keylog: Option<KeyLog>,
@@ -309,6 +314,7 @@ impl Client {
                 http_version_pref: HttpVersionPref::All,
                 https_only: false,
                 hooks: None,
+                recoveries: Recoveries::new(),
                 layers: Vec::new(),
                 connector_layers: Vec::new(),
                 keylog: None,
@@ -615,6 +621,7 @@ impl ClientBuilder {
                 .service(service);
 
             let service = ServiceBuilder::new()
+                .layer(ResponseRecoveryLayer::new(config.recoveries))
                 .layer(ResponseBodyTimeoutLayer::new(config.timeout_options))
                 .layer(ConfigServiceLayer::new(
                     config.https_only,
@@ -1700,6 +1707,13 @@ impl ClientBuilder {
         self
     }
 
+    /// Adds response recovery hooks to the client.
+    #[inline]
+    pub fn recoveries(mut self, recoveries: super::layer::recovery::Recoveries) -> ClientBuilder {
+        self.config.recoveries = recoveries;
+        self
+    }
+
     /// Adds a before-request hook using a closure.
     ///
     /// This is a convenience method for adding simple request hooks without
@@ -1795,6 +1809,35 @@ impl ClientBuilder {
         self
     }
 
+    /// Adds a status-based response recovery hook using a closure.
+    #[inline]
+    pub fn on_status<F, Fut>(mut self, status: http::StatusCode, hook: F) -> ClientBuilder
+    where
+        F: Fn(super::layer::recovery::StatusRecoveryContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Option<http::Request<Body>>, Error>> + Send + 'static,
+    {
+        struct ClosureHook<F>(F);
+
+        impl<F, Fut> super::layer::recovery::OnStatusHook for ClosureHook<F>
+        where
+            F: Fn(super::layer::recovery::StatusRecoveryContext) -> Fut + Send + Sync + 'static,
+            Fut: Future<Output = Result<Option<http::Request<Body>>, Error>> + Send + 'static,
+        {
+            fn on_status(
+                &self,
+                context: super::layer::recovery::StatusRecoveryContext,
+            ) -> futures_util::future::BoxFuture<'static, Result<Option<http::Request<Body>>, Error>>
+            {
+                (self.0)(context).boxed()
+            }
+        }
+
+        self.config
+            .recoveries
+            .push_hook(status, Arc::new(ClosureHook(hook)));
+        self
+    }
+
     // Tower middleware options
 
     /// Adds a new Tower [`Layer`](https://docs.rs/tower/latest/tower/trait.Layer.html) to the
@@ -1819,8 +1862,11 @@ impl ClientBuilder {
     pub fn layer<L>(mut self, layer: L) -> ClientBuilder
     where
         L: Layer<BoxedClientService> + Clone + Send + Sync + 'static,
-        L::Service: Service<http::Request<Body>, Response = http::Response<ResponseBody>, Error = BoxError>
-            + Clone
+        L::Service: Service<
+                http::Request<Body>,
+                Response = http::Response<super::ClientResponseBody>,
+                Error = BoxError,
+            > + Clone
             + Send
             + Sync
             + 'static,

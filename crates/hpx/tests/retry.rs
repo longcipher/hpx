@@ -5,7 +5,9 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use hpx::Client;
+use bytes::Bytes;
+use hpx::{Body, Client};
+use http_body_util::Full;
 use support::server;
 
 #[tokio::test]
@@ -48,6 +50,138 @@ async fn retries_apply_in_scope() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
+}
+
+#[tokio::test]
+async fn status_recovery_retries_payment_required_once() {
+    let _ = pretty_env_logger::try_init();
+
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let attempts_for_assert = attempts.clone();
+    let server = server::http(move |req| {
+        let attempts = attempts.clone();
+        async move {
+            let attempt = attempts.fetch_add(1, Ordering::Relaxed);
+
+            if attempt == 0 {
+                return http::Response::builder()
+                    .status(http::StatusCode::PAYMENT_REQUIRED)
+                    .body(Body::from("payment-required"))
+                    .unwrap();
+            }
+
+            let paid = req
+                .headers()
+                .get("x-payment")
+                .and_then(|value| value.to_str().ok());
+
+            if paid == Some("ok") {
+                http::Response::default()
+            } else {
+                http::Response::builder()
+                    .status(http::StatusCode::BAD_REQUEST)
+                    .body(Body::from("missing-payment"))
+                    .unwrap()
+            }
+        }
+    });
+
+    let client = Client::builder()
+        .on_status(http::StatusCode::PAYMENT_REQUIRED, |ctx| async move {
+            assert_eq!(ctx.status(), http::StatusCode::PAYMENT_REQUIRED);
+            assert_eq!(ctx.body().as_ref(), b"payment-required");
+
+            let mut request = ctx
+                .into_original_request()
+                .expect("request body should be replayable");
+            request.headers_mut().insert(
+                http::header::HeaderName::from_static("x-payment"),
+                http::HeaderValue::from_static("ok"),
+            );
+            Ok(Some(request))
+        })
+        .build()
+        .unwrap();
+
+    let url = format!("http://{}", server.addr());
+    let response = client.post(url).body("payload").send().await.unwrap();
+
+    assert_eq!(response.status(), http::StatusCode::OK);
+    assert_eq!(attempts_for_assert.load(Ordering::Relaxed), 2);
+}
+
+#[tokio::test]
+async fn status_recovery_skips_non_replayable_bodies() {
+    let _ = pretty_env_logger::try_init();
+
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let attempts_for_assert = attempts.clone();
+    let server = server::http(move |_req| {
+        let attempts = attempts.clone();
+        async move {
+            attempts.fetch_add(1, Ordering::Relaxed);
+            http::Response::builder()
+                .status(http::StatusCode::PAYMENT_REQUIRED)
+                .body(Body::from("payment-required"))
+                .unwrap()
+        }
+    });
+
+    let client = Client::builder()
+        .on_status(http::StatusCode::PAYMENT_REQUIRED, |ctx| async move {
+            assert!(ctx.into_original_request().is_none());
+            Ok(None)
+        })
+        .build()
+        .unwrap();
+
+    let url = format!("http://{}", server.addr());
+    let response = client
+        .post(url)
+        .body(Body::wrap(Full::new(Bytes::from_static(b"payload"))))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), http::StatusCode::PAYMENT_REQUIRED);
+    assert_eq!(response.text().await.unwrap(), "payment-required");
+    assert_eq!(attempts_for_assert.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
+async fn status_recovery_skips_oversized_bodies() {
+    let _ = pretty_env_logger::try_init();
+
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let attempts_for_assert = attempts.clone();
+    let oversized_body = "x".repeat(70_000);
+    let expected_len = oversized_body.len();
+
+    let server = server::http(move |_req| {
+        let attempts = attempts.clone();
+        let oversized_body = oversized_body.clone();
+        async move {
+            attempts.fetch_add(1, Ordering::Relaxed);
+            http::Response::builder()
+                .status(http::StatusCode::PAYMENT_REQUIRED)
+                .body(Body::from(oversized_body))
+                .unwrap()
+        }
+    });
+
+    let client = Client::builder()
+        .on_status(http::StatusCode::PAYMENT_REQUIRED, |_ctx| async move {
+            panic!("oversized bodies should bypass recovery buffering")
+        })
+        .build()
+        .unwrap();
+
+    let url = format!("http://{}", server.addr());
+    let response = client.get(url).send().await.unwrap();
+
+    assert_eq!(response.status(), http::StatusCode::PAYMENT_REQUIRED);
+    assert_eq!(response.text().await.unwrap().len(), expected_len);
+    assert_eq!(attempts_for_assert.load(Ordering::Relaxed), 1);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

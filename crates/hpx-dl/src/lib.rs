@@ -14,9 +14,6 @@ pub mod speed;
 pub mod storage;
 pub mod types;
 
-#[cfg(feature = "cli")]
-pub mod cli;
-
 pub use checksum::{compute_checksum, verify_checksum};
 pub use engine::{DownloadEngine, EngineBuilder, EngineConfig};
 pub use error::DownloadError;

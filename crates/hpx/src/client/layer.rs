@@ -12,6 +12,7 @@ pub mod cookie;
 ))]
 pub mod decoder;
 pub mod hooks;
+pub mod recovery;
 pub mod redirect;
 pub mod retry;
 pub mod timeout;

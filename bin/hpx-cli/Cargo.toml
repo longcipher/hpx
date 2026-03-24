@@ -1,0 +1,22 @@
+[package]
+name = "hpx-cli"
+version.workspace = true
+description = "CLI for hpx — high-performance HTTP client and download engine"
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "hpx"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true, features = ["derive"] }
+eyre = { workspace = true }
+hpx-dl = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+
+[lints]
+workspace = true

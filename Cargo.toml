@@ -1,9 +1,9 @@
 [workspace]
-members = ["crates/*"]
+members = ["crates/*", "bin/*"]
 resolver = "3"
 
 [workspace.package]
-version = "2.4.1"
+version = "2.4.2"
 edition = "2024"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license = "Apache-2.0"
@@ -185,9 +185,10 @@ all = "warn"
 
 [workspace.dependencies]
 # local crates
-fastwebsockets = { path = "crates/fastwebsockets", package = "hpx-fastwebsockets", version = "2.4.1" }
-hpx = { path = "crates/hpx", version = "2.4.1" }
-hpx-yawc = { path = "crates/yawc", version = "2.4.1" }
+fastwebsockets = { path = "crates/fastwebsockets", package = "hpx-fastwebsockets", version = "2.4.2" }
+hpx = { path = "crates/hpx", version = "2.4.2" }
+hpx-dl = { path = "crates/hpx-dl", version = "2.4.2" }
+hpx-yawc = { path = "crates/yawc", version = "2.4.2" }
 
 # external crates
 ahash = "0.8.12"
