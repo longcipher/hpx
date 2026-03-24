@@ -27,7 +27,7 @@ jobs:
           tool: just,cargo-hack,cargo-machete,taplo-cli,typos-cli,rumdl
 
       - name: Lint
-        run: just lint
+        run: just ci
 
       - name: Check features
         run: just check-feature

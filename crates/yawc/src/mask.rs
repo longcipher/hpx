@@ -109,6 +109,7 @@ pub fn apply_mask_fast64(buf: &mut [u8], mask: [u8; 4]) {
 #[doc(hidden)]
 #[target_feature(enable = "avx2")]
 #[inline]
+#[allow(dead_code)]
 unsafe fn apply_mask_avx2(buf: &mut [u8], mask: [u8; 4]) {
     #[cfg(target_arch = "x86")]
     use std::arch::x86::*;
@@ -123,8 +124,8 @@ unsafe fn apply_mask_avx2(buf: &mut [u8], mask: [u8; 4]) {
     // Create 256-bit mask by repeating the 4-byte mask
     let mask_u32 = u32::from_ne_bytes(mask);
     // SAFETY: AVX2 is guaranteed by target_feature on this function
-    let mask_128 = unsafe { _mm_set1_epi32(mask_u32 as i32) };
-    let mask_256 = unsafe { _mm256_broadcastd_epi32(mask_128) };
+    let mask_128 = _mm_set1_epi32(mask_u32 as i32);
+    let mask_256 = _mm256_broadcastd_epi32(mask_128);
 
     let mut ptr = buf.as_mut_ptr();
     // SAFETY: pointer arithmetic within the bounds of the buffer
