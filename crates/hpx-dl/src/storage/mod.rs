@@ -56,7 +56,7 @@ pub struct SegmentState {
     pub index: u32,
     /// Byte offset where this segment starts (inclusive).
     pub start: u64,
-    /// Byte offset where this segment ends (exclusive).
+    /// Byte offset where this segment ends (inclusive).
     pub end: u64,
     /// Current status of this segment.
     pub state: SegmentStatus,

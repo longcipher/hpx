@@ -27,8 +27,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [lints.rust]
-unused_unsafe = "allow"
-dead_code = "allow"
+# These were blanket allows; scoped below for targeted suppression only.
 
 # Optional feature configurations
 [features]

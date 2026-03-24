@@ -266,7 +266,9 @@ impl Client {
     /// instead of panicking.
     #[inline]
     pub fn new() -> Client {
-        Client::builder().build().expect("Client::new()")
+        Client::builder().build().expect(
+            "Client::new() failed to build — use Client::builder().build() for error handling",
+        )
     }
 
     /// Creates a [`ClientBuilder`] to configure a [`Client`].

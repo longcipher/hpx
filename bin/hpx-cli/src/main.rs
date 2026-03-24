@@ -89,8 +89,10 @@ fn main() -> eyre::Result<()> {
                 let destination = output.unwrap_or_else(|| {
                     url.split('/').next_back().unwrap_or("download").to_string()
                 });
-                let _priority = parse_priority(&priority).map_err(|e| eyre::eyre!("{e}"))?;
-                let request = hpx_dl::DownloadRequest::builder(&url, &destination).build();
+                let priority = parse_priority(&priority).map_err(|e| eyre::eyre!("{e}"))?;
+                let request = hpx_dl::DownloadRequest::builder(&url, &destination)
+                    .priority(priority)
+                    .build();
                 let id = engine.add(request)?;
                 println!("Added download {id}");
             }

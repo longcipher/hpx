@@ -10,6 +10,7 @@ edition.workspace = true
 [[bin]]
 name = "hpx"
 path = "src/main.rs"
+doc = false
 
 [dependencies]
 clap = { workspace = true, features = ["derive"] }

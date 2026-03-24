@@ -404,57 +404,7 @@ impl SegmentDownloader {
         file.set_len(total_size).await?;
         drop(file);
 
-        let mut join_set = tokio::task::JoinSet::new();
-
-        for segment in &self.segments {
-            let client = self.client.clone();
-            let url = self.url.clone();
-            let path = self.destination.clone();
-            let seg = segment.clone();
-            let progress_tx = progress_tx.clone();
-            let max_retries = self.max_retries;
-            let initial_delay = self.retry_initial_delay;
-            let max_delay = self.retry_max_delay;
-            let jitter = self.retry_jitter;
-
-            join_set.spawn(async move {
-                let result = with_retry(max_retries, initial_delay, max_delay, jitter, || {
-                    let client = client.clone();
-                    let url = url.clone();
-                    let seg = seg.clone();
-                    let path = path.clone();
-                    let progress_tx = progress_tx.clone();
-
-                    Box::pin(async move {
-                        let mut file = tokio::fs::OpenOptions::new()
-                            .write(true)
-                            .open(&path)
-                            .await?;
-                        download_segment(&client, &url, &seg, &mut file, progress_tx.as_ref()).await
-                    })
-                        as Pin<Box<dyn Future<Output = Result<(), DownloadError>> + Send>>
-                })
-                .await;
-
-                match result {
-                    Ok(()) => Ok(seg.len()),
-                    Err(err) => Err(DownloadError::SegmentRetryExhausted {
-                        start: seg.start,
-                        end: seg.end,
-                        attempts: max_retries + 1,
-                        source: Box::new(err),
-                    }),
-                }
-            });
-        }
-
-        let mut total_downloaded = 0u64;
-        while let Some(result) = join_set.join_next().await {
-            let bytes = result.map_err(|e| DownloadError::TaskJoin(e.to_string()))??;
-            total_downloaded += bytes;
-        }
-
-        Ok(total_downloaded)
+        self.download_inner(progress_tx).await
     }
 
     /// Download with resume support.
@@ -718,7 +668,14 @@ impl SegmentDownloader {
         if self.segments.is_empty() {
             return Err(DownloadError::NoSegments);
         }
+        self.download_inner(progress_tx).await
+    }
 
+    /// Shared download logic used by both `download()` and `download_from_existing()`.
+    async fn download_inner(
+        &self,
+        progress_tx: Option<tokio::sync::mpsc::Sender<u64>>,
+    ) -> Result<u64, DownloadError> {
         let mut join_set = tokio::task::JoinSet::new();
 
         for segment in &self.segments {

@@ -103,14 +103,25 @@ impl PriorityQueue {
     }
 
     /// Remove an entry by download ID.
+    ///
+    /// This is O(n) in the queue size. For typical download queues this is acceptable.
     pub fn remove(&mut self, id: DownloadId) -> Option<QueueEntry> {
         let entries: Vec<QueueEntry> = self.heap.drain().collect();
-        let (mut removed, remaining): (Vec<QueueEntry>, Vec<QueueEntry>) =
-            entries.into_iter().partition(|e| e.id == id);
-        for entry in remaining {
-            self.heap.push(entry);
+        let pos = entries.iter().position(|e| e.id == id);
+        if let Some(idx) = pos {
+            let mut entries = entries;
+            let removed = entries.swap_remove(idx);
+            for entry in entries {
+                self.heap.push(entry);
+            }
+            Some(removed)
+        } else {
+            // Restore all entries
+            for entry in entries {
+                self.heap.push(entry);
+            }
+            None
         }
-        removed.pop()
     }
 
     /// Number of entries in the queue.

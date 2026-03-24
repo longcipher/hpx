@@ -134,9 +134,12 @@ impl IncomingUpgrade {
             _ => (builder, None),
         };
 
-        let response = builder
-            .body(Empty::new())
-            .expect("bug: failed to build response");
+        let response = builder.body(Empty::new()).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("build response: {e}"),
+            )
+        })?;
 
         // max read buffer should be at least 2 times the payload read if not specified
         let max_read_buffer = options.max_read_buffer.unwrap_or(

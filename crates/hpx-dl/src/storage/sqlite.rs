@@ -8,6 +8,22 @@ use sqlx::{Row, SqlitePool, sqlite::SqlitePoolOptions};
 use super::{DownloadRecord, SegmentState, SegmentStatus, Storage};
 use crate::{DownloadError, DownloadId, DownloadPriority, DownloadState};
 
+/// Safely convert `u64` to `i64` for SQLite binding.
+///
+/// Download sizes exceeding `i64::MAX` (~9.2 EB) are practically impossible,
+/// so this returns an error rather than silently truncating.
+fn to_i64(value: u64) -> Result<i64, DownloadError> {
+    i64::try_from(value)
+        .map_err(|_| DownloadError::Storage(format!("value {value} exceeds i64 range for SQLite")))
+}
+
+/// Safely convert `i64` from SQLite to `u64`.
+fn to_u64(value: i64) -> u64 {
+    // SQLite stores non-negative values for byte offsets/counters.
+    // If negative, treat as 0 (defensive).
+    u64::try_from(value).unwrap_or(0)
+}
+
 /// SQLite-backed storage implementation.
 ///
 /// Uses WAL journal mode for concurrent read/write access.
@@ -187,8 +203,8 @@ impl Storage for SqliteStorage {
         .bind(priority_str(download.priority))
         .bind(&download.etag)
         .bind(&download.last_modified)
-        .bind(download.content_length.map(|v| v as i64))
-        .bind(download.bytes_downloaded as i64)
+        .bind(download.content_length.map(to_i64).transpose()?)
+        .bind(to_i64(download.bytes_downloaded)?)
         .bind(download.created_at)
         .bind(download.updated_at)
         .execute(&mut *tx)
@@ -204,10 +220,10 @@ impl Storage for SqliteStorage {
             )
             .bind(download.id.0.to_string())
             .bind(i64::from(segment.index))
-            .bind(segment.start as i64)
-            .bind(segment.end as i64)
+            .bind(to_i64(segment.start)?)
+            .bind(to_i64(segment.end)?)
             .bind(segment_status_str(segment.state))
-            .bind(segment.bytes_downloaded as i64)
+            .bind(to_i64(segment.bytes_downloaded)?)
             .execute(&mut *tx)
             .await
             .map_err(|e| DownloadError::Storage(e.to_string()))?;
@@ -249,10 +265,8 @@ impl Storage for SqliteStorage {
             priority: parse_priority(&priority_str)?,
             etag: row.get("etag"),
             last_modified: row.get("last_modified"),
-            content_length: row
-                .get::<Option<i64>, _>("content_length")
-                .map(|v| v as u64),
-            bytes_downloaded: row.get::<i64, _>("bytes_downloaded") as u64,
+            content_length: row.get::<Option<i64>, _>("content_length").map(to_u64),
+            bytes_downloaded: to_u64(row.get::<i64, _>("bytes_downloaded")),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
             segments,
@@ -332,7 +346,7 @@ impl Storage for SqliteStorage {
 
         // Update bytes_downloaded on the download
         sqlx::query("UPDATE downloads SET bytes_downloaded = ?, updated_at = ? WHERE id = ?")
-            .bind(bytes_downloaded as i64)
+            .bind(to_i64(bytes_downloaded)?)
             .bind(chrono_timestamp())
             .bind(id.0.to_string())
             .execute(&mut *tx)
@@ -355,10 +369,10 @@ impl Storage for SqliteStorage {
             )
             .bind(id.0.to_string())
             .bind(i64::from(segment.index))
-            .bind(segment.start as i64)
-            .bind(segment.end as i64)
+            .bind(to_i64(segment.start)?)
+            .bind(to_i64(segment.end)?)
             .bind(segment_status_str(segment.state))
-            .bind(segment.bytes_downloaded as i64)
+            .bind(to_i64(segment.bytes_downloaded)?)
             .execute(&mut *tx)
             .await
             .map_err(|e| DownloadError::Storage(e.to_string()))?;
@@ -389,10 +403,10 @@ impl SqliteStorage {
             let state_str: String = row.get("state");
             segments.push(SegmentState {
                 index: row.get::<i64, _>("idx") as u32,
-                start: row.get::<i64, _>("start") as u64,
-                end: row.get::<i64, _>("end") as u64,
+                start: to_u64(row.get::<i64, _>("start")),
+                end: to_u64(row.get::<i64, _>("end")),
                 state: parse_segment_status(&state_str)?,
-                bytes_downloaded: row.get::<i64, _>("bytes_downloaded") as u64,
+                bytes_downloaded: to_u64(row.get::<i64, _>("bytes_downloaded")),
             });
         }
 

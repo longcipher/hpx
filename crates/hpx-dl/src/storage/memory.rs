@@ -1,5 +1,7 @@
 //! In-memory storage backend for testing.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use scc::HashMap;
 
@@ -11,7 +13,7 @@ use crate::{DownloadError, DownloadId};
 /// Intended for unit tests and as a reference implementation.
 #[derive(Debug)]
 pub struct MemoryStorage {
-    records: HashMap<DownloadId, DownloadRecord>,
+    records: Arc<HashMap<DownloadId, DownloadRecord>>,
 }
 
 impl MemoryStorage {
@@ -19,7 +21,7 @@ impl MemoryStorage {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            records: HashMap::new(),
+            records: Arc::new(HashMap::new()),
         }
     }
 }
@@ -34,7 +36,11 @@ impl Default for MemoryStorage {
 impl Storage for MemoryStorage {
     async fn save(&self, download: &DownloadRecord) -> Result<(), DownloadError> {
         let id = download.id;
-        let result = self.records.insert_sync(id, download.clone());
+        let record = download.clone();
+        let records = Arc::clone(&self.records);
+        let result = tokio::task::spawn_blocking(move || records.insert_sync(id, record))
+            .await
+            .map_err(|e| DownloadError::Storage(e.to_string()))?;
         match result {
             Ok(()) => {
                 tracing::debug!(id = %id, "saved download record");
@@ -45,21 +51,32 @@ impl Storage for MemoryStorage {
     }
 
     async fn load(&self, id: DownloadId) -> Result<Option<DownloadRecord>, DownloadError> {
-        Ok(self.records.read_sync(&id, |_, record| record.clone()))
+        let records = Arc::clone(&self.records);
+        tokio::task::spawn_blocking(move || records.read_sync(&id, |_, record| record.clone()))
+            .await
+            .map_err(|e| DownloadError::Storage(e.to_string()))
     }
 
     async fn list(&self) -> Result<Vec<DownloadRecord>, DownloadError> {
-        let len = self.records.len();
-        let records = std::cell::RefCell::new(Vec::with_capacity(len));
-        self.records.iter_sync(|_, record| {
-            records.borrow_mut().push(record.clone());
-            true
-        });
-        Ok(records.into_inner())
+        let records = Arc::clone(&self.records);
+        tokio::task::spawn_blocking(move || {
+            let len = records.len();
+            let mut result = Vec::with_capacity(len);
+            records.iter_sync(|_, record| {
+                result.push(record.clone());
+                true
+            });
+            result
+        })
+        .await
+        .map_err(|e| DownloadError::Storage(e.to_string()))
     }
 
     async fn delete(&self, id: DownloadId) -> Result<(), DownloadError> {
-        let removed = self.records.remove_sync(&id);
+        let records = Arc::clone(&self.records);
+        let removed = tokio::task::spawn_blocking(move || records.remove_sync(&id))
+            .await
+            .map_err(|e| DownloadError::Storage(e.to_string()))?;
         if removed.is_some() {
             tracing::debug!(id = %id, "deleted download record");
         }
@@ -71,10 +88,16 @@ impl Storage for MemoryStorage {
         id: DownloadId,
         segments: &[SegmentState],
     ) -> Result<(), DownloadError> {
-        let updated = self.records.update_sync(&id, |_, record| {
-            record.segments = segments.to_vec();
-            record.bytes_downloaded = segments.iter().map(|s| s.bytes_downloaded).sum();
-        });
+        let segments = segments.to_vec();
+        let records = Arc::clone(&self.records);
+        let updated = tokio::task::spawn_blocking(move || {
+            records.update_sync(&id, |_, record| {
+                record.segments = segments;
+                record.bytes_downloaded = record.segments.iter().map(|s| s.bytes_downloaded).sum();
+            })
+        })
+        .await
+        .map_err(|e| DownloadError::Storage(e.to_string()))?;
         if updated.is_some() {
             tracing::debug!(id = %id, "updated progress");
             Ok(())

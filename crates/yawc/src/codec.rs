@@ -144,8 +144,19 @@ impl ReadState {
 
     #[inline(always)]
     fn opcode(&self) -> OpCode {
-        // SAFETY: We only store valid opcodes
-        unsafe { std::mem::transmute(self.flags & 0x0F) }
+        // The opcode bits are set from a valid OpCode in ReadState::new,
+        // which only stores values from OpCode's u8 representation.
+        match self.flags & 0x0F {
+            0x0 => OpCode::Continuation,
+            0x1 => OpCode::Text,
+            0x2 => OpCode::Binary,
+            0x8 => OpCode::Close,
+            0x9 => OpCode::Ping,
+            0xA => OpCode::Pong,
+            // This branch is unreachable because ReadState::new only stores
+            // valid OpCode values. If it is reached, it indicates a bug.
+            _ => unreachable!("invalid opcode bits in ReadState"),
+        }
     }
 
     #[inline(always)]

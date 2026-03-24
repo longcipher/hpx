@@ -280,7 +280,7 @@ impl Negotiation {
             config.client_max_window_bits
         );
 
-        let level = self.compression_level.unwrap();
+        let level = self.compression_level?;
 
         // configure the compressor using the assigned role and preferred flags.
         Some(if role == Role::Client {
@@ -757,12 +757,17 @@ impl WebSocket<MaybeTlsStream<TcpStream>> {
         options: Options,
         builder: HttpRequestBuilder,
     ) -> Result<TcpWebSocket> {
-        let host = url.host().expect("hostname").to_string();
+        let host = url
+            .host()
+            .ok_or_else(|| WebSocketError::InvalidHttpScheme)?
+            .to_string();
 
         let tcp_stream = if let Some(tcp_address) = tcp_address {
             TcpStream::connect(tcp_address).await?
         } else {
-            let port = url.port_or_known_default().expect("port");
+            let port = url
+                .port_or_known_default()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "URL has no port"))?;
             TcpStream::connect(format!("{host}:{port}")).await?
         };
 
@@ -897,13 +902,18 @@ where
     ) -> Result<WebSocket<S>> {
         if !builder
             .headers_ref()
-            .expect("header")
-            .contains_key(header::HOST)
+            .map(|h| h.contains_key(header::HOST))
+            .unwrap_or(false)
         {
-            let host = url.host().expect("hostname").to_string();
+            let host = url
+                .host()
+                .ok_or(WebSocketError::InvalidHttpScheme)?
+                .to_string();
 
             let is_port_defined = url.port().is_some();
-            let port = url.port_or_known_default().expect("port");
+            let port = url
+                .port_or_known_default()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "URL has no port"))?;
             let host_header = if is_port_defined {
                 format!("{host}:{port}")
             } else {
@@ -923,11 +933,17 @@ where
             .header(header::SEC_WEBSOCKET_KEY, generate_key())
             .header(header::SEC_WEBSOCKET_VERSION, "13")
             .body(Empty::<Bytes>::new())
-            .expect("request build");
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
 
         if let Some(compression) = options.compression.as_ref() {
             let extensions = WebSocketExtensions::from(compression);
-            let header_value = extensions.to_string().parse().unwrap();
+            let header_value =
+                extensions
+                    .to_string()
+                    .parse()
+                    .map_err(|e: header::InvalidHeaderValue| {
+                        io::Error::new(io::ErrorKind::InvalidInput, e.to_string())
+                    })?;
             req.headers_mut()
                 .insert(header::SEC_WEBSOCKET_EXTENSIONS, header_value);
         }
@@ -1008,13 +1024,24 @@ impl WebSocket<HttpStream> {
                 upgrade::sec_websocket_protocol(key.as_bytes()),
             )
             .body(Empty::new())
-            .expect("bug: failed to build response");
+            .map_err(|e| {
+                io::Error::new(io::ErrorKind::InvalidInput, format!("build response: {e}"))
+            })?;
 
         let extensions = if let Some(client_compression) = maybe_compression {
             if let Some(server_compression) = options.compression.as_ref() {
                 let offer = server_compression.merge(&client_compression);
 
-                let header_value = offer.to_string().parse().unwrap();
+                let header_value =
+                    offer
+                        .to_string()
+                        .parse()
+                        .map_err(|e: header::InvalidHeaderValue| {
+                            io::Error::new(
+                                io::ErrorKind::InvalidInput,
+                                format!("extension header: {e}"),
+                            )
+                        })?;
                 response
                     .headers_mut()
                     .insert(header::SEC_WEBSOCKET_EXTENSIONS, header_value);

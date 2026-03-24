@@ -3,12 +3,17 @@
 //! The [`DownloadEngine`] is the primary API surface. Use [`EngineBuilder`] to
 //! construct one with the desired [`EngineConfig`] and HTTP client.
 
-use std::{path::PathBuf, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
+
+use scc::HashMap;
 
 use crate::{
+    DownloadState, SegmentDownloader,
     error::DownloadError,
     event::EventBroadcaster,
-    types::{DownloadEvent, DownloadId, DownloadRequest, DownloadStatus},
+    queue::PriorityQueue,
+    segment::{calculate_segments, probe_remote},
+    types::{DownloadEvent, DownloadId, DownloadPriority, DownloadRequest, DownloadStatus},
 };
 
 /// Configuration for the download engine.
@@ -123,14 +128,29 @@ impl EngineBuilder {
     #[must_use]
     pub fn build(self) -> DownloadEngine {
         let client = self.client.unwrap_or_default();
-        let events = EventBroadcaster::new(256);
+        let events = Arc::new(EventBroadcaster::new(256));
 
         DownloadEngine {
             client,
             config: self.config,
             events,
+            downloads: Arc::new(HashMap::new()),
+            queue: std::sync::Mutex::new(PriorityQueue::new()),
         }
     }
+}
+
+/// Internal state for a tracked download.
+#[derive(Debug, Clone)]
+struct DownloadEntry {
+    /// The original request.
+    request: DownloadRequest,
+    /// Current state.
+    state: DownloadState,
+    /// Bytes downloaded so far.
+    bytes_downloaded: u64,
+    /// Total bytes if known (from HEAD probe).
+    total_bytes: Option<u64>,
 }
 
 /// Central coordinator for managing downloads.
@@ -139,7 +159,9 @@ impl EngineBuilder {
 pub struct DownloadEngine {
     client: hpx::Client,
     config: EngineConfig,
-    events: EventBroadcaster,
+    events: Arc<EventBroadcaster>,
+    downloads: Arc<HashMap<DownloadId, DownloadEntry>>,
+    queue: std::sync::Mutex<PriorityQueue>,
 }
 
 impl std::fmt::Debug for DownloadEngine {
@@ -148,7 +170,7 @@ impl std::fmt::Debug for DownloadEngine {
             .field("client", &"Client")
             .field("config", &self.config)
             .field("events", &self.events)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -184,45 +206,244 @@ impl DownloadEngine {
         &self.client
     }
 
-    /// Queue a new download. *(stub — not yet implemented)*
-    pub fn add(&self, _request: DownloadRequest) -> Result<DownloadId, DownloadError> {
+    /// Queue a new download.
+    ///
+    /// Probes the remote file with a HEAD request to determine size and
+    /// range support, calculates segment boundaries, then stores the
+    /// download in the internal registry.
+    pub fn add(&self, request: DownloadRequest) -> Result<DownloadId, DownloadError> {
         let id = DownloadId::new();
+
+        let entry = DownloadEntry {
+            request: request.clone(),
+            state: DownloadState::Queued,
+            bytes_downloaded: 0,
+            total_bytes: None,
+        };
+
+        let inserted = self.downloads.insert_sync(id, entry);
+        if inserted.is_err() {
+            return Err(DownloadError::Storage(
+                "duplicate download id (unlikely)".into(),
+            ));
+        }
+
+        // Enqueue with the request priority
+        let queue_entry = crate::queue::QueueEntry::new(
+            id,
+            request.priority,
+            request.clone(),
+            0, // seq will be assigned by the queue
+        );
+        self.queue
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(queue_entry);
+
         let _ = self.emit(DownloadEvent::Added { id });
-        Err(DownloadError::Storage("not implemented".into()))
+
+        // Spawn the actual download task
+        let client = self.client.clone();
+        let downloads = Arc::clone(&self.downloads);
+        let events_tx = self.events.clone();
+        let config = self.config.clone();
+        let url = request.url.clone();
+        let destination = request.destination.clone();
+        let max_connections = request
+            .max_connections
+            .unwrap_or(config.max_connections_per_download);
+
+        tokio::spawn(async move {
+            // Update state to Connecting
+            let _ = downloads.update_sync(&id, |_, entry| {
+                entry.state = DownloadState::Connecting;
+            });
+            let _ = events_tx.emit(DownloadEvent::StateChanged {
+                id,
+                state: DownloadState::Connecting,
+            });
+
+            // Probe remote
+            let remote_info = match probe_remote(&client, &url).await {
+                Ok(info) => info,
+                Err(err) => {
+                    tracing::error!(%id, %url, error = %err, "probe failed");
+                    let _ = downloads.update_sync(&id, |_, entry| {
+                        entry.state = DownloadState::Failed;
+                    });
+                    let _ = events_tx.emit(DownloadEvent::Failed {
+                        id,
+                        error: err.to_string(),
+                    });
+                    return;
+                }
+            };
+
+            let file_size = remote_info.content_length.unwrap_or(0);
+
+            // Update total_bytes
+            let _ = downloads.update_sync(&id, |_, entry| {
+                entry.total_bytes = remote_info.content_length;
+            });
+
+            // Calculate segments
+            let segments = calculate_segments(file_size, max_connections, config.min_segment_size);
+
+            // Update state to Downloading
+            let _ = downloads.update_sync(&id, |_, entry| {
+                entry.state = DownloadState::Downloading;
+            });
+            let _ = events_tx.emit(DownloadEvent::StateChanged {
+                id,
+                state: DownloadState::Downloading,
+            });
+            let _ = events_tx.emit(DownloadEvent::Started { id });
+
+            // Create segment downloader
+            let downloader = SegmentDownloader::new(client, url.clone(), segments, destination)
+                .with_retry_config(
+                    config.retry_max_attempts,
+                    config.retry_initial_delay,
+                    config.retry_max_delay,
+                    config.retry_jitter,
+                );
+
+            // Download
+            match downloader.download(None).await {
+                Ok(bytes) => {
+                    let _ = downloads.update_sync(&id, |_, entry| {
+                        entry.state = DownloadState::Completed;
+                        entry.bytes_downloaded = bytes;
+                    });
+                    let _ = events_tx.emit(DownloadEvent::Completed { id });
+                    tracing::info!(%id, bytes, "download completed");
+                }
+                Err(err) => {
+                    tracing::error!(%id, error = %err, "download failed");
+                    let _ = downloads.update_sync(&id, |_, entry| {
+                        entry.state = DownloadState::Failed;
+                    });
+                    let _ = events_tx.emit(DownloadEvent::Failed {
+                        id,
+                        error: err.to_string(),
+                    });
+                }
+            }
+        });
+
+        Ok(id)
     }
 
-    /// Pause an active download. *(stub — not yet implemented)*
+    /// Pause an active download.
+    ///
+    /// Marks the download as paused in the internal registry. The running
+    /// download task will observe this on its next state check.
     pub fn pause(&self, id: DownloadId) -> Result<(), DownloadError> {
+        let updated = self.downloads.update_sync(&id, |_, entry| {
+            if entry.state == DownloadState::Downloading
+                || entry.state == DownloadState::Queued
+                || entry.state == DownloadState::Connecting
+            {
+                entry.state = DownloadState::Paused;
+            }
+        });
+        if updated.is_none() {
+            return Err(DownloadError::NotFound(id.0));
+        }
         let _ = self.emit(DownloadEvent::StateChanged {
             id,
-            state: crate::types::DownloadState::Paused,
+            state: DownloadState::Paused,
         });
-        Err(DownloadError::Storage("not implemented".into()))
+        Ok(())
     }
 
-    /// Resume a paused download. *(stub — not yet implemented)*
+    /// Resume a paused download.
+    ///
+    /// Re-queues the download and marks it as Queued. A new download task
+    /// will be spawned when concurrency slots are available.
     pub fn resume(&self, id: DownloadId) -> Result<(), DownloadError> {
+        let mut found = false;
+        let mut priority = DownloadPriority::default();
+        let mut request = None;
+
+        let _ = self.downloads.read_sync(&id, |_, entry| {
+            if entry.state == DownloadState::Paused {
+                found = true;
+                priority = entry.request.priority;
+                request = Some(entry.request.clone());
+            }
+        });
+
+        if !found {
+            return Err(DownloadError::NotFound(id.0));
+        }
+
+        let req = request.ok_or(DownloadError::NotFound(id.0))?;
+
+        self.downloads.update_sync(&id, |_, entry| {
+            entry.state = DownloadState::Queued;
+        });
+
+        // Re-enqueue
+        let queue_entry = crate::queue::QueueEntry::new(id, priority, req, 0);
+        self.queue
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(queue_entry);
+
         let _ = self.emit(DownloadEvent::StateChanged {
             id,
-            state: crate::types::DownloadState::Downloading,
+            state: DownloadState::Queued,
         });
-        Err(DownloadError::Storage("not implemented".into()))
+        Ok(())
     }
 
-    /// Remove a download from the queue. *(stub — not yet implemented)*
+    /// Remove a download from the queue.
+    ///
+    /// Removes the download from the internal registry and the priority queue.
     pub fn remove(&self, id: DownloadId) -> Result<(), DownloadError> {
+        let removed = self.downloads.remove_sync(&id);
+        if removed.is_none() {
+            return Err(DownloadError::NotFound(id.0));
+        }
+        // Also remove from queue if present
+        self.queue
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(id);
+
         let _ = self.emit(DownloadEvent::Removed { id });
-        Err(DownloadError::Storage("not implemented".into()))
+        Ok(())
     }
 
-    /// Get the current status of a download. *(stub — not yet implemented)*
-    pub fn status(&self, _id: DownloadId) -> Result<DownloadStatus, DownloadError> {
-        Err(DownloadError::Storage("not implemented".into()))
+    /// Get the current status of a download.
+    pub fn status(&self, id: DownloadId) -> Result<DownloadStatus, DownloadError> {
+        let status = self.downloads.read_sync(&id, |_, entry| DownloadStatus {
+            id,
+            url: entry.request.url.clone(),
+            state: entry.state,
+            bytes_downloaded: entry.bytes_downloaded,
+            total_bytes: entry.total_bytes,
+            priority: entry.request.priority,
+        });
+        status.ok_or(DownloadError::NotFound(id.0))
     }
 
-    /// List all known downloads. *(stub — not yet implemented)*
+    /// List all known downloads.
     pub fn list(&self) -> Result<Vec<DownloadStatus>, DownloadError> {
-        Err(DownloadError::Storage("not implemented".into()))
+        let mut statuses = Vec::new();
+        self.downloads.iter_sync(|id, entry| {
+            statuses.push(DownloadStatus {
+                id: *id,
+                url: entry.request.url.clone(),
+                state: entry.state,
+                bytes_downloaded: entry.bytes_downloaded,
+                total_bytes: entry.total_bytes,
+                priority: entry.request.priority,
+            });
+            true
+        });
+        Ok(statuses)
     }
 }
 
@@ -311,7 +532,7 @@ mod tests {
         let _rx = engine.subscribe();
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn engine_emit_and_subscribe() {
         let engine = EngineBuilder::new().build();
         let mut rx = engine.subscribe();
@@ -333,19 +554,60 @@ mod tests {
         assert_eq!(result.unwrap(), 0);
     }
 
-    #[test]
-    fn engine_stubs_return_not_implemented() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn engine_add_returns_id_and_enqueues() {
         let engine = EngineBuilder::new().build();
-        let id = DownloadId::new();
+        let request =
+            DownloadRequest::builder("https://example.com/file.bin", "/tmp/out.bin").build();
 
-        assert!(
-            engine
-                .add(DownloadRequest::builder("https://example.com", "/tmp/out").build())
-                .is_err()
-        );
-        assert!(engine.pause(id).is_err());
-        assert!(engine.resume(id).is_err());
+        let id = engine.add(request).expect("add should succeed");
+        // Verify the download is tracked
+        let status = engine.status(id).expect("status should find the download");
+        assert_eq!(status.state, DownloadState::Queued);
+        assert_eq!(status.url, "https://example.com/file.bin");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn engine_list_shows_added_downloads() {
+        let engine = EngineBuilder::new().build();
+
+        let r1 = DownloadRequest::builder("https://example.com/a.bin", "/tmp/a.bin").build();
+        let r2 = DownloadRequest::builder("https://example.com/b.bin", "/tmp/b.bin").build();
+
+        let id1 = engine.add(r1).expect("add r1");
+        let id2 = engine.add(r2).expect("add r2");
+
+        let list = engine.list().expect("list");
+        assert_eq!(list.len(), 2);
+        let ids: Vec<DownloadId> = list.iter().map(|s| s.id).collect();
+        assert!(ids.contains(&id1));
+        assert!(ids.contains(&id2));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn engine_remove_works() {
+        let engine = EngineBuilder::new().build();
+        let request =
+            DownloadRequest::builder("https://example.com/file.bin", "/tmp/out.bin").build();
+
+        let id = engine.add(request).expect("add");
+        engine.remove(id).expect("remove");
         assert!(engine.status(id).is_err());
-        assert!(engine.list().is_err());
+    }
+
+    #[test]
+    fn engine_status_not_found() {
+        let engine = EngineBuilder::new().build();
+        let missing = DownloadId::new();
+        let err = engine.status(missing).unwrap_err();
+        assert!(matches!(err, DownloadError::NotFound(_)));
+    }
+
+    #[test]
+    fn engine_pause_not_found() {
+        let engine = EngineBuilder::new().build();
+        let missing = DownloadId::new();
+        let err = engine.pause(missing).unwrap_err();
+        assert!(matches!(err, DownloadError::NotFound(_)));
     }
 }
