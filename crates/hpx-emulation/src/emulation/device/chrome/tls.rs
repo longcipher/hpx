@@ -1,4 +1,8 @@
 use super::*;
+use crate::fingerprint::{
+    CertCompression, CipherSuite as Cs, Curve, EchMode, SignatureAlgorithm as SigAlg,
+    TlsFingerprint as FpTls, TlsPreset,
+};
 
 macro_rules! tls_options {
     (@build $builder:expr) => {
@@ -40,6 +44,131 @@ macro_rules! tls_options {
             .curves($curves)
             .alps_use_new_codepoint(true))
     };
+}
+
+/// Standard Chrome cipher suites.
+const CHROME_CIPHER_SUITES: &[Cs] = &[
+    Cs::Tls13Aes128GcmSha256,
+    Cs::Tls13Aes256GcmSha384,
+    Cs::Tls13ChaCha20Poly1305Sha256,
+    Cs::EcdheEcdsaWithAes128GcmSha256,
+    Cs::EcdheRsaWithAes128GcmSha256,
+    Cs::EcdheEcdsaWithAes256GcmSha384,
+    Cs::EcdheRsaWithAes256GcmSha384,
+    Cs::EcdheEcdsaWithChaCha20Poly1305Sha256,
+    Cs::EcdheRsaWithChaCha20Poly1305Sha256,
+    Cs::EcdheRsaWithAes128CbcSha,
+    Cs::EcdheRsaWithAes256CbcSha,
+    Cs::RsaWithAes128GcmSha256,
+    Cs::RsaWithAes256GcmSha384,
+    Cs::RsaWithAes128CbcSha,
+    Cs::RsaWithAes256CbcSha,
+];
+
+/// Standard Chrome signature algorithms.
+const CHROME_SIGALGS: &[SigAlg] = &[
+    SigAlg::EcdsaSecp256r1Sha256,
+    SigAlg::RsaPssRsaeSha256,
+    SigAlg::RsaPkcs1Sha256,
+    SigAlg::EcdsaSecp384r1Sha384,
+    SigAlg::RsaPssRsaeSha384,
+    SigAlg::RsaPkcs1Sha384,
+    SigAlg::RsaPssRsaeSha512,
+    SigAlg::RsaPkcs1Sha512,
+];
+
+/// Builds a structured `FpTls` from a `TlsPreset`.
+pub fn tls_fingerprint_from_preset(preset: TlsPreset) -> FpTls {
+    match preset {
+        TlsPreset::ChromeBase => FpTls {
+            curves: vec![Curve::X25519, Curve::Secp256r1, Curve::Secp384r1],
+            cipher_suites: CHROME_CIPHER_SUITES.to_vec(),
+            signature_algorithms: CHROME_SIGALGS.to_vec(),
+            permute_extensions: false,
+            ech_mode: EchMode::Disabled,
+            pre_shared_key: false,
+            cert_compression: vec![CertCompression::Brotli],
+            alps_use_new_codepoint: false,
+        },
+        TlsPreset::ChromeEchGrease => FpTls {
+            ech_mode: EchMode::Grease,
+            ..tls_fingerprint_from_preset(TlsPreset::ChromeBase)
+        },
+        TlsPreset::ChromePermute => FpTls {
+            permute_extensions: true,
+            ..tls_fingerprint_from_preset(TlsPreset::ChromeBase)
+        },
+        TlsPreset::ChromePermuteEch => FpTls {
+            permute_extensions: true,
+            ech_mode: EchMode::Grease,
+            ..tls_fingerprint_from_preset(TlsPreset::ChromeBase)
+        },
+        TlsPreset::ChromePermuteEchPsk => FpTls {
+            permute_extensions: true,
+            ech_mode: EchMode::Grease,
+            pre_shared_key: true,
+            ..tls_fingerprint_from_preset(TlsPreset::ChromeBase)
+        },
+        TlsPreset::ChromeKyber => FpTls {
+            curves: vec![
+                Curve::X25519Kyber768Draft00,
+                Curve::X25519,
+                Curve::Secp256r1,
+                Curve::Secp384r1,
+            ],
+            permute_extensions: true,
+            ech_mode: EchMode::Grease,
+            pre_shared_key: true,
+            ..tls_fingerprint_from_preset(TlsPreset::ChromeBase)
+        },
+        TlsPreset::ChromeMlkem768 => FpTls {
+            curves: vec![
+                Curve::X25519MLKEM768,
+                Curve::X25519,
+                Curve::Secp256r1,
+                Curve::Secp384r1,
+            ],
+            permute_extensions: true,
+            ech_mode: EchMode::Grease,
+            pre_shared_key: true,
+            alps_use_new_codepoint: true,
+            ..tls_fingerprint_from_preset(TlsPreset::ChromeBase)
+        },
+        TlsPreset::FirefoxBase => FpTls {
+            curves: vec![Curve::X25519, Curve::Secp256r1, Curve::Secp384r1],
+            cipher_suites: CHROME_CIPHER_SUITES.to_vec(),
+            signature_algorithms: CHROME_SIGALGS.to_vec(),
+            permute_extensions: false,
+            ech_mode: EchMode::Disabled,
+            pre_shared_key: false,
+            cert_compression: vec![CertCompression::Brotli],
+            alps_use_new_codepoint: false,
+        },
+        TlsPreset::FirefoxEchGrease => FpTls {
+            ech_mode: EchMode::Grease,
+            ..tls_fingerprint_from_preset(TlsPreset::FirefoxBase)
+        },
+        TlsPreset::SafariBase => FpTls {
+            curves: vec![Curve::X25519, Curve::Secp256r1, Curve::Secp384r1],
+            cipher_suites: CHROME_CIPHER_SUITES.to_vec(),
+            signature_algorithms: CHROME_SIGALGS.to_vec(),
+            permute_extensions: false,
+            ech_mode: EchMode::Disabled,
+            pre_shared_key: false,
+            cert_compression: vec![CertCompression::Brotli],
+            alps_use_new_codepoint: false,
+        },
+        TlsPreset::OkHttpBase => FpTls {
+            curves: vec![Curve::X25519, Curve::Secp256r1, Curve::Secp384r1],
+            cipher_suites: CHROME_CIPHER_SUITES.to_vec(),
+            signature_algorithms: CHROME_SIGALGS.to_vec(),
+            permute_extensions: false,
+            ech_mode: EchMode::Disabled,
+            pre_shared_key: false,
+            cert_compression: vec![],
+            alps_use_new_codepoint: false,
+        },
+    }
 }
 
 pub const CURVES_1: &str = join!(":", "X25519", "P-256", "P-384");

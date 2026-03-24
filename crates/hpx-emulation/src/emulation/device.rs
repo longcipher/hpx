@@ -8,6 +8,7 @@ pub mod okhttp;
 pub mod opera;
 pub mod safari;
 
+pub use chrome::tls::tls_fingerprint_from_preset;
 #[cfg(feature = "emulation-compression")]
 pub use hpx::header::ACCEPT_ENCODING;
 pub use hpx::{

@@ -1,7 +1,7 @@
 #[macro_use]
 mod http2;
 #[macro_use]
-mod tls;
+pub mod tls;
 mod header;
 
 use header::*;

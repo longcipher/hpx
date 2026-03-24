@@ -1,4 +1,4 @@
-mod device;
+pub(crate) mod device;
 #[cfg(feature = "emulation-rand")]
 mod rand;
 
