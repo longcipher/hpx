@@ -177,6 +177,7 @@ pub struct ProxyConfig {
     pub kind: ProxyKind,
 }
 
+#[cfg(feature = "http")]
 impl TryFrom<ProxyConfig> for hpx::Proxy {
     type Error = hpx::Error;
 

@@ -4,6 +4,7 @@
 #[derive(Debug, thiserror::Error)]
 pub enum DownloadError {
     /// HTTP-level error from the underlying client.
+    #[cfg(feature = "http")]
     #[error("HTTP error: {0}")]
     Http(#[from] hpx::Error),
 

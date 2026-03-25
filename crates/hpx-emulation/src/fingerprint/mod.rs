@@ -35,6 +35,7 @@ pub use diff::{FingerprintDiff, diff_fingerprints};
 /// This is the bridge between the opaque `tls_options!(N)` macro system
 /// and the new structured fingerprint types. Each preset maps to a
 /// specific combination of TLS features (curves, ECH, permutation, etc.).
+#[cfg(feature = "emulation")]
 pub fn tls_fingerprint_from_preset(preset: TlsPreset) -> TlsFingerprint {
     // Delegate to the emulation layer's implementation
     crate::emulation::device::tls_fingerprint_from_preset(preset)
