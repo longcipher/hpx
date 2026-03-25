@@ -119,7 +119,7 @@ type InnerResponseBody = TimeoutBody<tower_http::decompression::DecompressionBod
 type InnerResponseBody = TimeoutBody<Incoming>;
 
 /// The complete HTTP client service stack with all middleware layers.
-type ClientService = Timeout<
+pub type ClientService = Timeout<
     ResponseRecovery<
         ResponseBodyTimeout<
             ConfigService<
@@ -143,7 +143,7 @@ type ClientService = Timeout<
 >;
 
 /// Type-erased client service for dynamic middleware composition.
-type BoxedClientService =
+pub type BoxedClientService =
     BoxCloneSyncService<http::Request<Body>, http::Response<super::ClientResponseBody>, BoxError>;
 
 /// Layer type for wrapping boxed client services with additional middleware.
@@ -155,7 +155,7 @@ type BoxedClientLayer = BoxCloneSyncServiceLayer<
 >;
 
 /// Client reference type that can be either the generic service or a boxed service.
-type ClientRef = Either<ClientService, BoxedClientService>;
+pub type ClientRef = Either<ClientService, BoxedClientService>;
 
 /// An [`Client`] to make Requests with.
 ///
@@ -449,6 +449,16 @@ impl Client {
         let uri = req.uri().clone();
         let fut = Oneshot::new(self.inner.as_ref().clone(), req);
         Pending::request(uri, fut)
+    }
+
+    /// Consume the client and return the inner tower::Service.
+    pub(crate) fn into_inner(self) -> ClientRef {
+        Arc::unwrap_or_clone(self.inner)
+    }
+
+    /// Get a clone of the inner tower::Service.
+    pub(crate) fn clone_inner(&self) -> ClientRef {
+        self.inner.as_ref().clone()
     }
 }
 

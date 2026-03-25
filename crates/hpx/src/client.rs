@@ -6,6 +6,7 @@ mod emulation;
 mod http;
 mod request;
 mod response;
+pub mod tower_compat;
 
 pub mod layer;
 #[cfg(feature = "multipart")]

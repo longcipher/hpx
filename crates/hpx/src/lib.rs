@@ -353,6 +353,12 @@ pub use self::{
     proxy::{NoProxy, Proxy},
     proxy_pool::{ProxyPool, ProxyPoolBuilder, ProxyPoolStrategy},
 };
+pub mod tower_compat {
+    //! Tower-native compatibility for composing hpx with the broader tower ecosystem.
+    //!
+    //! See [`TowerServiceExt`] and [`HpxRequestExt`] for details.
+    pub use crate::client::tower_compat::{HpxAdapter, HpxRequestExt, HpxService, TowerServiceExt};
+}
 
 fn _assert_impls() {
     fn assert_send<T: Send>() {}

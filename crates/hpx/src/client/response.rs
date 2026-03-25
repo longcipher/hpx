@@ -45,6 +45,21 @@ impl Response {
         }
     }
 
+    /// Construct a [`Response`] from a standard `http::Response` and the final request URI.
+    ///
+    /// This is the reverse bridge for the tower-native integration: when using
+    /// [`TowerServiceExt::into_tower_service()`](crate::tower_compat::TowerServiceExt), the
+    /// returned service yields `http::Response<ClientResponseBody>`. Use this method to
+    /// convert it back to `hpx::Response` for the convenience API.
+    pub fn from_http<B>(uri: Uri, res: http::Response<B>) -> Response
+    where
+        B: HttpBody + Send + Sync + 'static,
+        B::Data: Into<Bytes>,
+        B::Error: Into<BoxError>,
+    {
+        Response::new(res, uri)
+    }
+
     /// Get the final [`Uri`] of this [`Response`].
     #[inline]
     pub fn uri(&self) -> &Uri {
