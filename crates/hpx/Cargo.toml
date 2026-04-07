@@ -102,7 +102,7 @@ rustls-tls = [
 ]
 
 # Enable HTTP/1 support.
-http1 = ["dep:httparse", "dep:smallvec"]
+http1 = ["dep:httparse", "dep:smallvec", "tracing", "stream"]
 
 # Enable HTTP/2 support.
 http2 = ["dep:http2"]
