@@ -15,10 +15,10 @@ An ergonomic all-in-one HTTP client for browser emulation with TLS, JA3/JA4, and
 
 | Crate | Version | Description |
 |-------|---------|-------------|
-| [`hpx`](https://crates.io/crates/hpx) | 2.4.5 | High Performance HTTP Client |
-| [`hpx-emulation`](https://crates.io/crates/hpx-emulation) | 2.4.5 | Browser emulation profiles |
-| [`hpx-yawc`](https://crates.io/crates/hpx-yawc) | 2.4.5 | WebSocket library (RFC 6455 + compression) |
-| [`hpx-fastwebsockets`](https://crates.io/crates/hpx-fastwebsockets) | 2.4.5 | Fast minimal WebSocket implementation |
+| [`hpx`](https://crates.io/crates/hpx) | 2.4.6 | High Performance HTTP Client |
+| [`hpx-emulation`](https://crates.io/crates/hpx-emulation) | 2.4.6 | Browser emulation profiles |
+| [`hpx-yawc`](https://crates.io/crates/hpx-yawc) | 2.4.6 | WebSocket library (RFC 6455 + compression) |
+| [`hpx-fastwebsockets`](https://crates.io/crates/hpx-fastwebsockets) | 2.4.6 | Fast minimal WebSocket implementation |
 
 ## Features
 
@@ -64,7 +64,7 @@ Add `hpx` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hpx = "2.4.5"
+hpx = "2.4.6"
 ```
 
 The default features include **BoringSSL** TLS, **HTTP/1.1**, and **HTTP/2** support.
@@ -73,8 +73,8 @@ For browser emulation, add the utility crate:
 
 ```toml
 [dependencies]
-hpx = "2.4.5"
-hpx-emulation = "2.4.5"
+hpx = "2.4.6"
+hpx-emulation = "2.4.6"
 ```
 
 ## Feature Flags
@@ -125,7 +125,7 @@ The `ws` feature is an alias for `ws-yawc` (the default WebSocket backend). To u
 
 ```toml
 [dependencies]
-hpx = { version = "2.4.5", features = ["ws-fastwebsockets"] }
+hpx = { version = "2.4.6", features = ["ws-fastwebsockets"] }
 ```
 
 When both `ws-yawc` and `ws-fastwebsockets` are enabled, fastwebsockets takes priority.
@@ -135,37 +135,37 @@ When both `ws-yawc` and `ws-fastwebsockets` are enabled, fastwebsockets takes pr
 **Minimal HTTP client:**
 
 ```toml
-hpx = "2.4.5"  # default: boring + http1 + http2
+hpx = "2.4.6"  # default: boring + http1 + http2
 ```
 
 **JSON API client:**
 
 ```toml
-hpx = { version = "2.4.5", features = ["json", "cookies", "gzip"] }
+hpx = { version = "2.4.6", features = ["json", "cookies", "gzip"] }
 ```
 
 **WebSocket client:**
 
 ```toml
-hpx = { version = "2.4.5", features = ["ws"] }
+hpx = { version = "2.4.6", features = ["ws"] }
 ```
 
 **High-performance trading:**
 
 ```toml
-hpx = { version = "2.4.5", features = ["simd-json", "hickory-dns", "zstd", "ws"] }
+hpx = { version = "2.4.6", features = ["simd-json", "hickory-dns", "zstd", "ws"] }
 ```
 
 **Pure Rust (no C dependencies):**
 
 ```toml
-hpx = { version = "2.4.5", default-features = false, features = ["rustls-tls", "http1", "http2"] }
+hpx = { version = "2.4.6", default-features = false, features = ["rustls-tls", "http1", "http2"] }
 ```
 
 **Full-featured:**
 
 ```toml
-hpx = { version = "2.4.5", features = [
+hpx = { version = "2.4.6", features = [
     "json", "form", "query", "multipart", "stream",
     "cookies", "charset",
     "gzip", "brotli", "zstd", "deflate",
@@ -206,7 +206,7 @@ BoringSSL is the default TLS backend, providing robust support for modern TLS fe
 
 ```toml
 [dependencies]
-hpx = "2.4.5"
+hpx = "2.4.6"
 ```
 
 ### Rustls
@@ -217,7 +217,7 @@ A pure Rust TLS implementation. Useful for environments where C dependencies are
 
 ```toml
 [dependencies]
-hpx = { version = "2.4.5", default-features = false, features = ["rustls-tls", "http1", "http2"] }
+hpx = { version = "2.4.6", default-features = false, features = ["rustls-tls", "http1", "http2"] }
 ```
 
 ## Usage Examples
