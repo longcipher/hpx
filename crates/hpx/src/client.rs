@@ -27,7 +27,10 @@ pub use self::{
     conn::HttpInfo,
     core::upgrade::Upgraded,
     emulation::{BrowserProfile, Emulation, EmulationBuilder, EmulationFactory},
-    http::{Client, ClientBuilder},
+    http::{
+        Client, ClientBuilder, HttpVersionPreference, PoolConfigOptions, ProtocolConfigOptions,
+        ProxyConfigOptions, TlsConfigOptions, TransportConfigOptions,
+    },
     request::{Request, RequestBuilder},
     response::Response,
 };

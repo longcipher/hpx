@@ -20,12 +20,30 @@ use crate::client::core::{
     upgrade::OnUpgrade,
 };
 
+/// Default number of HTTP/1 dispatcher iterations processed in a single poll.
+pub(crate) const DEFAULT_MAX_POLL_ITERATIONS: usize = 16;
+
+/// Configuration for the HTTP/1 dispatcher poll loop.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct PollConfig {
+    pub(crate) max_iterations: usize,
+}
+
+impl Default for PollConfig {
+    fn default() -> Self {
+        Self {
+            max_iterations: DEFAULT_MAX_POLL_ITERATIONS,
+        }
+    }
+}
+
 pub(crate) struct Dispatcher<D, Bs: Body, I, T> {
     conn: Conn<I, Bs::Data, T>,
     dispatch: D,
     body_tx: Option<body::Sender>,
     body_rx: Pin<Box<Option<Bs>>>,
     is_closing: bool,
+    poll_config: PollConfig,
 }
 
 pub(crate) trait Dispatch {
@@ -69,12 +87,21 @@ where
     Bs::Error: Into<BoxError>,
 {
     pub(crate) fn new(dispatch: D, conn: Conn<I, Bs::Data, T>) -> Self {
+        Self::new_with_config(dispatch, conn, PollConfig::default())
+    }
+
+    pub(crate) fn new_with_config(
+        dispatch: D,
+        conn: Conn<I, Bs::Data, T>,
+        poll_config: PollConfig,
+    ) -> Self {
         Dispatcher {
             conn,
             dispatch,
             body_tx: None,
             body_rx: Box::pin(None),
             is_closing: false,
+            poll_config,
         }
     }
 
@@ -129,9 +156,7 @@ where
         // Limit the looping on this connection, in case it is ready far too
         // often, so that other futures don't starve.
         //
-        // 16 was chosen arbitrarily, as that is number of pipelined requests
-        // benchmarks often use. Perhaps it should be a config option instead.
-        for _ in 0..16 {
+        for _ in 0..self.poll_config.max_iterations {
             let _ = self.poll_read(cx)?;
             let _ = self.poll_write(cx)?;
             let _ = self.poll_flush(cx)?;
@@ -147,6 +172,15 @@ where
             if !self.conn.wants_read_again() {
                 // break;
                 return Poll::Ready(Ok(()));
+            }
+
+            let mut consume_budget = std::pin::pin!(tokio::task::consume_budget());
+            if consume_budget.as_mut().poll(cx).is_pending() {
+                trace!(
+                    "poll_loop yielding due to cooperative budget (self = {:p})",
+                    self
+                );
+                return Poll::Pending;
             }
         }
 
@@ -680,5 +714,19 @@ mod tests {
         // Ensure conn.write_body wasn't called with the empty chunk.
         // If it is, it will trigger an assertion.
         assert!(dispatcher.poll().is_pending());
+    }
+
+    #[test]
+    fn dispatcher_uses_custom_poll_config() {
+        let io = tokio_test::io::Builder::new().build();
+        let (_tx, rx) = dispatch::channel();
+        let conn = Conn::<_, bytes::Bytes, ClientTransaction>::new(io);
+        let dispatcher = Dispatcher::new_with_config(
+            Client::<IncomingBody>::new(rx),
+            conn,
+            PollConfig { max_iterations: 7 },
+        );
+
+        assert_eq!(dispatcher.poll_config.max_iterations, 7);
     }
 }

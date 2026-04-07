@@ -314,9 +314,9 @@ impl Jar {
     pub fn get_all(&self) -> impl Iterator<Item = Cookie<'static>> {
         let store = self.store.load();
         store
-            .iter()
-            .flat_map(|(_, path_map)| {
-                path_map.iter().flat_map(|(_, name_map)| {
+            .values()
+            .flat_map(|path_map| {
+                path_map.values().flat_map(|name_map| {
                     name_map
                         .iter()
                         .map(|cookie| Cookie(cookie.clone().into_owned()))

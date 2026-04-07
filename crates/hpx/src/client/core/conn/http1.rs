@@ -295,7 +295,16 @@ impl Builder {
         }
 
         let cd = proto::h1::dispatch::Client::new(rx);
-        let proto = proto::h1::Dispatcher::new(cd, conn);
+        let proto = proto::h1::Dispatcher::new_with_config(
+            cd,
+            conn,
+            proto::h1::dispatch::PollConfig {
+                max_iterations: self
+                    .opts
+                    .h1_max_poll_iterations
+                    .unwrap_or(proto::h1::dispatch::DEFAULT_MAX_POLL_ITERATIONS),
+            },
+        );
 
         Ok((SendRequest { dispatch: tx }, Connection { inner: proto }))
     }

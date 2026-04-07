@@ -37,6 +37,9 @@ pub struct Http1Options {
 
     /// Whether to allow obsolete multiline headers in HTTP/1 responses.
     pub allow_obsolete_multiline_headers_in_responses: bool,
+
+    /// Maximum number of dispatcher loop iterations per scheduler poll.
+    pub h1_max_poll_iterations: Option<usize>,
 }
 
 impl Http1OptionsBuilder {
@@ -158,6 +161,20 @@ impl Http1OptionsBuilder {
     #[inline]
     pub fn allow_obsolete_multiline_headers_in_responses(mut self, value: bool) -> Self {
         self.opts.allow_obsolete_multiline_headers_in_responses = value;
+        self
+    }
+
+    /// Set the maximum number of dispatcher iterations per scheduler poll.
+    ///
+    /// The minimum value is 1.
+    #[inline]
+    pub fn max_poll_iterations(mut self, max_iterations: usize) -> Self {
+        assert!(
+            max_iterations > 0,
+            "max_poll_iterations must be greater than zero"
+        );
+
+        self.opts.h1_max_poll_iterations = Some(max_iterations);
         self
     }
 

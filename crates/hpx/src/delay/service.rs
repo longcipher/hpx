@@ -240,7 +240,7 @@ mod tests {
         assert!(matches!(futures_util::poll!(fut.as_mut()), Poll::Pending));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
 
-        let _ = fut.await.unwrap();
+        fut.await.unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(started.elapsed() >= Duration::from_millis(25));
     }

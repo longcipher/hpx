@@ -1,4 +1,5 @@
 pub mod client;
+mod config_groups;
 pub mod future;
 
 use std::{
@@ -25,6 +26,10 @@ use {super::layer::cookie::CookieServiceLayer, crate::cookie};
 #[cfg(feature = "boring")]
 pub(crate) use self::client::extra::ConnectIdentity;
 pub(crate) use self::client::{ConnectRequest, HttpClient, extra::ConnectExtra};
+pub use self::config_groups::{
+    HttpVersionPreference, PoolConfigOptions, ProtocolConfigOptions, ProxyConfigOptions,
+    TlsConfigOptions, TransportConfigOptions,
+};
 use self::future::Pending;
 #[cfg(any(
     feature = "gzip",
@@ -118,29 +123,29 @@ type InnerResponseBody = TimeoutBody<tower_http::decompression::DecompressionBod
 )))]
 type InnerResponseBody = TimeoutBody<Incoming>;
 
-/// The complete HTTP client service stack with all middleware layers.
-pub type ClientService = Timeout<
-    ResponseRecovery<
-        ResponseBodyTimeout<
-            ConfigService<
-                Decompression<
-                    Retry<
-                        RetryPolicy,
-                        FollowRedirect<
-                            CookieService<
-                                MapErr<
-                                    HttpClient<Connector, Body>,
-                                    fn(client::error::Error) -> BoxError,
-                                >,
-                            >,
-                            FollowRedirectPolicy,
-                        >,
+/// The complete HTTP client service stack before outer timeout decoration.
+type BaseClientService = ResponseBodyTimeout<
+    ConfigService<
+        Decompression<
+            Retry<
+                RetryPolicy,
+                FollowRedirect<
+                    CookieService<
+                        MapErr<HttpClient<Connector, Body>, fn(client::error::Error) -> BoxError>,
                     >,
+                    FollowRedirectPolicy,
                 >,
             >,
         >,
     >,
 >;
+
+/// The complete HTTP client service stack with all middleware layers.
+pub type ClientService = Timeout<ResponseRecovery<BaseClientService>>;
+
+/// Hooks-enabled client service path that remains statically dispatched.
+type HookedClientService =
+    Timeout<super::layer::hooks::HooksService<ResponseRecovery<BaseClientService>>>;
 
 /// Type-erased client service for dynamic middleware composition.
 pub type BoxedClientService =
@@ -154,8 +159,8 @@ type BoxedClientLayer = BoxCloneSyncServiceLayer<
     BoxError,
 >;
 
-/// Client reference type that can be either the generic service or a boxed service.
-pub type ClientRef = Either<ClientService, BoxedClientService>;
+/// Client reference type that can be either a typed service path or a boxed service.
+pub type ClientRef = Either<ClientService, Either<HookedClientService, BoxedClientService>>;
 
 /// An [`Client`] to make Requests with.
 ///
@@ -183,12 +188,168 @@ pub struct ClientBuilder {
 
 /// The HTTP version preference for the client.
 #[repr(u8)]
+#[derive(Clone, Debug)]
 enum HttpVersionPref {
     Http1,
     Http2,
     All,
 }
 
+/// Legacy flat Config structure - to be refactored into layered configs
+/// This maintains backward compatibility during the migration
+/// Transport layer configuration (TCP/TLS settings)
+#[derive(Clone)]
+struct TransportConfig {
+    tcp_nodelay: bool,
+    tcp_reuse_address: bool,
+    tcp_keepalive: Option<Duration>,
+    tcp_keepalive_interval: Option<Duration>,
+    tcp_keepalive_retries: Option<u32>,
+    #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+    tcp_user_timeout: Option<Duration>,
+    tcp_send_buffer_size: Option<usize>,
+    tcp_recv_buffer_size: Option<usize>,
+    tcp_happy_eyeballs_timeout: Option<Duration>,
+    tcp_connect_options: TcpConnectOptions,
+}
+
+/// Connection pool configuration
+#[derive(Clone)]
+struct PoolConfig {
+    idle_timeout: Option<Duration>,
+    max_idle_per_host: usize,
+    max_size: Option<NonZeroU32>,
+}
+
+/// TLS configuration
+#[derive(Clone)]
+struct TlsConfig {
+    keylog: Option<KeyLog>,
+    tls_info: bool,
+    tls_sni: bool,
+    verify_hostname: bool,
+    identity: Option<Identity>,
+    cert_store: CertStore,
+    cert_verification: bool,
+    min_version: Option<TlsVersion>,
+    max_version: Option<TlsVersion>,
+}
+
+/// HTTP protocol configuration
+#[derive(Clone)]
+struct ProtocolConfig {
+    http_version_pref: HttpVersionPref,
+    https_only: bool,
+    retry_policy: retry::Policy,
+    redirect_policy: redirect::Policy,
+    referer: bool,
+    timeout_options: TimeoutOptions,
+    recoveries: Recoveries,
+}
+
+/// Proxy configuration
+#[derive(Clone)]
+struct ProxyConfig {
+    proxies: Vec<ProxyMatcher>,
+    auto_sys_proxy: bool,
+}
+
+/// DNS configuration
+#[derive(Clone)]
+struct DnsConfig {
+    #[cfg(feature = "hickory-dns")]
+    hickory_dns: bool,
+    dns_overrides: HashMap<Cow<'static, str>, Vec<SocketAddr>>,
+    dns_resolver: Option<Arc<dyn Resolve>>,
+}
+
+/// Middleware and hooks configuration
+#[derive(Clone)]
+struct MiddlewareConfig {
+    layers: Vec<BoxedClientLayer>,
+    connector_layers: Vec<BoxedConnectorLayer>,
+    hooks: Option<super::layer::hooks::Hooks>,
+}
+
+impl From<HttpVersionPreference> for HttpVersionPref {
+    fn from(value: HttpVersionPreference) -> Self {
+        match value {
+            HttpVersionPreference::Http1 => Self::Http1,
+            HttpVersionPreference::Http2 => Self::Http2,
+            HttpVersionPreference::All => Self::All,
+        }
+    }
+}
+
+impl From<TransportConfigOptions> for TransportConfig {
+    fn from(value: TransportConfigOptions) -> Self {
+        Self {
+            tcp_nodelay: value.tcp_nodelay,
+            tcp_reuse_address: value.tcp_reuse_address,
+            tcp_keepalive: value.tcp_keepalive,
+            tcp_keepalive_interval: value.tcp_keepalive_interval,
+            tcp_keepalive_retries: value.tcp_keepalive_retries,
+            #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+            tcp_user_timeout: value.tcp_user_timeout,
+            tcp_send_buffer_size: value.tcp_send_buffer_size,
+            tcp_recv_buffer_size: value.tcp_recv_buffer_size,
+            tcp_happy_eyeballs_timeout: value.tcp_happy_eyeballs_timeout,
+            tcp_connect_options: value.tcp_connect_options,
+        }
+    }
+}
+
+impl From<PoolConfigOptions> for PoolConfig {
+    fn from(value: PoolConfigOptions) -> Self {
+        Self {
+            idle_timeout: value.idle_timeout,
+            max_idle_per_host: value.max_idle_per_host,
+            max_size: value.max_size,
+        }
+    }
+}
+
+impl From<TlsConfigOptions> for TlsConfig {
+    fn from(value: TlsConfigOptions) -> Self {
+        Self {
+            keylog: value.keylog,
+            tls_info: value.tls_info,
+            tls_sni: value.tls_sni,
+            verify_hostname: value.verify_hostname,
+            identity: value.identity,
+            cert_store: value.cert_store,
+            cert_verification: value.cert_verification,
+            min_version: value.min_version,
+            max_version: value.max_version,
+        }
+    }
+}
+
+impl From<ProtocolConfigOptions> for ProtocolConfig {
+    fn from(value: ProtocolConfigOptions) -> Self {
+        Self {
+            http_version_pref: value.http_version_preference.into(),
+            https_only: value.https_only,
+            retry_policy: value.retry_policy,
+            redirect_policy: value.redirect_policy,
+            referer: value.referer,
+            timeout_options: value.timeout_options,
+            recoveries: value.recoveries,
+        }
+    }
+}
+
+impl From<ProxyConfigOptions> for ProxyConfig {
+    fn from(value: ProxyConfigOptions) -> Self {
+        Self {
+            proxies: value.proxies.into_iter().map(Proxy::into_matcher).collect(),
+            auto_sys_proxy: value.auto_system_proxy,
+        }
+    }
+}
+
+/// Legacy flat Config structure - to be refactored into layered configs
+/// This maintains backward compatibility during the migration
 struct Config {
     error: Option<Error>,
     headers: HeaderMap,
@@ -202,47 +363,16 @@ struct Config {
     accept_encoding: AcceptEncoding,
     connect_timeout: Option<Duration>,
     connection_verbose: bool,
-    pool_idle_timeout: Option<Duration>,
-    pool_max_idle_per_host: usize,
-    pool_max_size: Option<NonZeroU32>,
-    tcp_nodelay: bool,
-    tcp_reuse_address: bool,
-    tcp_keepalive: Option<Duration>,
-    tcp_keepalive_interval: Option<Duration>,
-    tcp_keepalive_retries: Option<u32>,
-    #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
-    tcp_user_timeout: Option<Duration>,
-    tcp_send_buffer_size: Option<usize>,
-    tcp_recv_buffer_size: Option<usize>,
-    tcp_happy_eyeballs_timeout: Option<Duration>,
-    tcp_connect_options: TcpConnectOptions,
-    proxies: Vec<ProxyMatcher>,
-    auto_sys_proxy: bool,
-    retry_policy: retry::Policy,
-    redirect_policy: redirect::Policy,
-    referer: bool,
-    timeout_options: TimeoutOptions,
+    // Layered configurations - to be used in future refactoring
+    pool: PoolConfig,
+    transport: TransportConfig,
+    tls: TlsConfig,
+    protocol: ProtocolConfig,
+    proxy: ProxyConfig,
+    dns: DnsConfig,
+    middleware: MiddlewareConfig,
     #[cfg(feature = "cookies")]
     cookie_store: Option<Arc<dyn cookie::CookieStore>>,
-    #[cfg(feature = "hickory-dns")]
-    hickory_dns: bool,
-    dns_overrides: HashMap<Cow<'static, str>, Vec<SocketAddr>>,
-    dns_resolver: Option<Arc<dyn Resolve>>,
-    http_version_pref: HttpVersionPref,
-    https_only: bool,
-    hooks: Option<super::layer::hooks::Hooks>,
-    recoveries: Recoveries,
-    layers: Vec<BoxedClientLayer>,
-    connector_layers: Vec<BoxedConnectorLayer>,
-    keylog: Option<KeyLog>,
-    tls_info: bool,
-    tls_sni: bool,
-    verify_hostname: bool,
-    identity: Option<Identity>,
-    cert_store: CertStore,
-    cert_verification: bool,
-    min_tls_version: Option<TlsVersion>,
-    max_tls_version: Option<TlsVersion>,
     transport_options: TransportOptions,
 }
 
@@ -287,47 +417,61 @@ impl Client {
                 accept_encoding: AcceptEncoding::default(),
                 connect_timeout: None,
                 connection_verbose: false,
-                pool_idle_timeout: Some(Duration::from_secs(90)),
-                pool_max_idle_per_host: usize::MAX,
-                pool_max_size: None,
-                tcp_keepalive: Some(Duration::from_secs(15)),
-                tcp_keepalive_interval: Some(Duration::from_secs(15)),
-                tcp_keepalive_retries: Some(3),
-                #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
-                tcp_user_timeout: Some(Duration::from_secs(30)),
-                tcp_connect_options: TcpConnectOptions::default(),
-                tcp_nodelay: true,
-                tcp_reuse_address: false,
-                tcp_send_buffer_size: None,
-                tcp_recv_buffer_size: None,
-                tcp_happy_eyeballs_timeout: Some(Duration::from_millis(300)),
-                proxies: Vec::new(),
-                auto_sys_proxy: true,
-                retry_policy: retry::Policy::default(),
-                redirect_policy: redirect::Policy::none(),
-                referer: true,
-                timeout_options: TimeoutOptions::default(),
-                #[cfg(feature = "hickory-dns")]
-                hickory_dns: cfg!(feature = "hickory-dns"),
+                pool: PoolConfig {
+                    idle_timeout: Some(Duration::from_secs(90)),
+                    max_idle_per_host: usize::MAX,
+                    max_size: None,
+                },
+                transport: TransportConfig {
+                    tcp_nodelay: true,
+                    tcp_reuse_address: false,
+                    tcp_keepalive: Some(Duration::from_secs(15)),
+                    tcp_keepalive_interval: Some(Duration::from_secs(15)),
+                    tcp_keepalive_retries: Some(3),
+                    #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+                    tcp_user_timeout: Some(Duration::from_secs(30)),
+                    tcp_connect_options: TcpConnectOptions::default(),
+                    tcp_send_buffer_size: None,
+                    tcp_recv_buffer_size: None,
+                    tcp_happy_eyeballs_timeout: Some(Duration::from_millis(300)),
+                },
+                tls: TlsConfig {
+                    keylog: None,
+                    tls_info: false,
+                    tls_sni: true,
+                    verify_hostname: true,
+                    identity: None,
+                    cert_store: CertStore::default(),
+                    cert_verification: true,
+                    min_version: None,
+                    max_version: None,
+                },
+                protocol: ProtocolConfig {
+                    http_version_pref: HttpVersionPref::All,
+                    https_only: false,
+                    retry_policy: retry::Policy::default(),
+                    redirect_policy: redirect::Policy::none(),
+                    referer: true,
+                    timeout_options: TimeoutOptions::default(),
+                    recoveries: Recoveries::new(),
+                },
+                proxy: ProxyConfig {
+                    proxies: Vec::new(),
+                    auto_sys_proxy: true,
+                },
+                dns: DnsConfig {
+                    #[cfg(feature = "hickory-dns")]
+                    hickory_dns: cfg!(feature = "hickory-dns"),
+                    dns_overrides: HashMap::new(),
+                    dns_resolver: None,
+                },
+                middleware: MiddlewareConfig {
+                    layers: Vec::new(),
+                    connector_layers: Vec::new(),
+                    hooks: None,
+                },
                 #[cfg(feature = "cookies")]
                 cookie_store: None,
-                dns_overrides: HashMap::new(),
-                dns_resolver: None,
-                http_version_pref: HttpVersionPref::All,
-                https_only: false,
-                hooks: None,
-                recoveries: Recoveries::new(),
-                layers: Vec::new(),
-                connector_layers: Vec::new(),
-                keylog: None,
-                tls_info: false,
-                tls_sni: true,
-                verify_hostname: true,
-                identity: None,
-                cert_store: CertStore::default(),
-                cert_verification: true,
-                min_tls_version: None,
-                max_tls_version: None,
                 transport_options: TransportOptions::default(),
             },
         }
@@ -497,6 +641,53 @@ impl tower::Service<Request> for &'_ Client {
 // ===== impl ClientBuilder =====
 
 impl ClientBuilder {
+    /// Replace the transport-layer configuration as a reusable group.
+    #[inline]
+    pub fn transport_config(mut self, config: TransportConfigOptions) -> ClientBuilder {
+        let connect_timeout = config.connect_timeout;
+        let connection_verbose = config.connection_verbose;
+        self.config.transport = config.into();
+        self.config.connect_timeout = connect_timeout;
+        self.config.connection_verbose = connection_verbose;
+        self.config
+            .protocol
+            .timeout_options
+            .timeout_connect(connect_timeout);
+        self
+    }
+
+    /// Replace the connection-pool configuration as a reusable group.
+    #[inline]
+    pub fn pool_config(mut self, config: PoolConfigOptions) -> ClientBuilder {
+        self.config.pool = config.into();
+        self
+    }
+
+    /// Replace the TLS configuration as a reusable group.
+    #[inline]
+    pub fn tls_config(mut self, config: TlsConfigOptions) -> ClientBuilder {
+        self.config.tls = config.into();
+        self
+    }
+
+    /// Replace the protocol configuration as a reusable group.
+    #[inline]
+    pub fn protocol_config(mut self, config: ProtocolConfigOptions) -> ClientBuilder {
+        self.config.protocol = config.into();
+        self.config
+            .protocol
+            .timeout_options
+            .timeout_connect(self.config.connect_timeout);
+        self
+    }
+
+    /// Replace the proxy configuration as a reusable group.
+    #[inline]
+    pub fn proxy_config(mut self, config: ProxyConfigOptions) -> ClientBuilder {
+        self.config.proxy = config.into();
+        self
+    }
+
     /// Returns a [`Client`] that uses this [`ClientBuilder`] configuration.
     ///
     /// # Errors
@@ -511,8 +702,8 @@ impl ClientBuilder {
         }
 
         // Prepare proxies
-        if config.auto_sys_proxy {
-            config.proxies.push(ProxyMatcher::system());
+        if config.proxy.auto_sys_proxy {
+            config.proxy.proxies.push(ProxyMatcher::system());
         }
 
         // Create base client service
@@ -524,60 +715,60 @@ impl ClientBuilder {
             let http2_options = config.transport_options.http2_options;
 
             let resolver = {
-                let mut resolver: Arc<dyn Resolve> = match config.dns_resolver {
+                let mut resolver: Arc<dyn Resolve> = match config.dns.dns_resolver {
                     Some(dns_resolver) => dns_resolver,
                     #[cfg(feature = "hickory-dns")]
-                    None if config.hickory_dns => Arc::new(HickoryDnsResolver::new()),
+                    None if config.dns.hickory_dns => Arc::new(HickoryDnsResolver::new()),
                     None => Arc::new(GaiResolver::new()),
                 };
 
-                if !config.dns_overrides.is_empty() {
+                if !config.dns.dns_overrides.is_empty() {
                     resolver = Arc::new(DnsResolverWithOverrides::new(
                         resolver,
-                        config.dns_overrides,
+                        config.dns.dns_overrides,
                     ));
                 }
                 DynResolver::new(resolver)
             };
 
             // Build connector
-            let connector = Connector::builder(config.proxies, resolver)
+            let connector = Connector::builder(config.proxy.proxies, resolver)
                 .timeout(config.connect_timeout)
-                .tls_info(config.tls_info)
+                .tls_info(config.tls.tls_info)
                 .tls_options(tls_options)
                 .verbose(config.connection_verbose)
                 .with_tls(|tls| {
-                    let alpn_protocol = match config.http_version_pref {
+                    let alpn_protocol = match config.protocol.http_version_pref {
                         HttpVersionPref::Http1 => Some(AlpnProtocol::HTTP1),
                         HttpVersionPref::Http2 => Some(AlpnProtocol::HTTP2),
                         _ => None,
                     };
                     tls.alpn_protocol(alpn_protocol)
-                        .max_version(config.max_tls_version)
-                        .min_version(config.min_tls_version)
-                        .tls_sni(config.tls_sni)
-                        .verify_hostname(config.verify_hostname)
-                        .cert_verification(config.cert_verification)
-                        .cert_store(config.cert_store)
-                        .identity(config.identity)
-                        .keylog(config.keylog)
+                        .max_version(config.tls.max_version)
+                        .min_version(config.tls.min_version)
+                        .tls_sni(config.tls.tls_sni)
+                        .verify_hostname(config.tls.verify_hostname)
+                        .cert_verification(config.tls.cert_verification)
+                        .cert_store(config.tls.cert_store)
+                        .identity(config.tls.identity)
+                        .keylog(config.tls.keylog)
                 })
                 .with_http(|http| {
                     http.enforce_http(false);
-                    http.set_keepalive(config.tcp_keepalive);
-                    http.set_keepalive_interval(config.tcp_keepalive_interval);
-                    http.set_keepalive_retries(config.tcp_keepalive_retries);
-                    http.set_reuse_address(config.tcp_reuse_address);
-                    http.set_connect_options(config.tcp_connect_options);
+                    http.set_keepalive(config.transport.tcp_keepalive);
+                    http.set_keepalive_interval(config.transport.tcp_keepalive_interval);
+                    http.set_keepalive_retries(config.transport.tcp_keepalive_retries);
+                    http.set_reuse_address(config.transport.tcp_reuse_address);
+                    http.set_connect_options(config.transport.tcp_connect_options);
                     http.set_connect_timeout(config.connect_timeout);
-                    http.set_nodelay(config.tcp_nodelay);
-                    http.set_send_buffer_size(config.tcp_send_buffer_size);
-                    http.set_recv_buffer_size(config.tcp_recv_buffer_size);
-                    http.set_happy_eyeballs_timeout(config.tcp_happy_eyeballs_timeout);
+                    http.set_nodelay(config.transport.tcp_nodelay);
+                    http.set_send_buffer_size(config.transport.tcp_send_buffer_size);
+                    http.set_recv_buffer_size(config.transport.tcp_recv_buffer_size);
+                    http.set_happy_eyeballs_timeout(config.transport.tcp_happy_eyeballs_timeout);
                     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
-                    http.set_tcp_user_timeout(config.tcp_user_timeout);
+                    http.set_tcp_user_timeout(config.transport.tcp_user_timeout);
                 })
-                .build(config.connector_layers)?;
+                .build(config.middleware.connector_layers)?;
 
             // Build client
             #[allow(unused_mut)]
@@ -592,15 +783,18 @@ impl ClientBuilder {
             {
                 builder = builder
                     .http2_options(http2_options)
-                    .http2_only(matches!(config.http_version_pref, HttpVersionPref::Http2))
+                    .http2_only(matches!(
+                        config.protocol.http_version_pref,
+                        HttpVersionPref::Http2
+                    ))
                     .http2_timer(TokioTimer::new());
             }
 
             builder
                 .pool_timer(TokioTimer::new())
-                .pool_idle_timeout(config.pool_idle_timeout)
-                .pool_max_idle_per_host(config.pool_max_idle_per_host)
-                .pool_max_size(config.pool_max_size)
+                .pool_idle_timeout(config.pool.idle_timeout)
+                .pool_max_idle_per_host(config.pool.max_idle_per_host)
+                .pool_max_size(config.pool.max_size)
                 .build(connector)
                 .map_err(Into::into as _)
         };
@@ -613,11 +807,13 @@ impl ClientBuilder {
                 .service(service);
 
             let service = ServiceBuilder::new()
-                .layer(RetryLayer::new(RetryPolicy::new(config.retry_policy)))
+                .layer(RetryLayer::new(RetryPolicy::new(
+                    config.protocol.retry_policy,
+                )))
                 .layer({
-                    let policy = FollowRedirectPolicy::new(config.redirect_policy)
-                        .with_referer(config.referer)
-                        .with_https_only(config.https_only);
+                    let policy = FollowRedirectPolicy::new(config.protocol.redirect_policy)
+                        .with_referer(config.protocol.referer)
+                        .with_https_only(config.protocol.https_only);
                     FollowRedirectLayer::with_policy(policy)
                 })
                 .service(service);
@@ -633,30 +829,40 @@ impl ClientBuilder {
                 .service(service);
 
             let service = ServiceBuilder::new()
-                .layer(ResponseRecoveryLayer::new(config.recoveries))
-                .layer(ResponseBodyTimeoutLayer::new(config.timeout_options))
+                .layer(ResponseRecoveryLayer::new(config.protocol.recoveries))
+                .layer(ResponseBodyTimeoutLayer::new(
+                    config.protocol.timeout_options,
+                ))
                 .layer(ConfigServiceLayer::new(
-                    config.https_only,
+                    config.protocol.https_only,
                     config.headers,
                     config.orig_headers,
                 ))
                 .service(service);
 
-            // Add hooks layer if configured
-            let has_hooks = config.hooks.as_ref().is_some_and(|h| !h.is_empty());
+            if config.middleware.layers.is_empty() {
+                if let Some(hooks) = config.middleware.hooks
+                    && !hooks.is_empty()
+                {
+                    let service = ServiceBuilder::new()
+                        .layer(TimeoutLayer::new(config.protocol.timeout_options))
+                        .layer(super::layer::hooks::HooksLayer::new(hooks))
+                        .service(service);
 
-            if config.layers.is_empty() && !has_hooks {
-                let service = ServiceBuilder::new()
-                    .layer(TimeoutLayer::new(config.timeout_options))
-                    .service(service);
+                    ClientRef::Right(Either::Left(service))
+                } else {
+                    let service = ServiceBuilder::new()
+                        .layer(TimeoutLayer::new(config.protocol.timeout_options))
+                        .service(service);
 
-                ClientRef::Left(service)
+                    ClientRef::Left(service)
+                }
             } else {
                 // Start with boxed service
                 let mut service = BoxCloneSyncService::new(service);
 
                 // Add hooks layer if present
-                if let Some(hooks) = config.hooks
+                if let Some(hooks) = config.middleware.hooks
                     && !hooks.is_empty()
                 {
                     let hooks_layer = super::layer::hooks::HooksLayer::new(hooks);
@@ -666,16 +872,20 @@ impl ClientBuilder {
                 }
 
                 // Add custom layers
-                let service = config.layers.into_iter().fold(service, |service, layer| {
-                    ServiceBuilder::new().layer(layer).service(service)
-                });
+                let service = config
+                    .middleware
+                    .layers
+                    .into_iter()
+                    .fold(service, |service, layer| {
+                        ServiceBuilder::new().layer(layer).service(service)
+                    });
 
                 let service = ServiceBuilder::new()
-                    .layer(TimeoutLayer::new(config.timeout_options))
+                    .layer(TimeoutLayer::new(config.protocol.timeout_options))
                     .service(service)
                     .map_err(error::map_timeout_to_request_error);
 
-                ClientRef::Right(BoxCloneSyncService::new(service))
+                ClientRef::Right(Either::Right(BoxCloneSyncService::new(service)))
             }
         };
 
@@ -987,7 +1197,7 @@ impl ClientBuilder {
     /// Default will follow redirects up to a maximum of 10.
     #[inline]
     pub fn redirect(mut self, policy: redirect::Policy) -> ClientBuilder {
-        self.config.redirect_policy = policy;
+        self.config.protocol.redirect_policy = policy;
         self
     }
 
@@ -996,7 +1206,7 @@ impl ClientBuilder {
     /// Default is `true`.
     #[inline]
     pub fn referer(mut self, enable: bool) -> ClientBuilder {
-        self.config.referer = enable;
+        self.config.protocol.referer = enable;
         self
     }
 
@@ -1004,7 +1214,7 @@ impl ClientBuilder {
 
     /// Set a request retry policy.
     pub fn retry(mut self, policy: retry::Policy) -> ClientBuilder {
-        self.config.retry_policy = policy;
+        self.config.protocol.retry_policy = policy;
         self
     }
 
@@ -1023,7 +1233,7 @@ impl ClientBuilder {
     /// ```
     #[inline]
     pub fn system_proxy(mut self) -> ClientBuilder {
-        self.config.auto_sys_proxy = true;
+        self.config.proxy.auto_sys_proxy = true;
         self
     }
 
@@ -1042,8 +1252,8 @@ impl ClientBuilder {
     /// ```
     #[inline]
     pub fn proxy(mut self, proxy: Proxy) -> ClientBuilder {
-        self.config.proxies.push(proxy.into_matcher());
-        self.config.auto_sys_proxy = false;
+        self.config.proxy.proxies.push(proxy.into_matcher());
+        self.config.proxy.auto_sys_proxy = false;
         self
     }
 
@@ -1055,9 +1265,10 @@ impl ClientBuilder {
     #[inline]
     pub fn proxy_pool(mut self, pool: crate::proxy_pool::ProxyPool) -> ClientBuilder {
         self.config
+            .middleware
             .layers
             .push(BoxCloneSyncServiceLayer::new(pool.layer()));
-        self.config.auto_sys_proxy = false;
+        self.config.proxy.auto_sys_proxy = false;
         self
     }
 
@@ -1070,8 +1281,8 @@ impl ClientBuilder {
     /// This also disables the automatic usage of the "system" proxy.
     #[inline]
     pub fn no_proxy(mut self) -> ClientBuilder {
-        self.config.proxies.clear();
-        self.config.auto_sys_proxy = false;
+        self.config.proxy.proxies.clear();
+        self.config.proxy.auto_sys_proxy = false;
         self
     }
 
@@ -1085,7 +1296,7 @@ impl ClientBuilder {
     /// Default is no timeout.
     #[inline]
     pub fn timeout(mut self, timeout: Duration) -> ClientBuilder {
-        self.config.timeout_options.total_timeout(timeout);
+        self.config.protocol.timeout_options.total_timeout(timeout);
         self
     }
 
@@ -1094,7 +1305,7 @@ impl ClientBuilder {
     /// Default is `None`.
     #[inline]
     pub fn read_timeout(mut self, timeout: Duration) -> ClientBuilder {
-        self.config.timeout_options.read_timeout(timeout);
+        self.config.protocol.timeout_options.read_timeout(timeout);
         self
     }
 
@@ -1109,7 +1320,10 @@ impl ClientBuilder {
     #[inline]
     pub fn connect_timeout(mut self, timeout: Duration) -> ClientBuilder {
         self.config.connect_timeout = Some(timeout);
-        self.config.timeout_options.timeout_connect(Some(timeout));
+        self.config
+            .protocol
+            .timeout_options
+            .timeout_connect(Some(timeout));
         self
     }
 
@@ -1121,7 +1335,7 @@ impl ClientBuilder {
     /// Default is `None`.
     #[inline]
     pub fn timeout_global(mut self, timeout: Option<Duration>) -> ClientBuilder {
-        self.config.timeout_options.timeout_global(timeout);
+        self.config.protocol.timeout_options.timeout_global(timeout);
         self
     }
 
@@ -1132,7 +1346,10 @@ impl ClientBuilder {
     /// Default is `None`.
     #[inline]
     pub fn timeout_per_call(mut self, timeout: Option<Duration>) -> ClientBuilder {
-        self.config.timeout_options.timeout_per_call(timeout);
+        self.config
+            .protocol
+            .timeout_options
+            .timeout_per_call(timeout);
         self
     }
 
@@ -1141,7 +1358,10 @@ impl ClientBuilder {
     /// Default is `None`.
     #[inline]
     pub fn timeout_resolve(mut self, timeout: Option<Duration>) -> ClientBuilder {
-        self.config.timeout_options.timeout_resolve(timeout);
+        self.config
+            .protocol
+            .timeout_options
+            .timeout_resolve(timeout);
         self
     }
 
@@ -1150,7 +1370,10 @@ impl ClientBuilder {
     /// Default is `None`.
     #[inline]
     pub fn timeout_send_request(mut self, timeout: Option<Duration>) -> ClientBuilder {
-        self.config.timeout_options.timeout_send_request(timeout);
+        self.config
+            .protocol
+            .timeout_options
+            .timeout_send_request(timeout);
         self
     }
 
@@ -1159,7 +1382,10 @@ impl ClientBuilder {
     /// Default is 1 second.
     #[inline]
     pub fn timeout_await_100(mut self, timeout: Option<Duration>) -> ClientBuilder {
-        self.config.timeout_options.timeout_await_100(timeout);
+        self.config
+            .protocol
+            .timeout_options
+            .timeout_await_100(timeout);
         self
     }
 
@@ -1168,7 +1394,10 @@ impl ClientBuilder {
     /// Default is `None`.
     #[inline]
     pub fn timeout_send_body(mut self, timeout: Option<Duration>) -> ClientBuilder {
-        self.config.timeout_options.timeout_send_body(timeout);
+        self.config
+            .protocol
+            .timeout_options
+            .timeout_send_body(timeout);
         self
     }
 
@@ -1177,7 +1406,10 @@ impl ClientBuilder {
     /// Default is `None`.
     #[inline]
     pub fn timeout_recv_response(mut self, timeout: Option<Duration>) -> ClientBuilder {
-        self.config.timeout_options.timeout_recv_response(timeout);
+        self.config
+            .protocol
+            .timeout_options
+            .timeout_recv_response(timeout);
         self
     }
 
@@ -1186,7 +1418,10 @@ impl ClientBuilder {
     /// Default is `None`.
     #[inline]
     pub fn timeout_recv_body(mut self, timeout: Option<Duration>) -> ClientBuilder {
-        self.config.timeout_options.timeout_recv_body(timeout);
+        self.config
+            .protocol
+            .timeout_options
+            .timeout_recv_body(timeout);
         self
     }
 
@@ -1197,6 +1432,7 @@ impl ClientBuilder {
     #[inline]
     pub fn max_response_header_size(mut self, size: Option<usize>) -> ClientBuilder {
         self.config
+            .protocol
             .timeout_options
             .set_max_response_header_size(size);
         self
@@ -1226,21 +1462,21 @@ impl ClientBuilder {
     where
         D: Into<Option<Duration>>,
     {
-        self.config.pool_idle_timeout = val.into();
+        self.config.pool.idle_timeout = val.into();
         self
     }
 
     /// Sets the maximum idle connection per host allowed in the pool.
     #[inline]
     pub fn pool_max_idle_per_host(mut self, max: usize) -> ClientBuilder {
-        self.config.pool_max_idle_per_host = max;
+        self.config.pool.max_idle_per_host = max;
         self
     }
 
     /// Sets the maximum number of connections in the pool.
     #[inline]
     pub fn pool_max_size(mut self, max: u32) -> ClientBuilder {
-        self.config.pool_max_size = NonZeroU32::new(max);
+        self.config.pool.max_size = NonZeroU32::new(max);
         self
     }
 
@@ -1249,21 +1485,21 @@ impl ClientBuilder {
     /// Defaults to false.
     #[inline]
     pub fn https_only(mut self, enabled: bool) -> ClientBuilder {
-        self.config.https_only = enabled;
+        self.config.protocol.https_only = enabled;
         self
     }
 
     /// Only use HTTP/1.
     #[inline]
     pub fn http1_only(mut self) -> ClientBuilder {
-        self.config.http_version_pref = HttpVersionPref::Http1;
+        self.config.protocol.http_version_pref = HttpVersionPref::Http1;
         self
     }
 
     /// Only use HTTP/2.
     #[inline]
     pub fn http2_only(mut self) -> ClientBuilder {
-        self.config.http_version_pref = HttpVersionPref::Http2;
+        self.config.protocol.http_version_pref = HttpVersionPref::Http2;
         self
     }
 
@@ -1271,6 +1507,29 @@ impl ClientBuilder {
     #[cfg(feature = "http1")]
     #[inline]
     pub fn http1_options(mut self, options: Http1Options) -> ClientBuilder {
+        *self.config.transport_options.http1_options_mut() = Some(options);
+        self
+    }
+
+    /// Set the maximum number of HTTP/1 dispatcher iterations per poll cycle.
+    ///
+    /// This bounds how many pipelined HTTP/1 exchanges are processed before the
+    /// task yields back to the runtime scheduler.
+    #[cfg(feature = "http1")]
+    #[inline]
+    pub fn max_poll_iterations(mut self, max_iterations: usize) -> ClientBuilder {
+        assert!(
+            max_iterations > 0,
+            "max_poll_iterations must be greater than zero"
+        );
+
+        let mut options = self
+            .config
+            .transport_options
+            .http1_options
+            .take()
+            .unwrap_or_default();
+        options.h1_max_poll_iterations = Some(max_iterations);
         *self.config.transport_options.http1_options_mut() = Some(options);
         self
     }
@@ -1290,7 +1549,7 @@ impl ClientBuilder {
     /// Default is `true`.
     #[inline]
     pub fn tcp_nodelay(mut self, enabled: bool) -> ClientBuilder {
-        self.config.tcp_nodelay = enabled;
+        self.config.transport.tcp_nodelay = enabled;
         self
     }
 
@@ -1304,7 +1563,7 @@ impl ClientBuilder {
     where
         D: Into<Option<Duration>>,
     {
-        self.config.tcp_keepalive = val.into();
+        self.config.transport.tcp_keepalive = val.into();
         self
     }
 
@@ -1318,7 +1577,7 @@ impl ClientBuilder {
     where
         D: Into<Option<Duration>>,
     {
-        self.config.tcp_keepalive_interval = val.into();
+        self.config.transport.tcp_keepalive_interval = val.into();
         self
     }
 
@@ -1332,7 +1591,7 @@ impl ClientBuilder {
     where
         C: Into<Option<u32>>,
     {
-        self.config.tcp_keepalive_retries = retries.into();
+        self.config.transport.tcp_keepalive_retries = retries.into();
         self
     }
 
@@ -1354,14 +1613,14 @@ impl ClientBuilder {
     where
         D: Into<Option<Duration>>,
     {
-        self.config.tcp_user_timeout = val.into();
+        self.config.transport.tcp_user_timeout = val.into();
         self
     }
 
     /// Set whether sockets have `SO_REUSEADDR` enabled.
     #[inline]
     pub fn tcp_reuse_address(mut self, enabled: bool) -> ClientBuilder {
-        self.config.tcp_reuse_address = enabled;
+        self.config.transport.tcp_reuse_address = enabled;
         self
     }
 
@@ -1373,7 +1632,7 @@ impl ClientBuilder {
     where
         S: Into<Option<usize>>,
     {
-        self.config.tcp_send_buffer_size = size.into();
+        self.config.transport.tcp_send_buffer_size = size.into();
         self
     }
 
@@ -1385,7 +1644,7 @@ impl ClientBuilder {
     where
         S: Into<Option<usize>>,
     {
-        self.config.tcp_recv_buffer_size = size.into();
+        self.config.transport.tcp_recv_buffer_size = size.into();
         self
     }
 
@@ -1406,7 +1665,7 @@ impl ClientBuilder {
     where
         D: Into<Option<Duration>>,
     {
-        self.config.tcp_happy_eyeballs_timeout = val.into();
+        self.config.transport.tcp_happy_eyeballs_timeout = val.into();
         self
     }
 
@@ -1428,6 +1687,7 @@ impl ClientBuilder {
         T: Into<Option<IpAddr>>,
     {
         self.config
+            .transport
             .tcp_connect_options
             .set_local_address(addr.into());
         self
@@ -1454,6 +1714,7 @@ impl ClientBuilder {
         V6: Into<Option<Ipv6Addr>>,
     {
         self.config
+            .transport
             .tcp_connect_options
             .set_local_addresses(ipv4, ipv6);
         self
@@ -1521,7 +1782,10 @@ impl ClientBuilder {
     where
         T: Into<std::borrow::Cow<'static, str>>,
     {
-        self.config.tcp_connect_options.set_interface(interface);
+        self.config
+            .transport
+            .tcp_connect_options
+            .set_interface(interface);
         self
     }
 
@@ -1530,7 +1794,7 @@ impl ClientBuilder {
     /// Sets the identity to be used for client certificate authentication.
     #[inline]
     pub fn identity(mut self, identity: Identity) -> ClientBuilder {
-        self.config.identity = Some(identity);
+        self.config.tls.identity = Some(identity);
         self
     }
 
@@ -1540,7 +1804,7 @@ impl ClientBuilder {
     /// for TLS connections. By default, the system's verify certificate store is used.
     #[inline]
     pub fn cert_store(mut self, store: CertStore) -> ClientBuilder {
-        self.config.cert_store = store;
+        self.config.tls.cert_store = store;
         self
     }
 
@@ -1557,7 +1821,7 @@ impl ClientBuilder {
     /// as a last resort.
     #[inline]
     pub fn cert_verification(mut self, cert_verification: bool) -> ClientBuilder {
-        self.config.cert_verification = cert_verification;
+        self.config.tls.cert_verification = cert_verification;
         self
     }
 
@@ -1571,7 +1835,7 @@ impl ClientBuilder {
     /// introduces a significant vulnerability to man-in-the-middle attacks.
     #[inline]
     pub fn verify_hostname(mut self, verify_hostname: bool) -> ClientBuilder {
-        self.config.verify_hostname = verify_hostname;
+        self.config.tls.verify_hostname = verify_hostname;
         self
     }
 
@@ -1580,14 +1844,14 @@ impl ClientBuilder {
     /// Defaults to `true`.
     #[inline]
     pub fn tls_sni(mut self, tls_sni: bool) -> ClientBuilder {
-        self.config.tls_sni = tls_sni;
+        self.config.tls.tls_sni = tls_sni;
         self
     }
 
     /// Configures TLS key logging for the client.
     #[inline]
     pub fn keylog(mut self, keylog: KeyLog) -> ClientBuilder {
-        self.config.keylog = Some(keylog);
+        self.config.tls.keylog = Some(keylog);
         self
     }
 
@@ -1596,7 +1860,7 @@ impl ClientBuilder {
     /// By default the TLS backend's own default is used.
     #[inline]
     pub fn min_tls_version(mut self, version: TlsVersion) -> ClientBuilder {
-        self.config.min_tls_version = Some(version);
+        self.config.tls.min_version = Some(version);
         self
     }
 
@@ -1605,7 +1869,7 @@ impl ClientBuilder {
     /// By default there's no maximum.
     #[inline]
     pub fn max_tls_version(mut self, version: TlsVersion) -> ClientBuilder {
-        self.config.max_tls_version = Some(version);
+        self.config.tls.max_version = Some(version);
         self
     }
 
@@ -1616,7 +1880,7 @@ impl ClientBuilder {
     /// feature to be enabled.
     #[inline]
     pub fn tls_info(mut self, tls_info: bool) -> ClientBuilder {
-        self.config.tls_info = tls_info;
+        self.config.tls.tls_info = tls_info;
         self
     }
 
@@ -1638,7 +1902,7 @@ impl ClientBuilder {
     #[cfg(feature = "hickory-dns")]
     #[cfg_attr(docsrs, doc(cfg(feature = "hickory-dns")))]
     pub fn no_hickory_dns(mut self) -> ClientBuilder {
-        self.config.hickory_dns = false;
+        self.config.dns.hickory_dns = false;
         self
     }
 
@@ -1673,6 +1937,7 @@ impl ClientBuilder {
         A: IntoIterator<Item = SocketAddr>,
     {
         self.config
+            .dns
             .dns_overrides
             .insert(domain.into(), addrs.into_iter().collect());
         self
@@ -1688,7 +1953,7 @@ impl ClientBuilder {
     where
         R: IntoResolve,
     {
-        self.config.dns_resolver = Some(resolver.into_resolve());
+        self.config.dns.dns_resolver = Some(resolver.into_resolve());
         self
     }
 
@@ -1715,14 +1980,14 @@ impl ClientBuilder {
     /// ```
     #[inline]
     pub fn hooks(mut self, hooks: super::layer::hooks::Hooks) -> ClientBuilder {
-        self.config.hooks = Some(hooks);
+        self.config.middleware.hooks = Some(hooks);
         self
     }
 
     /// Adds response recovery hooks to the client.
     #[inline]
     pub fn recoveries(mut self, recoveries: super::layer::recovery::Recoveries) -> ClientBuilder {
-        self.config.recoveries = recoveries;
+        self.config.protocol.recoveries = recoveries;
         self
     }
 
@@ -1754,6 +2019,7 @@ impl ClientBuilder {
     {
         let hooks = self
             .config
+            .middleware
             .hooks
             .get_or_insert_with(super::layer::hooks::Hooks::new);
 
@@ -1798,6 +2064,7 @@ impl ClientBuilder {
     {
         let hooks = self
             .config
+            .middleware
             .hooks
             .get_or_insert_with(super::layer::hooks::Hooks::new);
 
@@ -1845,6 +2112,7 @@ impl ClientBuilder {
         }
 
         self.config
+            .protocol
             .recoveries
             .push_hook(status, Arc::new(ClosureHook(hook)));
         self
@@ -1885,7 +2153,7 @@ impl ClientBuilder {
         <L::Service as Service<http::Request<Body>>>::Future: Send + 'static,
     {
         let layer = BoxCloneSyncServiceLayer::new(layer);
-        self.config.layers.push(layer);
+        self.config.middleware.layers.push(layer);
         self
     }
 
@@ -1919,7 +2187,7 @@ impl ClientBuilder {
         <L::Service as Service<Unnameable>>::Future: Send + 'static,
     {
         let layer = BoxCloneSyncServiceLayer::new(layer);
-        self.config.connector_layers.push(layer);
+        self.config.middleware.connector_layers.push(layer);
         self
     }
 
@@ -1958,5 +2226,70 @@ impl ClientBuilder {
             .transport_options
             .apply_transport_options(transport_opts);
         self.default_headers(headers).orig_headers(orig_headers)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use tower::util::Either;
+
+    use super::*;
+
+    struct NoopBeforeRequestHook;
+
+    impl super::super::layer::hooks::BeforeRequestHook for NoopBeforeRequestHook {
+        fn on_request(&self, _request: &mut http::Request<Body>) -> Result<(), Error> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn hooks_only_client_keeps_typed_service_path() {
+        let hooks = super::super::layer::hooks::Hooks::builder()
+            .before_request(Arc::new(NoopBeforeRequestHook))
+            .build();
+
+        let client = Client::builder().hooks(hooks).build().unwrap();
+
+        assert!(matches!(
+            client.into_inner(),
+            Either::Right(Either::Left(_))
+        ));
+    }
+
+    #[test]
+    fn transport_config_options_override_transport_defaults() {
+        let builder = Client::builder().transport_config(
+            TransportConfigOptions::new()
+                .tcp_nodelay(false)
+                .tcp_reuse_address(true),
+        );
+
+        assert!(!builder.config.transport.tcp_nodelay);
+        assert!(builder.config.transport.tcp_reuse_address);
+    }
+
+    #[test]
+    fn reusable_protocol_config_can_be_applied_to_multiple_builders() {
+        let protocol = ProtocolConfigOptions::new().https_only(true).referer(false);
+
+        let builder_a = Client::builder().protocol_config(protocol.clone());
+        let builder_b = Client::builder().protocol_config(protocol);
+
+        assert!(builder_a.config.protocol.https_only);
+        assert!(!builder_a.config.protocol.referer);
+        assert!(builder_b.config.protocol.https_only);
+        assert!(!builder_b.config.protocol.referer);
+    }
+
+    #[cfg(feature = "http1")]
+    #[test]
+    fn max_poll_iterations_updates_http1_options() {
+        let builder = Client::builder().max_poll_iterations(7);
+        let options = builder.config.transport_options.http1_options.unwrap();
+
+        assert_eq!(options.h1_max_poll_iterations, Some(7));
     }
 }

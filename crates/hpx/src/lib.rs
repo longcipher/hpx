@@ -5,6 +5,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(test, deny(warnings))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![allow(clippy::items_after_test_module)]
 
 //! # hpx
 //!
@@ -345,7 +346,9 @@ pub use self::client::ws;
 pub use self::{
     client::{
         AsSendBody, Body, BrowserProfile, Client, ClientBuilder, ClientResponseBody, Emulation,
-        EmulationBuilder, EmulationFactory, HttpInfo, Request, RequestBuilder, Response, Upgraded,
+        EmulationBuilder, EmulationFactory, HttpInfo, HttpVersionPreference, PoolConfigOptions,
+        ProtocolConfigOptions, ProxyConfigOptions, Request, RequestBuilder, Response,
+        TlsConfigOptions, TransportConfigOptions, Upgraded,
     },
     error::{Error, Result},
     ext::{ResponseBuilderExt, ResponseExt},

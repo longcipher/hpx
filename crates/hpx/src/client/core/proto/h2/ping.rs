@@ -16,6 +16,8 @@
 //!    running average. 3c. Calculate bdp as bytes/rtt. 3d. If bdp is over 2/3 max, set new max to
 //!    bdp and update windows.
 
+#![allow(clippy::items_after_test_module)]
+
 use std::{
     fmt,
     future::Future,

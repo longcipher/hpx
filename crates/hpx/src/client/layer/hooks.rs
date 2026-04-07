@@ -45,12 +45,13 @@
 //! ```
 
 use std::{
+    future::Future,
     sync::Arc,
     task::{Context, Poll},
 };
 
-use futures_util::{FutureExt, future::BoxFuture};
 use http::{HeaderMap, Request, Response, StatusCode};
+use pin_project_lite::pin_project;
 use tower::{Layer, Service};
 
 use crate::{Body, Error};
@@ -357,16 +358,38 @@ pub struct HooksService<S> {
     hooks: Arc<Hooks>,
 }
 
+pin_project! {
+    /// Future returned by [`HooksService`].
+    pub struct HooksFuture<Fut> {
+        hooks: Arc<Hooks>,
+        #[pin]
+        state: HooksFutureState<Fut>,
+    }
+}
+
+pin_project! {
+    #[project = HooksFutureStateProj]
+    enum HooksFutureState<Fut> {
+        Error {
+            error: Option<crate::error::BoxError>,
+        },
+        Response {
+            #[pin]
+            future: Fut,
+        },
+    }
+}
+
 impl<S, ResBody> Service<Request<Body>> for HooksService<S>
 where
     S: Service<Request<Body>, Response = Response<ResBody>> + Clone + Send + 'static,
     S::Error: Into<crate::error::BoxError> + Send,
-    S::Future: Send,
+    S::Future: Send + 'static,
     ResBody: Send + 'static,
 {
     type Response = Response<ResBody>;
     type Error = crate::error::BoxError;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+    type Future = HooksFuture<S::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx).map_err(Into::into)
@@ -379,29 +402,61 @@ where
         // Run before-request hooks
         if let Err(e) = hooks.run_before_request(&mut req) {
             hooks.run_on_error(&e);
-            return futures_util::future::err(e.into()).boxed();
+            return HooksFuture {
+                hooks,
+                state: HooksFutureState::Error {
+                    error: Some(e.into()),
+                },
+            };
         }
 
-        async move {
-            match inner.call(req).await {
-                Ok(response) => {
-                    // Run after-response hooks
-                    if let Err(e) = hooks.run_after_response(response.status(), response.headers())
-                    {
-                        hooks.run_on_error(&e);
-                        return Err(e.into());
-                    }
-                    Ok(response)
-                }
-                Err(e) => {
-                    let boxed_error: crate::error::BoxError = e.into();
-                    let error = Error::request(boxed_error);
-                    hooks.run_on_error(&error);
-                    Err(error.into())
-                }
-            }
+        HooksFuture {
+            hooks,
+            state: HooksFutureState::Response {
+                future: inner.call(req),
+            },
         }
-        .boxed()
+    }
+}
+
+impl<Fut, ResBody, Err> Future for HooksFuture<Fut>
+where
+    Fut: Future<Output = Result<Response<ResBody>, Err>>,
+    Err: Into<crate::error::BoxError>,
+{
+    type Output = Result<Response<ResBody>, crate::error::BoxError>;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
+
+        match this.state.as_mut().project() {
+            HooksFutureStateProj::Error { error } => {
+                let error = error
+                    .take()
+                    .expect("HooksFuture::Error polled after completion");
+                Poll::Ready(Err(error))
+            }
+            HooksFutureStateProj::Response { future } => match future.poll(cx) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(Ok(response)) => {
+                    if let Err(e) = this
+                        .hooks
+                        .run_after_response(response.status(), response.headers())
+                    {
+                        this.hooks.run_on_error(&e);
+                        Poll::Ready(Err(e.into()))
+                    } else {
+                        Poll::Ready(Ok(response))
+                    }
+                }
+                Poll::Ready(Err(error)) => {
+                    let boxed_error: crate::error::BoxError = error.into();
+                    let error = Error::request(boxed_error);
+                    this.hooks.run_on_error(&error);
+                    Poll::Ready(Err(error.into()))
+                }
+            },
+        }
     }
 }
 
