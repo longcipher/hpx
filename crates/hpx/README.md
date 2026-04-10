@@ -16,6 +16,7 @@ This is the core crate of the [hpx](https://github.com/longcipher/hpx) project.
 - **Redirect Policy** with configurable behaviors
 - **Rotating Proxies** with SOCKS support
 - **Certificate Store** management
+- **Mutual TLS** client certificate authentication
 - **Tower Middleware** support for extensibility
 - **Request/Response Hooks** for lifecycle monitoring
 - **Retry Configuration** with backoff strategies
@@ -40,6 +41,37 @@ async fn main() -> hpx::Result<()> {
     Ok(())
 }
 ```
+
+## Cloudflare mTLS
+
+`hpx` can attach a client certificate during the TLS handshake, which is required for Cloudflare Access / Zero Trust deployments protected by mutual TLS.
+
+```rust
+use hpx::{Client, tls::Identity};
+use std::fs;
+
+#[tokio::main]
+async fn main() -> hpx::Result<()> {
+    let pem = fs::read("cloudflare-client.pem")?;
+
+    let client = Client::builder()
+        .identity(Identity::from_pem(&pem)?)
+        .build()?;
+
+    let response = client
+        .get("https://mtls-protected.example.com")
+        .send()
+        .await?;
+
+    println!("status = {}", response.status());
+    Ok(())
+}
+```
+
+- Use `Identity::from_pem(...)` when Cloudflare gives you a single PEM bundle containing the certificate chain and private key.
+- Use `Identity::from_pkcs8_pem(cert_pem, key_pem)` when the certificate chain and private key are stored in separate PEM files.
+- Use `Identity::from_pkcs12_der(...)` for `.p12` / `.pfx` archives when your client certificate is packaged as a PKCS#12 bundle.
+- `Identity::from_pem(...)`, `Identity::from_pkcs8_pem(...)`, and `Identity::from_pkcs12_der(...)` work on both the BoringSSL and Rustls backends.
 
 ## Feature Flags
 

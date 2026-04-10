@@ -277,13 +277,25 @@
 
 #[cfg(feature = "cookies")]
 use arc_swap as _;
+#[cfg(feature = "rustls-tls")]
+use const_oid as _;
+#[cfg(feature = "rustls-tls")]
+use der as _;
+#[cfg(feature = "rustls-tls")]
+use hmac as _;
 use parking_lot as _;
+#[cfg(feature = "rustls-tls")]
+use pkcs8 as _;
+#[cfg(feature = "rustls-tls")]
+use pkcs12 as _;
 #[cfg(feature = "rustls-tls")]
 use rustls as _;
 #[cfg(feature = "rustls-tls")]
 use rustls_pemfile as _;
 #[cfg(feature = "rustls-tls")]
 use rustls_pki_types as _;
+#[cfg(feature = "rustls-tls")]
+use sha2 as _;
 #[cfg(feature = "http1")]
 use smallvec as _;
 #[cfg(feature = "webpki-roots")]

@@ -99,6 +99,13 @@ rustls-tls = [
     "dep:rustls-pki-types",
     "dep:webpki-roots",
     "dep:rustls-pemfile",
+    "dep:const-oid",
+    "dep:der",
+    "dep:hmac",
+    "dep:pkcs12",
+    "dep:pkcs8",
+    "dep:sha1",
+    "dep:sha2",
 ]
 
 # Enable HTTP/1 support.
@@ -116,9 +123,12 @@ arc-swap = { workspace = true, optional = true }
 boring = { workspace = true, optional = true }
 brotli = { workspace = true, optional = true }
 bytes = { workspace = true }
+const-oid = { workspace = true, features = ["db"], optional = true }
+der = { workspace = true, features = ["alloc", "oid"], optional = true }
 flate2 = { workspace = true, optional = true }
 futures-channel = { workspace = true }
 futures-util = { workspace = true }
+hmac = { workspace = true, optional = true }
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
@@ -128,6 +138,11 @@ ipnet = { workspace = true }
 parking_lot = { workspace = true }
 percent-encoding = { workspace = true }
 pin-project-lite = { workspace = true }
+pkcs12 = { workspace = true, features = ["kdf"], optional = true }
+pkcs8 = { workspace = true, features = [
+    "3des",
+    "sha1-insecure",
+], optional = true }
 rand.workspace = true
 rustls = { workspace = true, optional = true, features = [
     "std",
@@ -203,6 +218,7 @@ hickory-resolver = { workspace = true, optional = true }
 ## tracing
 base64 = { workspace = true }
 sha1 = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
 tracing = { workspace = true, features = ["std"], optional = true }
 
 ## windows system proxy

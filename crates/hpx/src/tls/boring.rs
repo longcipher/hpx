@@ -677,3 +677,101 @@ impl<IO> EstablishedConn<IO> {
         EstablishedConn { io, req }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::convert::Infallible;
+
+    use boring::ssl::{SslAcceptor, SslFiletype, SslMethod, SslVerifyMode};
+    use bytes::Bytes;
+    use http_body_util::Full;
+    use hyper::{Response, server::conn::http1, service::service_fn};
+    use hyper_util::rt::TokioIo;
+    use tokio::net::TcpListener;
+
+    use crate::{
+        Client,
+        tls::{CertStore, Identity},
+    };
+
+    const CA_CERT_PEM: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/mtls/ca.crt"
+    ));
+    const CLIENT_CERT_PEM: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/mtls/client.crt"
+    ));
+    const CLIENT_KEY_PEM: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/mtls/client.key"
+    ));
+    const SERVER_CERT_PATH: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/mtls/server.crt");
+    const SERVER_KEY_PATH: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/mtls/server.key");
+    const CA_CERT_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/mtls/ca.crt");
+
+    fn tls_acceptor() -> SslAcceptor {
+        let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+        acceptor
+            .set_certificate_chain_file(SERVER_CERT_PATH)
+            .unwrap();
+        acceptor
+            .set_private_key_file(SERVER_KEY_PATH, SslFiletype::PEM)
+            .unwrap();
+        acceptor.set_ca_file(CA_CERT_PATH).unwrap();
+        acceptor.set_verify(SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT);
+        acceptor.check_private_key().unwrap();
+        acceptor.build()
+    }
+
+    #[tokio::test]
+    async fn combined_pem_identity_authenticates_with_mutual_tls() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let acceptor = tls_acceptor();
+
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let stream = tokio_boring::accept(&acceptor, stream).await.unwrap();
+            let service = service_fn(|_request| async {
+                let mut response = Response::new(Full::new(Bytes::from_static(b"mtls-ok")));
+                response.headers_mut().insert(
+                    http::header::CONNECTION,
+                    http::HeaderValue::from_static("close"),
+                );
+                Ok::<_, Infallible>(response)
+            });
+
+            http1::Builder::new()
+                .serve_connection(TokioIo::new(stream), service)
+                .await
+                .unwrap();
+        });
+
+        let mut pem = CLIENT_CERT_PEM.to_vec();
+        pem.extend_from_slice(CLIENT_KEY_PEM);
+
+        let cert_store = CertStore::builder()
+            .add_pem_cert(CA_CERT_PEM)
+            .build()
+            .unwrap();
+        let identity = Identity::from_pem(&pem).unwrap();
+        let client = Client::builder()
+            .no_proxy()
+            .cert_store(cert_store)
+            .identity(identity)
+            .build()
+            .unwrap();
+
+        let response = client
+            .get(format!("https://localhost:{}/", addr.port()))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.text().await.unwrap(), "mtls-ok");
+        server.await.unwrap();
+    }
+}
