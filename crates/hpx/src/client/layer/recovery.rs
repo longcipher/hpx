@@ -8,12 +8,12 @@ use std::{
 use bytes::Bytes;
 use futures_util::{FutureExt, future::BoxFuture};
 use http::{HeaderMap, Request, Response, StatusCode};
-use http_body::Body as HttpBody;
+use http_body::Body as _;
 use http_body_util::BodyExt;
 use tower::{Layer, Service};
 
 use super::retry::clone_http_request;
-use crate::{Body, ClientResponseBody, Error, error::BoxError};
+use crate::{Body, ClientResponseBody, Error, client::http::InnerResponseBody, error::BoxError};
 
 /// A hook that can recover from a specific status response by optionally returning a replay request.
 pub trait OnStatusHook: Send + Sync {
@@ -183,15 +183,13 @@ pub(crate) struct ResponseRecovery<S> {
     recoveries: Arc<Recoveries>,
 }
 
-impl<S, ResBody> Service<Request<Body>> for ResponseRecovery<S>
+impl<S> Service<Request<Body>> for ResponseRecovery<S>
 where
-    S: Service<Request<Body>, Response = Response<ResBody>, Error = BoxError>
+    S: Service<Request<Body>, Response = Response<InnerResponseBody>, Error = BoxError>
         + Clone
         + Send
         + 'static,
     S::Future: Send + 'static,
-    ResBody: HttpBody<Data = Bytes> + Send + Sync + 'static,
-    ResBody::Error: Into<BoxError> + Send,
 {
     type Response = Response<ClientResponseBody>;
     type Error = BoxError;
@@ -213,19 +211,17 @@ where
         async move {
             let response = inner.call(req).await?;
             let Some(hook) = recoveries.hook_for(response.status()) else {
-                return Ok(response.map(ClientResponseBody::wrap));
+                return Ok(response.map(ClientResponseBody::from_inner_response));
             };
 
             let body_limit = recoveries.max_body_bytes() as u64;
             let upper = response.body().size_hint().upper();
             if upper.is_none_or(|upper| upper > body_limit) {
-                return Ok(response.map(ClientResponseBody::wrap));
+                return Ok(response.map(ClientResponseBody::from_inner_response));
             }
 
             let (parts, body) = response.into_parts();
-            let collected = BodyExt::collect(body)
-                .await
-                .map_err(Into::<BoxError>::into)?;
+            let collected = BodyExt::collect(body).await?;
             let bytes = collected.to_bytes();
             let context = StatusRecoveryContext::new(
                 parts.status,
@@ -240,7 +236,7 @@ where
                 .map_err(Into::<BoxError>::into)?
             {
                 let response = inner.call(request).await?;
-                return Ok(response.map(ClientResponseBody::wrap));
+                return Ok(response.map(ClientResponseBody::from_inner_response));
             }
 
             Ok(Response::from_parts(parts, ClientResponseBody::from(bytes)))

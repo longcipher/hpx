@@ -295,7 +295,7 @@ impl Http1Transaction for Client {
         extend(dst, b"\r\n");
 
         if let Some(orig_headers) = RequestConfig::<OrigHeaderMap>::get(&msg.head.extensions) {
-            write_headers_original_case(&mut msg.head.headers, orig_headers, dst);
+            write_headers_original_case(&msg.head.headers, orig_headers, dst);
         } else {
             write_headers(&msg.head.headers, dst);
         }
@@ -647,7 +647,7 @@ pub(crate) fn write_headers(headers: &HeaderMap, dst: &mut Vec<u8>) {
 }
 
 fn write_headers_original_case(
-    headers: &mut HeaderMap,
+    headers: &HeaderMap,
     orig_headers: &OrigHeaderMap,
     dst: &mut Vec<u8>,
 ) {
@@ -683,4 +683,53 @@ impl fmt::Write for FastWrite<'_> {
 #[inline]
 fn extend(dst: &mut Vec<u8>, data: &[u8]) {
     dst.extend_from_slice(data);
+}
+
+#[cfg(test)]
+mod tests {
+    use http::{HeaderMap, HeaderValue};
+
+    use super::write_headers_original_case;
+    use crate::header::OrigHeaderMap;
+
+    #[test]
+    fn write_headers_original_case_preserves_headers_and_output() {
+        let mut orig_headers = OrigHeaderMap::new();
+        orig_headers.insert("X-Test");
+        orig_headers.insert("Empty-Header");
+
+        let mut headers = HeaderMap::new();
+        headers.append("x-test", HeaderValue::from_static("one"));
+        headers.insert("empty-header", HeaderValue::from_static(""));
+        headers.insert("host", HeaderValue::from_static("example.com"));
+        let expected = headers.clone();
+
+        let mut dst = Vec::new();
+        write_headers_original_case(&headers, &orig_headers, &mut dst);
+
+        assert_eq!(
+            String::from_utf8(dst).unwrap(),
+            "X-Test: one\r\nEmpty-Header:\r\nhost: example.com\r\n"
+        );
+        assert_eq!(headers, expected);
+    }
+
+    #[test]
+    fn write_headers_original_case_skips_duplicate_normalized_original_names() {
+        let mut orig_headers = OrigHeaderMap::new();
+        orig_headers.insert("X-Test");
+        orig_headers.insert("x-test");
+
+        let mut headers = HeaderMap::new();
+        headers.append("x-test", HeaderValue::from_static("one"));
+        headers.append("x-test", HeaderValue::from_static("two"));
+
+        let mut dst = Vec::new();
+        write_headers_original_case(&headers, &orig_headers, &mut dst);
+
+        assert_eq!(
+            String::from_utf8(dst).unwrap(),
+            "X-Test: one\r\nX-Test: two\r\n"
+        );
+    }
 }

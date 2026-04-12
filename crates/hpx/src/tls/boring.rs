@@ -23,7 +23,6 @@ use boring::{
 };
 use cache::{SessionCache, SessionKey};
 use http::Uri;
-use parking_lot::Mutex;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio_boring::SslStream;
 use tower::Service;
@@ -155,14 +154,14 @@ pub struct HttpsConnector<T> {
 #[derive(Clone)]
 struct Inner {
     ssl: SslConnector,
-    cache: Option<Arc<Mutex<SessionCache<ConnectIdentity>>>>,
+    cache: Option<Arc<SessionCache<ConnectIdentity>>>,
     config: HandshakeConfig,
 }
 
 /// A builder for creating a `TlsConnector`.
 #[derive(Clone)]
 pub struct TlsConnectorBuilder {
-    session_cache: Arc<Mutex<SessionCache<ConnectIdentity>>>,
+    session_cache: Arc<SessionCache<ConnectIdentity>>,
     alpn_protocol: Option<AlpnProtocol>,
     max_version: Option<TlsVersion>,
     min_version: Option<TlsVersion>,
@@ -268,7 +267,7 @@ impl Inner {
 
             // If the session cache is enabled, we try to retrieve the session
             // associated with the key. If it exists, we set it in the SSL configuration.
-            if let Some(session) = cache.lock().get(&key) {
+            if let Some(session) = cache.get(&key) {
                 #[allow(unsafe_code)]
                 unsafe { cfg.set_session(&session) }?;
 
@@ -525,7 +524,7 @@ impl TlsConnectorBuilder {
                 let cache = cache.clone();
                 move |ssl: &mut SslRef, session| {
                     if let Ok(Some(key)) = key_index().map(|idx| ssl.ex_data(idx)) {
-                        cache.lock().insert(key.clone(), session);
+                        cache.insert(key.clone(), session);
                     }
                 }
             });
@@ -550,9 +549,7 @@ impl TlsConnector {
     pub fn builder() -> TlsConnectorBuilder {
         const DEFAULT_SESSION_CACHE_CAPACITY: usize = 8;
         TlsConnectorBuilder {
-            session_cache: Arc::new(Mutex::new(SessionCache::with_capacity(
-                DEFAULT_SESSION_CACHE_CAPACITY,
-            ))),
+            session_cache: Arc::new(SessionCache::with_capacity(DEFAULT_SESSION_CACHE_CAPACITY)),
             alpn_protocol: None,
             min_version: None,
             max_version: None,

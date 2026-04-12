@@ -64,7 +64,7 @@ impl Future for Pending {
                 if let Some(redirect_uri) = res.extensions_mut().remove::<RequestUri>() {
                     *uri = redirect_uri.0;
                 }
-                Ok(Response::new(res, uri.clone()))
+                Ok(Response::from_client_response(uri.clone(), res))
             }
             Err(err) => {
                 let mut err = err

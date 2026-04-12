@@ -112,7 +112,8 @@ type Decompression<T> = super::layer::decoder::Decompression<T>;
     feature = "brotli",
     feature = "deflate"
 ))]
-type InnerResponseBody = TimeoutBody<tower_http::decompression::DecompressionBody<Incoming>>;
+pub(crate) type InnerResponseBody =
+    TimeoutBody<tower_http::decompression::DecompressionBody<Incoming>>;
 
 /// Response body type with timeout only (no compression features).
 #[cfg(not(any(
@@ -121,7 +122,7 @@ type InnerResponseBody = TimeoutBody<tower_http::decompression::DecompressionBod
     feature = "brotli",
     feature = "deflate"
 )))]
-type InnerResponseBody = TimeoutBody<Incoming>;
+pub(crate) type InnerResponseBody = TimeoutBody<Incoming>;
 
 /// The complete HTTP client service stack before outer timeout decoration.
 type BaseClientService = ResponseBodyTimeout<
@@ -183,7 +184,7 @@ pub struct Client {
 /// A [`ClientBuilder`] can be used to create a [`Client`] with custom configuration.
 #[must_use]
 pub struct ClientBuilder {
-    config: Config,
+    config: CoreConfig,
 }
 
 /// The HTTP version preference for the client.
@@ -195,11 +196,12 @@ enum HttpVersionPref {
     All,
 }
 
-/// Legacy flat Config structure - to be refactored into layered configs
-/// This maintains backward compatibility during the migration
-/// Transport layer configuration (TCP/TLS settings)
+/// Transport-layer configuration.
 #[derive(Clone)]
 struct TransportConfig {
+    connect_timeout: Option<Duration>,
+    connection_verbose: bool,
+    transport_options: TransportOptions,
     tcp_nodelay: bool,
     tcp_reuse_address: bool,
     tcp_keepalive: Option<Duration>,
@@ -266,9 +268,40 @@ struct DnsConfig {
 /// Middleware and hooks configuration
 #[derive(Clone)]
 struct MiddlewareConfig {
+    #[cfg(any(
+        feature = "gzip",
+        feature = "zstd",
+        feature = "brotli",
+        feature = "deflate",
+    ))]
+    accept_encoding: AcceptEncoding,
+    #[cfg(feature = "cookies")]
+    cookie_store: Option<Arc<dyn cookie::CookieStore>>,
     layers: Vec<BoxedClientLayer>,
     connector_layers: Vec<BoxedConnectorLayer>,
     hooks: Option<super::layer::hooks::Hooks>,
+}
+
+/// Layered root configuration for [`ClientBuilder`].
+struct CoreConfig {
+    error: Option<Error>,
+    headers: HeaderMap,
+    orig_headers: OrigHeaderMap,
+    transport: TransportConfig,
+    pool: PoolConfig,
+    tls: TlsConfig,
+    protocol: ProtocolConfig,
+    proxy: ProxyConfig,
+    dns: DnsConfig,
+    middleware: MiddlewareConfig,
+}
+
+impl CoreConfig {
+    fn sync_connect_timeout(&mut self) {
+        self.protocol
+            .timeout_options
+            .timeout_connect(self.transport.connect_timeout);
+    }
 }
 
 impl From<HttpVersionPreference> for HttpVersionPref {
@@ -281,9 +314,19 @@ impl From<HttpVersionPreference> for HttpVersionPref {
     }
 }
 
+impl TransportConfig {
+    fn with_transport_options(mut self, transport_options: TransportOptions) -> Self {
+        self.transport_options = transport_options;
+        self
+    }
+}
+
 impl From<TransportConfigOptions> for TransportConfig {
     fn from(value: TransportConfigOptions) -> Self {
         Self {
+            connect_timeout: value.connect_timeout,
+            connection_verbose: value.connection_verbose,
+            transport_options: TransportOptions::default(),
             tcp_nodelay: value.tcp_nodelay,
             tcp_reuse_address: value.tcp_reuse_address,
             tcp_keepalive: value.tcp_keepalive,
@@ -348,34 +391,6 @@ impl From<ProxyConfigOptions> for ProxyConfig {
     }
 }
 
-/// Legacy flat Config structure - to be refactored into layered configs
-/// This maintains backward compatibility during the migration
-struct Config {
-    error: Option<Error>,
-    headers: HeaderMap,
-    orig_headers: OrigHeaderMap,
-    #[cfg(any(
-        feature = "gzip",
-        feature = "zstd",
-        feature = "brotli",
-        feature = "deflate",
-    ))]
-    accept_encoding: AcceptEncoding,
-    connect_timeout: Option<Duration>,
-    connection_verbose: bool,
-    // Layered configurations - to be used in future refactoring
-    pool: PoolConfig,
-    transport: TransportConfig,
-    tls: TlsConfig,
-    protocol: ProtocolConfig,
-    proxy: ProxyConfig,
-    dns: DnsConfig,
-    middleware: MiddlewareConfig,
-    #[cfg(feature = "cookies")]
-    cookie_store: Option<Arc<dyn cookie::CookieStore>>,
-    transport_options: TransportOptions,
-}
-
 // ===== impl Client =====
 
 impl Default for Client {
@@ -404,25 +419,14 @@ impl Client {
     /// Creates a [`ClientBuilder`] to configure a [`Client`].
     pub fn builder() -> ClientBuilder {
         ClientBuilder {
-            config: Config {
+            config: CoreConfig {
                 error: None,
                 headers: HeaderMap::new(),
                 orig_headers: OrigHeaderMap::new(),
-                #[cfg(any(
-                    feature = "gzip",
-                    feature = "zstd",
-                    feature = "brotli",
-                    feature = "deflate",
-                ))]
-                accept_encoding: AcceptEncoding::default(),
-                connect_timeout: None,
-                connection_verbose: false,
-                pool: PoolConfig {
-                    idle_timeout: Some(Duration::from_secs(90)),
-                    max_idle_per_host: usize::MAX,
-                    max_size: None,
-                },
                 transport: TransportConfig {
+                    connect_timeout: None,
+                    connection_verbose: false,
+                    transport_options: TransportOptions::default(),
                     tcp_nodelay: true,
                     tcp_reuse_address: false,
                     tcp_keepalive: Some(Duration::from_secs(15)),
@@ -434,6 +438,11 @@ impl Client {
                     tcp_send_buffer_size: None,
                     tcp_recv_buffer_size: None,
                     tcp_happy_eyeballs_timeout: Some(Duration::from_millis(300)),
+                },
+                pool: PoolConfig {
+                    idle_timeout: Some(Duration::from_secs(90)),
+                    max_idle_per_host: usize::MAX,
+                    max_size: None,
                 },
                 tls: TlsConfig {
                     keylog: None,
@@ -466,13 +475,19 @@ impl Client {
                     dns_resolver: None,
                 },
                 middleware: MiddlewareConfig {
+                    #[cfg(any(
+                        feature = "gzip",
+                        feature = "zstd",
+                        feature = "brotli",
+                        feature = "deflate",
+                    ))]
+                    accept_encoding: AcceptEncoding::default(),
+                    #[cfg(feature = "cookies")]
+                    cookie_store: None,
                     layers: Vec::new(),
                     connector_layers: Vec::new(),
                     hooks: None,
                 },
-                #[cfg(feature = "cookies")]
-                cookie_store: None,
-                transport_options: TransportOptions::default(),
             },
         }
     }
@@ -644,15 +659,10 @@ impl ClientBuilder {
     /// Replace the transport-layer configuration as a reusable group.
     #[inline]
     pub fn transport_config(mut self, config: TransportConfigOptions) -> ClientBuilder {
-        let connect_timeout = config.connect_timeout;
-        let connection_verbose = config.connection_verbose;
-        self.config.transport = config.into();
-        self.config.connect_timeout = connect_timeout;
-        self.config.connection_verbose = connection_verbose;
-        self.config
-            .protocol
-            .timeout_options
-            .timeout_connect(connect_timeout);
+        let transport_options = self.config.transport.transport_options.clone();
+        self.config.transport =
+            TransportConfig::from(config).with_transport_options(transport_options);
+        self.config.sync_connect_timeout();
         self
     }
 
@@ -674,10 +684,7 @@ impl ClientBuilder {
     #[inline]
     pub fn protocol_config(mut self, config: ProtocolConfigOptions) -> ClientBuilder {
         self.config.protocol = config.into();
-        self.config
-            .protocol
-            .timeout_options
-            .timeout_connect(self.config.connect_timeout);
+        self.config.sync_connect_timeout();
         self
     }
 
@@ -708,11 +715,11 @@ impl ClientBuilder {
 
         // Create base client service
         let service = {
-            let tls_options = config.transport_options.tls_options;
+            let tls_options = config.transport.transport_options.tls_options.take();
             #[cfg(feature = "http1")]
-            let http1_options = config.transport_options.http1_options;
+            let http1_options = config.transport.transport_options.http1_options.take();
             #[cfg(feature = "http2")]
-            let http2_options = config.transport_options.http2_options;
+            let http2_options = config.transport.transport_options.http2_options.take();
 
             let resolver = {
                 let mut resolver: Arc<dyn Resolve> = match config.dns.dns_resolver {
@@ -733,10 +740,10 @@ impl ClientBuilder {
 
             // Build connector
             let connector = Connector::builder(config.proxy.proxies, resolver)
-                .timeout(config.connect_timeout)
+                .timeout(config.transport.connect_timeout)
                 .tls_info(config.tls.tls_info)
                 .tls_options(tls_options)
-                .verbose(config.connection_verbose)
+                .verbose(config.transport.connection_verbose)
                 .with_tls(|tls| {
                     let alpn_protocol = match config.protocol.http_version_pref {
                         HttpVersionPref::Http1 => Some(AlpnProtocol::HTTP1),
@@ -760,7 +767,7 @@ impl ClientBuilder {
                     http.set_keepalive_retries(config.transport.tcp_keepalive_retries);
                     http.set_reuse_address(config.transport.tcp_reuse_address);
                     http.set_connect_options(config.transport.tcp_connect_options);
-                    http.set_connect_timeout(config.connect_timeout);
+                    http.set_connect_timeout(config.transport.connect_timeout);
                     http.set_nodelay(config.transport.tcp_nodelay);
                     http.set_send_buffer_size(config.transport.tcp_send_buffer_size);
                     http.set_recv_buffer_size(config.transport.tcp_recv_buffer_size);
@@ -803,7 +810,7 @@ impl ClientBuilder {
         let client = {
             #[cfg(feature = "cookies")]
             let service = ServiceBuilder::new()
-                .layer(CookieServiceLayer::new(config.cookie_store))
+                .layer(CookieServiceLayer::new(config.middleware.cookie_store))
                 .service(service);
 
             let service = ServiceBuilder::new()
@@ -825,7 +832,7 @@ impl ClientBuilder {
                 feature = "deflate",
             ))]
             let service = ServiceBuilder::new()
-                .layer(DecompressionLayer::new(config.accept_encoding))
+                .layer(DecompressionLayer::new(config.middleware.accept_encoding))
                 .service(service);
 
             let service = ServiceBuilder::new()
@@ -996,7 +1003,7 @@ impl ClientBuilder {
         if enable {
             self.cookie_provider(Arc::new(cookie::Jar::default()))
         } else {
-            self.config.cookie_store = None;
+            self.config.middleware.cookie_store = None;
             self
         }
     }
@@ -1018,7 +1025,7 @@ impl ClientBuilder {
     where
         C: cookie::IntoCookieStore,
     {
-        self.config.cookie_store = Some(cookie_store.into_cookie_store());
+        self.config.middleware.cookie_store = Some(cookie_store.into_cookie_store());
         self
     }
 
@@ -1042,7 +1049,7 @@ impl ClientBuilder {
     #[cfg(feature = "gzip")]
     #[cfg_attr(docsrs, doc(cfg(feature = "gzip")))]
     pub fn gzip(mut self, enable: bool) -> ClientBuilder {
-        self.config.accept_encoding.gzip = enable;
+        self.config.middleware.accept_encoding.gzip = enable;
         self
     }
 
@@ -1066,7 +1073,7 @@ impl ClientBuilder {
     #[cfg(feature = "brotli")]
     #[cfg_attr(docsrs, doc(cfg(feature = "brotli")))]
     pub fn brotli(mut self, enable: bool) -> ClientBuilder {
-        self.config.accept_encoding.brotli = enable;
+        self.config.middleware.accept_encoding.brotli = enable;
         self
     }
 
@@ -1090,7 +1097,7 @@ impl ClientBuilder {
     #[cfg(feature = "zstd")]
     #[cfg_attr(docsrs, doc(cfg(feature = "zstd")))]
     pub fn zstd(mut self, enable: bool) -> ClientBuilder {
-        self.config.accept_encoding.zstd = enable;
+        self.config.middleware.accept_encoding.zstd = enable;
         self
     }
 
@@ -1114,7 +1121,7 @@ impl ClientBuilder {
     #[cfg(feature = "deflate")]
     #[cfg_attr(docsrs, doc(cfg(feature = "deflate")))]
     pub fn deflate(mut self, enable: bool) -> ClientBuilder {
-        self.config.accept_encoding.deflate = enable;
+        self.config.middleware.accept_encoding.deflate = enable;
         self
     }
 
@@ -1319,11 +1326,8 @@ impl ClientBuilder {
     /// a tokio timer enabled.
     #[inline]
     pub fn connect_timeout(mut self, timeout: Duration) -> ClientBuilder {
-        self.config.connect_timeout = Some(timeout);
-        self.config
-            .protocol
-            .timeout_options
-            .timeout_connect(Some(timeout));
+        self.config.transport.connect_timeout = Some(timeout);
+        self.config.sync_connect_timeout();
         self
     }
 
@@ -1446,7 +1450,7 @@ impl ClientBuilder {
     /// [log]: https://crates.io/crates/log
     #[inline]
     pub fn connection_verbose(mut self, verbose: bool) -> ClientBuilder {
-        self.config.connection_verbose = verbose;
+        self.config.transport.connection_verbose = verbose;
         self
     }
 
@@ -1507,7 +1511,7 @@ impl ClientBuilder {
     #[cfg(feature = "http1")]
     #[inline]
     pub fn http1_options(mut self, options: Http1Options) -> ClientBuilder {
-        *self.config.transport_options.http1_options_mut() = Some(options);
+        *self.config.transport.transport_options.http1_options_mut() = Some(options);
         self
     }
 
@@ -1525,12 +1529,13 @@ impl ClientBuilder {
 
         let mut options = self
             .config
+            .transport
             .transport_options
             .http1_options
             .take()
             .unwrap_or_default();
         options.h1_max_poll_iterations = Some(max_iterations);
-        *self.config.transport_options.http1_options_mut() = Some(options);
+        *self.config.transport.transport_options.http1_options_mut() = Some(options);
         self
     }
 
@@ -1538,7 +1543,7 @@ impl ClientBuilder {
     #[cfg(feature = "http2")]
     #[inline]
     pub fn http2_options(mut self, options: Http2Options) -> ClientBuilder {
-        *self.config.transport_options.http2_options_mut() = Some(options);
+        *self.config.transport.transport_options.http2_options_mut() = Some(options);
         self
     }
 
@@ -1887,7 +1892,7 @@ impl ClientBuilder {
     /// Sets the TLS options for the client.
     #[inline]
     pub fn tls_options(mut self, options: TlsOptions) -> ClientBuilder {
-        *self.config.transport_options.tls_options_mut() = Some(options);
+        *self.config.transport.transport_options.tls_options_mut() = Some(options);
         self
     }
 
@@ -2223,6 +2228,7 @@ impl ClientBuilder {
         let (transport_opts, headers, orig_headers) = emulation.into_parts();
 
         self.config
+            .transport
             .transport_options
             .apply_transport_options(transport_opts);
         self.default_headers(headers).orig_headers(orig_headers)
@@ -2231,7 +2237,7 @@ impl ClientBuilder {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{sync::Arc, time::Duration};
 
     use tower::util::Either;
 
@@ -2261,14 +2267,45 @@ mod tests {
 
     #[test]
     fn transport_config_options_override_transport_defaults() {
+        let connect_timeout = Duration::from_secs(3);
         let builder = Client::builder().transport_config(
             TransportConfigOptions::new()
+                .connect_timeout(Some(connect_timeout))
+                .connection_verbose(true)
                 .tcp_nodelay(false)
                 .tcp_reuse_address(true),
         );
 
+        assert_eq!(
+            builder.config.transport.connect_timeout,
+            Some(connect_timeout)
+        );
+        assert!(builder.config.transport.connection_verbose);
         assert!(!builder.config.transport.tcp_nodelay);
         assert!(builder.config.transport.tcp_reuse_address);
+        assert_eq!(
+            builder.config.protocol.timeout_options.connect_timeout(),
+            Some(connect_timeout)
+        );
+    }
+
+    #[test]
+    fn transport_builder_methods_mutate_nested_transport_group() {
+        let connect_timeout = Duration::from_secs(7);
+
+        let builder = Client::builder()
+            .connect_timeout(connect_timeout)
+            .connection_verbose(true);
+
+        assert_eq!(
+            builder.config.transport.connect_timeout,
+            Some(connect_timeout)
+        );
+        assert!(builder.config.transport.connection_verbose);
+        assert_eq!(
+            builder.config.protocol.timeout_options.connect_timeout(),
+            Some(connect_timeout)
+        );
     }
 
     #[test]
@@ -2284,11 +2321,52 @@ mod tests {
         assert!(!builder_b.config.protocol.referer);
     }
 
+    #[test]
+    fn protocol_config_preserves_transport_connect_timeout() {
+        let connect_timeout = Duration::from_secs(11);
+
+        let builder = Client::builder()
+            .connect_timeout(connect_timeout)
+            .protocol_config(ProtocolConfigOptions::new().https_only(true));
+
+        assert_eq!(
+            builder.config.transport.connect_timeout,
+            Some(connect_timeout)
+        );
+        assert_eq!(
+            builder.config.protocol.timeout_options.connect_timeout(),
+            Some(connect_timeout)
+        );
+    }
+
+    #[cfg(feature = "http1")]
+    #[test]
+    fn transport_config_preserves_existing_http1_transport_options() {
+        let builder = Client::builder()
+            .max_poll_iterations(7)
+            .transport_config(TransportConfigOptions::new().tcp_nodelay(false));
+
+        let options = builder
+            .config
+            .transport
+            .transport_options
+            .http1_options
+            .unwrap();
+
+        assert_eq!(options.h1_max_poll_iterations, Some(7));
+        assert!(!builder.config.transport.tcp_nodelay);
+    }
+
     #[cfg(feature = "http1")]
     #[test]
     fn max_poll_iterations_updates_http1_options() {
         let builder = Client::builder().max_poll_iterations(7);
-        let options = builder.config.transport_options.http1_options.unwrap();
+        let options = builder
+            .config
+            .transport
+            .transport_options
+            .http1_options
+            .unwrap();
 
         assert_eq!(options.h1_max_poll_iterations, Some(7));
     }

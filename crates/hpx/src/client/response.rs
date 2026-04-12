@@ -14,16 +14,25 @@ use http_body::{Body as HttpBody, Frame};
 use http_body_util::{BodyExt, Collected};
 #[cfg(feature = "charset")]
 use mime::Mime;
-#[cfg(feature = "json")]
+#[cfg(any(feature = "json", feature = "form"))]
 use serde::de::DeserializeOwned;
 
 use super::{
+    ClientResponseBody,
     conn::HttpInfo,
     core::{ext::ReasonPhrase, upgrade},
 };
 #[cfg(feature = "cookies")]
 use crate::cookie;
 use crate::{Body, Error, Upgraded, error::BoxError, ext::RequestUri};
+
+#[cfg(feature = "simd-json")]
+fn simd_json_input(bytes: Bytes) -> bytes::BytesMut {
+    match bytes.try_into_mut() {
+        Ok(bytes_mut) => bytes_mut,
+        Err(bytes) => bytes::BytesMut::from(bytes.as_ref()),
+    }
+}
 
 /// A Response to a submitted [`crate::Request`].
 #[derive(Debug)]
@@ -58,6 +67,13 @@ impl Response {
         B::Error: Into<BoxError>,
     {
         Response::new(res, uri)
+    }
+
+    pub(crate) fn from_client_response(uri: Uri, res: http::Response<ClientResponseBody>) -> Self {
+        Response {
+            uri,
+            res: res.map(Body::from),
+        }
     }
 
     /// Get the final [`Uri`] of this [`Response`].
@@ -238,6 +254,51 @@ impl Response {
         Ok(text.into_owned())
     }
 
+    /// Try to deserialize the response body as `application/x-www-form-urlencoded`.
+    ///
+    /// # Optional
+    ///
+    /// This requires the optional `form` feature enabled.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate hpx;
+    /// # extern crate serde;
+    /// #
+    /// # use hpx::Error;
+    /// # use serde::Deserialize;
+    /// #
+    /// #[derive(Deserialize)]
+    /// struct TokenResponse {
+    ///     access_token: String,
+    ///     expires_in: u64,
+    /// }
+    ///
+    /// # async fn run() -> Result<(), Error> {
+    /// let token = hpx::Client::new()
+    ///     .get("https://example.com/oauth/token")
+    ///     .send()
+    ///     .await?
+    ///     .form::<TokenResponse>()
+    ///     .await?;
+    ///
+    /// println!(
+    ///     "token: {} expires in {}",
+    ///     token.access_token, token.expires_in
+    /// );
+    /// # Ok(())
+    /// # }
+    /// #
+    /// # fn main() { }
+    /// ```
+    #[cfg(feature = "form")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "form")))]
+    pub async fn form<T: DeserializeOwned>(self) -> crate::Result<T> {
+        let full = self.bytes().await?;
+        serde_urlencoded::from_bytes(&full).map_err(Error::decode)
+    }
+
     /// Try to deserialize the response body as JSON.
     ///
     /// # Optional
@@ -327,9 +388,8 @@ impl Response {
     #[cfg_attr(docsrs, doc(cfg(feature = "simd-json")))]
     pub async fn json<T: DeserializeOwned>(self) -> crate::Result<T> {
         let full = self.bytes().await?;
-        // simd-json requires a mutable buffer
-        let mut bytes_vec = full.to_vec();
-        simd_json::from_slice(&mut bytes_vec).map_err(Error::decode)
+        let mut bytes_mut = simd_json_input(full);
+        simd_json::from_slice(&mut bytes_mut).map_err(Error::decode)
     }
 
     /// Get the full response body as [`Bytes`].
@@ -602,7 +662,7 @@ impl<T: Into<Body>> From<http::Response<T>> for Response {
 // It's supposed to be the inverse of the conversion above.
 impl From<Response> for http::Response<Body> {
     fn from(r: Response) -> http::Response<Body> {
-        let mut res = r.res.map(Body::wrap);
+        let mut res = r.res;
         res.extensions_mut().insert(RequestUri(r.uri));
         res
     }
@@ -611,7 +671,7 @@ impl From<Response> for http::Response<Body> {
 /// A [`Response`] can be piped as the [`Body`] of another request.
 impl From<Response> for Body {
     fn from(r: Response) -> Body {
-        Body::wrap(r.res.into_body())
+        r.res.into_body()
     }
 }
 
@@ -637,5 +697,104 @@ impl HttpBody for Response {
     #[inline]
     fn size_hint(&self) -> http_body::SizeHint {
         self.res.body().size_hint()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+    use http::Uri;
+    #[cfg(feature = "form")]
+    use serde::Deserialize;
+
+    use super::Response;
+    #[cfg(feature = "simd-json")]
+    use super::simd_json_input;
+    use crate::{Body, ClientResponseBody, ext::RequestUri};
+
+    fn response_with_body<T: Into<Body>>(body: T) -> Response {
+        let mut res = http::Response::new(body);
+        res.extensions_mut()
+            .insert(RequestUri(Uri::from_static("https://example.com/resource")));
+        res.into()
+    }
+
+    #[cfg(feature = "form")]
+    #[tokio::test]
+    async fn response_form_decodes_urlencoded_body() {
+        #[derive(Debug, Deserialize, PartialEq, Eq)]
+        struct TokenResponse {
+            access_token: String,
+            expires_in: u64,
+        }
+
+        let response = response_with_body("access_token=abc123&expires_in=60");
+        let token = response.form::<TokenResponse>().await.unwrap();
+
+        assert_eq!(
+            token,
+            TokenResponse {
+                access_token: "abc123".to_owned(),
+                expires_in: 60,
+            }
+        );
+    }
+
+    #[test]
+    fn response_into_body_preserves_reusable_bytes() {
+        let response = response_with_body(Bytes::from_static(b"hello"));
+        let body: Body = response.into();
+
+        assert_eq!(body.as_bytes(), Some(&b"hello"[..]));
+    }
+
+    #[test]
+    fn response_into_http_preserves_reusable_bytes_and_uri() {
+        let response = response_with_body(Bytes::from_static(b"hello"));
+        let http_response: http::Response<Body> = response.into();
+
+        assert_eq!(http_response.body().as_bytes(), Some(&b"hello"[..]));
+        assert_eq!(
+            http_response
+                .extensions()
+                .get::<RequestUri>()
+                .map(|uri| &uri.0),
+            Some(&Uri::from_static("https://example.com/resource"))
+        );
+    }
+
+    #[test]
+    fn response_from_client_response_preserves_direct_body_access() {
+        let response = Response::from_client_response(
+            Uri::from_static("https://example.com/resource"),
+            http::Response::new(ClientResponseBody::from(Bytes::from_static(b"hello"))),
+        );
+
+        let body: Body = response.into();
+        assert_eq!(body.as_bytes(), Some(&b"hello"[..]));
+    }
+
+    #[cfg(feature = "simd-json")]
+    #[test]
+    fn simd_json_input_reuses_unique_bytes_storage() {
+        let bytes = Bytes::from(Vec::from(&b"{\"ok\":true}"[..]));
+        let ptr = bytes.as_ptr();
+
+        let buffer = simd_json_input(bytes);
+
+        assert_eq!(buffer.as_ptr(), ptr);
+    }
+
+    #[cfg(feature = "simd-json")]
+    #[test]
+    fn simd_json_input_copies_when_bytes_are_shared() {
+        let bytes = Bytes::from(Vec::from(&b"{\"ok\":true}"[..]));
+        let shared = bytes.clone();
+        let ptr = shared.as_ptr();
+
+        let buffer = simd_json_input(shared);
+
+        assert_eq!(buffer.as_ref(), bytes.as_ref());
+        assert_ne!(buffer.as_ptr(), ptr);
     }
 }

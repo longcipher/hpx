@@ -64,6 +64,22 @@ impl Request {
         Request(request)
     }
 
+    /// Construct an [`hpx::Request`](crate::Request) from any standard [`http::Request`].
+    ///
+    /// Unlike the blanket `From<http::Request<T>> for Request` impl, this accepts any
+    /// `http-body` compatible body type and wraps it for streaming without pre-buffering.
+    /// This is useful when forwarding framework-native request bodies such as
+    /// `axum::extract::Request` into `hpx`.
+    pub fn from_http<B>(req: HttpRequest<B>) -> Self
+    where
+        B: http_body::Body + Send + Sync + 'static,
+        B::Data: Into<bytes::Bytes>,
+        B::Error: Into<crate::error::BoxError>,
+    {
+        let (parts, body) = req.into_parts();
+        Request(HttpRequest::from_parts(parts, Some(Body::wrap(body))))
+    }
+
     /// Get the method.
     #[inline]
     pub fn method(&self) -> &Method {
@@ -906,5 +922,39 @@ impl From<Request> for HttpRequest<Body> {
     #[inline]
     fn from(req: Request) -> HttpRequest<Body> {
         req.0.map(|body| body.unwrap_or_else(Body::empty))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+    use http_body_util::{BodyExt, Full};
+
+    use super::Request;
+
+    #[tokio::test]
+    async fn request_from_http_preserves_parts_and_streams_body() {
+        let mut req = http::Request::builder()
+            .method(http::Method::POST)
+            .uri("https://example.com/upload?part=1")
+            .header("x-test", "value")
+            .body(Full::new(Bytes::from_static(b"payload")))
+            .unwrap();
+        req.extensions_mut().insert(42usize);
+
+        let request = Request::from_http(req);
+
+        assert_eq!(request.method(), http::Method::POST);
+        assert_eq!(
+            request.uri().to_string(),
+            "https://example.com/upload?part=1"
+        );
+        assert_eq!(request.headers()["x-test"], "value");
+        assert_eq!(request.extensions().get::<usize>(), Some(&42));
+
+        let http_request: http::Request<crate::Body> = request.into();
+        let bytes = http_request.into_body().collect().await.unwrap().to_bytes();
+
+        assert_eq!(bytes, Bytes::from_static(b"payload"));
     }
 }

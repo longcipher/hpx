@@ -8,19 +8,63 @@ use std::{
 
 use bytes::Bytes;
 use http_body::{Body as HttpBody, SizeHint};
-use http_body_util::{BodyExt, Either, Full, combinators::BoxBody};
+use http_body_util::{BodyExt, combinators::BoxBody};
 use pin_project_lite::pin_project;
 #[cfg(feature = "stream")]
 use {tokio::fs::File, tokio_util::io::ReaderStream};
 
+use super::http::InnerResponseBody;
 use crate::error::{BoxError, Error};
 
-/// An request body.
-#[derive(Debug)]
-pub struct Body(Either<Bytes, BoxBody<Bytes, BoxError>>);
+pin_project! {
+    /// An request body.
+    pub struct Body {
+        #[pin]
+        inner: BodyInner,
+    }
+}
 
-/// A stable, erased response body type for client middleware boundaries.
-pub struct ClientResponseBody(BoxBody<Bytes, BoxError>);
+pin_project! {
+    /// A stable, erased response body type for client middleware boundaries.
+    pub struct ClientResponseBody {
+        #[pin]
+        inner: ClientResponseBodyInner,
+    }
+}
+
+pin_project! {
+    #[project = BodyInnerProj]
+    enum BodyInner {
+        Reusable {
+            bytes: Bytes,
+        },
+        Client {
+            #[pin]
+            body: Pin<Box<ClientResponseBody>>,
+        },
+        Boxed {
+            #[pin]
+            body: BoxBody<Bytes, BoxError>,
+        },
+    }
+}
+
+pin_project! {
+    #[project = ClientResponseBodyInnerProj]
+    enum ClientResponseBodyInner {
+        Reusable {
+            bytes: Bytes,
+        },
+        Inner {
+            #[pin]
+            body: InnerResponseBody,
+        },
+        Boxed {
+            #[pin]
+            body: BoxBody<Bytes, BoxError>,
+        },
+    }
+}
 
 pin_project! {
     /// We can't use `map_frame()` because that loses the hint data (for good reason).
@@ -38,9 +82,10 @@ impl Body {
     ///
     /// `None` is returned, if the underlying data is a stream.
     pub fn as_bytes(&self) -> Option<&[u8]> {
-        match &self.0 {
-            Either::Left(bytes) => Some(bytes.as_ref()),
-            Either::Right(..) => None,
+        match &self.inner {
+            BodyInner::Reusable { bytes } => Some(bytes.as_ref()),
+            BodyInner::Client { body } => body.as_ref().get_ref().as_bytes(),
+            BodyInner::Boxed { .. } => None,
         }
     }
 
@@ -63,9 +108,7 @@ impl Body {
         B::Data: Into<Bytes>,
         B::Error: Into<BoxError>,
     {
-        Body(Either::Right(
-            IntoBytesBody { inner }.map_err(Into::into).boxed(),
-        ))
+        Body::boxed(IntoBytesBody { inner }.map_err(Into::into).boxed())
     }
 
     /// Wrap a futures `Stream` in a box inside `Body`.
@@ -116,7 +159,7 @@ impl Body {
                 .map_ok(Frame::data)
                 .map_err(Into::into),
         ));
-        Body(Either::Right(body.boxed()))
+        Body::boxed(body.boxed())
     }
 
     #[inline]
@@ -126,21 +169,32 @@ impl Body {
 
     #[inline]
     pub(crate) fn reusable(chunk: Bytes) -> Body {
-        Body(Either::Left(chunk))
+        Body {
+            inner: BodyInner::Reusable { bytes: chunk },
+        }
+    }
+
+    #[inline]
+    fn boxed(body: BoxBody<Bytes, BoxError>) -> Body {
+        Body {
+            inner: BodyInner::Boxed { body },
+        }
     }
 
     #[cfg(feature = "multipart")]
     pub(crate) fn content_length(&self) -> Option<u64> {
-        match self.0 {
-            Either::Left(ref bytes) => Some(bytes.len() as u64),
-            Either::Right(ref body) => body.size_hint().exact(),
+        match &self.inner {
+            BodyInner::Reusable { bytes } => Some(bytes.len() as u64),
+            BodyInner::Client { body } => body.size_hint().exact(),
+            BodyInner::Boxed { body } => body.size_hint().exact(),
         }
     }
 
     pub(crate) fn try_clone(&self) -> Option<Body> {
-        match self.0 {
-            Either::Left(ref chunk) => Some(Body::reusable(chunk.clone())),
-            Either::Right { .. } => None,
+        match &self.inner {
+            BodyInner::Reusable { bytes } => Some(Body::reusable(bytes.clone())),
+            BodyInner::Client { body } => body.as_ref().get_ref().try_clone().map(Body::from),
+            BodyInner::Boxed { .. } => None,
         }
     }
 
@@ -165,15 +219,16 @@ impl Body {
     /// }
     /// ```
     pub fn into_bytes_mut(self) -> Option<bytes::BytesMut> {
-        match self.0 {
-            Either::Left(bytes) => {
+        match self.inner {
+            BodyInner::Reusable { bytes } => {
                 // Try to convert without copying if possible
                 match bytes.try_into_mut() {
                     Ok(bytes_mut) => Some(bytes_mut),
                     Err(bytes) => Some(bytes::BytesMut::from(bytes.as_ref())),
                 }
             }
-            Either::Right(_) => None,
+            BodyInner::Client { .. } => None,
+            BodyInner::Boxed { .. } => None,
         }
     }
 
@@ -218,6 +273,16 @@ impl Default for Body {
     }
 }
 
+impl fmt::Debug for Body {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.inner {
+            BodyInner::Reusable { bytes } => f.debug_tuple("Body").field(bytes).finish(),
+            BodyInner::Client { .. } => f.write_str("Body(ClientResponseBody(..))"),
+            BodyInner::Boxed { .. } => f.write_str("Body(..)"),
+        }
+    }
+}
+
 impl ClientResponseBody {
     /// Wrap any compatible HTTP body into the stable client response body type.
     pub fn wrap<B>(inner: B) -> Self
@@ -226,7 +291,55 @@ impl ClientResponseBody {
         B::Data: Into<Bytes>,
         B::Error: Into<BoxError>,
     {
-        Self(IntoBytesBody { inner }.map_err(Into::into).boxed())
+        Self::boxed(IntoBytesBody { inner }.map_err(Into::into).boxed())
+    }
+
+    #[inline]
+    pub(crate) fn from_inner_response(body: InnerResponseBody) -> Self {
+        Self {
+            inner: ClientResponseBodyInner::Inner { body },
+        }
+    }
+
+    #[inline]
+    fn boxed(body: BoxBody<Bytes, BoxError>) -> Self {
+        Self {
+            inner: ClientResponseBodyInner::Boxed { body },
+        }
+    }
+
+    #[inline]
+    fn reusable(bytes: Bytes) -> Self {
+        Self {
+            inner: ClientResponseBodyInner::Reusable { bytes },
+        }
+    }
+
+    #[inline]
+    fn as_bytes(&self) -> Option<&[u8]> {
+        match &self.inner {
+            ClientResponseBodyInner::Reusable { bytes } => Some(bytes.as_ref()),
+            ClientResponseBodyInner::Inner { .. } | ClientResponseBodyInner::Boxed { .. } => None,
+        }
+    }
+
+    #[inline]
+    fn into_bytes_mut(self) -> Option<bytes::BytesMut> {
+        match self.inner {
+            ClientResponseBodyInner::Reusable { bytes } => match bytes.try_into_mut() {
+                Ok(bytes_mut) => Some(bytes_mut),
+                Err(bytes) => Some(bytes::BytesMut::from(bytes.as_ref())),
+            },
+            ClientResponseBodyInner::Inner { .. } | ClientResponseBodyInner::Boxed { .. } => None,
+        }
+    }
+
+    #[inline]
+    fn try_clone(&self) -> Option<Self> {
+        match &self.inner {
+            ClientResponseBodyInner::Reusable { bytes } => Some(Self::reusable(bytes.clone())),
+            ClientResponseBodyInner::Inner { .. } | ClientResponseBodyInner::Boxed { .. } => None,
+        }
     }
 }
 
@@ -244,13 +357,13 @@ impl Default for ClientResponseBody {
 
 impl From<BoxBody<Bytes, BoxError>> for ClientResponseBody {
     fn from(body: BoxBody<Bytes, BoxError>) -> Self {
-        Self(body)
+        Self::boxed(body)
     }
 }
 
 impl From<Bytes> for ClientResponseBody {
     fn from(bytes: Bytes) -> Self {
-        Self(Full::new(bytes).map_err(|never| match never {}).boxed())
+        Self::reusable(bytes)
     }
 }
 
@@ -281,7 +394,18 @@ impl From<&'static str> for ClientResponseBody {
 impl From<BoxBody<Bytes, BoxError>> for Body {
     #[inline]
     fn from(body: BoxBody<Bytes, BoxError>) -> Self {
-        Self(Either::Right(body))
+        Self::boxed(body)
+    }
+}
+
+impl From<ClientResponseBody> for Body {
+    #[inline]
+    fn from(body: ClientResponseBody) -> Self {
+        Self {
+            inner: BodyInner::Client {
+                body: Box::pin(body),
+            },
+        }
     }
 }
 
@@ -336,8 +460,8 @@ impl HttpBody for Body {
         mut self: Pin<&mut Self>,
         cx: &mut Context,
     ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
-        match self.0 {
-            Either::Left(ref mut bytes) => {
+        match self.as_mut().project().inner.project() {
+            BodyInnerProj::Reusable { bytes } => {
                 let out = bytes.split_off(0);
                 if out.is_empty() {
                     Poll::Ready(None)
@@ -345,8 +469,17 @@ impl HttpBody for Body {
                     Poll::Ready(Some(Ok(http_body::Frame::data(out))))
                 }
             }
-            Either::Right(ref mut body) => {
-                Poll::Ready(ready!(Pin::new(body).poll_frame(cx)).map(|opt_chunk| {
+            BodyInnerProj::Client { body } => {
+                let mut body = body.get_mut().as_mut();
+                Poll::Ready(ready!(body.as_mut().poll_frame(cx)).map(|opt_chunk| {
+                    opt_chunk.map_err(|err| match err.downcast::<Error>() {
+                        Ok(err) => *err,
+                        Err(err) => Error::body(err),
+                    })
+                }))
+            }
+            BodyInnerProj::Boxed { body } => {
+                Poll::Ready(ready!(body.poll_frame(cx)).map(|opt_chunk| {
                     opt_chunk.map_err(|err| match err.downcast::<Error>() {
                         Ok(err) => *err,
                         Err(err) => Error::body(err),
@@ -358,17 +491,19 @@ impl HttpBody for Body {
 
     #[inline]
     fn size_hint(&self) -> SizeHint {
-        match self.0 {
-            Either::Left(ref bytes) => SizeHint::with_exact(bytes.len() as u64),
-            Either::Right(ref body) => body.size_hint(),
+        match &self.inner {
+            BodyInner::Reusable { bytes } => SizeHint::with_exact(bytes.len() as u64),
+            BodyInner::Client { body } => body.size_hint(),
+            BodyInner::Boxed { body } => body.size_hint(),
         }
     }
 
     #[inline]
     fn is_end_stream(&self) -> bool {
-        match self.0 {
-            Either::Left(ref bytes) => bytes.is_empty(),
-            Either::Right(ref body) => body.is_end_stream(),
+        match &self.inner {
+            BodyInner::Reusable { bytes } => bytes.is_empty(),
+            BodyInner::Client { body } => body.is_end_stream(),
+            BodyInner::Boxed { body } => body.is_end_stream(),
         }
     }
 }
@@ -381,15 +516,34 @@ impl HttpBody for ClientResponseBody {
         mut self: Pin<&mut Self>,
         cx: &mut Context,
     ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
-        Pin::new(&mut self.0).poll_frame(cx)
+        match self.as_mut().project().inner.project() {
+            ClientResponseBodyInnerProj::Reusable { bytes } => {
+                let out = bytes.split_off(0);
+                if out.is_empty() {
+                    Poll::Ready(None)
+                } else {
+                    Poll::Ready(Some(Ok(http_body::Frame::data(out))))
+                }
+            }
+            ClientResponseBodyInnerProj::Inner { body } => body.poll_frame(cx),
+            ClientResponseBodyInnerProj::Boxed { body } => body.poll_frame(cx),
+        }
     }
 
     fn size_hint(&self) -> SizeHint {
-        self.0.size_hint()
+        match &self.inner {
+            ClientResponseBodyInner::Reusable { bytes } => SizeHint::with_exact(bytes.len() as u64),
+            ClientResponseBodyInner::Inner { body } => body.size_hint(),
+            ClientResponseBodyInner::Boxed { body } => body.size_hint(),
+        }
     }
 
     fn is_end_stream(&self) -> bool {
-        self.0.is_end_stream()
+        match &self.inner {
+            ClientResponseBodyInner::Reusable { bytes } => bytes.is_empty(),
+            ClientResponseBodyInner::Inner { body } => body.is_end_stream(),
+            ClientResponseBodyInner::Boxed { body } => body.is_end_stream(),
+        }
     }
 }
 

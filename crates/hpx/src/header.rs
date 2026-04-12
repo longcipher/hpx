@@ -139,33 +139,30 @@ impl OrigHeaderMap {
     }
 
     /// Calls the given function for each header in this map's order, preserving original casing.
-    /// Headers in the map are processed first, others follow.
-    pub(crate) fn sort_headers_for_each<F>(&self, headers: &mut HeaderMap, mut dst: F)
+    /// Headers in the map are processed first, others follow, without mutating `headers`.
+    pub(crate) fn sort_headers_for_each<F>(&self, headers: &HeaderMap, mut dst: F)
     where
         F: FnMut(&[u8], &HeaderValue),
     {
-        // First, sort headers according to the order defined in this map
+        // Preserve the current behavior for duplicate normalized names in OrigHeaderMap:
+        // only the first original spelling for a given HeaderName drives output.
         for (name, orig_name) in self.iter() {
+            let Some(first_orig_name) = self.0.get_all(name).iter().next() else {
+                continue;
+            };
+            if !std::ptr::eq(first_orig_name, orig_name) {
+                continue;
+            }
+
             for value in headers.get_all(name) {
                 dst(orig_name.as_ref(), value);
             }
-
-            headers.remove(name);
         }
 
-        // After processing all ordered headers, append any remaining headers
-        let mut prev_name: Option<OrigHeaderName> = None;
-        for (name, value) in headers.drain() {
-            match (name, &prev_name) {
-                (Some(name), _) => {
-                    dst(name.as_ref(), &value);
-                    prev_name.replace(name.into_orig_header_name());
-                }
-                (None, Some(prev_name)) => {
-                    dst(prev_name.as_ref(), &value);
-                }
-                _ => (),
-            };
+        for (name, value) in headers {
+            if !self.0.contains_key(name) {
+                dst(name.as_ref(), value);
+            }
         }
     }
 }
@@ -306,6 +303,17 @@ mod test {
     use http::{HeaderMap, HeaderName, HeaderValue};
 
     use super::OrigHeaderMap;
+
+    fn collect_sorted_headers(
+        orig_headers: &OrigHeaderMap,
+        headers: &HeaderMap,
+    ) -> Vec<(Vec<u8>, HeaderValue)> {
+        let mut ordered = Vec::new();
+        orig_headers.sort_headers_for_each(headers, |name, value| {
+            ordered.push((name.to_vec(), value.clone()));
+        });
+        ordered
+    }
 
     /// Returns a view of all spellings associated with that header name,
     /// in the order they were found.
@@ -502,5 +510,83 @@ mod test {
             1,
             "Host header should be preserved"
         );
+    }
+
+    #[test]
+    fn test_sort_headers_for_each_preserves_effective_order_and_original_case() {
+        let mut orig_headers = OrigHeaderMap::new();
+        orig_headers.insert("X-Test");
+        orig_headers.insert("Accept");
+
+        let mut headers = HeaderMap::new();
+        headers.insert("user-agent", HeaderValue::from_static("agent/1.0"));
+        headers.append("x-test", HeaderValue::from_static("one"));
+        headers.append("x-test", HeaderValue::from_static("two"));
+        headers.insert("host", HeaderValue::from_static("example.com"));
+        headers.insert("accept", HeaderValue::from_static("application/json"));
+
+        let ordered = collect_sorted_headers(&orig_headers, &headers);
+
+        let rendered: Vec<_> = ordered
+            .into_iter()
+            .map(|(name, value)| (name, value.to_str().unwrap().to_owned()))
+            .collect();
+        assert_eq!(
+            rendered,
+            vec![
+                (b"X-Test".to_vec(), "one".to_owned()),
+                (b"X-Test".to_vec(), "two".to_owned()),
+                (b"Accept".to_vec(), "application/json".to_owned()),
+                (b"user-agent".to_vec(), "agent/1.0".to_owned()),
+                (b"host".to_vec(), "example.com".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_sort_headers_for_each_skips_duplicate_normalized_original_names() {
+        let mut orig_headers = OrigHeaderMap::new();
+        orig_headers.insert("X-Test");
+        orig_headers.insert("x-test");
+        orig_headers.insert("X-Test");
+        orig_headers.insert("Accept");
+
+        let mut headers = HeaderMap::new();
+        headers.append("x-test", HeaderValue::from_static("one"));
+        headers.append("x-test", HeaderValue::from_static("two"));
+        headers.insert("accept", HeaderValue::from_static("text/plain"));
+
+        let ordered = collect_sorted_headers(&orig_headers, &headers);
+
+        let rendered: Vec<_> = ordered
+            .into_iter()
+            .map(|(name, value)| (name, value.to_str().unwrap().to_owned()))
+            .collect();
+        assert_eq!(
+            rendered,
+            vec![
+                (b"X-Test".to_vec(), "one".to_owned()),
+                (b"X-Test".to_vec(), "two".to_owned()),
+                (b"Accept".to_vec(), "text/plain".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_sort_headers_for_each_does_not_mutate_source_headers() {
+        let mut orig_headers = OrigHeaderMap::new();
+        orig_headers.insert("X-Test");
+        orig_headers.insert("Accept");
+
+        let mut headers = HeaderMap::new();
+        headers.insert("user-agent", HeaderValue::from_static("agent/1.0"));
+        headers.append("x-test", HeaderValue::from_static("one"));
+        headers.append("x-test", HeaderValue::from_static("two"));
+        headers.insert("accept", HeaderValue::from_static("application/json"));
+        let expected = headers.clone();
+
+        let _ = collect_sorted_headers(&orig_headers, &headers);
+
+        assert_eq!(headers, expected);
     }
 }

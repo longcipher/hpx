@@ -42,6 +42,45 @@ async fn main() -> hpx::Result<()> {
 }
 ```
 
+## Streaming / Proxying / Gateway
+
+Requires the `stream` feature. `Request::from_http(...)` lets you forward framework-native request bodies into `hpx` without buffering them first, which is useful in reverse proxies and API gateways.
+
+```rust
+use axum::{
+    body::Body as AxumBody,
+    extract::{Request as AxumRequest, State},
+    http::{Response as AxumResponse, StatusCode},
+};
+use hpx::{Body, Client, Request};
+
+async fn proxy(
+    State(client): State<Client>,
+    mut req: AxumRequest<AxumBody>,
+) -> Result<AxumResponse<Body>, StatusCode> {
+    let path_and_query = req
+        .uri()
+        .path_and_query()
+        .map(|value| value.as_str())
+        .unwrap_or("/");
+
+    let upstream_uri = format!("https://upstream.internal{path_and_query}")
+        .parse()
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    *req.uri_mut() = upstream_uri;
+
+    let upstream_req = Request::from_http(req);
+    let upstream_res = client
+        .execute(upstream_req)
+        .await
+        .map_err(|_| StatusCode::BAD_GATEWAY)?;
+
+    Ok(http::Response::<Body>::from(upstream_res))
+}
+```
+
+Use `Response::bytes_stream()` when you need per-chunk inspection, and `Client::into_tower_service()` when you want to compose the client inside a Tower middleware stack via `tower_compat::HpxService`.
+
 ## Cloudflare mTLS
 
 `hpx` can attach a client certificate during the TLS handshake, which is required for Cloudflare Access / Zero Trust deployments protected by mutual TLS.
