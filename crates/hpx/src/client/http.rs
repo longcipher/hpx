@@ -725,7 +725,7 @@ impl ClientBuilder {
                 let mut resolver: Arc<dyn Resolve> = match config.dns.dns_resolver {
                     Some(dns_resolver) => dns_resolver,
                     #[cfg(feature = "hickory-dns")]
-                    None if config.dns.hickory_dns => Arc::new(HickoryDnsResolver::new()),
+                    None if config.dns.hickory_dns => Arc::new(HickoryDnsResolver::new()?),
                     None => Arc::new(GaiResolver::new()),
                 };
 

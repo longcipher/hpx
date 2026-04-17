@@ -1,9 +1,31 @@
 mod support;
+#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+use std::sync::Arc;
+#[cfg(feature = "boring")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "rustls-tls")]
+use std::{convert::Infallible, io::Cursor};
 use std::{env, sync::LazyLock};
 
+#[cfg(feature = "boring")]
+use boring::ssl::{SslAcceptor, SslFiletype, SslMethod, SslVerifyMode};
+#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+use bytes::Bytes;
 use hpx::Client;
+#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+use hpx::tls::{CertStore, Identity};
+#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+use http_body_util::Full;
+#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+use hyper::{Response, server::conn::http1, service::service_fn};
+#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+use hyper_util::rt::TokioIo;
 use support::server;
+#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+use tokio::net::TcpListener;
 use tokio::sync::Mutex;
+#[cfg(feature = "rustls-tls")]
+use tokio_rustls::{TlsAcceptor, rustls};
 
 // serialize tests that read from / write to environment variables
 static HTTP_PROXY_ENV_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
@@ -444,4 +466,328 @@ async fn proxy_tunnel_connect_error() {
             );
         }
     }
+}
+
+#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+const CA_CERT_PEM: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/support/mtls/ca.crt"
+));
+#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+const CLIENT_CERT_PEM: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/support/mtls/client.crt"
+));
+#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+const CLIENT_KEY_PEM: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/support/mtls/client.key"
+));
+#[cfg(feature = "boring")]
+const SERVER_CERT_PATH: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/mtls/server.crt");
+#[cfg(feature = "boring")]
+const SERVER_KEY_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/mtls/server.key");
+#[cfg(feature = "boring")]
+const CA_CERT_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/mtls/ca.crt");
+#[cfg(feature = "rustls-tls")]
+const SERVER_CERT_PEM: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/support/mtls/server.crt"
+));
+#[cfg(feature = "rustls-tls")]
+const SERVER_KEY_PEM: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/support/mtls/server.key"
+));
+
+#[cfg(feature = "boring")]
+fn mtls_tls_acceptor() -> SslAcceptor {
+    let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+    acceptor
+        .set_certificate_chain_file(SERVER_CERT_PATH)
+        .unwrap();
+    acceptor
+        .set_private_key_file(SERVER_KEY_PATH, SslFiletype::PEM)
+        .unwrap();
+    acceptor.set_ca_file(CA_CERT_PATH).unwrap();
+    acceptor.set_verify(SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT);
+    acceptor.check_private_key().unwrap();
+    acceptor.build()
+}
+
+#[cfg(feature = "boring")]
+fn proxy_tls_acceptor() -> SslAcceptor {
+    let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+    acceptor
+        .set_certificate_chain_file(SERVER_CERT_PATH)
+        .unwrap();
+    acceptor
+        .set_private_key_file(SERVER_KEY_PATH, SslFiletype::PEM)
+        .unwrap();
+    acceptor.set_ca_file(CA_CERT_PATH).unwrap();
+    acceptor.set_verify(SslVerifyMode::PEER);
+    acceptor.check_private_key().unwrap();
+    acceptor.build()
+}
+
+#[cfg(feature = "boring")]
+async fn spawn_origin_mtls_server() -> (tokio::task::JoinHandle<()>, u16) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let acceptor = mtls_tls_acceptor();
+
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let stream = tokio_boring::accept(&acceptor, stream).await.unwrap();
+        let service = service_fn(|_request| async {
+            let mut response = Response::new(Full::new(Bytes::from_static(b"mtls-ok")));
+            response.headers_mut().insert(
+                http::header::CONNECTION,
+                http::HeaderValue::from_static("close"),
+            );
+            Ok::<_, std::convert::Infallible>(response)
+        });
+
+        http1::Builder::new()
+            .serve_connection(TokioIo::new(stream), service)
+            .await
+            .unwrap();
+    });
+
+    (server, port)
+}
+
+#[cfg(feature = "boring")]
+async fn spawn_https_proxy(
+    proxy_saw_client_cert: Arc<AtomicBool>,
+) -> (tokio::task::JoinHandle<()>, u16) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let acceptor = proxy_tls_acceptor();
+
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let stream = tokio_boring::accept(&acceptor, stream).await.unwrap();
+        proxy_saw_client_cert.store(stream.ssl().peer_certificate().is_some(), Ordering::SeqCst);
+
+        let service = service_fn(|req| async move {
+            assert_eq!(req.method(), http::Method::CONNECT);
+
+            let authority = req.uri().authority().cloned().unwrap();
+            tokio::spawn(async move {
+                let upgraded = hyper::upgrade::on(req).await.unwrap();
+                let mut upgraded = TokioIo::new(upgraded);
+                let mut origin = tokio::net::TcpStream::connect(authority.to_string())
+                    .await
+                    .unwrap();
+
+                tokio::io::copy_bidirectional(&mut upgraded, &mut origin)
+                    .await
+                    .unwrap();
+            });
+
+            Ok::<_, hyper::Error>(Response::new(Full::new(Bytes::new())))
+        });
+
+        hyper::server::conn::http1::Builder::new()
+            .serve_connection(TokioIo::new(stream), service)
+            .with_upgrades()
+            .await
+            .unwrap();
+    });
+
+    (server, port)
+}
+
+#[cfg(feature = "rustls-tls")]
+fn parse_certs(pem: &[u8]) -> Vec<rustls::pki_types::CertificateDer<'static>> {
+    rustls_pemfile::certs(&mut Cursor::new(pem))
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+}
+
+#[cfg(feature = "rustls-tls")]
+fn parse_key(pem: &[u8]) -> rustls::pki_types::PrivateKeyDer<'static> {
+    rustls_pemfile::private_key(&mut Cursor::new(pem))
+        .unwrap()
+        .unwrap()
+}
+
+#[cfg(feature = "rustls-tls")]
+fn rustls_mtls_tls_acceptor() -> TlsAcceptor {
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut roots = rustls::RootCertStore::empty();
+    let (added, ignored) = roots.add_parsable_certificates(parse_certs(CA_CERT_PEM));
+    assert_eq!(added, 1);
+    assert_eq!(ignored, 0);
+
+    let verifier = rustls::server::WebPkiClientVerifier::builder_with_provider(
+        Arc::new(roots),
+        provider.clone(),
+    )
+    .build()
+    .unwrap();
+
+    let config = rustls::ServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_client_cert_verifier(verifier)
+        .with_single_cert(parse_certs(SERVER_CERT_PEM), parse_key(SERVER_KEY_PEM))
+        .unwrap();
+
+    TlsAcceptor::from(Arc::new(config))
+}
+
+#[cfg(feature = "rustls-tls")]
+fn rustls_proxy_tls_acceptor() -> TlsAcceptor {
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let config = rustls::ServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(parse_certs(SERVER_CERT_PEM), parse_key(SERVER_KEY_PEM))
+        .unwrap();
+
+    TlsAcceptor::from(Arc::new(config))
+}
+
+#[cfg(feature = "rustls-tls")]
+async fn spawn_rustls_origin_mtls_server() -> (tokio::task::JoinHandle<()>, u16) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let acceptor = rustls_mtls_tls_acceptor();
+
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let stream = acceptor.accept(stream).await.unwrap();
+        let service = service_fn(|_request| async {
+            let mut response = Response::new(Full::new(Bytes::from_static(b"mtls-ok")));
+            response.headers_mut().insert(
+                http::header::CONNECTION,
+                http::HeaderValue::from_static("close"),
+            );
+            Ok::<_, Infallible>(response)
+        });
+
+        http1::Builder::new()
+            .serve_connection(TokioIo::new(stream), service)
+            .await
+            .unwrap();
+    });
+
+    (server, port)
+}
+
+#[cfg(feature = "rustls-tls")]
+async fn spawn_rustls_https_proxy() -> (tokio::task::JoinHandle<()>, u16) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let acceptor = rustls_proxy_tls_acceptor();
+
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let stream = acceptor.accept(stream).await.unwrap();
+
+        let service = service_fn(|req| async move {
+            assert_eq!(req.method(), http::Method::CONNECT);
+
+            let authority = req.uri().authority().cloned().unwrap();
+            tokio::spawn(async move {
+                let upgraded = hyper::upgrade::on(req).await.unwrap();
+                let mut upgraded = TokioIo::new(upgraded);
+                let mut origin = tokio::net::TcpStream::connect(authority.to_string())
+                    .await
+                    .unwrap();
+
+                tokio::io::copy_bidirectional(&mut upgraded, &mut origin)
+                    .await
+                    .unwrap();
+            });
+
+            Ok::<_, hyper::Error>(Response::new(Full::new(Bytes::new())))
+        });
+
+        hyper::server::conn::http1::Builder::new()
+            .serve_connection(TokioIo::new(stream), service)
+            .with_upgrades()
+            .await
+            .unwrap();
+    });
+
+    (server, port)
+}
+
+#[cfg(feature = "boring")]
+#[tokio::test]
+async fn https_proxy_does_not_consume_origin_mtls_identity() {
+    let (origin_server, origin_port) = spawn_origin_mtls_server().await;
+    let proxy_saw_client_cert = Arc::new(AtomicBool::new(false));
+    let (proxy_server, proxy_port) = spawn_https_proxy(proxy_saw_client_cert.clone()).await;
+
+    let mut pem = CLIENT_CERT_PEM.to_vec();
+    pem.extend_from_slice(CLIENT_KEY_PEM);
+
+    let cert_store = CertStore::builder()
+        .add_pem_cert(CA_CERT_PEM)
+        .build()
+        .unwrap();
+    let identity = Identity::from_pem(&pem).unwrap();
+    let proxy = hpx::Proxy::https(format!("https://localhost:{proxy_port}")).unwrap();
+
+    let client = Client::builder()
+        .no_proxy()
+        .proxy(proxy)
+        .cert_store(cert_store)
+        .identity(identity)
+        .build()
+        .unwrap();
+
+    let response = client
+        .get(format!("https://localhost:{origin_port}/"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.text().await.unwrap(), "mtls-ok");
+    assert!(
+        !proxy_saw_client_cert.load(Ordering::SeqCst),
+        "origin client certificate must only be presented inside the CONNECT tunnel"
+    );
+
+    proxy_server.await.unwrap();
+    origin_server.await.unwrap();
+}
+
+#[cfg(feature = "rustls-tls")]
+#[tokio::test]
+async fn https_proxy_supports_origin_mtls_with_rustls() {
+    let (origin_server, origin_port) = spawn_rustls_origin_mtls_server().await;
+    let (proxy_server, proxy_port) = spawn_rustls_https_proxy().await;
+
+    let cert_store = CertStore::builder()
+        .add_pem_cert(CA_CERT_PEM)
+        .build()
+        .unwrap();
+    let identity = Identity::from_pkcs8_pem(CLIENT_CERT_PEM, CLIENT_KEY_PEM).unwrap();
+    let proxy = hpx::Proxy::https(format!("https://localhost:{proxy_port}")).unwrap();
+
+    let client = Client::builder()
+        .no_proxy()
+        .proxy(proxy)
+        .cert_store(cert_store)
+        .identity(identity)
+        .build()
+        .unwrap();
+
+    let response = client
+        .get(format!("https://localhost:{origin_port}/"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.text().await.unwrap(), "mtls-ok");
+
+    proxy_server.await.unwrap();
+    origin_server.await.unwrap();
 }

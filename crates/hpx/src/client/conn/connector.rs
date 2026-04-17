@@ -307,6 +307,34 @@ impl ConnectorService {
         self.build_tls_connector_generic(http, extra)
     }
 
+    fn build_https_proxy_connector(
+        &self,
+        extra: &ConnectExtra,
+    ) -> Result<HttpsConnector<HttpConnector>, BoxError> {
+        let mut http = self.http.clone();
+
+        if !self.config.tcp_nodelay {
+            http.set_nodelay(true);
+        }
+
+        if let Some(opts) = extra.tcp_options() {
+            http.set_connect_options(opts.clone());
+        }
+
+        let mut tls_options = extra.tls_options().cloned().unwrap_or_default();
+        tls_options.alpn_protocols = None;
+
+        let tls = self
+            .tls_builder
+            .as_ref()
+            .clone()
+            .identity(None)
+            .alpn_protocol(None)
+            .build(&tls_options)?;
+
+        Ok(HttpsConnector::with_connector(http, tls))
+    }
+
     #[cfg(unix)]
     fn build_unix_connector(
         &self,
@@ -421,13 +449,16 @@ impl ConnectorService {
                 if uri.is_https() {
                     trace!("tunneling over HTTP(s) proxy: {:?}", proxy_uri);
 
-                    // Build an HTTPS connector.
+                    // Build separate connectors for the outer proxy handshake and the inner
+                    // origin handshake so origin mTLS credentials are only used inside the
+                    // CONNECT tunnel.
+                    let proxy_connector = self.build_https_proxy_connector(req.extra())?;
                     let mut connector = self.build_https_connector(req.extra())?;
 
                     // Build a tunnel connector to establish the CONNECT tunnel.
                     let tunneled = {
                         let mut tunnel =
-                            proxy::tunnel::TunnelConnector::new(proxy_uri, connector.clone());
+                            proxy::tunnel::TunnelConnector::new(proxy_uri, proxy_connector);
 
                         // If the proxy requires basic authentication, add it to the tunnel.
                         if let Some(auth) = proxy.basic_auth() {
