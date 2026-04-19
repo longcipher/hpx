@@ -19,7 +19,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use handle::Handle;
+pub(crate) use handle::Handle;
 use scc::HashMap as SccHashMap;
 
 /// Specifies the intent for a (TLS) keylogger.

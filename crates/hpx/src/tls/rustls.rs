@@ -1,7 +1,7 @@
 #![allow(unused)]
 use std::{
     borrow::Cow,
-    fmt::{self, Debug},
+    fmt::{self, Debug, Write as _},
     future::Future,
     io,
     pin::Pin,
@@ -11,8 +11,10 @@ use std::{
 
 use http::Uri;
 use rustls::{
-    ClientConfig, DigitallySignedStruct, SignatureScheme,
+    ClientConfig, DEFAULT_VERSIONS, DigitallySignedStruct, KeyLog as RustlsKeyLog, SignatureScheme,
+    SupportedProtocolVersion,
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+    version::{TLS12, TLS13},
 };
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -25,6 +27,11 @@ use crate::{
     error::BoxError,
     tls::{AlpnProtocol, AlpsProtocol, CertStore, Identity, KeyLog, TlsOptions, TlsVersion},
 };
+
+const SUPPORTED_TLS12: &SupportedProtocolVersion = &TLS12;
+const SUPPORTED_TLS13: &SupportedProtocolVersion = &TLS13;
+static TLS12_ONLY: &[&SupportedProtocolVersion] = &[SUPPORTED_TLS12];
+static TLS13_ONLY: &[&SupportedProtocolVersion] = &[SUPPORTED_TLS13];
 
 /// Builds for [`HandshakeConfig`].
 pub struct HandshakeConfigBuilder {
@@ -203,6 +210,13 @@ impl TlsConnectorBuilder {
             root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
             root_store
         };
+        let protocol_versions = protocol_versions(self.min_version, self.max_version)?;
+        let key_log = match self.keylog.clone() {
+            Some(policy) => Some(Arc::new(KeyLogBridge {
+                handle: policy.handle().map_err(Error::tls)?,
+            }) as Arc<dyn RustlsKeyLog>),
+            None => None,
+        };
 
         // ALPN — use raw protocol name bytes for rustls (not wire-format
         // length-prefixed encoding which is only correct for BoringSSL).
@@ -218,7 +232,7 @@ impl TlsConnectorBuilder {
         let create_config = |alpn: Option<Vec<Vec<u8>>>| -> crate::Result<_> {
             let provider = rustls_provider();
             let builder = ClientConfig::builder_with_provider(provider)
-                .with_safe_default_protocol_versions()
+                .with_protocol_versions(protocol_versions)
                 .map_err(|e| Error::tls(Box::new(e)))?;
 
             let builder = if self.cert_verification {
@@ -240,6 +254,9 @@ impl TlsConnectorBuilder {
             if let Some(protos) = alpn {
                 config.alpn_protocols = protos;
             }
+            if let Some(ref key_log) = key_log {
+                config.key_log = key_log.clone();
+            }
 
             Ok(Arc::new(RustlsConnector::from(Arc::new(config))))
         };
@@ -249,8 +266,6 @@ impl TlsConnectorBuilder {
         let connector_h2 = create_config(Some(vec![AlpnProtocol::HTTP2.as_wire_bytes().to_vec()]))?;
         let connector_http1 =
             create_config(Some(vec![AlpnProtocol::HTTP1.as_wire_bytes().to_vec()]))?;
-
-        // TODO: Handle other options like min/max version, keylog, etc.
 
         Ok(TlsConnector {
             connector,
@@ -438,6 +453,79 @@ where
 
 fn rustls_provider() -> Arc<rustls::crypto::CryptoProvider> {
     Arc::new(rustls::crypto::ring::default_provider())
+}
+
+fn protocol_versions(
+    min_version: Option<TlsVersion>,
+    max_version: Option<TlsVersion>,
+) -> crate::Result<&'static [&'static SupportedProtocolVersion]> {
+    fn rank(version: TlsVersion) -> Option<u8> {
+        match version {
+            TlsVersion::TLS_1_2 => Some(0),
+            TlsVersion::TLS_1_3 => Some(1),
+            _ => None,
+        }
+    }
+
+    let min_rank = match min_version {
+        Some(version) => Some(rank(version).ok_or_else(|| {
+            Error::tls(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "rustls supports only TLS 1.2 and TLS 1.3",
+            ))
+        })?),
+        None => None,
+    };
+    let max_rank = match max_version {
+        Some(version) => Some(rank(version).ok_or_else(|| {
+            Error::tls(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "rustls supports only TLS 1.2 and TLS 1.3",
+            ))
+        })?),
+        None => None,
+    };
+
+    if let (Some(min), Some(max)) = (min_rank, max_rank)
+        && min > max
+    {
+        return Err(Error::tls(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "minimum TLS version cannot exceed maximum TLS version",
+        )));
+    }
+
+    match (min_rank, max_rank) {
+        (None, None) => Ok(DEFAULT_VERSIONS),
+        (None, Some(0)) => Ok(TLS12_ONLY),
+        (None, Some(1)) => Ok(DEFAULT_VERSIONS),
+        (Some(0), None) => Ok(DEFAULT_VERSIONS),
+        (Some(1), None) => Ok(TLS13_ONLY),
+        (Some(0), Some(0)) => Ok(TLS12_ONLY),
+        (Some(0), Some(1)) => Ok(DEFAULT_VERSIONS),
+        (Some(1), Some(1)) => Ok(TLS13_ONLY),
+        _ => unreachable!("unsupported protocol version ranks are rejected above"),
+    }
+}
+
+#[derive(Debug)]
+struct KeyLogBridge {
+    handle: crate::tls::keylog::Handle,
+}
+
+impl RustlsKeyLog for KeyLogBridge {
+    fn log(&self, label: &str, client_random: &[u8], secret: &[u8]) {
+        let mut line = String::new();
+        let _ = write!(&mut line, "{label} ");
+        for byte in client_random {
+            let _ = write!(&mut line, "{byte:02x}");
+        }
+        let _ = write!(&mut line, " ");
+        for byte in secret {
+            let _ = write!(&mut line, "{byte:02x}");
+        }
+        self.handle.write(&line);
+    }
 }
 
 /// A stream which may be wrapped with TLS.
@@ -646,19 +734,26 @@ impl ServerCertVerifier for NoVerifier {
 
 #[cfg(test)]
 mod tests {
-    use std::{convert::Infallible, io::Cursor, sync::Arc};
+    use std::{
+        convert::Infallible,
+        fs,
+        io::Cursor,
+        sync::Arc,
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    };
 
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use bytes::Bytes;
     use http_body_util::Full;
     use hyper::{Response, server::conn::http1, service::service_fn};
     use hyper_util::rt::TokioIo;
+    use rustls::KeyLog as RustlsKeyLog;
     use tokio::net::TcpListener;
     use tokio_rustls::{TlsAcceptor, rustls};
 
     use crate::{
         Client,
-        tls::{CertStore, Identity},
+        tls::{CertStore, Identity, KeyLog, TlsVersion},
     };
 
     const CA_CERT_PEM: &[u8] = include_bytes!(concat!(
@@ -696,6 +791,84 @@ mod tests {
         rustls_pemfile::private_key(&mut Cursor::new(pem))
             .unwrap()
             .unwrap()
+    }
+
+    fn unique_keylog_path() -> std::path::PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "hpx-rustls-keylog-{stamp}-{}.log",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn protocol_versions_follow_requested_bounds() {
+        assert_eq!(
+            super::protocol_versions(None, None).unwrap(),
+            rustls::DEFAULT_VERSIONS
+        );
+        assert_eq!(
+            super::protocol_versions(Some(TlsVersion::TLS_1_2), None).unwrap(),
+            rustls::DEFAULT_VERSIONS
+        );
+        assert_eq!(
+            super::protocol_versions(Some(TlsVersion::TLS_1_3), None).unwrap(),
+            &[&rustls::version::TLS13]
+        );
+        assert_eq!(
+            super::protocol_versions(None, Some(TlsVersion::TLS_1_2)).unwrap(),
+            &[&rustls::version::TLS12]
+        );
+        assert_eq!(
+            super::protocol_versions(Some(TlsVersion::TLS_1_2), Some(TlsVersion::TLS_1_2)).unwrap(),
+            &[&rustls::version::TLS12]
+        );
+        assert_eq!(
+            super::protocol_versions(Some(TlsVersion::TLS_1_3), Some(TlsVersion::TLS_1_3)).unwrap(),
+            &[&rustls::version::TLS13]
+        );
+    }
+
+    #[test]
+    fn protocol_versions_reject_unsupported_bounds() {
+        let err = super::protocol_versions(Some(TlsVersion::TLS_1_1), None).unwrap_err();
+        assert!(err.is_tls());
+        assert!(err.to_string().contains("TLS 1.2 and TLS 1.3"));
+
+        let err = super::protocol_versions(Some(TlsVersion::TLS_1_3), Some(TlsVersion::TLS_1_2))
+            .unwrap_err();
+        assert!(err.is_tls());
+        assert!(err.to_string().contains("minimum TLS version"));
+    }
+
+    #[test]
+    fn rustls_keylog_bridge_writes_keylog_lines() {
+        let path = unique_keylog_path();
+        let keylog = KeyLog::from_file(&path);
+
+        let bridge = super::KeyLogBridge {
+            handle: keylog.handle().unwrap(),
+        };
+
+        RustlsKeyLog::log(&bridge, "CLIENT_RANDOM", b"abcd", b"ef");
+
+        let expected = "CLIENT_RANDOM 61626364 6566\n";
+        for _ in 0..100 {
+            if let Ok(contents) = fs::read_to_string(&path)
+                && contents == expected
+            {
+                let _ = fs::remove_file(&path);
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        let contents = fs::read_to_string(&path).unwrap_or_default();
+        let _ = fs::remove_file(&path);
+        assert_eq!(contents, expected);
     }
 
     fn tls_acceptor() -> TlsAcceptor {

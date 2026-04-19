@@ -4,6 +4,7 @@
 //! calculation, and single-segment download for parallel HTTP range downloads.
 
 use std::{
+    collections::HashMap,
     future::Future,
     path::{Path, PathBuf},
     pin::Pin,
@@ -15,9 +16,22 @@ use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tracing::debug;
 
 use crate::{
+    CompositeLimiter,
     error::DownloadError,
     storage::{SegmentStatus, Storage},
 };
+
+/// Internal progress updates emitted by [`SegmentDownloader`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SegmentProgressUpdate {
+    /// A segment finished successfully.
+    Completed {
+        /// Zero-based segment index.
+        index: u32,
+        /// Bytes downloaded for the completed segment.
+        bytes_downloaded: u64,
+    },
+}
 
 /// Information gathered from a HEAD request to the remote file.
 #[derive(Debug, Clone)]
@@ -70,9 +84,22 @@ impl SegmentRange {
 ///
 /// Returns [`DownloadError::Http`] if the HEAD request fails.
 pub async fn probe_remote(client: &hpx::Client, url: &str) -> Result<RemoteInfo, DownloadError> {
+    probe_remote_with_headers(client, url, &HashMap::new()).await
+}
+
+/// Send a HEAD request to probe remote file metadata with custom headers.
+pub async fn probe_remote_with_headers(
+    client: &hpx::Client,
+    url: &str,
+    headers: &HashMap<String, String, impl std::hash::BuildHasher>,
+) -> Result<RemoteInfo, DownloadError> {
     debug!(%url, "probing remote file with HEAD request");
 
-    let response = client.head(url).send().await?;
+    let mut request = client.head(url);
+    for (name, value) in headers {
+        request = request.header(name, value);
+    }
+    let response = request.send().await?;
     let headers = response.headers();
 
     let content_length = headers
@@ -182,14 +209,28 @@ pub async fn download_segment(
     file: &mut tokio::fs::File,
     progress_tx: Option<&tokio::sync::mpsc::Sender<u64>>,
 ) -> Result<(), DownloadError> {
+    let headers = HashMap::new();
+    let limiter = CompositeLimiter::unlimited();
+    download_segment_with_options(client, url, range, file, progress_tx, &headers, &limiter).await
+}
+
+async fn download_segment_with_options(
+    client: &hpx::Client,
+    url: &str,
+    range: &SegmentRange,
+    file: &mut tokio::fs::File,
+    progress_tx: Option<&tokio::sync::mpsc::Sender<u64>>,
+    headers: &HashMap<String, String, impl std::hash::BuildHasher>,
+    limiter: &CompositeLimiter,
+) -> Result<(), DownloadError> {
     let header_value = range_header_value(range);
     debug!(url, range = %header_value, "starting segment download");
 
-    let response = client
-        .get(url)
-        .header(hpx::header::RANGE, header_value)
-        .send()
-        .await?;
+    let mut request = client.get(url).header(hpx::header::RANGE, header_value);
+    for (name, value) in headers {
+        request = request.header(name, value);
+    }
+    let response = request.send().await?;
 
     let status = response.status();
     if status != hpx::StatusCode::PARTIAL_CONTENT && status != hpx::StatusCode::OK {
@@ -202,6 +243,9 @@ pub async fn download_segment(
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result?;
         let chunk_len = chunk.len();
+        limiter
+            .wait_for(u64::try_from(chunk_len).unwrap_or(u64::MAX))
+            .await?;
 
         file.seek(std::io::SeekFrom::Start(offset)).await?;
         file.write_all(&chunk).await?;
@@ -295,6 +339,12 @@ pub struct SegmentDownloader {
     pub segments: Vec<SegmentRange>,
     /// Destination file path.
     pub destination: PathBuf,
+    /// Custom headers applied to requests.
+    pub headers: HashMap<String, String>,
+    /// Speed limiter enforced for each downloaded chunk.
+    pub limiter: CompositeLimiter,
+    /// Optional segment state updates.
+    pub(crate) segment_tx: Option<tokio::sync::mpsc::UnboundedSender<SegmentProgressUpdate>>,
     /// Maximum retry attempts per segment.
     pub max_retries: u32,
     /// Initial backoff delay.
@@ -333,6 +383,9 @@ impl SegmentDownloader {
             url: url.into(),
             segments,
             destination: destination.into(),
+            headers: HashMap::new(),
+            limiter: CompositeLimiter::unlimited(),
+            segment_tx: None,
             max_retries: 3,
             retry_initial_delay: Duration::from_millis(200),
             retry_max_delay: Duration::from_secs(30),
@@ -373,6 +426,30 @@ impl SegmentDownloader {
         self.retry_initial_delay = initial_delay;
         self.retry_max_delay = max_delay;
         self.retry_jitter = jitter;
+        self
+    }
+
+    /// Override request headers applied to segment requests.
+    #[must_use]
+    pub fn with_headers(mut self, headers: HashMap<String, String>) -> Self {
+        self.headers = headers;
+        self
+    }
+
+    /// Override the limiter used by each segment request.
+    #[must_use]
+    pub fn with_limiter(mut self, limiter: CompositeLimiter) -> Self {
+        self.limiter = limiter;
+        self
+    }
+
+    /// Subscribe to segment completion updates.
+    #[must_use]
+    pub(crate) fn with_segment_updates(
+        mut self,
+        segment_tx: tokio::sync::mpsc::UnboundedSender<SegmentProgressUpdate>,
+    ) -> Self {
+        self.segment_tx = Some(segment_tx);
         self
     }
 
@@ -649,6 +726,9 @@ impl SegmentDownloader {
             url: self.url.clone(),
             segments,
             destination: self.destination.clone(),
+            headers: self.headers.clone(),
+            limiter: self.limiter.clone(),
+            segment_tx: self.segment_tx.clone(),
             max_retries: self.max_retries,
             retry_initial_delay: self.retry_initial_delay,
             retry_max_delay: self.retry_max_delay,
@@ -678,7 +758,7 @@ impl SegmentDownloader {
     ) -> Result<u64, DownloadError> {
         let mut join_set = tokio::task::JoinSet::new();
 
-        for segment in &self.segments {
+        for (segment_index, segment) in self.segments.iter().enumerate() {
             let client = self.client.clone();
             let url = self.url.clone();
             let path = self.destination.clone();
@@ -688,6 +768,10 @@ impl SegmentDownloader {
             let initial_delay = self.retry_initial_delay;
             let max_delay = self.retry_max_delay;
             let jitter = self.retry_jitter;
+            let headers = self.headers.clone();
+            let limiter = self.limiter.clone();
+            let segment_tx = self.segment_tx.clone();
+            let segment_index = segment_index as u32;
 
             join_set.spawn(async move {
                 let result = with_retry(max_retries, initial_delay, max_delay, jitter, || {
@@ -696,20 +780,39 @@ impl SegmentDownloader {
                     let seg = seg.clone();
                     let path = path.clone();
                     let progress_tx = progress_tx.clone();
+                    let headers = headers.clone();
+                    let limiter = limiter.clone();
 
                     Box::pin(async move {
                         let mut file = tokio::fs::OpenOptions::new()
                             .write(true)
                             .open(&path)
                             .await?;
-                        download_segment(&client, &url, &seg, &mut file, progress_tx.as_ref()).await
+                        download_segment_with_options(
+                            &client,
+                            &url,
+                            &seg,
+                            &mut file,
+                            progress_tx.as_ref(),
+                            &headers,
+                            &limiter,
+                        )
+                        .await
                     })
                         as Pin<Box<dyn Future<Output = Result<(), DownloadError>> + Send>>
                 })
                 .await;
 
                 match result {
-                    Ok(()) => Ok(seg.len()),
+                    Ok(()) => {
+                        if let Some(segment_tx) = &segment_tx {
+                            let _ = segment_tx.send(SegmentProgressUpdate::Completed {
+                                index: segment_index,
+                                bytes_downloaded: seg.len(),
+                            });
+                        }
+                        Ok(seg.len())
+                    }
                     Err(err) => Err(DownloadError::SegmentRetryExhausted {
                         start: seg.start,
                         end: seg.end,

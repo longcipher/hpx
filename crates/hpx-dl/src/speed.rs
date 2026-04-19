@@ -40,6 +40,17 @@ impl SpeedLimiter {
         }
     }
 
+    /// Create a limiter with an empty bucket so the first chunk is throttled.
+    #[must_use]
+    pub(crate) fn depleted(bytes_per_second: u64) -> Self {
+        Self {
+            capacity: bytes_per_second,
+            tokens: Arc::new(AtomicU64::new(0)),
+            bytes_per_second,
+            last_refill: Arc::new(tokio::sync::Mutex::new(Instant::now())),
+        }
+    }
+
     /// Create an unlimited limiter (no-op).
     #[must_use]
     pub fn unlimited() -> Self {
@@ -71,59 +82,43 @@ impl SpeedLimiter {
             return Ok(());
         }
 
-        let mut last = self.last_refill.lock().await;
-        let now = Instant::now();
-        let elapsed = now.duration_since(*last);
+        let mut remaining = bytes;
+        loop {
+            let sleep_duration = {
+                let mut last = self.last_refill.lock().await;
+                let now = Instant::now();
+                let elapsed = now.duration_since(*last);
 
-        // Refill tokens based on elapsed time.
-        if elapsed > Duration::ZERO {
-            let new_tokens = (elapsed.as_millis() as u64)
-                .saturating_mul(self.bytes_per_second)
-                .div_ceil(1000);
-            let current = self.tokens.load(Ordering::Relaxed);
-            let updated = current.saturating_add(new_tokens).min(self.capacity);
-            self.tokens.store(updated, Ordering::Relaxed);
-            *last = now;
+                // Refill tokens based on elapsed time.
+                if elapsed > Duration::ZERO {
+                    let new_tokens = (elapsed.as_millis() as u64)
+                        .saturating_mul(self.bytes_per_second)
+                        .div_ceil(1000);
+                    let current = self.tokens.load(Ordering::Relaxed);
+                    let updated = current.saturating_add(new_tokens).min(self.capacity);
+                    self.tokens.store(updated, Ordering::Relaxed);
+                    *last = now;
+                }
+
+                // Consume as much as we can from the shared bucket.
+                let available = self.tokens.load(Ordering::Relaxed);
+                if available > 0 {
+                    let granted = available.min(remaining);
+                    self.tokens.fetch_sub(granted, Ordering::Relaxed);
+                    remaining -= granted;
+                    if remaining == 0 {
+                        return Ok(());
+                    }
+                }
+
+                // Calculate how long this waiter should sleep before trying again.
+                let deficit = remaining;
+                let sleep_ms = deficit.saturating_mul(1000).div_ceil(self.bytes_per_second);
+                Duration::from_millis(sleep_ms)
+            };
+
+            tokio::time::sleep(sleep_duration).await;
         }
-
-        // Check if we have enough tokens.
-        let available = self.tokens.load(Ordering::Relaxed);
-        if available >= bytes {
-            self.tokens.fetch_sub(bytes, Ordering::Relaxed);
-            return Ok(());
-        }
-
-        // Calculate sleep needed.
-        let deficit = bytes - available;
-        let sleep_ms = deficit.saturating_mul(1000).div_ceil(self.bytes_per_second);
-        let sleep_duration = Duration::from_millis(sleep_ms);
-
-        // Release the mutex before sleeping.
-        drop(last);
-
-        tokio::time::sleep(sleep_duration).await;
-
-        // Consume tokens after sleep.
-        // Re-acquire lock briefly to update last_refill.
-        let mut last = self.last_refill.lock().await;
-        *last = Instant::now();
-
-        // Refill tokens from the sleep period.
-        let current = self.tokens.load(Ordering::Relaxed);
-        let new_tokens = (sleep_ms.saturating_mul(self.bytes_per_second)).div_ceil(1000);
-        let updated = current.saturating_add(new_tokens).min(self.capacity);
-        self.tokens.store(updated, Ordering::Relaxed);
-
-        // Consume.
-        let available = self.tokens.load(Ordering::Relaxed);
-        if available >= bytes {
-            self.tokens.fetch_sub(bytes, Ordering::Relaxed);
-        } else {
-            // Should not happen after correct sleep, but consume what we have.
-            self.tokens.store(0, Ordering::Relaxed);
-        }
-
-        Ok(())
     }
 }
 
@@ -306,7 +301,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_large_chunk_triggers_sleep() {
-        // 100 B/s, request 200 bytes → need 100 more → sleep ~1s.
+        // 100 B/s, request 200 bytes from an empty bucket with 100-byte burst
+        // capacity takes about 3s total: 2s to fill the burst, then 1s more for
+        // the remaining 100 bytes.
         let lim = SpeedLimiter::new(100);
         lim.tokens.store(0, Ordering::Relaxed);
 
@@ -319,8 +316,76 @@ mod tests {
             "Too fast: {elapsed:?}"
         );
         assert!(
-            elapsed <= Duration::from_millis(3000),
+            elapsed <= Duration::from_millis(4000),
             "Too slow: {elapsed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_waiters_share_the_same_bucket() {
+        let lim = SpeedLimiter::new(100);
+        lim.tokens.store(0, Ordering::Relaxed);
+
+        let barrier = Arc::new(tokio::sync::Barrier::new(3));
+        let lim2 = lim.clone();
+        let barrier1 = Arc::clone(&barrier);
+        let barrier2 = Arc::clone(&barrier);
+
+        let start = Instant::now();
+        let waiter1 = tokio::spawn(async move {
+            barrier1.wait().await;
+            lim.wait_for(100).await.unwrap();
+        });
+        let waiter2 = tokio::spawn(async move {
+            barrier2.wait().await;
+            lim2.wait_for(100).await.unwrap();
+        });
+
+        barrier.wait().await;
+        waiter1.await.unwrap();
+        waiter2.await.unwrap();
+
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(1800),
+            "Concurrent waiters finished too quickly: {elapsed:?}"
+        );
+        assert!(
+            elapsed <= Duration::from_secs(5),
+            "Concurrent waiters took too long: {elapsed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_waiters_do_not_double_credit_sleep_time() {
+        let lim = SpeedLimiter::new(100);
+        lim.tokens.store(0, Ordering::Relaxed);
+
+        let barrier = Arc::new(tokio::sync::Barrier::new(4));
+        let mut handles = Vec::new();
+        for _ in 0..3 {
+            let waiter = lim.clone();
+            let barrier = Arc::clone(&barrier);
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                waiter.wait_for(50).await.unwrap();
+            }));
+        }
+
+        let start = Instant::now();
+        barrier.wait().await;
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(1200),
+            "Three concurrent waiters finished too quickly: {elapsed:?}"
+        );
+        assert!(
+            elapsed <= Duration::from_secs(5),
+            "Three concurrent waiters took too long: {elapsed:?}"
         );
     }
 

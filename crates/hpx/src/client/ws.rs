@@ -3,6 +3,10 @@
 //! This module provides WebSocket support with switchable backends:
 //! - `ws-yawc` (default): Uses the hpx-yawc WebSocket library
 //! - `ws-fastwebsockets`: Uses the fastwebsockets library
+//!
+//! The yawc backend keeps the basic client handshake flow but does not expose
+//! handshake response metadata. Unsupported handshake customization options are
+//! rejected explicitly instead of being treated as silent no-ops.
 
 #[cfg(feature = "json")]
 mod json;

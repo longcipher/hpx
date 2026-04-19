@@ -54,6 +54,10 @@ pub enum DownloadError {
         actual: String,
     },
 
+    /// Download or engine configuration is invalid.
+    #[error("Invalid configuration: {0}")]
+    InvalidConfiguration(String),
+
     /// A segment download task panicked.
     #[error("Segment task join error: {0}")]
     TaskJoin(String),
