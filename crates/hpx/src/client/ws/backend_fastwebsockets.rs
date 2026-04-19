@@ -28,6 +28,9 @@ use crate::{
 /// A WebSocket stream.
 type WebSocketStream = fastwebsockets::WebSocket<Upgraded>;
 
+/// Default maximum WebSocket message size for the fastwebsockets backend.
+pub const DEFAULT_MAX_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
+
 /// Configuration for WebSocket connection.
 #[derive(Debug, Clone, Copy)]
 pub struct WebSocketConfig {
@@ -42,7 +45,7 @@ pub struct WebSocketConfig {
 impl Default for WebSocketConfig {
     fn default() -> Self {
         Self {
-            max_message_size: None,
+            max_message_size: Some(DEFAULT_MAX_MESSAGE_SIZE),
             auto_close: true,
             auto_pong: true,
         }
@@ -632,5 +635,18 @@ impl WebSocketWrite {
             .write_frame(frame)
             .await
             .map_err(Error::websocket)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_sets_a_message_size_limit() {
+        assert_eq!(
+            WebSocketConfig::default().max_message_size,
+            Some(DEFAULT_MAX_MESSAGE_SIZE)
+        );
     }
 }

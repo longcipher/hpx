@@ -3,7 +3,7 @@ members = ["crates/*", "bin/*"]
 resolver = "3"
 
 [workspace.package]
-version = "2.4.9"
+version = "2.4.10"
 edition = "2024"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license = "Apache-2.0"
@@ -185,11 +185,11 @@ all = "warn"
 
 [workspace.dependencies]
 # local crates
-fastwebsockets = { path = "crates/fastwebsockets", package = "hpx-fastwebsockets", version = "2.4.9" }
-hpx = { path = "crates/hpx", version = "2.4.9" }
-hpx-dl = { path = "crates/hpx-dl", version = "2.4.9" }
-hpx-yawc = { path = "crates/yawc", version = "2.4.9" }
-yawc = { path = "crates/yawc", version = "2.4.9" }
+fastwebsockets = { path = "crates/fastwebsockets", package = "hpx-fastwebsockets", version = "2.4.10" }
+hpx = { path = "crates/hpx", version = "2.4.10" }
+hpx-dl = { path = "crates/hpx-dl", version = "2.4.10" }
+hpx-yawc = { path = "crates/yawc", version = "2.4.10" }
+yawc = { path = "crates/yawc", version = "2.4.10" }
 
 # external crates
 ahash = "0.8.12"
@@ -199,7 +199,7 @@ async-trait = "0.1.80"
 axum = "0.8.9"
 axum-core = "0.5.6"
 base64 = "0.22.1"
-boring = "5.0.2"
+boring = "5.1.0"
 brotli = "8.0.2"
 bytes = "1.11.1"
 bytes-utils = "0.1.4"
@@ -278,7 +278,7 @@ sync_wrapper = "1.0.2"
 system-configuration = "0.7.0"
 tempfile = "3.27.0"
 thiserror = "2.0.18"
-tokio = "1.51.1"
+tokio = "1.52.1"
 tokio-boring = "5.0.0"
 tokio-rustls = "0.26"
 tokio-socks = "0.5.2"

@@ -14,6 +14,9 @@ use http::{HeaderMap, HeaderName, HeaderValue, Version};
 use super::message::{CloseCode, CloseFrame, Message, Utf8Bytes};
 use crate::{EmulationFactory, Error, RequestBuilder, header::OrigHeaderMap, proxy::Proxy};
 
+/// Default maximum WebSocket message size for the yawc backend.
+pub const DEFAULT_MAX_MESSAGE_SIZE: usize = 1024 * 1024;
+
 /// Configuration for WebSocket connection.
 #[derive(Debug, Clone, Copy)]
 pub struct WebSocketConfig {
@@ -28,7 +31,7 @@ pub struct WebSocketConfig {
 impl Default for WebSocketConfig {
     fn default() -> Self {
         Self {
-            max_message_size: None,
+            max_message_size: Some(DEFAULT_MAX_MESSAGE_SIZE),
             auto_close: true,
             auto_pong: true,
         }
@@ -531,5 +534,18 @@ impl UnsupportedSettings {
                 unsupported.join(", ")
             )))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_sets_a_message_size_limit() {
+        assert_eq!(
+            WebSocketConfig::default().max_message_size,
+            Some(DEFAULT_MAX_MESSAGE_SIZE)
+        );
     }
 }

@@ -1225,6 +1225,20 @@ impl ClientBuilder {
         self
     }
 
+    /// Set the maximum number of retries allowed for a single logical request.
+    ///
+    /// This is a convenience wrapper around
+    /// [`retry::Policy::max_retries_per_request`] that preserves the rest of
+    /// the currently configured retry policy.
+    pub fn max_retries_per_request(mut self, max: u32) -> ClientBuilder {
+        self.config.protocol.retry_policy = self
+            .config
+            .protocol
+            .retry_policy
+            .max_retries_per_request(max);
+        self
+    }
+
     // Proxy options
 
     /// Enable automatic detection of system proxy settings from environment
@@ -2336,6 +2350,16 @@ mod tests {
         assert_eq!(
             builder.config.protocol.timeout_options.connect_timeout(),
             Some(connect_timeout)
+        );
+    }
+
+    #[test]
+    fn max_retries_per_request_updates_retry_policy() {
+        let builder = Client::builder().max_retries_per_request(3);
+
+        assert_eq!(
+            builder.config.protocol.retry_policy.max_retries_per_request,
+            3
         );
     }
 

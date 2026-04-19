@@ -31,8 +31,8 @@ impl HickoryDnsResolver {
                 debug!("using system DNS configuration");
                 resolver
             }
-            Err(err) => {
-                debug!("error reading DNS system conf: {err}, using defaults");
+            Err(_err) => {
+                debug!("error reading DNS system conf: {_err}, using defaults");
                 TokioResolver::builder_with_config(
                     ResolverConfig::default(),
                     TokioRuntimeProvider::default(),

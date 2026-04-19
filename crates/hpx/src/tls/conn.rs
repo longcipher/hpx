@@ -38,6 +38,7 @@ pub mod no_tls {
 
     pub struct HttpsConnector<T>(pub T);
     pub struct TlsConnector;
+    #[derive(Clone)]
     pub struct TlsConnectorBuilder;
 
     pub struct EstablishedConn<IO> {

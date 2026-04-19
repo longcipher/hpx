@@ -117,6 +117,41 @@ http2 = ["dep:http2"]
 # Enable macros.
 macros = ["tokio/macros"]
 
+# Preset for low-latency HTTP/WebSocket clients. This enables the common
+# compile-time pieces used by HFT-style clients without requiring users to
+# remember every feature flag.
+hft = [
+    "boring",
+    "hickory-dns",
+    "http1",
+    "http2",
+    "simd-json",
+    "stream",
+    "tracing",
+    "ws-fastwebsockets",
+    "zstd",
+]
+
+# Preset for browser-like clients. Runtime fingerprints still come from
+# ClientBuilder::emulation(...) or RequestBuilder::emulation(...), while this
+# feature enables the compile-time support usually paired with that profile.
+stealth = [
+    "boring",
+    "brotli",
+    "charset",
+    "cookies",
+    "deflate",
+    "gzip",
+    "hickory-dns",
+    "http1",
+    "http2",
+    "query",
+    "stream",
+    "tracing",
+    "ws-fastwebsockets",
+    "zstd",
+]
+
 [dependencies]
 ahash = { workspace = true }
 arc-swap = { workspace = true, optional = true }
