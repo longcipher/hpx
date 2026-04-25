@@ -77,7 +77,7 @@ fn main() -> eyre::Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
 
-    let engine = DownloadEngine::builder().build();
+    let engine = DownloadEngine::builder().build()?;
 
     match cli.command {
         Commands::Dl(dl_cmd) => match dl_cmd {

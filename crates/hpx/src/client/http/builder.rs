@@ -1,0 +1,1662 @@
+use std::{
+    borrow::Cow,
+    convert::TryInto,
+    future::Future,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    num::NonZeroU32,
+    sync::Arc,
+    time::Duration,
+};
+
+use futures_util::FutureExt;
+use http::{
+    HeaderMap,
+    header::{HeaderValue, USER_AGENT},
+};
+use tower::{
+    Layer, Service, ServiceBuilder, ServiceExt,
+    retry::RetryLayer,
+    util::{BoxCloneSyncService, BoxCloneSyncServiceLayer, Either},
+};
+#[cfg(feature = "cookies")]
+use {super::super::layer::cookie::CookieServiceLayer, crate::cookie};
+
+#[cfg(any(
+    feature = "gzip",
+    feature = "zstd",
+    feature = "brotli",
+    feature = "deflate"
+))]
+use super::super::layer::decoder::DecompressionLayer;
+use super::{
+    super::{
+        conn::{BoxedConnectorService, Conn, Connector, Unnameable},
+        core::rt::{TokioExecutor, TokioTimer},
+        layer::{
+            config::ConfigServiceLayer,
+            recovery::ResponseRecoveryLayer,
+            redirect::FollowRedirectLayer,
+            retry::RetryPolicy,
+            timeout::{ResponseBodyTimeoutLayer, TimeoutLayer},
+        },
+    },
+    Body, BoxedClientService, Client, ClientBuilder, ClientRef, HttpClient, HttpVersionPref,
+    PoolConfigOptions, ProtocolConfigOptions, ProxyConfigOptions, TlsConfigOptions,
+    TransportConfig, TransportConfigOptions,
+};
+#[cfg(feature = "hickory-dns")]
+use crate::dns::hickory::HickoryDnsResolver;
+#[cfg(feature = "http1")]
+use crate::http1::Http1Options;
+#[cfg(feature = "http2")]
+use crate::http2::Http2Options;
+use crate::{
+    EmulationFactory, Proxy,
+    dns::{DnsResolverWithOverrides, DynResolver, GaiResolver, IntoResolve, Resolve},
+    error::{self, BoxError, Error},
+    header::OrigHeaderMap,
+    proxy::Matcher as ProxyMatcher,
+    redirect::{self, FollowRedirectPolicy},
+    retry,
+    tls::{AlpnProtocol, CertStore, Identity, KeyLog, TlsOptions, TlsVersion},
+};
+
+impl ClientBuilder {
+    /// Replace the transport-layer configuration as a reusable group.
+    #[inline]
+    pub fn transport_config(mut self, config: TransportConfigOptions) -> ClientBuilder {
+        let transport_options = self.config.transport.transport_options.clone();
+        self.config.transport =
+            TransportConfig::from(config).with_transport_options(transport_options);
+        self.config.sync_connect_timeout();
+        self
+    }
+
+    /// Replace the connection-pool configuration as a reusable group.
+    #[inline]
+    pub fn pool_config(mut self, config: PoolConfigOptions) -> ClientBuilder {
+        self.config.pool = config.into();
+        self
+    }
+
+    /// Replace the TLS configuration as a reusable group.
+    #[inline]
+    pub fn tls_config(mut self, config: TlsConfigOptions) -> ClientBuilder {
+        self.config.tls = config.into();
+        self
+    }
+
+    /// Replace the protocol configuration as a reusable group.
+    #[inline]
+    pub fn protocol_config(mut self, config: ProtocolConfigOptions) -> ClientBuilder {
+        self.config.protocol = config.into();
+        self.config.sync_connect_timeout();
+        self
+    }
+
+    /// Replace the proxy configuration as a reusable group.
+    #[inline]
+    pub fn proxy_config(mut self, config: ProxyConfigOptions) -> ClientBuilder {
+        self.config.proxy = config.into();
+        self
+    }
+
+    /// Returns a [`Client`] that uses this [`ClientBuilder`] configuration.
+    ///
+    /// # Errors
+    ///
+    /// This method fails if a TLS backend cannot be initialized, or the resolver
+    /// cannot load the system configuration.
+    pub fn build(self) -> crate::Result<Client> {
+        let mut config = self.config;
+
+        if let Some(err) = config.error {
+            return Err(err);
+        }
+
+        // Prepare proxies
+        if config.proxy.auto_sys_proxy {
+            config.proxy.proxies.push(ProxyMatcher::system());
+        }
+
+        // Create base client service
+        let service = {
+            let tls_options = config.transport.transport_options.tls_options.take();
+            #[cfg(feature = "http1")]
+            let http1_options = config.transport.transport_options.http1_options.take();
+            #[cfg(feature = "http2")]
+            let http2_options = config.transport.transport_options.http2_options.take();
+
+            let resolver = {
+                let mut resolver: Arc<dyn Resolve> = match config.dns.dns_resolver {
+                    Some(dns_resolver) => dns_resolver,
+                    #[cfg(feature = "hickory-dns")]
+                    None if config.dns.hickory_dns => Arc::new(HickoryDnsResolver::new()?),
+                    None => Arc::new(GaiResolver::new()),
+                };
+
+                if !config.dns.dns_overrides.is_empty() {
+                    resolver = Arc::new(DnsResolverWithOverrides::new(
+                        resolver,
+                        config.dns.dns_overrides,
+                    ));
+                }
+                DynResolver::new(resolver)
+            };
+
+            // Build connector
+            let connector = Connector::builder(config.proxy.proxies, resolver)
+                .timeout(config.transport.connect_timeout)
+                .tls_info(config.tls.tls_info)
+                .tls_options(tls_options)
+                .verbose(config.transport.connection_verbose)
+                .with_tls(|tls| {
+                    let alpn_protocol = match config.protocol.http_version_pref {
+                        HttpVersionPref::Http1 => Some(AlpnProtocol::HTTP1),
+                        HttpVersionPref::Http2 => Some(AlpnProtocol::HTTP2),
+                        _ => None,
+                    };
+                    tls.alpn_protocol(alpn_protocol)
+                        .max_version(config.tls.max_version)
+                        .min_version(config.tls.min_version)
+                        .tls_sni(config.tls.tls_sni)
+                        .verify_hostname(config.tls.verify_hostname)
+                        .cert_verification(config.tls.cert_verification)
+                        .cert_store(config.tls.cert_store)
+                        .identity(config.tls.identity)
+                        .keylog(config.tls.keylog)
+                })
+                .with_http(|http| {
+                    http.enforce_http(false);
+                    http.set_keepalive(config.transport.tcp_keepalive);
+                    http.set_keepalive_interval(config.transport.tcp_keepalive_interval);
+                    http.set_keepalive_retries(config.transport.tcp_keepalive_retries);
+                    http.set_reuse_address(config.transport.tcp_reuse_address);
+                    http.set_connect_options(config.transport.tcp_connect_options);
+                    http.set_connect_timeout(config.transport.connect_timeout);
+                    http.set_nodelay(config.transport.tcp_nodelay);
+                    http.set_send_buffer_size(config.transport.tcp_send_buffer_size);
+                    http.set_recv_buffer_size(config.transport.tcp_recv_buffer_size);
+                    http.set_happy_eyeballs_timeout(config.transport.tcp_happy_eyeballs_timeout);
+                    #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+                    http.set_tcp_user_timeout(config.transport.tcp_user_timeout);
+                })
+                .build(config.middleware.connector_layers)?;
+
+            // Build client
+            #[allow(unused_mut)]
+            let mut builder = HttpClient::builder(TokioExecutor::new());
+
+            #[cfg(feature = "http1")]
+            {
+                builder = builder.http1_options(http1_options);
+            }
+
+            #[cfg(feature = "http2")]
+            {
+                builder = builder
+                    .http2_options(http2_options)
+                    .http2_only(matches!(
+                        config.protocol.http_version_pref,
+                        HttpVersionPref::Http2
+                    ))
+                    .http2_timer(TokioTimer::new());
+            }
+
+            builder
+                .pool_timer(TokioTimer::new())
+                .pool_idle_timeout(config.pool.idle_timeout)
+                .pool_max_idle_per_host(config.pool.max_idle_per_host)
+                .pool_max_size(config.pool.max_size)
+                .build(connector)
+                .map_err(Into::into as _)
+        };
+
+        // Configured client service with layers
+        let client = {
+            #[cfg(feature = "cookies")]
+            let service = ServiceBuilder::new()
+                .layer(CookieServiceLayer::new(config.middleware.cookie_store))
+                .service(service);
+
+            let service = ServiceBuilder::new()
+                .layer(RetryLayer::new(RetryPolicy::new(
+                    config.protocol.retry_policy,
+                )))
+                .layer({
+                    let policy = FollowRedirectPolicy::new(config.protocol.redirect_policy)
+                        .with_referer(config.protocol.referer)
+                        .with_https_only(config.protocol.https_only);
+                    FollowRedirectLayer::with_policy(policy)
+                })
+                .service(service);
+
+            #[cfg(any(
+                feature = "gzip",
+                feature = "zstd",
+                feature = "brotli",
+                feature = "deflate",
+            ))]
+            let service = ServiceBuilder::new()
+                .layer(DecompressionLayer::new(config.middleware.accept_encoding))
+                .service(service);
+
+            let service = ServiceBuilder::new()
+                .layer(ResponseRecoveryLayer::new(config.protocol.recoveries))
+                .layer(ResponseBodyTimeoutLayer::new(
+                    config.protocol.timeout_options,
+                ))
+                .layer(ConfigServiceLayer::new(
+                    config.protocol.https_only,
+                    config.headers,
+                    config.orig_headers,
+                ))
+                .service(service);
+
+            if config.middleware.layers.is_empty() {
+                if let Some(hooks) = config.middleware.hooks
+                    && !hooks.is_empty()
+                {
+                    let service = ServiceBuilder::new()
+                        .layer(TimeoutLayer::new(config.protocol.timeout_options))
+                        .layer(super::super::layer::hooks::HooksLayer::new(hooks))
+                        .service(service);
+
+                    ClientRef::Right(Either::Left(service))
+                } else {
+                    let service = ServiceBuilder::new()
+                        .layer(TimeoutLayer::new(config.protocol.timeout_options))
+                        .service(service);
+
+                    ClientRef::Left(service)
+                }
+            } else {
+                // Start with boxed service
+                let mut service = BoxCloneSyncService::new(service);
+
+                // Add hooks layer if present
+                if let Some(hooks) = config.middleware.hooks
+                    && !hooks.is_empty()
+                {
+                    let hooks_layer = super::super::layer::hooks::HooksLayer::new(hooks);
+                    service = ServiceBuilder::new()
+                        .layer(BoxCloneSyncServiceLayer::new(hooks_layer))
+                        .service(service);
+                }
+
+                // Add custom layers
+                let service = config
+                    .middleware
+                    .layers
+                    .into_iter()
+                    .fold(service, |service, layer| {
+                        ServiceBuilder::new().layer(layer).service(service)
+                    });
+
+                let service = ServiceBuilder::new()
+                    .layer(TimeoutLayer::new(config.protocol.timeout_options))
+                    .service(service)
+                    .map_err(error::map_timeout_to_request_error);
+
+                ClientRef::Right(Either::Right(BoxCloneSyncService::new(service)))
+            }
+        };
+
+        Ok(Client {
+            inner: Arc::new(client),
+        })
+    }
+
+    // Higher-level options
+
+    /// Sets the `User-Agent` header to be used by this client.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # async fn doc() -> hpx::Result<()> {
+    /// // Name your user agent after your app?
+    /// static APP_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
+    ///
+    /// let client = hpx::Client::builder().user_agent(APP_USER_AGENT).build()?;
+    /// let res = client.get("https://www.rust-lang.org").send().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn user_agent<V>(mut self, value: V) -> ClientBuilder
+    where
+        V: TryInto<HeaderValue>,
+        V::Error: Into<http::Error>,
+    {
+        match value.try_into() {
+            Ok(value) => {
+                self.config.headers.insert(USER_AGENT, value);
+            }
+            Err(err) => {
+                self.config.error = Some(Error::builder(err.into()));
+            }
+        };
+        self
+    }
+
+    /// Sets the default headers for every request.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use hpx::header;
+    /// # async fn doc() -> hpx::Result<()> {
+    /// let mut headers = header::HeaderMap::new();
+    /// headers.insert("X-MY-HEADER", header::HeaderValue::from_static("value"));
+    ///
+    /// // Consider marking security-sensitive headers with `set_sensitive`.
+    /// let mut auth_value = header::HeaderValue::from_static("secret");
+    /// auth_value.set_sensitive(true);
+    /// headers.insert(header::AUTHORIZATION, auth_value);
+    ///
+    /// // get a client builder
+    /// let client = hpx::Client::builder().default_headers(headers).build()?;
+    /// let res = client.get("https://www.rust-lang.org").send().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// Override the default headers:
+    ///
+    /// ```rust
+    /// use hpx::header;
+    /// # async fn doc() -> hpx::Result<()> {
+    /// let mut headers = header::HeaderMap::new();
+    /// headers.insert("X-MY-HEADER", header::HeaderValue::from_static("value"));
+    ///
+    /// // get a client builder
+    /// let client = hpx::Client::builder().default_headers(headers).build()?;
+    /// let res = client
+    ///     .get("https://www.rust-lang.org")
+    ///     .header("X-MY-HEADER", "new_value")
+    ///     .send()
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    pub fn default_headers(mut self, headers: HeaderMap) -> ClientBuilder {
+        crate::util::replace_headers(&mut self.config.headers, headers);
+        self
+    }
+
+    /// Sets the original headers for every request.
+    #[inline]
+    pub fn orig_headers(mut self, orig_headers: OrigHeaderMap) -> ClientBuilder {
+        self.config.orig_headers.extend(orig_headers);
+        self
+    }
+
+    /// Enable a persistent cookie store for the client.
+    ///
+    /// Cookies received in responses will be preserved and included in
+    /// additional requests.
+    ///
+    /// By default, no cookie store is used.
+    ///
+    /// # Optional
+    ///
+    /// This requires the optional `cookies` feature to be enabled.
+    #[inline]
+    #[cfg(feature = "cookies")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "cookies")))]
+    pub fn cookie_store(mut self, enable: bool) -> ClientBuilder {
+        if enable {
+            self.cookie_provider(Arc::new(cookie::Jar::default()))
+        } else {
+            self.config.middleware.cookie_store = None;
+            self
+        }
+    }
+
+    /// Set the persistent cookie store for the client.
+    ///
+    /// Cookies received in responses will be passed to this store, and
+    /// additional requests will query this store for cookies.
+    ///
+    /// By default, no cookie store is used.
+    ///
+    /// # Optional
+    ///
+    /// This requires the optional `cookies` feature to be enabled.
+    #[inline]
+    #[cfg(feature = "cookies")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "cookies")))]
+    pub fn cookie_provider<C>(mut self, cookie_store: C) -> ClientBuilder
+    where
+        C: cookie::IntoCookieStore,
+    {
+        self.config.middleware.cookie_store = Some(cookie_store.into_cookie_store());
+        self
+    }
+
+    /// Enable auto gzip decompression by checking the `Content-Encoding` response header.
+    ///
+    /// If auto gzip decompression is turned on:
+    ///
+    /// - When sending a request and if the request's headers do not already contain an
+    ///   `Accept-Encoding` **and** `Range` values, the `Accept-Encoding` header is set to `gzip`.
+    ///   The request body is **not** automatically compressed.
+    /// - When receiving a response, if its headers contain a `Content-Encoding` value of `gzip`,
+    ///   both `Content-Encoding` and `Content-Length` are removed from the headers' set. The
+    ///   response body is automatically decompressed.
+    ///
+    /// If the `gzip` feature is turned on, the default option is enabled.
+    ///
+    /// # Optional
+    ///
+    /// This requires the optional `gzip` feature to be enabled
+    #[inline]
+    #[cfg(feature = "gzip")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "gzip")))]
+    pub fn gzip(mut self, enable: bool) -> ClientBuilder {
+        self.config.middleware.accept_encoding.gzip = enable;
+        self
+    }
+
+    /// Enable auto brotli decompression by checking the `Content-Encoding` response header.
+    ///
+    /// If auto brotli decompression is turned on:
+    ///
+    /// - When sending a request and if the request's headers do not already contain an
+    ///   `Accept-Encoding` **and** `Range` values, the `Accept-Encoding` header is set to `br`. The
+    ///   request body is **not** automatically compressed.
+    /// - When receiving a response, if its headers contain a `Content-Encoding` value of `br`, both
+    ///   `Content-Encoding` and `Content-Length` are removed from the headers' set. The response
+    ///   body is automatically decompressed.
+    ///
+    /// If the `brotli` feature is turned on, the default option is enabled.
+    ///
+    /// # Optional
+    ///
+    /// This requires the optional `brotli` feature to be enabled
+    #[inline]
+    #[cfg(feature = "brotli")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "brotli")))]
+    pub fn brotli(mut self, enable: bool) -> ClientBuilder {
+        self.config.middleware.accept_encoding.brotli = enable;
+        self
+    }
+
+    /// Enable auto zstd decompression by checking the `Content-Encoding` response header.
+    ///
+    /// If auto zstd decompression is turned on:
+    ///
+    /// - When sending a request and if the request's headers do not already contain an
+    ///   `Accept-Encoding` **and** `Range` values, the `Accept-Encoding` header is set to `zstd`.
+    ///   The request body is **not** automatically compressed.
+    /// - When receiving a response, if its headers contain a `Content-Encoding` value of `zstd`,
+    ///   both `Content-Encoding` and `Content-Length` are removed from the headers' set. The
+    ///   response body is automatically decompressed.
+    ///
+    /// If the `zstd` feature is turned on, the default option is enabled.
+    ///
+    /// # Optional
+    ///
+    /// This requires the optional `zstd` feature to be enabled
+    #[inline]
+    #[cfg(feature = "zstd")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "zstd")))]
+    pub fn zstd(mut self, enable: bool) -> ClientBuilder {
+        self.config.middleware.accept_encoding.zstd = enable;
+        self
+    }
+
+    /// Enable auto deflate decompression by checking the `Content-Encoding` response header.
+    ///
+    /// If auto deflate decompression is turned on:
+    ///
+    /// - When sending a request and if the request's headers do not already contain an
+    ///   `Accept-Encoding` **and** `Range` values, the `Accept-Encoding` header is set to
+    ///   `deflate`. The request body is **not** automatically compressed.
+    /// - When receiving a response, if it's headers contain a `Content-Encoding` value that equals
+    ///   to `deflate`, both values `Content-Encoding` and `Content-Length` are removed from the
+    ///   headers' set. The response body is automatically decompressed.
+    ///
+    /// If the `deflate` feature is turned on, the default option is enabled.
+    ///
+    /// # Optional
+    ///
+    /// This requires the optional `deflate` feature to be enabled
+    #[inline]
+    #[cfg(feature = "deflate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "deflate")))]
+    pub fn deflate(mut self, enable: bool) -> ClientBuilder {
+        self.config.middleware.accept_encoding.deflate = enable;
+        self
+    }
+
+    /// Disable auto response body zstd decompression.
+    ///
+    /// This method exists even if the optional `zstd` feature is not enabled.
+    /// This can be used to ensure a `Client` doesn't use zstd decompression
+    /// even if another dependency were to enable the optional `zstd` feature.
+    #[inline]
+    pub fn no_zstd(self) -> ClientBuilder {
+        #[cfg(feature = "zstd")]
+        {
+            self.zstd(false)
+        }
+
+        #[cfg(not(feature = "zstd"))]
+        {
+            self
+        }
+    }
+
+    /// Disable auto response body gzip decompression.
+    ///
+    /// This method exists even if the optional `gzip` feature is not enabled.
+    /// This can be used to ensure a `Client` doesn't use gzip decompression
+    /// even if another dependency were to enable the optional `gzip` feature.
+    #[inline]
+    pub fn no_gzip(self) -> ClientBuilder {
+        #[cfg(feature = "gzip")]
+        {
+            self.gzip(false)
+        }
+
+        #[cfg(not(feature = "gzip"))]
+        {
+            self
+        }
+    }
+
+    /// Disable auto response body brotli decompression.
+    ///
+    /// This method exists even if the optional `brotli` feature is not enabled.
+    /// This can be used to ensure a `Client` doesn't use brotli decompression
+    /// even if another dependency were to enable the optional `brotli` feature.
+    #[inline]
+    pub fn no_brotli(self) -> ClientBuilder {
+        #[cfg(feature = "brotli")]
+        {
+            self.brotli(false)
+        }
+
+        #[cfg(not(feature = "brotli"))]
+        {
+            self
+        }
+    }
+
+    /// Disable auto response body deflate decompression.
+    ///
+    /// This method exists even if the optional `deflate` feature is not enabled.
+    /// This can be used to ensure a `Client` doesn't use deflate decompression
+    /// even if another dependency were to enable the optional `deflate` feature.
+    #[inline]
+    pub fn no_deflate(self) -> ClientBuilder {
+        #[cfg(feature = "deflate")]
+        {
+            self.deflate(false)
+        }
+
+        #[cfg(not(feature = "deflate"))]
+        {
+            self
+        }
+    }
+
+    // Redirect options
+
+    /// Set a `RedirectPolicy` for this client.
+    ///
+    /// Default will follow redirects up to a maximum of 10.
+    #[inline]
+    pub fn redirect(mut self, policy: redirect::Policy) -> ClientBuilder {
+        self.config.protocol.redirect_policy = policy;
+        self
+    }
+
+    /// Enable or disable automatic setting of the `Referer` header.
+    ///
+    /// Default is `true`.
+    #[inline]
+    pub fn referer(mut self, enable: bool) -> ClientBuilder {
+        self.config.protocol.referer = enable;
+        self
+    }
+
+    // Retry options
+
+    /// Set a request retry policy.
+    pub fn retry(mut self, policy: retry::Policy) -> ClientBuilder {
+        self.config.protocol.retry_policy = policy;
+        self
+    }
+
+    /// Set the maximum number of retries allowed for a single logical request.
+    ///
+    /// This is a convenience wrapper around
+    /// [`retry::Policy::max_retries_per_request`] that preserves the rest of
+    /// the currently configured retry policy.
+    pub fn max_retries_per_request(mut self, max: u32) -> ClientBuilder {
+        self.config.protocol.retry_policy = self
+            .config
+            .protocol
+            .retry_policy
+            .max_retries_per_request(max);
+        self
+    }
+
+    // Proxy options
+
+    /// Enable automatic detection of system proxy settings from environment
+    /// variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`) and,
+    /// when the `system-proxy` feature is active, OS-level proxy configuration.
+    ///
+    /// System proxy detection is **enabled by default**. Call this method to
+    /// explicitly opt in (no-op if already enabled).
+    ///
+    /// # Example
+    /// ```
+    /// let client = hpx::Client::builder().system_proxy().build().unwrap();
+    /// ```
+    #[inline]
+    pub fn system_proxy(mut self) -> ClientBuilder {
+        self.config.proxy.auto_sys_proxy = true;
+        self
+    }
+
+    /// Add a `Proxy` to the list of proxies the `Client` will use.
+    ///
+    /// # Note
+    ///
+    /// Adding a proxy will disable the automatic usage of the "system" proxy.
+    ///
+    /// # Example
+    /// ```
+    /// use hpx::{Client, Proxy};
+    ///
+    /// let proxy = Proxy::http("http://proxy:8080").unwrap();
+    /// let client = Client::builder().proxy(proxy).build().unwrap();
+    /// ```
+    #[inline]
+    pub fn proxy(mut self, proxy: Proxy) -> ClientBuilder {
+        self.config.proxy.proxies.push(proxy.into_matcher());
+        self.config.proxy.auto_sys_proxy = false;
+        self
+    }
+
+    /// Configure a proxy pool middleware for request-level proxy rotation.
+    ///
+    /// This middleware selects a proxy for each request based on the configured
+    /// [`crate::proxy_pool::ProxyPoolStrategy`]. When this is set, automatic
+    /// system proxy detection is disabled.
+    #[inline]
+    pub fn proxy_pool(mut self, pool: crate::proxy_pool::ProxyPool) -> ClientBuilder {
+        self.config
+            .middleware
+            .layers
+            .push(BoxCloneSyncServiceLayer::new(pool.layer()));
+        self.config.proxy.auto_sys_proxy = false;
+        self
+    }
+
+    /// Clear all `Proxies`, so `Client` will use no proxy anymore.
+    ///
+    /// # Note
+    /// To add a proxy exclusion list, use [crate::proxy::Proxy::no_proxy()]
+    /// on all desired proxies instead.
+    ///
+    /// This also disables the automatic usage of the "system" proxy.
+    #[inline]
+    pub fn no_proxy(mut self) -> ClientBuilder {
+        self.config.proxy.proxies.clear();
+        self.config.proxy.auto_sys_proxy = false;
+        self
+    }
+
+    // Timeout options
+
+    /// Enables a request timeout.
+    ///
+    /// The timeout is applied from when the request starts connecting until the
+    /// response body has finished.
+    ///
+    /// Default is no timeout.
+    #[inline]
+    pub fn timeout(mut self, timeout: Duration) -> ClientBuilder {
+        self.config.protocol.timeout_options.total_timeout(timeout);
+        self
+    }
+
+    /// Set a timeout for only the read phase of a `Client`.
+    ///
+    /// Default is `None`.
+    #[inline]
+    pub fn read_timeout(mut self, timeout: Duration) -> ClientBuilder {
+        self.config.protocol.timeout_options.read_timeout(timeout);
+        self
+    }
+
+    /// Set a timeout for only the connect phase of a `Client`.
+    ///
+    /// Default is `None`.
+    ///
+    /// # Note
+    ///
+    /// This **requires** the futures be executed in a tokio runtime with
+    /// a tokio timer enabled.
+    #[inline]
+    pub fn connect_timeout(mut self, timeout: Duration) -> ClientBuilder {
+        self.config.transport.connect_timeout = Some(timeout);
+        self.config.sync_connect_timeout();
+        self
+    }
+
+    /// Timeout for the entire request lifecycle (end-to-end).
+    ///
+    /// This is the global timeout covering all phases: DNS resolution,
+    /// connection, request sending, and response body reading.
+    ///
+    /// Default is `None`.
+    #[inline]
+    pub fn timeout_global(mut self, timeout: Option<Duration>) -> ClientBuilder {
+        self.config.protocol.timeout_options.timeout_global(timeout);
+        self
+    }
+
+    /// Timeout for a single call attempt when following redirects.
+    ///
+    /// Resets after each redirect.
+    ///
+    /// Default is `None`.
+    #[inline]
+    pub fn timeout_per_call(mut self, timeout: Option<Duration>) -> ClientBuilder {
+        self.config
+            .protocol
+            .timeout_options
+            .timeout_per_call(timeout);
+        self
+    }
+
+    /// Timeout for DNS resolution.
+    ///
+    /// Default is `None`.
+    #[inline]
+    pub fn timeout_resolve(mut self, timeout: Option<Duration>) -> ClientBuilder {
+        self.config
+            .protocol
+            .timeout_options
+            .timeout_resolve(timeout);
+        self
+    }
+
+    /// Timeout for sending request headers (not the body).
+    ///
+    /// Default is `None`.
+    #[inline]
+    pub fn timeout_send_request(mut self, timeout: Option<Duration>) -> ClientBuilder {
+        self.config
+            .protocol
+            .timeout_options
+            .timeout_send_request(timeout);
+        self
+    }
+
+    /// Timeout for awaiting a `100 Continue` response.
+    ///
+    /// Default is 1 second.
+    #[inline]
+    pub fn timeout_await_100(mut self, timeout: Option<Duration>) -> ClientBuilder {
+        self.config
+            .protocol
+            .timeout_options
+            .timeout_await_100(timeout);
+        self
+    }
+
+    /// Timeout for sending the request body.
+    ///
+    /// Default is `None`.
+    #[inline]
+    pub fn timeout_send_body(mut self, timeout: Option<Duration>) -> ClientBuilder {
+        self.config
+            .protocol
+            .timeout_options
+            .timeout_send_body(timeout);
+        self
+    }
+
+    /// Timeout for receiving response headers (not the body).
+    ///
+    /// Default is `None`.
+    #[inline]
+    pub fn timeout_recv_response(mut self, timeout: Option<Duration>) -> ClientBuilder {
+        self.config
+            .protocol
+            .timeout_options
+            .timeout_recv_response(timeout);
+        self
+    }
+
+    /// Timeout for receiving the response body.
+    ///
+    /// Default is `None`.
+    #[inline]
+    pub fn timeout_recv_body(mut self, timeout: Option<Duration>) -> ClientBuilder {
+        self.config
+            .protocol
+            .timeout_options
+            .timeout_recv_body(timeout);
+        self
+    }
+
+    /// Set the maximum size of HTTP response headers in bytes.
+    ///
+    /// This protects against servers sending unreasonably large response headers.
+    /// Default is 64KB (65536 bytes). Set to `None` to disable the limit.
+    #[inline]
+    pub fn max_response_header_size(mut self, size: Option<usize>) -> ClientBuilder {
+        self.config
+            .protocol
+            .timeout_options
+            .set_max_response_header_size(size);
+        self
+    }
+
+    /// Set whether connections should emit verbose logs.
+    ///
+    /// Enabling this option will emit [log][] messages at the `TRACE` level
+    /// for read and write operations on connections.
+    ///
+    /// [log]: https://crates.io/crates/log
+    #[inline]
+    pub fn connection_verbose(mut self, verbose: bool) -> ClientBuilder {
+        self.config.transport.connection_verbose = verbose;
+        self
+    }
+
+    // HTTP options
+
+    /// Set an optional timeout for idle sockets being kept-alive.
+    ///
+    /// Pass `None` to disable timeout.
+    ///
+    /// Default is 90 seconds.
+    #[inline]
+    pub fn pool_idle_timeout<D>(mut self, val: D) -> ClientBuilder
+    where
+        D: Into<Option<Duration>>,
+    {
+        self.config.pool.idle_timeout = val.into();
+        self
+    }
+
+    /// Sets the maximum idle connection per host allowed in the pool.
+    #[inline]
+    pub fn pool_max_idle_per_host(mut self, max: usize) -> ClientBuilder {
+        self.config.pool.max_idle_per_host = max;
+        self
+    }
+
+    /// Sets the maximum number of connections in the pool.
+    #[inline]
+    pub fn pool_max_size(mut self, max: u32) -> ClientBuilder {
+        self.config.pool.max_size = NonZeroU32::new(max);
+        self
+    }
+
+    /// Restrict the Client to be used with HTTPS only requests.
+    ///
+    /// Defaults to false.
+    #[inline]
+    pub fn https_only(mut self, enabled: bool) -> ClientBuilder {
+        self.config.protocol.https_only = enabled;
+        self
+    }
+
+    /// Only use HTTP/1.
+    #[inline]
+    pub fn http1_only(mut self) -> ClientBuilder {
+        self.config.protocol.http_version_pref = HttpVersionPref::Http1;
+        self
+    }
+
+    /// Only use HTTP/2.
+    #[inline]
+    pub fn http2_only(mut self) -> ClientBuilder {
+        self.config.protocol.http_version_pref = HttpVersionPref::Http2;
+        self
+    }
+
+    /// Sets the HTTP/1 options for the client.
+    #[cfg(feature = "http1")]
+    #[inline]
+    pub fn http1_options(mut self, options: Http1Options) -> ClientBuilder {
+        *self.config.transport.transport_options.http1_options_mut() = Some(options);
+        self
+    }
+
+    /// Set the maximum number of HTTP/1 dispatcher iterations per poll cycle.
+    ///
+    /// This bounds how many pipelined HTTP/1 exchanges are processed before the
+    /// task yields back to the runtime scheduler.
+    #[cfg(feature = "http1")]
+    #[inline]
+    pub fn max_poll_iterations(mut self, max_iterations: usize) -> ClientBuilder {
+        assert!(
+            max_iterations > 0,
+            "max_poll_iterations must be greater than zero"
+        );
+
+        let mut options = self
+            .config
+            .transport
+            .transport_options
+            .http1_options
+            .take()
+            .unwrap_or_default();
+        options.h1_max_poll_iterations = Some(max_iterations);
+        *self.config.transport.transport_options.http1_options_mut() = Some(options);
+        self
+    }
+
+    /// Sets the HTTP/2 options for the client.
+    #[cfg(feature = "http2")]
+    #[inline]
+    pub fn http2_options(mut self, options: Http2Options) -> ClientBuilder {
+        *self.config.transport.transport_options.http2_options_mut() = Some(options);
+        self
+    }
+
+    // TCP options
+
+    /// Set whether sockets have `TCP_NODELAY` enabled.
+    ///
+    /// Default is `true`.
+    #[inline]
+    pub fn tcp_nodelay(mut self, enabled: bool) -> ClientBuilder {
+        self.config.transport.tcp_nodelay = enabled;
+        self
+    }
+
+    /// Set that all sockets have `SO_KEEPALIVE` set with the supplied duration.
+    ///
+    /// If `None`, the option will not be set.
+    ///
+    /// Default is 15 seconds.
+    #[inline]
+    pub fn tcp_keepalive<D>(mut self, val: D) -> ClientBuilder
+    where
+        D: Into<Option<Duration>>,
+    {
+        self.config.transport.tcp_keepalive = val.into();
+        self
+    }
+
+    /// Set that all sockets have `SO_KEEPALIVE` set with the supplied interval.
+    ///
+    /// If `None`, the option will not be set.
+    ///
+    /// Default is 15 seconds.
+    #[inline]
+    pub fn tcp_keepalive_interval<D>(mut self, val: D) -> ClientBuilder
+    where
+        D: Into<Option<Duration>>,
+    {
+        self.config.transport.tcp_keepalive_interval = val.into();
+        self
+    }
+
+    /// Set that all sockets have `SO_KEEPALIVE` set with the supplied retry count.
+    ///
+    /// If `None`, the option will not be set.
+    ///
+    /// Default is 3 retries.
+    #[inline]
+    pub fn tcp_keepalive_retries<C>(mut self, retries: C) -> ClientBuilder
+    where
+        C: Into<Option<u32>>,
+    {
+        self.config.transport.tcp_keepalive_retries = retries.into();
+        self
+    }
+
+    /// Set that all sockets have `TCP_USER_TIMEOUT` set with the supplied duration.
+    ///
+    /// This option controls how long transmitted data may remain unacknowledged before
+    /// the connection is force-closed.
+    ///
+    /// If `None`, the option will not be set.
+    ///
+    /// Default is 30 seconds.
+    #[inline]
+    #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+    #[cfg_attr(
+        docsrs,
+        doc(cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))
+    )]
+    pub fn tcp_user_timeout<D>(mut self, val: D) -> ClientBuilder
+    where
+        D: Into<Option<Duration>>,
+    {
+        self.config.transport.tcp_user_timeout = val.into();
+        self
+    }
+
+    /// Set whether sockets have `SO_REUSEADDR` enabled.
+    #[inline]
+    pub fn tcp_reuse_address(mut self, enabled: bool) -> ClientBuilder {
+        self.config.transport.tcp_reuse_address = enabled;
+        self
+    }
+
+    /// Sets the size of the TCP send buffer on this client socket.
+    ///
+    /// On most operating systems, this sets the `SO_SNDBUF` socket option.
+    #[inline]
+    pub fn tcp_send_buffer_size<S>(mut self, size: S) -> ClientBuilder
+    where
+        S: Into<Option<usize>>,
+    {
+        self.config.transport.tcp_send_buffer_size = size.into();
+        self
+    }
+
+    /// Sets the size of the TCP receive buffer on this client socket.
+    ///
+    /// On most operating systems, this sets the `SO_RCVBUF` socket option.
+    #[inline]
+    pub fn tcp_recv_buffer_size<S>(mut self, size: S) -> ClientBuilder
+    where
+        S: Into<Option<usize>>,
+    {
+        self.config.transport.tcp_recv_buffer_size = size.into();
+        self
+    }
+
+    /// Set timeout for [RFC 6555 (Happy Eyeballs)][RFC 6555] algorithm.
+    ///
+    /// If hostname resolves to both IPv4 and IPv6 addresses and connection
+    /// cannot be established using preferred address family before timeout
+    /// elapses, then connector will in parallel attempt connection using other
+    /// address family.
+    ///
+    /// If `None`, parallel connection attempts are disabled.
+    ///
+    /// Default is 300 milliseconds.
+    ///
+    /// [RFC 6555]: https://tools.ietf.org/html/rfc6555
+    #[inline]
+    pub fn tcp_happy_eyeballs_timeout<D>(mut self, val: D) -> ClientBuilder
+    where
+        D: Into<Option<Duration>>,
+    {
+        self.config.transport.tcp_happy_eyeballs_timeout = val.into();
+        self
+    }
+
+    /// Bind to a local IP Address.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use std::net::IpAddr;
+    /// let local_addr = IpAddr::from([12, 4, 1, 8]);
+    /// let client = hpx::Client::builder()
+    ///     .local_address(local_addr)
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    #[inline]
+    pub fn local_address<T>(mut self, addr: T) -> ClientBuilder
+    where
+        T: Into<Option<IpAddr>>,
+    {
+        self.config
+            .transport
+            .tcp_connect_options
+            .set_local_address(addr.into());
+        self
+    }
+
+    /// Set that all sockets are bound to the configured IPv4 or IPv6 address (depending on host's
+    /// preferences) before connection.
+    ///
+    ///  # Example
+    /// ///
+    /// ```
+    /// use std::net::{Ipv4Addr, Ipv6Addr};
+    /// let ipv4 = Ipv4Addr::new(127, 0, 0, 1);
+    /// let ipv6 = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1);
+    /// let client = hpx::Client::builder()
+    ///     .local_addresses(ipv4, ipv6)
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    #[inline]
+    pub fn local_addresses<V4, V6>(mut self, ipv4: V4, ipv6: V6) -> ClientBuilder
+    where
+        V4: Into<Option<Ipv4Addr>>,
+        V6: Into<Option<Ipv6Addr>>,
+    {
+        self.config
+            .transport
+            .tcp_connect_options
+            .set_local_addresses(ipv4, ipv6);
+        self
+    }
+
+    /// Bind connections only on the specified network interface.
+    ///
+    /// This option is only available on the following operating systems:
+    ///
+    /// - Android
+    /// - Fuchsia
+    /// - Linux,
+    /// - macOS and macOS-like systems (iOS, tvOS, watchOS and visionOS)
+    /// - Solaris and illumos
+    ///
+    /// On Android, Linux, and Fuchsia, this uses the
+    /// [`SO_BINDTODEVICE`][man-7-socket] socket option. On macOS and macOS-like
+    /// systems, Solaris, and illumos, this instead uses the [`IP_BOUND_IF` and
+    /// `IPV6_BOUND_IF`][man-7p-ip] socket options (as appropriate).
+    ///
+    /// Note that connections will fail if the provided interface name is not a
+    /// network interface that currently exists when a connection is established.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn doc() -> Result<(), hpx::Error> {
+    /// let interface = "lo";
+    /// let client = hpx::Client::builder().interface(interface).build()?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// [man-7-socket]: https://man7.org/linux/man-pages/man7/socket.7.html
+    /// [man-7p-ip]: https://docs.oracle.com/cd/E86824_01/html/E54777/ip-7p.html
+    #[inline]
+    #[cfg(any(
+        target_os = "android",
+        target_os = "fuchsia",
+        target_os = "illumos",
+        target_os = "ios",
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "solaris",
+        target_os = "tvos",
+        target_os = "visionos",
+        target_os = "watchos",
+    ))]
+    #[cfg_attr(
+        docsrs,
+        doc(cfg(any(
+            target_os = "android",
+            target_os = "fuchsia",
+            target_os = "illumos",
+            target_os = "ios",
+            target_os = "linux",
+            target_os = "macos",
+            target_os = "solaris",
+            target_os = "tvos",
+            target_os = "visionos",
+            target_os = "watchos",
+        )))
+    )]
+    pub fn interface<T>(mut self, interface: T) -> ClientBuilder
+    where
+        T: Into<std::borrow::Cow<'static, str>>,
+    {
+        self.config
+            .transport
+            .tcp_connect_options
+            .set_interface(interface);
+        self
+    }
+
+    // TLS options
+
+    /// Sets the identity to be used for client certificate authentication.
+    #[inline]
+    pub fn identity(mut self, identity: Identity) -> ClientBuilder {
+        self.config.tls.identity = Some(identity);
+        self
+    }
+
+    /// Sets the verify certificate store for the client.
+    ///
+    /// This method allows you to specify a custom verify certificate store to be used
+    /// for TLS connections. By default, the system's verify certificate store is used.
+    #[inline]
+    pub fn cert_store(mut self, store: CertStore) -> ClientBuilder {
+        self.config.tls.cert_store = store;
+        self
+    }
+
+    /// Controls the use of certificate validation.
+    ///
+    /// Defaults to `true`.
+    ///
+    /// # Warning
+    ///
+    /// You should think very carefully before using this method. If
+    /// invalid certificates are trusted, *any* certificate for *any* site
+    /// will be trusted for use. This includes expired certificates. This
+    /// introduces significant vulnerabilities, and should only be used
+    /// as a last resort.
+    #[inline]
+    pub fn cert_verification(mut self, cert_verification: bool) -> ClientBuilder {
+        self.config.tls.cert_verification = cert_verification;
+        self
+    }
+
+    /// Configures the use of hostname verification when connecting.
+    ///
+    /// Defaults to `true`.
+    /// # Warning
+    ///
+    /// You should think very carefully before you use this method. If hostname verification is not
+    /// used, *any* valid certificate for *any* site will be trusted for use from any other. This
+    /// introduces a significant vulnerability to man-in-the-middle attacks.
+    #[inline]
+    pub fn verify_hostname(mut self, verify_hostname: bool) -> ClientBuilder {
+        self.config.tls.verify_hostname = verify_hostname;
+        self
+    }
+
+    /// Configures the use of Server Name Indication (SNI) when connecting.
+    ///
+    /// Defaults to `true`.
+    #[inline]
+    pub fn tls_sni(mut self, tls_sni: bool) -> ClientBuilder {
+        self.config.tls.tls_sni = tls_sni;
+        self
+    }
+
+    /// Configures TLS key logging for the client.
+    #[inline]
+    pub fn keylog(mut self, keylog: KeyLog) -> ClientBuilder {
+        self.config.tls.keylog = Some(keylog);
+        self
+    }
+
+    /// Set the minimum required TLS version for connections.
+    ///
+    /// By default the TLS backend's own default is used.
+    #[inline]
+    pub fn min_tls_version(mut self, version: TlsVersion) -> ClientBuilder {
+        self.config.tls.min_version = Some(version);
+        self
+    }
+
+    /// Set the maximum allowed TLS version for connections.
+    ///
+    /// By default there's no maximum.
+    #[inline]
+    pub fn max_tls_version(mut self, version: TlsVersion) -> ClientBuilder {
+        self.config.tls.max_version = Some(version);
+        self
+    }
+
+    /// Add TLS information as `TlsInfo` extension to responses.
+    ///
+    /// # Optional
+    ///
+    /// feature to be enabled.
+    #[inline]
+    pub fn tls_info(mut self, tls_info: bool) -> ClientBuilder {
+        self.config.tls.tls_info = tls_info;
+        self
+    }
+
+    /// Sets the TLS options for the client.
+    #[inline]
+    pub fn tls_options(mut self, options: TlsOptions) -> ClientBuilder {
+        *self.config.transport.transport_options.tls_options_mut() = Some(options);
+        self
+    }
+
+    // DNS options
+
+    /// Disables the hickory-dns async resolver.
+    ///
+    /// This method exists even if the optional `hickory-dns` feature is not enabled.
+    /// This can be used to ensure a `Client` doesn't use the hickory-dns async resolver
+    /// even if another dependency were to enable the optional `hickory-dns` feature.
+    #[inline]
+    #[cfg(feature = "hickory-dns")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "hickory-dns")))]
+    pub fn no_hickory_dns(mut self) -> ClientBuilder {
+        self.config.dns.hickory_dns = false;
+        self
+    }
+
+    /// Override DNS resolution for specific domains to a particular IP address.
+    ///
+    /// Warning
+    ///
+    /// Since the DNS protocol has no notion of ports, if you wish to send
+    /// traffic to a particular port you must include this port in the URI
+    /// itself, any port in the overridden addr will be ignored and traffic sent
+    /// to the conventional port for the given scheme (e.g. 80 for http).
+    #[inline]
+    pub fn resolve<D>(self, domain: D, addr: SocketAddr) -> ClientBuilder
+    where
+        D: Into<Cow<'static, str>>,
+    {
+        self.resolve_to_addrs(domain, std::iter::once(addr))
+    }
+
+    /// Override DNS resolution for specific domains to particular IP addresses.
+    ///
+    /// Warning
+    ///
+    /// Since the DNS protocol has no notion of ports, if you wish to send
+    /// traffic to a particular port you must include this port in the URI
+    /// itself, any port in the overridden addresses will be ignored and traffic sent
+    /// to the conventional port for the given scheme (e.g. 80 for http).
+    #[inline]
+    pub fn resolve_to_addrs<D, A>(mut self, domain: D, addrs: A) -> ClientBuilder
+    where
+        D: Into<Cow<'static, str>>,
+        A: IntoIterator<Item = SocketAddr>,
+    {
+        self.config
+            .dns
+            .dns_overrides
+            .insert(domain.into(), addrs.into_iter().collect());
+        self
+    }
+
+    /// Override the DNS resolver implementation.
+    ///
+    /// Pass any type implementing `IntoResolve`.
+    /// Overrides for specific names passed to `resolve` and `resolve_to_addrs` will
+    /// still be applied on top of this resolver.
+    #[inline]
+    pub fn dns_resolver<R>(mut self, resolver: R) -> ClientBuilder
+    where
+        R: IntoResolve,
+    {
+        self.config.dns.dns_resolver = Some(resolver.into_resolve());
+        self
+    }
+
+    // Hooks options
+
+    /// Adds lifecycle hooks to the client.
+    ///
+    /// Hooks allow you to execute custom logic at different stages of the
+    /// request lifecycle, such as before sending a request or after receiving
+    /// a response.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use std::sync::Arc;
+    ///
+    /// use hpx::hooks::{Hooks, LoggingHook};
+    ///
+    /// let hooks = Hooks::builder()
+    ///     .before_request(Arc::new(LoggingHook::new()))
+    ///     .build();
+    ///
+    /// let client = hpx::Client::builder().hooks(hooks).build().unwrap();
+    /// ```
+    #[inline]
+    pub fn hooks(mut self, hooks: super::super::layer::hooks::Hooks) -> ClientBuilder {
+        self.config.middleware.hooks = Some(hooks);
+        self
+    }
+
+    /// Adds response recovery hooks to the client.
+    #[inline]
+    pub fn recoveries(
+        mut self,
+        recoveries: super::super::layer::recovery::Recoveries,
+    ) -> ClientBuilder {
+        self.config.protocol.recoveries = recoveries;
+        self
+    }
+
+    /// Adds a before-request hook using a closure.
+    ///
+    /// This is a convenience method for adding simple request hooks without
+    /// implementing the `BeforeRequestHook` trait manually.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use hpx::header;
+    ///
+    /// let client = hpx::Client::builder()
+    ///     .on_request(|req| {
+    ///         req.headers_mut().insert(
+    ///             header::HeaderName::from_static("x-custom"),
+    ///             header::HeaderValue::from_static("value"),
+    ///         );
+    ///         Ok(())
+    ///     })
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    #[inline]
+    pub fn on_request<F>(mut self, hook: F) -> ClientBuilder
+    where
+        F: Fn(&mut http::Request<Body>) -> Result<(), Error> + Send + Sync + 'static,
+    {
+        let hooks = self
+            .config
+            .middleware
+            .hooks
+            .get_or_insert_with(super::super::layer::hooks::Hooks::new);
+
+        // Create a wrapper struct to implement BeforeRequestHook
+        struct ClosureHook<F>(F);
+
+        impl<F> super::super::layer::hooks::BeforeRequestHook for ClosureHook<F>
+        where
+            F: Fn(&mut http::Request<Body>) -> Result<(), Error> + Send + Sync,
+        {
+            fn on_request(&self, request: &mut http::Request<Body>) -> Result<(), Error> {
+                (self.0)(request)
+            }
+        }
+
+        hooks.before_request.push(Arc::new(ClosureHook(hook)));
+        self
+    }
+
+    /// Adds an after-response hook using a closure.
+    ///
+    /// This is a convenience method for adding simple response hooks without
+    /// implementing the `AfterResponseHook` trait manually.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use http::StatusCode;
+    ///
+    /// let client = hpx::Client::builder()
+    ///     .on_response(|status, _headers| {
+    ///         println!("Response status: {}", status);
+    ///         Ok(())
+    ///     })
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    #[inline]
+    pub fn on_response<F>(mut self, hook: F) -> ClientBuilder
+    where
+        F: Fn(http::StatusCode, &http::HeaderMap) -> Result<(), Error> + Send + Sync + 'static,
+    {
+        let hooks = self
+            .config
+            .middleware
+            .hooks
+            .get_or_insert_with(super::super::layer::hooks::Hooks::new);
+
+        // Create a wrapper struct to implement AfterResponseHook
+        struct ClosureHook<F>(F);
+
+        impl<F> super::super::layer::hooks::AfterResponseHook for ClosureHook<F>
+        where
+            F: Fn(http::StatusCode, &http::HeaderMap) -> Result<(), Error> + Send + Sync,
+        {
+            fn on_response(
+                &self,
+                status: http::StatusCode,
+                headers: &http::HeaderMap,
+            ) -> Result<(), Error> {
+                (self.0)(status, headers)
+            }
+        }
+
+        hooks.after_response.push(Arc::new(ClosureHook(hook)));
+        self
+    }
+
+    /// Adds a status-based response recovery hook using a closure.
+    #[inline]
+    pub fn on_status<F, Fut>(mut self, status: http::StatusCode, hook: F) -> ClientBuilder
+    where
+        F: Fn(super::super::layer::recovery::StatusRecoveryContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Option<http::Request<Body>>, Error>> + Send + 'static,
+    {
+        struct ClosureHook<F>(F);
+
+        impl<F, Fut> super::super::layer::recovery::OnStatusHook for ClosureHook<F>
+        where
+            F: Fn(super::super::layer::recovery::StatusRecoveryContext) -> Fut
+                + Send
+                + Sync
+                + 'static,
+            Fut: Future<Output = Result<Option<http::Request<Body>>, Error>> + Send + 'static,
+        {
+            fn on_status(
+                &self,
+                context: super::super::layer::recovery::StatusRecoveryContext,
+            ) -> futures_util::future::BoxFuture<'static, Result<Option<http::Request<Body>>, Error>>
+            {
+                (self.0)(context).boxed()
+            }
+        }
+
+        self.config
+            .protocol
+            .recoveries
+            .push_hook(status, Arc::new(ClosureHook(hook)));
+        self
+    }
+
+    // Tower middleware options
+
+    /// Adds a new Tower [`Layer`](https://docs.rs/tower/latest/tower/trait.Layer.html) to the
+    /// request [`Service`](https://docs.rs/tower/latest/tower/trait.Service.html) which is responsible
+    /// for request processing.
+    ///
+    /// Each subsequent invocation of this function will wrap previous layers.
+    ///
+    /// If configured, the `timeout` will be the outermost layer.
+    ///
+    /// Example usage:
+    /// ```
+    /// use std::time::Duration;
+    ///
+    /// let client = hpx::Client::builder()
+    ///     .timeout(Duration::from_millis(200))
+    ///     .layer(tower::timeout::TimeoutLayer::new(Duration::from_millis(50)))
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    #[inline]
+    pub fn layer<L>(mut self, layer: L) -> ClientBuilder
+    where
+        L: Layer<BoxedClientService> + Clone + Send + Sync + 'static,
+        L::Service: Service<
+                http::Request<Body>,
+                Response = http::Response<super::super::ClientResponseBody>,
+                Error = BoxError,
+            > + Clone
+            + Send
+            + Sync
+            + 'static,
+        <L::Service as Service<http::Request<Body>>>::Future: Send + 'static,
+    {
+        let layer = BoxCloneSyncServiceLayer::new(layer);
+        self.config.middleware.layers.push(layer);
+        self
+    }
+
+    /// Adds a new Tower [`Layer`](https://docs.rs/tower/latest/tower/trait.Layer.html) to the
+    /// base connector [`Service`](https://docs.rs/tower/latest/tower/trait.Service.html) which
+    /// is responsible for connection establishment.a
+    ///
+    /// Each subsequent invocation of this function will wrap previous layers.
+    ///
+    /// If configured, the `connect_timeout` will be the outermost layer.
+    ///
+    /// Example usage:
+    /// ```
+    /// use std::time::Duration;
+    ///
+    /// let client = hpx::Client::builder()
+    ///     // resolved to outermost layer, meaning while we are waiting on concurrency limit
+    ///     .connect_timeout(Duration::from_millis(200))
+    ///     // underneath the concurrency check, so only after concurrency limit lets us through
+    ///     .connector_layer(tower::timeout::TimeoutLayer::new(Duration::from_millis(50)))
+    ///     .connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(2))
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    #[inline]
+    pub fn connector_layer<L>(mut self, layer: L) -> ClientBuilder
+    where
+        L: Layer<BoxedConnectorService> + Clone + Send + Sync + 'static,
+        L::Service:
+            Service<Unnameable, Response = Conn, Error = BoxError> + Clone + Send + Sync + 'static,
+        <L::Service as Service<Unnameable>>::Future: Send + 'static,
+    {
+        let layer = BoxCloneSyncServiceLayer::new(layer);
+        self.config.middleware.connector_layers.push(layer);
+        self
+    }
+
+    // TLS/HTTP2 emulation options
+
+    /// Configures the client builder to emulate the specified HTTP context.
+    ///
+    /// This method sets the necessary headers, HTTP/1 and HTTP/2 options configurations, and  TLS
+    /// options config to use the specified HTTP context. It allows the client to mimic the
+    /// behavior of different versions or setups, which can be useful for testing or ensuring
+    /// compatibility with various environments.
+    ///
+    /// # Note
+    /// This will overwrite the existing configuration.
+    /// You must set emulation before you can perform subsequent HTTP1/HTTP2/TLS fine-tuning.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use hpx::{BrowserProfile, Client};
+    ///
+    /// let client = Client::builder()
+    ///     .emulation(BrowserProfile::Firefox)
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    #[inline]
+    pub fn emulation<P>(mut self, factory: P) -> ClientBuilder
+    where
+        P: EmulationFactory,
+    {
+        let emulation = factory.emulation();
+        let (transport_opts, headers, orig_headers) = emulation.into_parts();
+
+        self.config
+            .transport
+            .transport_options
+            .apply_transport_options(transport_opts);
+        self.default_headers(headers).orig_headers(orig_headers)
+    }
+}

@@ -9,6 +9,7 @@ pub mod engine;
 pub mod error;
 pub mod event;
 pub mod metalink;
+mod persistence;
 pub mod queue;
 #[cfg(feature = "http")]
 pub mod segment;

@@ -14,6 +14,9 @@ lint:
   just build-docs
 test:
   cargo nextest run --workspace --all-features
+bdd:
+  cargo test -p hpx-dl --test cucumber --all-features
+test-all: test bdd
 build-docs:
   RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items --all-features
 test-coverage:

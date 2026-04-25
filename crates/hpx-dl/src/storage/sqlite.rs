@@ -1,12 +1,15 @@
 //! SQLite-backed storage implementation with crash recovery.
 
-use std::path::Path;
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use async_trait::async_trait;
 use sqlx::{Row, SqlitePool, sqlite::SqlitePoolOptions};
 
 use super::{DownloadRecord, SegmentState, SegmentStatus, Storage};
-use crate::{DownloadError, DownloadId, DownloadPriority, DownloadState};
+use crate::{DownloadError, DownloadId, DownloadPriority, DownloadRequest, DownloadState};
 
 /// Safely convert `u64` to `i64` for SQLite binding.
 ///
@@ -78,12 +81,14 @@ impl SqliteStorage {
                 id TEXT PRIMARY KEY,
                 url TEXT NOT NULL,
                 destination TEXT NOT NULL,
+                request_json TEXT,
                 state TEXT NOT NULL,
                 priority TEXT NOT NULL,
                 etag TEXT,
                 last_modified TEXT,
                 content_length INTEGER,
                 bytes_downloaded INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )
@@ -92,6 +97,8 @@ impl SqliteStorage {
         .execute(pool)
         .await
         .map_err(|e| DownloadError::Storage(e.to_string()))?;
+
+        Self::ensure_request_json_column(pool).await?;
 
         sqlx::query(
             "
@@ -112,6 +119,61 @@ impl SqliteStorage {
         .map_err(|e| DownloadError::Storage(e.to_string()))?;
 
         Ok(())
+    }
+
+    async fn ensure_request_json_column(pool: &SqlitePool) -> Result<(), DownloadError> {
+        let rows = sqlx::query("PRAGMA table_info(downloads)")
+            .fetch_all(pool)
+            .await
+            .map_err(|e| DownloadError::Storage(e.to_string()))?;
+
+        let has_request_json = rows
+            .iter()
+            .any(|row| row.get::<String, _>("name") == "request_json");
+        if !has_request_json {
+            sqlx::query("ALTER TABLE downloads ADD COLUMN request_json TEXT")
+                .execute(pool)
+                .await
+                .map_err(|e| DownloadError::Storage(e.to_string()))?;
+        }
+
+        let has_last_error = rows
+            .iter()
+            .any(|row| row.get::<String, _>("name") == "last_error");
+        if !has_last_error {
+            sqlx::query("ALTER TABLE downloads ADD COLUMN last_error TEXT")
+                .execute(pool)
+                .await
+                .map_err(|e| DownloadError::Storage(e.to_string()))?;
+        }
+
+        Ok(())
+    }
+}
+
+fn serialize_request(request: &DownloadRequest) -> Result<String, DownloadError> {
+    serde_json::to_string(request).map_err(|e| DownloadError::Storage(e.to_string()))
+}
+
+fn deserialize_request(
+    request_json: Option<&str>,
+    url: String,
+    destination: PathBuf,
+    priority: DownloadPriority,
+) -> Result<DownloadRequest, DownloadError> {
+    match request_json {
+        Some(json) => serde_json::from_str(json).map_err(|e| DownloadError::Storage(e.to_string())),
+        None => Ok(DownloadRequest {
+            url,
+            destination,
+            priority,
+            checksum: None,
+            headers: HashMap::new(),
+            max_connections: None,
+            speed_limit: None,
+            mirrors: Vec::new(),
+            proxy: None,
+        }),
     }
 }
 
@@ -172,6 +234,7 @@ const fn segment_status_str(s: SegmentStatus) -> &'static str {
 #[async_trait]
 impl Storage for SqliteStorage {
     async fn save(&self, download: &DownloadRecord) -> Result<(), DownloadError> {
+        let request_json = serialize_request(&download.request)?;
         let mut tx = self
             .pool
             .begin()
@@ -191,20 +254,22 @@ impl Storage for SqliteStorage {
 
         sqlx::query(
             "
-            INSERT INTO downloads (id, url, destination, state, priority, etag, last_modified,
-                content_length, bytes_downloaded, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO downloads (id, url, destination, request_json, state, priority, etag,
+                last_modified, content_length, bytes_downloaded, last_error, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ",
         )
         .bind(download.id.0.to_string())
-        .bind(&download.url)
-        .bind(download.destination.to_string_lossy().as_ref())
+        .bind(&download.request.url)
+        .bind(download.request.destination.to_string_lossy().as_ref())
+        .bind(&request_json)
         .bind(download.state.to_string())
-        .bind(priority_str(download.priority))
+        .bind(priority_str(download.request.priority))
         .bind(&download.etag)
         .bind(&download.last_modified)
         .bind(download.content_length.map(to_i64).transpose()?)
         .bind(to_i64(download.bytes_downloaded)?)
+        .bind(&download.last_error)
         .bind(download.created_at)
         .bind(download.updated_at)
         .execute(&mut *tx)
@@ -239,8 +304,8 @@ impl Storage for SqliteStorage {
 
     async fn load(&self, id: DownloadId) -> Result<Option<DownloadRecord>, DownloadError> {
         let row = sqlx::query(
-            "SELECT id, url, destination, state, priority, etag, last_modified, \
-             content_length, bytes_downloaded, created_at, updated_at \
+            "SELECT id, url, destination, request_json, state, priority, etag, last_modified, \
+               content_length, bytes_downloaded, last_error, created_at, updated_at \
              FROM downloads WHERE id = ?",
         )
         .bind(id.0.to_string())
@@ -255,18 +320,25 @@ impl Storage for SqliteStorage {
 
         let state_str: String = row.get("state");
         let priority_str: String = row.get("priority");
+        let url: String = row.get("url");
+        let destination = PathBuf::from(row.get::<String, _>("destination"));
+        let priority = parse_priority(&priority_str)?;
+        let request_json = row.get::<Option<String>, _>("request_json");
+        let request = deserialize_request(request_json.as_deref(), url, destination, priority)?;
         let segments = self.load_segments(id).await?;
 
         Ok(Some(DownloadRecord {
             id,
-            url: row.get("url"),
-            destination: std::path::PathBuf::from(row.get::<String, _>("destination")),
+            url: request.url.clone(),
+            destination: request.destination.clone(),
             state: parse_download_state(&state_str)?,
-            priority: parse_priority(&priority_str)?,
+            priority: request.priority,
+            request,
             etag: row.get("etag"),
             last_modified: row.get("last_modified"),
             content_length: row.get::<Option<i64>, _>("content_length").map(to_u64),
             bytes_downloaded: to_u64(row.get::<i64, _>("bytes_downloaded")),
+            last_error: row.get("last_error"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
             segments,
@@ -385,6 +457,83 @@ impl Storage for SqliteStorage {
         tracing::debug!(id = %id, "updated progress");
         Ok(())
     }
+
+    async fn upsert(&self, download: &DownloadRecord) -> Result<(), DownloadError> {
+        let request_json = serialize_request(&download.request)?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| DownloadError::Storage(e.to_string()))?;
+
+        sqlx::query(
+            "
+            INSERT INTO downloads (id, url, destination, request_json, state, priority, etag,
+                last_modified, content_length, bytes_downloaded, last_error, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                url = excluded.url,
+                destination = excluded.destination,
+                request_json = excluded.request_json,
+                state = excluded.state,
+                priority = excluded.priority,
+                etag = excluded.etag,
+                last_modified = excluded.last_modified,
+                content_length = excluded.content_length,
+                bytes_downloaded = excluded.bytes_downloaded,
+                last_error = excluded.last_error,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at
+            ",
+        )
+        .bind(download.id.0.to_string())
+        .bind(&download.request.url)
+        .bind(download.request.destination.to_string_lossy().as_ref())
+        .bind(&request_json)
+        .bind(download.state.to_string())
+        .bind(priority_str(download.request.priority))
+        .bind(&download.etag)
+        .bind(&download.last_modified)
+        .bind(download.content_length.map(to_i64).transpose()?)
+        .bind(to_i64(download.bytes_downloaded)?)
+        .bind(&download.last_error)
+        .bind(download.created_at)
+        .bind(download.updated_at)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| DownloadError::Storage(e.to_string()))?;
+
+        sqlx::query("DELETE FROM segments WHERE download_id = ?")
+            .bind(download.id.0.to_string())
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| DownloadError::Storage(e.to_string()))?;
+
+        for segment in &download.segments {
+            sqlx::query(
+                "
+                INSERT INTO segments (download_id, idx, start, end, state, bytes_downloaded)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ",
+            )
+            .bind(download.id.0.to_string())
+            .bind(i64::from(segment.index))
+            .bind(to_i64(segment.start)?)
+            .bind(to_i64(segment.end)?)
+            .bind(segment_status_str(segment.state))
+            .bind(to_i64(segment.bytes_downloaded)?)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| DownloadError::Storage(e.to_string()))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| DownloadError::Storage(e.to_string()))?;
+
+        tracing::debug!(id = %download.id, "upserted download record");
+        Ok(())
+    }
 }
 
 impl SqliteStorage {
@@ -422,8 +571,6 @@ fn chrono_timestamp() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::*;
 
     async fn memory_storage() -> SqliteStorage {
@@ -438,16 +585,21 @@ mod tests {
     fn sample_record() -> DownloadRecord {
         let id = DownloadId::new();
         let now = 1_700_000_000;
+        let request = DownloadRequest::builder("https://example.com/file.bin", "/tmp/file.bin")
+            .priority(DownloadPriority::Normal)
+            .build();
         DownloadRecord {
             id,
-            url: "https://example.com/file.bin".to_string(),
-            destination: PathBuf::from("/tmp/file.bin"),
+            request: request.clone(),
+            url: request.url.clone(),
+            destination: request.destination.clone(),
             state: DownloadState::Queued,
-            priority: DownloadPriority::Normal,
+            priority: request.priority,
             etag: Some("\"abc123\"".to_string()),
             last_modified: Some("Mon, 01 Jan 2024 00:00:00 GMT".to_string()),
             content_length: Some(10_000),
             bytes_downloaded: 0,
+            last_error: None,
             created_at: now,
             updated_at: now,
             segments: Vec::new(),
@@ -457,16 +609,21 @@ mod tests {
     fn sample_record_with_segments() -> DownloadRecord {
         let id = DownloadId::new();
         let now = 1_700_000_000;
+        let request = DownloadRequest::builder("https://example.com/large.bin", "/tmp/large.bin")
+            .priority(DownloadPriority::High)
+            .build();
         DownloadRecord {
             id,
-            url: "https://example.com/large.bin".to_string(),
-            destination: PathBuf::from("/tmp/large.bin"),
+            request: request.clone(),
+            url: request.url.clone(),
+            destination: request.destination.clone(),
             state: DownloadState::Downloading,
-            priority: DownloadPriority::High,
+            priority: request.priority,
             etag: Some("\"def456\"".to_string()),
             last_modified: None,
             content_length: Some(20_000),
             bytes_downloaded: 7_000,
+            last_error: None,
             created_at: now,
             updated_at: now,
             segments: vec![
@@ -535,6 +692,8 @@ mod tests {
         assert_eq!(loaded.id, id);
         assert_eq!(loaded.url, record.url);
         assert_eq!(loaded.destination, record.destination);
+        assert_eq!(loaded.request.url, record.request.url);
+        assert_eq!(loaded.request.destination, record.request.destination);
         assert_eq!(loaded.state, DownloadState::Queued);
         assert_eq!(loaded.priority, DownloadPriority::Normal);
         assert_eq!(loaded.etag, record.etag);
@@ -581,16 +740,21 @@ mod tests {
     async fn save_with_none_optional_fields() {
         let storage = memory_storage().await;
         let id = DownloadId::new();
+        let request = DownloadRequest::builder("https://example.com/file", "/tmp/file")
+            .priority(DownloadPriority::Low)
+            .build();
         let record = DownloadRecord {
             id,
-            url: "https://example.com/file".to_string(),
-            destination: PathBuf::from("/tmp/file"),
+            request: request.clone(),
+            url: request.url.clone(),
+            destination: request.destination.clone(),
             state: DownloadState::Queued,
-            priority: DownloadPriority::Low,
+            priority: request.priority,
             etag: None,
             last_modified: None,
             content_length: None,
             bytes_downloaded: 0,
+            last_error: None,
             created_at: 1_000_000,
             updated_at: 1_000_000,
             segments: Vec::new(),
@@ -622,7 +786,10 @@ mod tests {
         let r1 = sample_record();
         let mut r2 = sample_record();
         r2.id = DownloadId::new();
-        r2.url = "https://example.org/other.bin".to_string();
+        r2.request = DownloadRequest::builder("https://example.org/other.bin", "/tmp/file.bin")
+            .priority(DownloadPriority::Normal)
+            .build();
+        r2.sync_request_fields();
 
         storage.save(&r1).await.expect("save r1");
         storage.save(&r2).await.expect("save r2");
@@ -752,6 +919,31 @@ mod tests {
         assert!(storage.load(id).await.expect("load").is_none());
     }
 
+    #[tokio::test]
+    async fn upsert_replaces_existing_request_payload() {
+        let storage = memory_storage().await;
+        let mut record = sample_record();
+        let id = record.id;
+
+        storage.save(&record).await.expect("save");
+
+        record.request =
+            DownloadRequest::builder("https://example.org/replaced.bin", "/tmp/replaced.bin")
+                .priority(DownloadPriority::Critical)
+                .build();
+        record.sync_request_fields();
+        record.state = DownloadState::Paused;
+
+        storage.upsert(&record).await.expect("upsert");
+
+        let loaded = storage.load(id).await.expect("load").expect("exists");
+        assert_eq!(loaded.request.url, "https://example.org/replaced.bin");
+        assert_eq!(loaded.url, "https://example.org/replaced.bin");
+        assert_eq!(loaded.destination, PathBuf::from("/tmp/replaced.bin"));
+        assert_eq!(loaded.priority, DownloadPriority::Critical);
+        assert_eq!(loaded.state, DownloadState::Paused);
+    }
+
     // --- Priority and state variants ---
 
     #[tokio::test]
@@ -765,7 +957,8 @@ mod tests {
         ] {
             let mut record = sample_record();
             record.id = DownloadId::new();
-            record.priority = priority;
+            record.request.priority = priority;
+            record.sync_request_fields();
             storage.save(&record).await.expect("save");
             let loaded = storage
                 .load(record.id)

@@ -6,30 +6,34 @@
 
 use std::{
     collections::HashMap as StdHashMap,
+    future::Future,
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use scc::HashMap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
+#[cfg(feature = "sqlite")]
+use crate::storage::SqliteStorage;
 use crate::{
     CompositeLimiter, DownloadState, SegmentDownloader, SpeedLimiter,
     checksum::verify_checksum,
     error::DownloadError,
     event::EventBroadcaster,
+    persistence::PersistenceHandle,
     queue::{PriorityQueue, QueueEntry},
     segment::{
         RemoteInfo, ResumeState, SegmentProgressUpdate, calculate_segments,
-        compare_content_headers, probe_remote_with_headers,
+        probe_remote_with_headers, resume_state_from_segments,
     },
-    storage::{SegmentState, SegmentStatus},
-    types::{DownloadEvent, DownloadId, DownloadPriority, DownloadRequest, DownloadStatus},
+    storage::{DownloadRecord, SegmentState, SegmentStatus, Storage},
+    types::{DownloadEvent, DownloadId, DownloadRequest, DownloadStatus},
 };
 
 const SCHEDULER_IDLE_COALESCE_DELAY: Duration = Duration::from_millis(50);
@@ -78,6 +82,7 @@ impl Default for EngineConfig {
 pub struct EngineBuilder {
     client: Option<hpx::Client>,
     config: EngineConfig,
+    storage: Option<Arc<dyn Storage>>,
 }
 
 impl std::fmt::Debug for EngineBuilder {
@@ -85,6 +90,7 @@ impl std::fmt::Debug for EngineBuilder {
         f.debug_struct("EngineBuilder")
             .field("client", &self.client.as_ref().map(|_| "Client"))
             .field("config", &self.config)
+            .field("storage", &self.storage.as_ref().map(|_| "Storage"))
             .finish()
     }
 }
@@ -107,6 +113,13 @@ impl EngineBuilder {
     #[must_use]
     pub fn config(mut self, config: EngineConfig) -> Self {
         self.config = config;
+        self
+    }
+
+    /// Inject a custom storage backend.
+    #[must_use]
+    pub fn storage(mut self, storage: Arc<dyn Storage>) -> Self {
+        self.storage = Some(storage);
         self
     }
 
@@ -141,21 +154,25 @@ impl EngineBuilder {
     /// Build the [`DownloadEngine`].
     ///
     /// If no client was provided, a default `hpx::Client` is constructed.
-    #[must_use]
-    pub fn build(self) -> DownloadEngine {
+    pub fn build(self) -> Result<DownloadEngine, DownloadError> {
         let client = self.client.unwrap_or_default();
         let events = Arc::new(EventBroadcaster::new(256));
         let downloads = Arc::new(HashMap::new());
         let config = self.config;
-        let storage_path = config.storage_path.clone();
+        let storage = build_storage_backend(&config.storage_path, self.storage)?;
 
-        for persisted in load_persisted_downloads(&storage_path) {
-            let mut entry = persisted.entry;
-            if is_active_state(entry.state) || entry.state == DownloadState::Queued {
-                entry.state = DownloadState::Paused;
+        for mut record in load_records_from_storage(&storage)? {
+            if is_active_state(record.state) || record.state == DownloadState::Queued {
+                record.state = DownloadState::Paused;
+                record.last_error = None;
+                record.updated_at = current_timestamp();
+                persist_record_direct(&storage, &record)?;
             }
-            let _ = downloads.insert_sync(persisted.id, entry);
+
+            let _ = downloads.insert_sync(record.id, DownloadEntry::from_record(record));
         }
+
+        let persistence = Arc::new(PersistenceHandle::start(Arc::clone(&storage))?);
 
         let inner = Arc::new(EngineInner {
             client,
@@ -169,11 +186,10 @@ impl EngineBuilder {
             global_limiter: config
                 .global_speed_limit
                 .map(|limit| Arc::new(SpeedLimiter::depleted(limit))),
+            persistence,
         });
 
-        let _ = inner.persist_snapshot();
-
-        DownloadEngine { inner }
+        Ok(DownloadEngine { inner })
     }
 }
 
@@ -196,12 +212,75 @@ struct DownloadEntry {
     last_error: Option<String>,
     /// Per-segment completion state used for resume.
     segments: Vec<SegmentState>,
+    /// Unix timestamp (seconds) when the entry was created.
+    #[serde(default = "current_timestamp")]
+    created_at: i64,
+    /// Unix timestamp (seconds) when the entry was last updated.
+    #[serde(default = "current_timestamp")]
+    updated_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PersistedDownload {
     id: DownloadId,
     entry: DownloadEntry,
+}
+
+impl DownloadEntry {
+    fn new(request: DownloadRequest) -> Self {
+        let now = current_timestamp();
+        Self {
+            request,
+            state: DownloadState::Queued,
+            bytes_downloaded: 0,
+            total_bytes: None,
+            etag: None,
+            last_modified: None,
+            last_error: None,
+            segments: Vec::new(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn from_record(mut record: DownloadRecord) -> Self {
+        record.sync_request_fields();
+        Self {
+            request: record.request,
+            state: record.state,
+            bytes_downloaded: record.bytes_downloaded,
+            total_bytes: record.content_length,
+            etag: record.etag,
+            last_modified: record.last_modified,
+            last_error: record.last_error,
+            segments: record.segments,
+            created_at: record.created_at,
+            updated_at: record.updated_at,
+        }
+    }
+
+    fn to_record(&self, id: DownloadId) -> DownloadRecord {
+        DownloadRecord {
+            id,
+            request: self.request.clone(),
+            url: self.request.url.clone(),
+            destination: self.request.destination.clone(),
+            state: self.state,
+            priority: self.request.priority,
+            etag: self.etag.clone(),
+            last_modified: self.last_modified.clone(),
+            content_length: self.total_bytes,
+            bytes_downloaded: self.bytes_downloaded,
+            last_error: self.last_error.clone(),
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+            segments: self.segments.clone(),
+        }
+    }
+
+    fn touch(&mut self) {
+        self.updated_at = current_timestamp();
+    }
 }
 
 struct EngineInner {
@@ -214,6 +293,7 @@ struct EngineInner {
     scheduler_running: AtomicBool,
     concurrency: Arc<Semaphore>,
     global_limiter: Option<Arc<SpeedLimiter>>,
+    persistence: Arc<PersistenceHandle>,
 }
 
 impl std::fmt::Debug for EngineInner {
@@ -231,70 +311,70 @@ impl std::fmt::Debug for EngineInner {
 }
 
 impl EngineInner {
-    fn snapshot_downloads(&self) -> Vec<PersistedDownload> {
-        let mut snapshot = Vec::new();
-        self.downloads.iter_sync(|id, entry| {
-            snapshot.push(PersistedDownload {
-                id: *id,
-                entry: entry.clone(),
-            });
-            true
-        });
-        snapshot
+    fn entry_snapshot(&self, id: DownloadId) -> Result<DownloadEntry, DownloadError> {
+        self.downloads
+            .read_sync(&id, |_, entry| entry.clone())
+            .ok_or(DownloadError::NotFound(id.0))
     }
 
-    fn persist_snapshot(&self) -> Result<(), DownloadError> {
-        let snapshot = self.snapshot_downloads();
-        let payload = serde_json::to_vec_pretty(&snapshot)
-            .map_err(|error| DownloadError::Storage(error.to_string()))?;
-
-        if let Some(parent) = self.config.storage_path.parent()
-            && !parent.as_os_str().is_empty()
-        {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        let temp_path = self.config.storage_path.with_extension("tmp");
-        std::fs::write(&temp_path, payload)?;
-        std::fs::rename(temp_path, &self.config.storage_path)?;
-        Ok(())
-    }
-
-    fn transition_state(&self, id: DownloadId, state: DownloadState) -> Result<(), DownloadError> {
-        let updated = self.downloads.update_sync(&id, |_, entry| {
-            entry.state = state;
-            if state != DownloadState::Failed {
-                entry.last_error = None;
+    fn replace_entry(
+        &self,
+        id: DownloadId,
+        next_entry: DownloadEntry,
+    ) -> Result<(), DownloadError> {
+        let mut replacement = Some(next_entry);
+        let updated = self.downloads.update_sync(&id, move |_, entry| {
+            if let Some(replacement) = replacement.take() {
+                *entry = replacement;
             }
         });
+
         if updated.is_none() {
             return Err(DownloadError::NotFound(id.0));
         }
-        let _ = self.events.emit(DownloadEvent::StateChanged { id, state });
-        let _ = self.persist_snapshot();
+
         Ok(())
     }
 
-    fn update_after_probe(
+    async fn transition_state(
+        &self,
+        id: DownloadId,
+        state: DownloadState,
+    ) -> Result<(), DownloadError> {
+        let mut entry = self.entry_snapshot(id)?;
+        entry.state = state;
+        if state != DownloadState::Failed {
+            entry.last_error = None;
+        }
+        entry.touch();
+
+        let record = entry.to_record(id);
+        Arc::clone(&self.persistence).upsert_async(record).await?;
+        self.replace_entry(id, entry)?;
+
+        let _ = self.events.emit(DownloadEvent::StateChanged { id, state });
+        Ok(())
+    }
+
+    async fn update_after_probe(
         &self,
         id: DownloadId,
         remote: &RemoteInfo,
         segment_states: Vec<SegmentState>,
         bytes_downloaded: u64,
     ) -> Result<(), DownloadError> {
-        let updated = self.downloads.update_sync(&id, |_, entry| {
-            entry.total_bytes = remote.content_length;
-            entry.bytes_downloaded = bytes_downloaded;
-            entry.etag.clone_from(&remote.etag);
-            entry.last_modified.clone_from(&remote.last_modified);
-            entry.last_error = None;
-            entry.segments = segment_states;
-        });
-        if updated.is_none() {
-            return Err(DownloadError::NotFound(id.0));
-        }
-        let _ = self.persist_snapshot();
-        Ok(())
+        let mut entry = self.entry_snapshot(id)?;
+        entry.total_bytes = remote.content_length;
+        entry.bytes_downloaded = bytes_downloaded;
+        entry.etag.clone_from(&remote.etag);
+        entry.last_modified.clone_from(&remote.last_modified);
+        entry.last_error = None;
+        entry.segments = segment_states;
+        entry.touch();
+
+        let record = entry.to_record(id);
+        Arc::clone(&self.persistence).upsert_async(record).await?;
+        self.replace_entry(id, entry)
     }
 
     fn record_progress(&self, id: DownloadId, delta: u64) -> Result<(), DownloadError> {
@@ -316,94 +396,91 @@ impl EngineInner {
         Ok(())
     }
 
-    fn mark_segment_completed(
+    async fn mark_segment_completed(
         &self,
         id: DownloadId,
         index: u32,
         bytes_downloaded: u64,
     ) -> Result<(), DownloadError> {
-        let updated = self.downloads.update_sync(&id, |_, entry| {
-            if let Some(segment) = entry
-                .segments
-                .iter_mut()
-                .find(|segment| segment.index == index)
-            {
-                segment.state = SegmentStatus::Completed;
-                segment.bytes_downloaded = bytes_downloaded;
-            }
-        });
-        if updated.is_none() {
-            return Err(DownloadError::NotFound(id.0));
+        let mut entry = self.entry_snapshot(id)?;
+        if let Some(segment) = entry
+            .segments
+            .iter_mut()
+            .find(|segment| segment.index == index)
+        {
+            segment.state = SegmentStatus::Completed;
+            segment.bytes_downloaded = bytes_downloaded;
         }
-        let _ = self.persist_snapshot();
-        Ok(())
+        entry.touch();
+
+        let record = entry.to_record(id);
+        Arc::clone(&self.persistence).upsert_async(record).await?;
+        self.replace_entry(id, entry)
     }
 
-    fn complete_download(&self, id: DownloadId, bytes: u64) -> Result<(), DownloadError> {
-        let updated = self.downloads.update_sync(&id, |_, entry| {
-            entry.state = DownloadState::Completed;
-            entry.bytes_downloaded = bytes;
-            entry.last_error = None;
-            for segment in &mut entry.segments {
-                segment.state = SegmentStatus::Completed;
-                segment.bytes_downloaded = segment.end - segment.start + 1;
-            }
-        });
-        if updated.is_none() {
-            return Err(DownloadError::NotFound(id.0));
+    async fn complete_download(&self, id: DownloadId, bytes: u64) -> Result<(), DownloadError> {
+        let mut entry = self.entry_snapshot(id)?;
+        entry.state = DownloadState::Completed;
+        entry.bytes_downloaded = bytes;
+        entry.last_error = None;
+        for segment in &mut entry.segments {
+            segment.state = SegmentStatus::Completed;
+            segment.bytes_downloaded = segment.end - segment.start + 1;
         }
+        entry.touch();
+
+        let record = entry.to_record(id);
+        Arc::clone(&self.persistence).upsert_async(record).await?;
+        self.replace_entry(id, entry)?;
+
         let _ = self.events.emit(DownloadEvent::Completed { id });
-        let _ = self.persist_snapshot();
         Ok(())
     }
 
-    fn fail_download(&self, id: DownloadId, error: &DownloadError) -> Result<(), DownloadError> {
+    async fn fail_download(
+        &self,
+        id: DownloadId,
+        error: &DownloadError,
+    ) -> Result<(), DownloadError> {
         let message = error.to_string();
-        let updated = self.downloads.update_sync(&id, |_, entry| {
-            entry.state = DownloadState::Failed;
-            entry.last_error = Some(message.clone());
-        });
-        if updated.is_none() {
-            return Err(DownloadError::NotFound(id.0));
-        }
+        let mut entry = self.entry_snapshot(id)?;
+        entry.state = DownloadState::Failed;
+        entry.last_error = Some(message.clone());
+        entry.touch();
+
+        let record = entry.to_record(id);
+        Arc::clone(&self.persistence).upsert_async(record).await?;
+        self.replace_entry(id, entry)?;
+
         let _ = self
             .events
             .emit(DownloadEvent::Failed { id, error: message });
-        let _ = self.persist_snapshot();
         Ok(())
     }
 
     fn requeue(&self, id: DownloadId) -> Result<(), DownloadError> {
-        let mut request = None;
-        let mut priority = DownloadPriority::default();
-
-        let updated = self.downloads.update_sync(&id, |_, entry| {
-            if entry.state != DownloadState::Paused && entry.state != DownloadState::Failed {
-                return;
-            }
-            entry.state = DownloadState::Queued;
-            entry.last_error = None;
-            request = Some(entry.request.clone());
-            priority = entry.request.priority;
-        });
-        if updated.is_none() {
-            return Err(DownloadError::NotFound(id.0));
+        let mut entry = self.entry_snapshot(id)?;
+        if entry.state != DownloadState::Paused && entry.state != DownloadState::Failed {
+            return Err(DownloadError::InvalidState {
+                expected: "paused or failed".to_string(),
+                actual: entry.state.to_string(),
+            });
         }
 
-        let request = request.ok_or_else(|| DownloadError::InvalidState {
-            expected: "paused or failed".to_string(),
-            actual: self
-                .downloads
-                .read_sync(&id, |_, entry| entry.state.to_string())
-                .unwrap_or_else(|| "missing".to_string()),
-        })?;
+        entry.state = DownloadState::Queued;
+        entry.last_error = None;
+        entry.touch();
+
+        let request = entry.request.clone();
+        let priority = request.priority;
+        self.persistence.upsert(entry.to_record(id))?;
+        self.replace_entry(id, entry)?;
 
         self.queue
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(QueueEntry::new(id, priority, request, 0));
 
-        let _ = self.persist_snapshot();
         let _ = self.events.emit(DownloadEvent::StateChanged {
             id,
             state: DownloadState::Queued,
@@ -426,15 +503,14 @@ impl EngineInner {
             handle.abort();
         }
 
-        let updated = self.downloads.update_sync(&id, |_, entry| {
-            entry.state = DownloadState::Paused;
-            entry.last_error = None;
-        });
-        if updated.is_none() {
-            return Err(DownloadError::NotFound(id.0));
-        }
+        let mut entry = self.entry_snapshot(id)?;
+        entry.state = DownloadState::Paused;
+        entry.last_error = None;
+        entry.touch();
 
-        let _ = self.persist_snapshot();
+        self.persistence.upsert(entry.to_record(id))?;
+        self.replace_entry(id, entry)?;
+
         let _ = self.events.emit(DownloadEvent::StateChanged {
             id,
             state: DownloadState::Paused,
@@ -443,6 +519,8 @@ impl EngineInner {
     }
 
     fn remove_download(&self, id: DownloadId) -> Result<(), DownloadError> {
+        let _ = self.entry_snapshot(id)?;
+
         self.queue
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -457,12 +535,13 @@ impl EngineInner {
             handle.abort();
         }
 
+        self.persistence.delete(id)?;
+
         let removed = self.downloads.remove_sync(&id);
         if removed.is_none() {
             return Err(DownloadError::NotFound(id.0));
         }
 
-        let _ = self.persist_snapshot();
         let _ = self.events.emit(DownloadEvent::Removed { id });
         Ok(())
     }
@@ -572,7 +651,7 @@ impl EngineInner {
         }
 
         if let Some(error) = last_error {
-            let _ = self.fail_download(id, &error);
+            let _ = self.fail_download(id, &error).await;
         }
     }
 
@@ -582,7 +661,7 @@ impl EngineInner {
         request: &DownloadRequest,
         candidate_url: &str,
     ) -> Result<(), DownloadError> {
-        self.transition_state(id, DownloadState::Connecting)?;
+        self.transition_state(id, DownloadState::Connecting).await?;
 
         let client = build_client(&self.client, request.proxy.as_ref())?;
         let remote = probe_remote_with_headers(&client, candidate_url, &request.headers).await?;
@@ -605,7 +684,8 @@ impl EngineInner {
         let resume_state = self.resume_state(id, &remote, &segments)?;
         let segment_states = build_segment_states(&segments, &resume_state);
         let bytes_completed = bytes_completed(&segment_states);
-        self.update_after_probe(id, &remote, segment_states, bytes_completed)?;
+        self.update_after_probe(id, &remote, segment_states, bytes_completed)
+            .await?;
 
         ensure_destination_parent(&request.destination).await?;
 
@@ -614,11 +694,12 @@ impl EngineInner {
             if let Some(checksum) = &request.checksum {
                 verify_checksum(checksum, &request.destination).await?;
             }
-            self.complete_download(id, 0)?;
+            self.complete_download(id, 0).await?;
             return Ok(());
         }
 
-        self.transition_state(id, DownloadState::Downloading)?;
+        self.transition_state(id, DownloadState::Downloading)
+            .await?;
         let _ = self.events.emit(DownloadEvent::Started { id });
         if bytes_completed > 0 {
             let _ = self.events.emit(DownloadEvent::Progress {
@@ -676,7 +757,7 @@ impl EngineInner {
                             index,
                             bytes_downloaded,
                         } = update;
-                        let _ = self.mark_segment_completed(id, index, bytes_downloaded);
+                        let _ = self.mark_segment_completed(id, index, bytes_downloaded).await;
                     }
 
                     match result {
@@ -684,7 +765,8 @@ impl EngineInner {
                             if let Some(checksum) = &request.checksum {
                                 verify_checksum(checksum, &request.destination).await?;
                             }
-                            self.complete_download(id, bytes_completed.saturating_add(bytes))?;
+                            self.complete_download(id, bytes_completed.saturating_add(bytes))
+                                .await?;
                             return Ok(());
                         }
                         Err(error) => {
@@ -699,7 +781,7 @@ impl EngineInner {
                 }
                 maybe_update = segment_rx.recv() => {
                     if let Some(SegmentProgressUpdate::Completed { index, bytes_downloaded }) = maybe_update {
-                        let _ = self.mark_segment_completed(id, index, bytes_downloaded);
+                        let _ = self.mark_segment_completed(id, index, bytes_downloaded).await;
                     }
                 }
             }
@@ -721,37 +803,13 @@ impl EngineInner {
             return Ok(ResumeState::Fresh);
         }
 
-        if !compare_content_headers(
+        Ok(resume_state_from_segments(
             &entry.etag,
             &entry.last_modified,
             &remote.etag,
             &remote.last_modified,
-        ) {
-            return Ok(ResumeState::ContentChanged);
-        }
-
-        let completed_segments: Vec<u32> = entry
-            .segments
-            .iter()
-            .filter(|segment| segment.state == SegmentStatus::Completed)
-            .map(|segment| segment.index)
-            .collect();
-
-        if completed_segments.is_empty() {
-            return Ok(ResumeState::Fresh);
-        }
-
-        let bytes_completed = entry
-            .segments
-            .iter()
-            .filter(|segment| segment.state == SegmentStatus::Completed)
-            .map(|segment| segment.bytes_downloaded)
-            .sum();
-
-        Ok(ResumeState::CanResume {
-            bytes_completed,
-            completed_segments,
-        })
+            &entry.segments,
+        ))
     }
 
     fn shutdown(&self) {
@@ -776,11 +834,14 @@ impl EngineInner {
                 if is_active_state(entry.state) || entry.state == DownloadState::Queued {
                     entry.state = DownloadState::Paused;
                     entry.last_error = None;
+                    entry.touch();
                 }
             });
-        }
 
-        let _ = self.persist_snapshot();
+            if let Ok(entry) = self.entry_snapshot(id) {
+                let _ = self.persistence.upsert(entry.to_record(id));
+            }
+        }
     }
 }
 
@@ -832,19 +893,13 @@ impl DownloadEngine {
     /// Queue a new download.
     pub fn add(&self, request: DownloadRequest) -> Result<DownloadId, DownloadError> {
         let id = DownloadId::new();
-        let entry = DownloadEntry {
-            request: request.clone(),
-            state: DownloadState::Queued,
-            bytes_downloaded: 0,
-            total_bytes: None,
-            etag: None,
-            last_modified: None,
-            last_error: None,
-            segments: Vec::new(),
-        };
+        let entry = DownloadEntry::new(request.clone());
+
+        self.inner.persistence.upsert(entry.to_record(id))?;
 
         let inserted = self.inner.downloads.insert_sync(id, entry);
         if inserted.is_err() {
+            let _ = self.inner.persistence.delete(id);
             return Err(DownloadError::AlreadyExists(id.0));
         }
 
@@ -854,7 +909,6 @@ impl DownloadEngine {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(QueueEntry::new(id, request.priority, request, 0));
 
-        let _ = self.inner.persist_snapshot();
         let _ = self.emit(DownloadEvent::Added { id });
         self.inner.trigger_scheduler();
         Ok(id)
@@ -919,18 +973,145 @@ impl Drop for DownloadEngine {
     }
 }
 
-fn load_persisted_downloads(path: &Path) -> Vec<PersistedDownload> {
-    let Ok(bytes) = std::fs::read(path) else {
-        return Vec::new();
+fn build_storage_backend(
+    storage_path: &Path,
+    storage: Option<Arc<dyn Storage>>,
+) -> Result<Arc<dyn Storage>, DownloadError> {
+    if let Some(storage) = storage {
+        return Ok(storage);
+    }
+
+    #[cfg(feature = "sqlite")]
+    {
+        if let Some(parent) = storage_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let legacy_records = load_legacy_snapshot(storage_path)?;
+        if legacy_records.is_some() {
+            backup_legacy_snapshot(storage_path)?;
+        }
+        let storage: Arc<dyn Storage> =
+            Arc::new(block_on_storage(SqliteStorage::new(storage_path))?);
+
+        if let Some(records) = legacy_records {
+            for record in &records {
+                persist_record_direct(&storage, record)?;
+            }
+        }
+
+        Ok(storage)
+    }
+
+    #[cfg(not(feature = "sqlite"))]
+    {
+        let _ = storage_path;
+        Err(DownloadError::InvalidConfiguration(
+            "engine storage requires the sqlite feature or an injected Storage backend".to_string(),
+        ))
+    }
+}
+
+fn load_records_from_storage(
+    storage: &Arc<dyn Storage>,
+) -> Result<Vec<DownloadRecord>, DownloadError> {
+    block_on_storage(storage.list())
+}
+
+fn persist_record_direct(
+    storage: &Arc<dyn Storage>,
+    record: &DownloadRecord,
+) -> Result<(), DownloadError> {
+    block_on_storage(storage.upsert(record))
+}
+
+fn block_on_storage<T>(
+    future: impl Future<Output = Result<T, DownloadError>> + Send,
+) -> Result<T, DownloadError>
+where
+    T: Send,
+{
+    if tokio::runtime::Handle::try_current().is_ok() {
+        return std::thread::scope(|scope| {
+            let join_handle = scope.spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|error| DownloadError::Storage(error.to_string()))?;
+                runtime.block_on(future)
+            });
+
+            join_handle.join().map_err(storage_thread_panic)?
+        });
+    }
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| DownloadError::Storage(error.to_string()))?;
+    runtime.block_on(future)
+}
+
+fn storage_thread_panic(panic: Box<dyn std::any::Any + Send + 'static>) -> DownloadError {
+    if let Some(message) = panic.downcast_ref::<&str>() {
+        return DownloadError::Storage((*message).to_string());
+    }
+
+    if let Some(message) = panic.downcast_ref::<String>() {
+        return DownloadError::Storage(message.clone());
+    }
+
+    DownloadError::Storage("storage worker panicked".to_string())
+}
+
+fn load_legacy_snapshot(path: &Path) -> Result<Option<Vec<DownloadRecord>>, DownloadError> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(DownloadError::Io(error)),
     };
 
-    match serde_json::from_slice::<Vec<PersistedDownload>>(&bytes) {
-        Ok(downloads) => downloads,
-        Err(error) => {
-            tracing::warn!(path = %path.display(), error = %error, "ignoring invalid persisted download state");
-            Vec::new()
-        }
+    let first_non_whitespace = bytes
+        .iter()
+        .copied()
+        .find(|byte| !byte.is_ascii_whitespace());
+    if first_non_whitespace.is_none() {
+        return Ok(None);
     }
+    if first_non_whitespace != Some(b'[') {
+        return Ok(None);
+    }
+
+    let downloads = serde_json::from_slice::<Vec<PersistedDownload>>(&bytes).map_err(|error| {
+        DownloadError::Storage(format!(
+            "failed to migrate legacy snapshot {}: {error}",
+            path.display()
+        ))
+    })?;
+
+    Ok(Some(
+        downloads
+            .into_iter()
+            .map(|persisted| persisted.entry.to_record(persisted.id))
+            .collect(),
+    ))
+}
+
+fn backup_legacy_snapshot(path: &Path) -> Result<(), DownloadError> {
+    let backup_path = path.with_extension("legacy-json.bak");
+    if backup_path.exists() {
+        std::fs::remove_file(&backup_path)?;
+    }
+    std::fs::rename(path, backup_path)?;
+    Ok(())
+}
+
+fn current_timestamp() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs() as i64)
 }
 
 fn build_segment_states(
@@ -1009,7 +1190,92 @@ async fn ensure_destination_parent(path: &Path) -> Result<(), DownloadError> {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+    };
+
+    use async_trait::async_trait;
+
     use super::*;
+    use crate::{
+        DownloadPriority,
+        storage::{DownloadRecord, Storage},
+    };
+
+    #[derive(Debug, Default)]
+    struct TestStorage {
+        records: Mutex<HashMap<DownloadId, DownloadRecord>>,
+        fail_save: bool,
+    }
+
+    impl TestStorage {
+        fn with_record(record: DownloadRecord) -> Self {
+            let mut records = HashMap::new();
+            records.insert(record.id, record);
+            Self {
+                records: Mutex::new(records),
+                fail_save: false,
+            }
+        }
+
+        fn failing_save() -> Self {
+            Self {
+                records: Mutex::new(HashMap::new()),
+                fail_save: true,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Storage for TestStorage {
+        async fn save(&self, download: &DownloadRecord) -> Result<(), DownloadError> {
+            if self.fail_save {
+                return Err(DownloadError::Storage("save failed".to_string()));
+            }
+
+            let mut records = self.records.lock().unwrap();
+            if records.insert(download.id, download.clone()).is_some() {
+                return Err(DownloadError::AlreadyExists(download.id.0));
+            }
+            Ok(())
+        }
+
+        async fn load(&self, id: DownloadId) -> Result<Option<DownloadRecord>, DownloadError> {
+            let records = self.records.lock().unwrap();
+            Ok(records.get(&id).cloned())
+        }
+
+        async fn list(&self) -> Result<Vec<DownloadRecord>, DownloadError> {
+            let records = self.records.lock().unwrap();
+            Ok(records.values().cloned().collect())
+        }
+
+        async fn delete(&self, id: DownloadId) -> Result<(), DownloadError> {
+            let mut records = self.records.lock().unwrap();
+            records.remove(&id);
+            Ok(())
+        }
+
+        async fn update_progress(
+            &self,
+            id: DownloadId,
+            segments: &[SegmentState],
+        ) -> Result<(), DownloadError> {
+            let mut records = self.records.lock().unwrap();
+            let Some(record) = records.get_mut(&id) else {
+                return Err(DownloadError::NotFound(id.0));
+            };
+
+            record.segments = segments.to_vec();
+            record.bytes_downloaded = record
+                .segments
+                .iter()
+                .map(|segment| segment.bytes_downloaded)
+                .sum();
+            Ok(())
+        }
+    }
 
     #[test]
     fn engine_config_defaults() {
@@ -1045,7 +1311,7 @@ mod tests {
 
     #[test]
     fn builder_defaults_produce_valid_engine() {
-        let engine = EngineBuilder::new().build();
+        let engine = EngineBuilder::new().build().expect("build engine");
         assert_eq!(engine.config().max_concurrent_downloads, 5);
         assert_eq!(engine.config().max_connections_per_download, 5);
     }
@@ -1057,7 +1323,8 @@ mod tests {
             .max_connections(4)
             .speed_limit(Some(500_000))
             .storage_path("/tmp/test.db")
-            .build();
+            .build()
+            .expect("build engine");
 
         assert_eq!(engine.config().max_concurrent_downloads, 16);
         assert_eq!(engine.config().max_connections_per_download, 4);
@@ -1070,6 +1337,7 @@ mod tests {
     fn persisted_active_downloads_resume_as_paused() {
         let temp = tempfile::tempdir().expect("temp dir");
         let storage_path = temp.path().join("state.json");
+        let now = 1_700_000_000;
         let request =
             DownloadRequest::builder("https://example.com/file.bin", temp.path().join("file.bin"))
                 .build();
@@ -1084,6 +1352,8 @@ mod tests {
                 last_modified: Some("now".to_string()),
                 last_error: None,
                 segments: Vec::new(),
+                created_at: now,
+                updated_at: now,
             },
         }];
         std::fs::write(
@@ -1092,10 +1362,65 @@ mod tests {
         )
         .expect("persist state");
 
-        let engine = EngineBuilder::new().storage_path(&storage_path).build();
+        let engine = EngineBuilder::new()
+            .storage_path(&storage_path)
+            .build()
+            .expect("build engine");
         let statuses = engine.list().expect("status list");
         assert_eq!(statuses.len(), 1);
         assert_eq!(statuses[0].state, DownloadState::Paused);
+    }
+
+    #[test]
+    fn builder_rehydrates_persisted_downloads_from_storage() {
+        let id = DownloadId::new();
+        let now = 1_700_000_000;
+        let request = DownloadRequest::builder("https://example.com/file.bin", "/tmp/file.bin")
+            .priority(DownloadPriority::Normal)
+            .build();
+        let storage = Arc::new(TestStorage::with_record(DownloadRecord {
+            id,
+            request: request.clone(),
+            url: request.url.clone(),
+            destination: request.destination.clone(),
+            state: DownloadState::Downloading,
+            priority: request.priority,
+            etag: Some("etag".to_string()),
+            last_modified: Some("now".to_string()),
+            content_length: Some(128),
+            bytes_downloaded: 64,
+            last_error: None,
+            created_at: now,
+            updated_at: now,
+            segments: Vec::new(),
+        }));
+
+        let engine = EngineBuilder::new()
+            .storage(storage)
+            .build()
+            .expect("build with custom storage");
+
+        let statuses = engine.list().expect("status list");
+        assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses[0].id, id);
+        assert_eq!(statuses[0].state, DownloadState::Paused);
+    }
+
+    #[test]
+    fn add_returns_storage_error_when_persistence_fails() {
+        let engine = EngineBuilder::new()
+            .storage(Arc::new(TestStorage::failing_save()))
+            .build()
+            .expect("build with failing storage");
+
+        let request =
+            DownloadRequest::builder("https://example.com/file.bin", "/tmp/file.bin").build();
+        let error = engine
+            .add(request)
+            .expect_err("add should surface storage failure");
+        assert!(
+            matches!(error, DownloadError::Storage(message) if message.contains("save failed"))
+        );
     }
 
     #[test]

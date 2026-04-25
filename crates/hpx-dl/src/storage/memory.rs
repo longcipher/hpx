@@ -36,7 +36,8 @@ impl Default for MemoryStorage {
 impl Storage for MemoryStorage {
     async fn save(&self, download: &DownloadRecord) -> Result<(), DownloadError> {
         let id = download.id;
-        let record = download.clone();
+        let mut record = download.clone();
+        record.sync_request_fields();
         let records = Arc::clone(&self.records);
         let result = tokio::task::spawn_blocking(move || records.insert_sync(id, record))
             .await
@@ -105,6 +106,24 @@ impl Storage for MemoryStorage {
             Err(DownloadError::NotFound(id.0))
         }
     }
+
+    async fn upsert(&self, download: &DownloadRecord) -> Result<(), DownloadError> {
+        let id = download.id;
+        let mut record = download.clone();
+        record.sync_request_fields();
+        let records = Arc::clone(&self.records);
+        tokio::task::spawn_blocking(move || {
+            records.remove_sync(&id);
+            records
+                .insert_sync(id, record)
+                .map_err(|_| DownloadError::Storage("upsert failed".to_string()))
+        })
+        .await
+        .map_err(|e| DownloadError::Storage(e.to_string()))??;
+
+        tracing::debug!(id = %id, "upserted download record");
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -112,21 +131,26 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::{DownloadPriority, DownloadState};
+    use crate::{DownloadPriority, DownloadRequest, DownloadState};
 
     fn sample_record() -> DownloadRecord {
         let id = DownloadId::new();
         let now = 1_700_000_000;
+        let request = DownloadRequest::builder("https://example.com/file.bin", "/tmp/file.bin")
+            .priority(DownloadPriority::Normal)
+            .build();
         DownloadRecord {
             id,
-            url: "https://example.com/file.bin".to_string(),
-            destination: PathBuf::from("/tmp/file.bin"),
+            request: request.clone(),
+            url: request.url.clone(),
+            destination: request.destination.clone(),
             state: DownloadState::Queued,
-            priority: DownloadPriority::Normal,
+            priority: request.priority,
             etag: Some("\"abc123\"".to_string()),
             last_modified: Some("Mon, 01 Jan 2024 00:00:00 GMT".to_string()),
             content_length: Some(10_000),
             bytes_downloaded: 0,
+            last_error: None,
             created_at: now,
             updated_at: now,
             segments: Vec::new(),
@@ -144,6 +168,8 @@ mod tests {
         assert_eq!(loaded.id, id);
         assert_eq!(loaded.url, record.url);
         assert_eq!(loaded.destination, record.destination);
+        assert_eq!(loaded.request.url, record.request.url);
+        assert_eq!(loaded.request.destination, record.request.destination);
     }
 
     #[tokio::test]
@@ -171,7 +197,10 @@ mod tests {
         let r1 = sample_record();
         let mut r2 = sample_record();
         r2.id = DownloadId::new();
-        r2.url = "https://example.org/other.bin".to_string();
+        r2.request = DownloadRequest::builder("https://example.org/other.bin", "/tmp/file.bin")
+            .priority(DownloadPriority::Normal)
+            .build();
+        r2.sync_request_fields();
 
         storage.save(&r1).await.unwrap();
         storage.save(&r2).await.unwrap();
@@ -237,6 +266,30 @@ mod tests {
         let loaded = storage.load(id).await.unwrap().unwrap();
         assert_eq!(loaded.segments.len(), 2);
         assert_eq!(loaded.bytes_downloaded, 7000);
+    }
+
+    #[tokio::test]
+    async fn upsert_replaces_existing_record() {
+        let storage = MemoryStorage::new();
+        let mut record = sample_record();
+        let id = record.id;
+
+        storage.save(&record).await.unwrap();
+
+        record.request =
+            DownloadRequest::builder("https://example.org/other.bin", "/tmp/other.bin")
+                .priority(DownloadPriority::High)
+                .build();
+        record.sync_request_fields();
+        record.state = DownloadState::Paused;
+
+        storage.upsert(&record).await.unwrap();
+
+        let loaded = storage.load(id).await.unwrap().unwrap();
+        assert_eq!(loaded.request.url, "https://example.org/other.bin");
+        assert_eq!(loaded.destination, PathBuf::from("/tmp/other.bin"));
+        assert_eq!(loaded.state, DownloadState::Paused);
+        assert_eq!(loaded.priority, DownloadPriority::High);
     }
 
     #[tokio::test]

@@ -480,7 +480,7 @@ impl DownloadWorld {
         configure: impl FnOnce(hpx_dl::EngineBuilder) -> hpx_dl::EngineBuilder,
     ) {
         let builder = hpx_dl::DownloadEngine::builder().storage_path(&self.storage_path);
-        let engine = configure(builder).build();
+        let engine = configure(builder).build().expect("build download engine");
         self.set_engine(engine);
     }
 

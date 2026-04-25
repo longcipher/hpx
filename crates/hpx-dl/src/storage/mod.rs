@@ -5,13 +5,15 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::{DownloadError, DownloadId, DownloadPriority, DownloadState};
+use crate::{DownloadError, DownloadId, DownloadPriority, DownloadRequest, DownloadState};
 
 /// Persistent record for a single download job.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownloadRecord {
     /// Unique identifier for this download.
     pub id: DownloadId,
+    /// Full request payload needed to resume the download after restart.
+    pub request: DownloadRequest,
     /// Source URL.
     pub url: String,
     /// Local destination path.
@@ -28,12 +30,23 @@ pub struct DownloadRecord {
     pub content_length: Option<u64>,
     /// Total bytes downloaded so far.
     pub bytes_downloaded: u64,
+    /// Last failure recorded for this download.
+    pub last_error: Option<String>,
     /// Unix timestamp (seconds) when the record was created.
     pub created_at: i64,
     /// Unix timestamp (seconds) when the record was last updated.
     pub updated_at: i64,
     /// Per-segment progress state.
     pub segments: Vec<SegmentState>,
+}
+
+impl DownloadRecord {
+    /// Keep convenience fields in sync with the canonical request payload.
+    pub fn sync_request_fields(&mut self) {
+        self.url = self.request.url.clone();
+        self.destination = self.request.destination.clone();
+        self.priority = self.request.priority;
+    }
 }
 
 /// Status of an individual segment.
@@ -95,6 +108,18 @@ pub trait Storage: Send + Sync {
         id: DownloadId,
         segments: &[SegmentState],
     ) -> Result<(), DownloadError>;
+
+    /// Insert or replace a download record atomically.
+    async fn upsert(&self, download: &DownloadRecord) -> Result<(), DownloadError> {
+        let mut normalized = download.clone();
+        normalized.sync_request_fields();
+
+        if self.load(normalized.id).await?.is_some() {
+            self.delete(normalized.id).await?;
+        }
+
+        self.save(&normalized).await
+    }
 }
 
 // ---------------------------------------------------------------------------

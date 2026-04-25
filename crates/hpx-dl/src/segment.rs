@@ -628,6 +628,48 @@ pub fn determine_resume_state(
     }
 }
 
+/// Determine whether persisted segments can be safely resumed.
+#[must_use]
+pub fn resume_state_from_segments(
+    record_etag: &Option<String>,
+    record_last_modified: &Option<String>,
+    remote_etag: &Option<String>,
+    remote_last_modified: &Option<String>,
+    segments: &[crate::storage::SegmentState],
+) -> ResumeState {
+    let base_state = determine_resume_state(
+        true,
+        record_etag,
+        record_last_modified,
+        remote_etag,
+        remote_last_modified,
+    );
+
+    if !matches!(base_state, ResumeState::CanResume { .. }) {
+        return base_state;
+    }
+
+    let completed_segments: Vec<u32> = segments
+        .iter()
+        .filter(|segment| segment.state == SegmentStatus::Completed)
+        .map(|segment| segment.index)
+        .collect();
+    if completed_segments.is_empty() {
+        return ResumeState::Fresh;
+    }
+
+    let bytes_completed = segments
+        .iter()
+        .filter(|segment| segment.state == SegmentStatus::Completed)
+        .map(|segment| segment.bytes_downloaded)
+        .sum();
+
+    ResumeState::CanResume {
+        bytes_completed,
+        completed_segments,
+    }
+}
+
 /// Filter segments to only those not in `completed_indices`.
 #[must_use]
 pub fn filter_remaining_segments(
@@ -684,34 +726,29 @@ pub async fn check_resume(
         &remote.last_modified,
     );
 
-    // If CanResume, fill in the completed segments and bytes from the record
-    if let Some(record) = record
-        && matches!(state, ResumeState::CanResume { .. })
-    {
-        let completed_segments: Vec<u32> = record
-            .segments
-            .iter()
-            .filter(|s| s.state == SegmentStatus::Completed)
-            .map(|s| s.index)
-            .collect();
-
-        let bytes_completed: u64 = record
-            .segments
-            .iter()
-            .filter(|s| s.state == SegmentStatus::Completed)
-            .map(|s| s.bytes_downloaded)
-            .sum();
-
-        debug!(
-            bytes_completed,
-            segments = completed_segments.len(),
-            "content unchanged, can resume"
+    if let Some(record) = record {
+        let state = resume_state_from_segments(
+            &record_etag,
+            &record_last_modified,
+            &remote.etag,
+            &remote.last_modified,
+            &record.segments,
         );
 
-        return Ok(ResumeState::CanResume {
+        if let ResumeState::CanResume {
             bytes_completed,
             completed_segments,
-        });
+        } = &state
+        {
+            debug!(
+                bytes_completed,
+                segments = completed_segments.len(),
+                "content unchanged, can resume"
+            );
+        }
+
+        debug!(?state, "resume check completed");
+        return Ok(state);
     }
 
     debug!(?state, "resume check completed");
