@@ -1,6 +1,12 @@
 mod support;
 
-use std::time::Duration;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 use futures_util::future::join_all;
 use hpx::{Body, Client, ClientResponseBody};
@@ -154,6 +160,42 @@ async fn with_connect_timeout_layer_slow() {
     let err = res.unwrap_err();
 
     assert!(err.is_timeout());
+}
+
+#[tokio::test]
+async fn timeout_layer_does_not_break_follow_up_requests() {
+    let _ = env_logger::try_init();
+
+    let request_count = Arc::new(AtomicUsize::new(0));
+    let server_count = Arc::clone(&request_count);
+    let server = server::http(move |_req| {
+        let server_count = Arc::clone(&server_count);
+        async move {
+            let current = server_count.fetch_add(1, Ordering::SeqCst);
+            if current == 0 {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+
+            http::Response::new(hpx::Body::from(format!("response-{current}")))
+        }
+    });
+
+    let url = format!("http://{}/slow", server.addr());
+
+    let client = Client::builder()
+        .layer(TimeoutLayer::new(Duration::from_millis(50)))
+        .no_proxy()
+        .build()
+        .unwrap();
+
+    let first_err = client.get(&url).send().await.unwrap_err();
+    assert!(first_err.is_timeout());
+
+    let second = client.get(&url).send().await.unwrap();
+    let body = second.text().await.unwrap();
+
+    assert_eq!(body, "response-1");
+    assert_eq!(request_count.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]
