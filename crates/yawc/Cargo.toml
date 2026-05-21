@@ -33,6 +33,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 axum = ["axum-core", "http"]
 default = ["rustls-ring"]
+hotpath = ["dep:hotpath"]
 rustls-aws-lc-rs = ["tokio-rustls/aws-lc-rs"]
 rustls-ring = ["tokio-rustls/ring"]
 simd = ["simdutf8"]
@@ -86,12 +87,19 @@ test = false
 name = "proxy"
 test = false
 
+[[bench]]
+name = "websocket_core"
+harness = false
+
 # ==============================================================================
 # Common dependencies (shared across all targets)
 # ==============================================================================
 [dependencies]
 bytes = { workspace = true }
 futures = { workspace = true }
+hotpath = { workspace = true, features = [
+    "hotpath",
+], optional = true }
 rand = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }

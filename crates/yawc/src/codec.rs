@@ -193,6 +193,7 @@ impl codec::Decoder for Codec {
     type Error = <Decoder as codec::Decoder>::Error;
 
     #[inline]
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         self.decoder.decode(src)
     }
@@ -254,6 +255,7 @@ impl codec::Decoder for Decoder {
     /// - `Ok(Some(Frame))`: Returns a fully decoded `Frame` when successful.
     /// - `Ok(None)`: Indicates more data is needed to complete the frame.
     /// - `Err(WebSocketError)`: If a protocol violation or invalid frame structure is detected.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         // If we have a partial frame state, try to complete it
         if let Some(state) = self.state.take() {
@@ -395,6 +397,7 @@ impl codec::Encoder<Frame> for Encoder {
     /// - `Ok(())` if encoding is successful.
     /// - `Err(WebSocketError)` if encoding fails.
     #[inline(always)]
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn encode(&mut self, mut frame: Frame, dst: &mut BytesMut) -> Result<(), Self::Error> {
         if self.role == Role::Client {
             // ensure the mask is set

@@ -654,7 +654,7 @@ fn decode_trailers(buf: &mut BytesMut, count: usize) -> Result<HeaderMap, io::Er
                     Err(_) => {
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidInput,
-                            format!("Invalid header name: {:?}", &header),
+                            format!("Invalid header name: {:?}", header),
                         ));
                     }
                 };
@@ -664,7 +664,7 @@ fn decode_trailers(buf: &mut BytesMut, count: usize) -> Result<HeaderMap, io::Er
                     Err(_) => {
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidInput,
-                            format!("Invalid header value: {:?}", &header),
+                            format!("Invalid header value: {:?}", header),
                         ));
                     }
                 };

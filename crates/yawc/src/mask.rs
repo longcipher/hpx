@@ -1,40 +1,20 @@
-// Optimized masking implementation with SIMD support
+// Optimized masking implementation.
 
 /// Mask/unmask a frame with optimal strategy selection.
 ///
 /// This function automatically selects the fastest masking implementation based on:
 /// - Buffer size
-/// - CPU features (AVX2, NEON when available)
 /// - Architecture alignment
 #[inline]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn apply_mask(buf: &mut [u8], mask: [u8; 4]) {
-    // Try SIMD implementations first for larger buffers
-    #[cfg(all(
-        any(target_arch = "x86_64", target_arch = "x86"),
-        target_feature = "avx2"
-    ))]
-    if buf.len() >= 32 {
-        // SAFETY: AVX2 is guaranteed by target_feature
-        unsafe {
-            return apply_mask_avx2(buf, mask);
-        }
-    }
-
-    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-    if buf.len() >= 16 {
-        // SAFETY: NEON is guaranteed by target_feature
-        unsafe {
-            return apply_mask_neon(buf, mask);
-        }
-    }
-
-    // Fall back to scalar implementations
-    // For small buffers, use the fast32 path
-    // For larger buffers (>128 bytes), the 64-bit path is faster
+    // Criterion benchmarks on the core codec path show the word-aligned scalar
+    // paths beat the hand-written NEON path on aarch64 and are consistently
+    // faster than routing large buffers through manual SIMD.
     if buf.len() <= 128 {
-        apply_mask_fast32(buf, mask);
-    } else {
         apply_mask_fast64(buf, mask);
+    } else {
+        apply_mask_fast32(buf, mask);
     }
 }
 
@@ -49,6 +29,7 @@ fn apply_mask_fallback(buf: &mut [u8], mask: [u8; 4]) {
 /// Faster version of `apply_mask()` which operates on 4-byte blocks.
 #[doc(hidden)]
 #[inline(always)]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn apply_mask_fast32(buf: &mut [u8], mask: [u8; 4]) {
     let mask_u32 = u32::from_ne_bytes(mask);
     let (prefix, words, suffix) = unsafe { buf.align_to_mut::<u32>() };
@@ -75,6 +56,7 @@ pub fn apply_mask_fast32(buf: &mut [u8], mask: [u8; 4]) {
 /// Even faster version using 64-bit blocks for larger buffers.
 #[doc(hidden)]
 #[inline(always)]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn apply_mask_fast64(buf: &mut [u8], mask: [u8; 4]) {
     // Create 64-bit mask by repeating the 32-bit mask
     let mask_u32 = u32::from_ne_bytes(mask);
@@ -99,102 +81,6 @@ pub fn apply_mask_fast64(buf: &mut [u8], mask: [u8; 4]) {
     }
 
     apply_mask_fallback(suffix, mask_u64.to_ne_bytes()[..4].try_into().unwrap());
-}
-
-/// AVX2-accelerated masking for x86_64 with 256-bit vectors.
-///
-/// # Safety
-/// Requires AVX2 support. Caller must ensure the CPU supports AVX2.
-#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-#[doc(hidden)]
-#[target_feature(enable = "avx2")]
-#[inline]
-#[allow(dead_code)]
-unsafe fn apply_mask_avx2(buf: &mut [u8], mask: [u8; 4]) {
-    #[cfg(target_arch = "x86")]
-    use std::arch::x86::*;
-    #[cfg(target_arch = "x86_64")]
-    use std::arch::x86_64::*;
-
-    let len = buf.len();
-    if len < 32 {
-        return apply_mask_fast32(buf, mask);
-    }
-
-    // Create 256-bit mask by repeating the 4-byte mask
-    let mask_u32 = u32::from_ne_bytes(mask);
-    // SAFETY: AVX2 is guaranteed by target_feature on this function
-    let mask_128 = _mm_set1_epi32(mask_u32 as i32);
-    let mask_256 = _mm256_broadcastd_epi32(mask_128);
-
-    let mut ptr = buf.as_mut_ptr();
-    // SAFETY: pointer arithmetic within the bounds of the buffer
-    let end = unsafe { ptr.add(len) };
-    let aligned_end = unsafe { ptr.add(len - (len % 32)) };
-
-    // Process 32-byte chunks with AVX2
-    while ptr < aligned_end {
-        // SAFETY: ptr is within bounds and aligned_end ensures we have 32 bytes
-        unsafe {
-            let data = _mm256_loadu_si256(ptr as *const __m256i);
-            let masked = _mm256_xor_si256(data, mask_256);
-            _mm256_storeu_si256(ptr as *mut __m256i, masked);
-            ptr = ptr.add(32);
-        }
-    }
-
-    // Handle remaining bytes with scalar code
-    // SAFETY: remaining bytes are within bounds of original buffer
-    let remaining = unsafe { end.offset_from(ptr) } as usize;
-    if remaining > 0 {
-        let tail = unsafe { std::slice::from_raw_parts_mut(ptr, remaining) };
-        apply_mask_fast32(tail, mask);
-    }
-}
-
-/// NEON-accelerated masking for ARM64 with 128-bit vectors.
-///
-/// # Safety
-/// Requires NEON support. Caller must ensure the CPU supports NEON.
-#[cfg(target_arch = "aarch64")]
-#[doc(hidden)]
-#[target_feature(enable = "neon")]
-#[inline]
-unsafe fn apply_mask_neon(buf: &mut [u8], mask: [u8; 4]) {
-    use std::arch::aarch64::*;
-
-    let len = buf.len();
-    if len < 16 {
-        return apply_mask_fast32(buf, mask);
-    }
-
-    // Create 128-bit mask by repeating the 4-byte mask
-    let mask_u32 = u32::from_ne_bytes(mask);
-    let mask_128 = vdupq_n_u32(mask_u32);
-
-    let mut ptr = buf.as_mut_ptr();
-    // SAFETY: pointer arithmetic within the bounds of the buffer
-    let end = unsafe { ptr.add(len) };
-    let aligned_end = unsafe { ptr.add(len - (len % 16)) };
-
-    // Process 16-byte chunks with NEON
-    while ptr < aligned_end {
-        // SAFETY: ptr is within bounds and aligned_end ensures we have 16 bytes
-        unsafe {
-            let data = vld1q_u8(ptr);
-            let masked = veorq_u8(data, vreinterpretq_u8_u32(mask_128));
-            vst1q_u8(ptr, masked);
-            ptr = ptr.add(16);
-        }
-    }
-
-    // Handle remaining bytes with scalar code
-    // SAFETY: remaining bytes are within bounds of original buffer
-    let remaining = unsafe { end.offset_from(ptr) } as usize;
-    if remaining > 0 {
-        let tail = unsafe { std::slice::from_raw_parts_mut(ptr, remaining) };
-        apply_mask_fast32(tail, mask);
-    }
 }
 
 #[cfg(test)]

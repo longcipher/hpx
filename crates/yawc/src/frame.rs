@@ -748,6 +748,7 @@ impl Frame {
 
     /// Generates and sets a random mask if none is already set.
     #[inline]
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub(super) fn set_random_mask_if_not_set(&mut self) {
         if self.mask.is_none() {
             let mask: [u8; 4] = rand::random();
@@ -758,6 +759,7 @@ impl Frame {
     /// Write frame header directly into BytesMut without intermediate buffer.
     /// This is faster than fmt_head as it eliminates an extra copy.
     #[inline]
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub(super) fn write_head(&self, dst: &mut bytes::BytesMut) {
         use bytes::BufMut;
 

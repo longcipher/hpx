@@ -10,3 +10,4 @@ tags*
 !/benches/README.md
 !/benches/load_test.c
 !/benches/Makefile
+!/benches/websocket_core.rs

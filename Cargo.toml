@@ -3,7 +3,7 @@ members = ["crates/*", "bin/*"]
 resolver = "3"
 
 [workspace.package]
-version = "2.4.11"
+version = "2.4.12"
 edition = "2024"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license = "Apache-2.0"
@@ -185,11 +185,11 @@ all = "warn"
 
 [workspace.dependencies]
 # local crates
-fastwebsockets = { path = "crates/fastwebsockets", package = "hpx-fastwebsockets", version = "2.4.11" }
-hpx = { path = "crates/hpx", version = "2.4.11" }
-hpx-dl = { path = "crates/hpx-dl", version = "2.4.11" }
-hpx-yawc = { path = "crates/yawc", version = "2.4.11" }
-yawc = { path = "crates/yawc", version = "2.4.11" }
+fastwebsockets = { path = "crates/fastwebsockets", package = "hpx-fastwebsockets", version = "2.4.12" }
+hpx = { path = "crates/hpx", version = "2.4.12" }
+hpx-dl = { path = "crates/hpx-dl", version = "2.4.12" }
+hpx-yawc = { path = "crates/yawc", version = "2.4.12" }
+yawc = { path = "crates/yawc", version = "2.4.12" }
 
 # external crates
 ahash = "0.8.12"
@@ -210,7 +210,7 @@ cookie = "0.18.1"
 criterion = "0.8.2"
 cucumber = "0.23.0"
 der = "0.8.0"
-digest = "0.11.2"
+digest = "0.11.3"
 encoding_rs = "0.8.35"
 eyre = "0.6.12"
 fastrand = "2.4.1"
@@ -225,6 +225,7 @@ hex = "0.4.3"
 hickory-resolver = "0.26.0"
 hmac = "0.13.0"
 home = "0.5.12"
+hotpath = "0.16.1"
 http = "1.4.0"
 http-body = "1.0.1"
 http-body-util = "0.1.3"
@@ -241,9 +242,9 @@ memchr = "2.8.0"
 mime = "0.3.17"
 mime_guess = "2.0.5"
 nom = "8.0.0"
-opentelemetry = "0.31.0"
-opentelemetry-otlp = "0.31.1"
-opentelemetry_sdk = "0.31.0"
+opentelemetry = "0.32.0"
+opentelemetry-otlp = "0.32.0"
+opentelemetry_sdk = "0.32.0"
 parking_lot = "0.12.3"
 percent-encoding = "2.3.2"
 pin-project = "1.1.11"
@@ -252,7 +253,7 @@ pkcs12 = "0.2.0-pre.0"
 pkcs8 = "0.11.0-rc.8"
 pretty_env_logger = "0.5.0"
 proptest = "1.6.0"
-quick-xml = "0.39.2"
+quick-xml = "0.40.1"
 rand = "0.10.1"
 rustls = "0.23.39"
 rustls-native-certs = "0.8.3"
