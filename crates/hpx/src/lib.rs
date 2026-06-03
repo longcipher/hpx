@@ -323,6 +323,18 @@ mod util;
 pub mod cookie;
 pub mod dns;
 pub mod header;
+/// Authentication middleware for HTTP requests.
+#[cfg(feature = "auth")]
+#[cfg_attr(docsrs, doc(cfg(feature = "auth")))]
+pub mod auth {
+    pub use crate::client::layer::auth::*;
+}
+/// Circuit breaker middleware for Tower services.
+pub mod circuit_breaker {
+    pub use crate::client::layer::circuit_breaker::*;
+}
+/// Simplified one-liner API for common HTTP operations.
+pub mod simple;
 /// Lifecycle hooks for HTTP requests and responses.
 pub mod hooks {
     pub use crate::client::layer::hooks::*;

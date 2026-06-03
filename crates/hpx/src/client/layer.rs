@@ -1,6 +1,9 @@
 //! Middleware for the client.
 
+#[cfg(feature = "auth")]
+pub mod auth;
 pub mod auto_header;
+pub mod circuit_breaker;
 pub mod config;
 #[cfg(feature = "cookies")]
 pub mod cookie;

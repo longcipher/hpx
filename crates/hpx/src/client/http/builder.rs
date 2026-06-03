@@ -1622,6 +1622,69 @@ impl ClientBuilder {
         self
     }
 
+    // Auth options
+
+    /// Adds authentication to the client using the specified method.
+    ///
+    /// The auth layer is added as a Tower middleware that automatically
+    /// injects authentication headers into every request.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use hpx::auth::AuthMethod;
+    ///
+    /// let client = hpx::Client::builder()
+    ///     .auth(AuthMethod::bearer("my-secret-token"))
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    #[inline]
+    #[cfg(feature = "auth")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "auth")))]
+    pub fn auth(mut self, auth: super::super::layer::auth::AuthMethod) -> ClientBuilder {
+        self.config
+            .middleware
+            .layers
+            .push(BoxCloneSyncServiceLayer::new(
+                super::super::layer::auth::AuthLayer::new(auth),
+            ));
+        self
+    }
+
+    // Circuit Breaker options
+
+    /// Adds a circuit breaker middleware to the client.
+    ///
+    /// When the circuit is open (after `failure_threshold` consecutive failures),
+    /// all requests fail fast without making network calls.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use std::time::Duration;
+    ///
+    /// use hpx::circuit_breaker::CircuitBreakerConfig;
+    ///
+    /// let client = hpx::Client::builder()
+    ///     .circuit_breaker(CircuitBreakerConfig::new(5).recovery_timeout(Duration::from_secs(30)))
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    #[inline]
+    pub fn circuit_breaker(
+        mut self,
+        config: super::super::layer::circuit_breaker::CircuitBreakerConfig,
+    ) -> ClientBuilder {
+        self.config
+            .middleware
+            .layers
+            .push(BoxCloneSyncServiceLayer::new(
+                super::super::layer::circuit_breaker::CircuitBreakerLayer::new(config),
+            ));
+        self
+    }
+
     // TLS/HTTP2 emulation options
 
     /// Configures the client builder to emulate the specified HTTP context.

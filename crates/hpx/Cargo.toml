@@ -27,6 +27,9 @@ default = ["boring", "http1", "http2", "stream", "tracing"]
 # Enable support for decoding text.
 charset = ["dep:encoding_rs", "dep:mime"]
 
+# Enable authentication middleware with bearer token, API key, and OAuth2 support.
+auth = ["dep:async-trait"]
+
 # Enable cookies store support.
 cookies = ["dep:cookie", "dep:arc-swap"]
 
@@ -121,6 +124,7 @@ macros = ["tokio/macros"]
 # compile-time pieces used by HFT-style clients without requiring users to
 # remember every feature flag.
 hft = [
+    "auth",
     "boring",
     "hickory-dns",
     "http1",
@@ -136,6 +140,7 @@ hft = [
 # ClientBuilder::emulation(...) or RequestBuilder::emulation(...), while this
 # feature enables the compile-time support usually paired with that profile.
 stealth = [
+    "auth",
     "boring",
     "brotli",
     "charset",
@@ -155,6 +160,7 @@ stealth = [
 [dependencies]
 ahash = { workspace = true }
 arc-swap = { workspace = true, optional = true }
+async-trait = { workspace = true, optional = true }
 boring = { workspace = true, optional = true }
 brotli = { workspace = true, optional = true }
 bytes = { workspace = true }
