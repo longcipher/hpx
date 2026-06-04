@@ -300,11 +300,12 @@ impl WebSocketRequestBuilder {
         );
 
         // Ensure the request is HTTP 1.1/HTTP 2
-        let accept_key = match version {
+        let mut accept_key = match version {
             Some(Version::HTTP_10 | Version::HTTP_11) => {
                 // Generate a nonce if one wasn't provided
                 let nonce = self
                     .accept_key
+                    .clone()
                     .unwrap_or_else(|| Cow::Owned(fastwebsockets::handshake::generate_key()));
 
                 headers.insert(header::UPGRADE, HeaderValue::from_static("websocket"));
@@ -357,15 +358,118 @@ impl WebSocketRequestBuilder {
             }
         }
 
-        client
-            .execute(request)
-            .await
-            .map(|inner| WebSocketResponse {
-                inner,
-                accept_key,
-                protocols: self.protocols,
-                config: self.config,
-            })
+        // Follow redirects (up to 20 hops)
+        let mut request = request;
+        let mut redirect_count = 0;
+        const MAX_REDIRECTS: usize = 20;
+
+        loop {
+            let original_headers = request.headers().clone();
+            let response = client.execute(request).await?;
+
+            let status = response.status();
+
+            if !status.is_redirection() {
+                return Ok(WebSocketResponse {
+                    inner: response,
+                    accept_key,
+                    protocols: self.protocols,
+                    config: self.config,
+                });
+            }
+
+            redirect_count += 1;
+            if redirect_count > MAX_REDIRECTS {
+                return Err(Error::upgrade(format!(
+                    "too many redirects (max {MAX_REDIRECTS})"
+                )));
+            }
+
+            let location = response
+                .headers()
+                .get(header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+                .ok_or_else(|| Error::upgrade("redirect response missing Location header"))?;
+
+            // Parse the redirect URI
+            let redirect_uri =
+                if location.starts_with("http://") || location.starts_with("https://") {
+                    Uri::try_from(location).map_err(Error::builder)?
+                } else {
+                    // Relative URI - resolve against current URI
+                    let current_uri = response.uri();
+                    let base = format!(
+                        "{}://{}",
+                        current_uri.scheme_str().unwrap_or("http"),
+                        current_uri.authority().map(|a| a.as_str()).unwrap_or("")
+                    );
+                    let full = format!("{base}{location}");
+                    Uri::try_from(full).map_err(Error::builder)?
+                };
+
+            // Build a new request for the redirect target
+            let mut new_request = crate::Request::new(Method::GET, redirect_uri);
+            *new_request.version_mut() = Some(Version::HTTP_11);
+
+            // Copy headers from the original request, excluding host and websocket headers
+            for (name, value) in original_headers.iter() {
+                // Skip websocket-specific headers - they'll be regenerated
+                if name == header::UPGRADE
+                    || name == header::CONNECTION
+                    || name == header::SEC_WEBSOCKET_KEY
+                    || name == header::SEC_WEBSOCKET_VERSION
+                    || name == header::SEC_WEBSOCKET_PROTOCOL
+                    || name == header::HOST
+                {
+                    continue;
+                }
+                new_request
+                    .headers_mut()
+                    .insert(name.clone(), value.clone());
+            }
+
+            // Set the Host header for the new URI
+            if let Some(authority) = new_request.uri().authority() {
+                if let Ok(host_val) = HeaderValue::from_str(authority.as_str()) {
+                    new_request.headers_mut().insert(header::HOST, host_val);
+                }
+            }
+
+            // Regenerate the Sec-WebSocket-Key for security
+            let new_key = Cow::Owned(fastwebsockets::handshake::generate_key());
+            new_request.headers_mut().insert(
+                header::SEC_WEBSOCKET_VERSION,
+                HeaderValue::from_static("13"),
+            );
+            new_request
+                .headers_mut()
+                .insert(header::UPGRADE, HeaderValue::from_static("websocket"));
+            new_request
+                .headers_mut()
+                .insert(header::CONNECTION, HeaderValue::from_static("upgrade"));
+            new_request.headers_mut().insert(
+                header::SEC_WEBSOCKET_KEY,
+                HeaderValue::from_str(&new_key).map_err(Error::builder)?,
+            );
+
+            // Re-add subprotocols if present
+            if let Some(ref protocols) = self.protocols {
+                if !protocols.is_empty() {
+                    let subprotocols = protocols
+                        .iter()
+                        .map(|s| s.as_ref())
+                        .collect::<Vec<&str>>()
+                        .join(", ");
+                    new_request.headers_mut().insert(
+                        header::SEC_WEBSOCKET_PROTOCOL,
+                        subprotocols.parse().map_err(Error::builder)?,
+                    );
+                }
+            }
+
+            request = new_request;
+            accept_key = Some(new_key);
+        }
     }
 }
 

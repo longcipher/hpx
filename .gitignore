@@ -2,3 +2,11 @@ target/
 .rumdl_cache/
 Cargo.lock
 *.db
+*.db-wal
+*.db-shm
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+*.DS_Store
