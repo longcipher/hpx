@@ -13,7 +13,7 @@ path = "src/main.rs"
 doc = false
 
 [dependencies]
-clap = { workspace = true, features = ["derive"] }
+clap = { workspace = true, features = ["derive", "env"] }
 eyre = { workspace = true }
 hpx = { workspace = true, features = [
     "http1",
@@ -40,6 +40,14 @@ tokio = { workspace = true, features = [
 ] }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
+
+[dev-dependencies]
+axum = { workspace = true, features = ["ws"] }
+futures-util = { workspace = true }
+proptest = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["net", "time", "process"] }
+tokio-test = { workspace = true }
 
 [lints]
 workspace = true

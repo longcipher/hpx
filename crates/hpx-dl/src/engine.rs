@@ -144,6 +144,13 @@ impl EngineBuilder {
         self
     }
 
+    /// Set the maximum number of retry attempts per download.
+    #[must_use]
+    pub const fn retry_max_attempts(mut self, n: u32) -> Self {
+        self.config.retry_max_attempts = n;
+        self
+    }
+
     /// Set the storage database path.
     #[must_use]
     pub fn storage_path(mut self, path: impl Into<PathBuf>) -> Self {
@@ -1322,6 +1329,7 @@ mod tests {
             .max_concurrent(16)
             .max_connections(4)
             .speed_limit(Some(500_000))
+            .retry_max_attempts(7)
             .storage_path("/tmp/test.db")
             .build()
             .expect("build engine");
@@ -1329,8 +1337,8 @@ mod tests {
         assert_eq!(engine.config().max_concurrent_downloads, 16);
         assert_eq!(engine.config().max_connections_per_download, 4);
         assert_eq!(engine.config().global_speed_limit, Some(500_000));
+        assert_eq!(engine.config().retry_max_attempts, 7);
         assert_eq!(engine.config().storage_path, PathBuf::from("/tmp/test.db"));
-        assert_eq!(engine.config().retry_max_attempts, 3);
     }
 
     #[test]

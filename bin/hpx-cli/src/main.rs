@@ -7,6 +7,7 @@
 mod cli;
 mod http;
 mod output;
+mod progress;
 mod ws;
 
 use clap::{CommandFactory, Parser};
@@ -30,7 +31,15 @@ fn main() -> eyre::Result<()> {
 
     // Handle dl subcommand
     if let Some(cli::Commands::Dl(dl_cmd)) = cli.command {
-        return handle_dl_command(dl_cmd);
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?;
+        return runtime.block_on(handle_dl_command(
+            dl_cmd,
+            cli.retry,
+            cli.storage_path,
+            cli.max_concurrent,
+        ));
     }
 
     // Validate URL is provided for HTTP/WS
@@ -67,23 +76,90 @@ fn main() -> eyre::Result<()> {
     }
 }
 
-fn handle_dl_command(cmd: cli::DlCommands) -> eyre::Result<()> {
-    let engine = hpx_dl::DownloadEngine::builder().build()?;
+async fn handle_dl_command(
+    cmd: cli::DlCommands,
+    global_retry: u32,
+    storage_path: Option<std::path::PathBuf>,
+    max_concurrent: Option<usize>,
+) -> eyre::Result<()> {
+    let mut builder = hpx_dl::DownloadEngine::builder().retry_max_attempts(global_retry);
+    if let Some(path) = storage_path {
+        builder = builder.storage_path(path);
+    }
+    if let Some(max) = max_concurrent {
+        builder = builder.max_concurrent(max);
+    }
+    let engine = builder.build()?;
 
     match cmd {
         cli::DlCommands::Add {
             url,
             output,
             priority,
+            speed_limit,
+            checksum,
+            mirrors,
+            max_connections,
+            headers,
+            proxy,
+            retry: _,
         } => {
             let destination = output
                 .unwrap_or_else(|| url.split('/').next_back().unwrap_or("download").to_string());
             let priority = parse_priority(&priority)?;
-            let request = hpx_dl::DownloadRequest::builder(&url, &destination)
-                .priority(priority)
-                .build();
+            let mut builder =
+                hpx_dl::DownloadRequest::builder(&url, &destination).priority(priority);
+            if let Some(limit_str) = speed_limit {
+                let limit = cli::parse_speed_limit(&limit_str)?;
+                builder = builder.speed_limit(limit);
+            }
+            if let Some(checksum_str) = checksum {
+                let spec = cli::parse_checksum(&checksum_str)?;
+                builder = builder.checksum(spec);
+            }
+            if !mirrors.is_empty() {
+                builder = builder.mirrors(mirrors);
+            }
+            if let Some(max) = max_connections {
+                builder = builder.max_connections(max);
+            }
+            for (name, value) in cli::parsed_dl_headers(&headers) {
+                builder = builder.header(name, value);
+            }
+            if let Some(proxy_url) = proxy {
+                let config = cli::parse_proxy_config(&proxy_url)?;
+                builder = builder.proxy(config);
+            }
+            let request = builder.build();
             let id = engine.add(request)?;
             println!("Added download {id}");
+
+            // Subscribe to events and display progress
+            let mut rx = engine.subscribe();
+            let is_terminal = crate::output::is_terminal();
+            let mut display = crate::progress::ProgressDisplay::new(is_terminal);
+
+            // Wait until download completes or fails
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        let is_terminal_event = matches!(
+                            event,
+                            hpx_dl::DownloadEvent::StateChanged {
+                                state: hpx_dl::DownloadState::Completed
+                                    | hpx_dl::DownloadState::Failed,
+                                ..
+                            } | hpx_dl::DownloadEvent::Failed { .. }
+                        );
+                        display.handle_event(event);
+                        if is_terminal_event {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                }
+            }
         }
         cli::DlCommands::Pause { id } => {
             let download_id = id.parse::<uuid::Uuid>().map(hpx_dl::DownloadId::from)?;
@@ -100,10 +176,17 @@ fn handle_dl_command(cmd: cli::DlCommands) -> eyre::Result<()> {
             engine.remove(download_id)?;
             println!("Removed {download_id}");
         }
-        cli::DlCommands::List => {
+        cli::DlCommands::List { format } => {
             let downloads = engine.list()?;
             if downloads.is_empty() {
-                println!("No downloads.");
+                if matches!(format, cli::OutputFormat::Json) {
+                    println!("[]");
+                } else {
+                    println!("No downloads.");
+                }
+            } else if matches!(format, cli::OutputFormat::Json) {
+                let json = serde_json::to_string(&downloads)?;
+                println!("{json}");
             } else {
                 for status in &downloads {
                     println!(
@@ -120,20 +203,25 @@ fn handle_dl_command(cmd: cli::DlCommands) -> eyre::Result<()> {
                 }
             }
         }
-        cli::DlCommands::Status { id } => {
+        cli::DlCommands::Status { id, format } => {
             let download_id = id.parse::<uuid::Uuid>().map(hpx_dl::DownloadId::from)?;
             let status = engine.status(download_id)?;
-            println!(
-                "ID:       {}\nURL:      {}\nState:    {}\nProgress: {}/{} bytes\nPriority: {:?}",
-                status.id,
-                status.url,
-                status.state,
-                status.bytes_downloaded,
-                status
-                    .total_bytes
-                    .map_or_else(|| "?".to_string(), |t| t.to_string()),
-                status.priority,
-            );
+            if matches!(format, cli::OutputFormat::Json) {
+                let json = serde_json::to_string(&status)?;
+                println!("{json}");
+            } else {
+                println!(
+                    "ID:       {}\nURL:      {}\nState:    {}\nProgress: {}/{} bytes\nPriority: {:?}",
+                    status.id,
+                    status.url,
+                    status.state,
+                    status.bytes_downloaded,
+                    status
+                        .total_bytes
+                        .map_or_else(|| "?".to_string(), |t| t.to_string()),
+                    status.priority,
+                );
+            }
         }
     }
 

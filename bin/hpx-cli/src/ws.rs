@@ -1,4 +1,7 @@
-use std::io::{self, BufRead, IsTerminal, Read, Write};
+use std::{
+    io::{self, BufRead, IsTerminal, Read, Write},
+    time::Duration,
+};
 
 use eyre::{ContextCompat, Result, WrapErr};
 use hpx::ws::message::Message;
@@ -8,7 +11,57 @@ use crate::{
     output::{format_json_pretty, is_terminal, write_body},
 };
 
+const BACKOFF_INITIAL: Duration = Duration::from_secs(1);
+const BACKOFF_MAX: Duration = Duration::from_secs(30);
+
+/// Calculate exponential backoff duration for the given attempt (0-indexed).
+///
+/// Returns `min(BACKOFF_INITIAL * 2^attempt, BACKOFF_MAX)`.
+pub(crate) fn backoff_duration(attempt: u32) -> Duration {
+    let delay_ms = BACKOFF_INITIAL.as_millis() as u64 * (1u64 << attempt.min(30));
+    Duration::from_millis(delay_ms.min(BACKOFF_MAX.as_millis() as u64))
+}
+
+/// Determine whether a receive error warrants a reconnection attempt.
+///
+/// Returns `false` for errors that indicate a clean shutdown or user action
+/// (e.g. local EOF), and `true` for transient network errors.
+pub(crate) fn is_reconnectable_error(err: &eyre::Report) -> bool {
+    let msg = format!("{err:#}");
+    // Don't reconnect on explicit close by the user or clean EOF
+    !msg.contains("EOF") && !msg.contains("Connection closed") && !msg.contains("closed by peer")
+}
+
 pub(crate) async fn execute(cli: &Cli, url: &str) -> Result<()> {
+    let max_retries = if cli.reconnect { cli.reconnect_max } else { 0 };
+    let mut attempt = 0;
+
+    loop {
+        match try_execute(cli, url).await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                if attempt >= max_retries {
+                    return Err(e);
+                }
+                let is_reconnectable = is_reconnectable_error(&e);
+                if !is_reconnectable {
+                    return Err(e);
+                }
+                let delay = backoff_duration(attempt);
+                if !cli.silent {
+                    eprintln!(
+                        "Connection lost. Reconnecting in {delay:?}... (attempt {}/{max_retries})",
+                        attempt + 1
+                    );
+                }
+                tokio::time::sleep(delay).await;
+                attempt += 1;
+            }
+        }
+    }
+}
+
+async fn try_execute(cli: &Cli, url: &str) -> Result<()> {
     let mut builder = hpx::websocket(url);
 
     for (name, value) in &cli.parsed_headers() {
@@ -243,5 +296,72 @@ fn load_json_payload(json: &str) -> Result<Message> {
         let _value: serde_json::Value =
             serde_json::from_str(json).wrap_err("Invalid JSON string")?;
         Ok(Message::text(json.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backoff_first_attempt() {
+        assert_eq!(backoff_duration(0), Duration::from_secs(1));
+    }
+
+    #[test]
+    fn backoff_second_attempt() {
+        assert_eq!(backoff_duration(1), Duration::from_secs(2));
+    }
+
+    #[test]
+    fn backoff_third_attempt() {
+        assert_eq!(backoff_duration(2), Duration::from_secs(4));
+    }
+
+    #[test]
+    fn backoff_caps_at_max() {
+        assert_eq!(backoff_duration(30), BACKOFF_MAX);
+        assert_eq!(backoff_duration(100), BACKOFF_MAX);
+    }
+
+    #[test]
+    fn backoff_grows_exponentially() {
+        let d0 = backoff_duration(0);
+        let d1 = backoff_duration(1);
+        let d2 = backoff_duration(2);
+        assert!(d1 > d0);
+        assert!(d2 > d1);
+        assert_eq!(d1.as_secs(), d0.as_secs() * 2);
+        assert_eq!(d2.as_secs(), d1.as_secs() * 2);
+    }
+
+    #[test]
+    fn reconnectable_error_network() {
+        let err = eyre::eyre!("connection reset by peer");
+        assert!(is_reconnectable_error(&err));
+    }
+
+    #[test]
+    fn reconnectable_error_eof() {
+        let err = eyre::eyre!("unexpected EOF");
+        assert!(!is_reconnectable_error(&err));
+    }
+
+    #[test]
+    fn reconnectable_error_clean_close() {
+        let err = eyre::eyre!("Connection closed");
+        assert!(!is_reconnectable_error(&err));
+    }
+
+    #[test]
+    fn reconnectable_error_closed_by_peer() {
+        let err = eyre::eyre!("closed by peer");
+        assert!(!is_reconnectable_error(&err));
+    }
+
+    #[test]
+    fn reconnectable_error_timeout() {
+        let err = eyre::eyre!("timed out");
+        assert!(is_reconnectable_error(&err));
     }
 }

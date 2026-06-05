@@ -7,7 +7,7 @@ use eyre::{OptionExt, Result, WrapErr};
 use hpx::Client;
 
 use crate::{
-    cli::{Cli, OutputFormat},
+    cli::{Cli, FormValue, OutputFormat},
     output::{
         TimingWaterfall, copy_to_clipboard, format_json_pretty, print_headers,
         print_redirect_history, print_request_line, print_status_line, write_body,
@@ -82,8 +82,28 @@ pub(crate) async fn execute(cli: &Cli) -> Result<()> {
 
     // Form data
     if !cli.form.is_empty() {
-        let fields: Vec<(String, String)> = cli.parsed_form_fields();
-        builder = builder.form(&fields);
+        if cli.has_form_file_references() {
+            // Use multipart form when any field has file references
+            let mut form = hpx::multipart::Form::new();
+            for (key, value) in cli.parsed_form_fields_with_files() {
+                match value {
+                    FormValue::Text(text) => {
+                        form = form.text(key, text);
+                    }
+                    FormValue::File(path) => {
+                        let static_key: &'static str = Box::leak(key.into_boxed_str());
+                        form = form.file(static_key, &path).await.wrap_err_with(|| {
+                            format!("failed to read file {path} for form field")
+                        })?;
+                    }
+                }
+            }
+            builder = builder.multipart(form);
+        } else {
+            // Plain urlencoded form data
+            let fields: Vec<(String, String)> = cli.parsed_form_fields();
+            builder = builder.form(&fields);
+        }
     }
 
     // Multipart form data
@@ -150,7 +170,7 @@ pub(crate) async fn execute(cli: &Cli) -> Result<()> {
 
     let response = builder.send().await?;
 
-    waterfall.mark_body_done();
+    waterfall.mark_request_done();
 
     let status = response.status();
     let status_code = status.as_u16();
@@ -179,6 +199,8 @@ pub(crate) async fn execute(cli: &Cli) -> Result<()> {
     }
 
     let bytes = response.bytes().await?;
+
+    waterfall.mark_body_done();
 
     // Save cookies to jar if requested
     if let Some(ref jar_path) = cli.cookie_jar

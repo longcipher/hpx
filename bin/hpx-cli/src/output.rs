@@ -97,16 +97,22 @@ const fn status_color_code(status: u16) -> u8 {
 }
 
 pub(crate) struct TimingWaterfall {
-    dns_start: Instant,
+    request_start: Instant,
+    request_done: Option<Instant>,
     body_done: Option<Instant>,
 }
 
 impl TimingWaterfall {
     pub(crate) fn new() -> Self {
         Self {
-            dns_start: Instant::now(),
+            request_start: Instant::now(),
+            request_done: None,
             body_done: None,
         }
+    }
+
+    pub(crate) fn mark_request_done(&mut self) {
+        self.request_done = Some(Instant::now());
     }
 
     pub(crate) fn mark_body_done(&mut self) {
@@ -114,8 +120,6 @@ impl TimingWaterfall {
     }
 
     pub(crate) fn print(&self, color: bool) {
-        let total = self.body_done.map(|t| t.duration_since(self.dns_start));
-
         let mut stderr = io::stderr().lock();
         let _ = writeln!(stderr);
         let _ = writeln!(stderr, "Timing waterfall:");
@@ -124,14 +128,52 @@ impl TimingWaterfall {
         let reset = if color { "\x1b[0m" } else { "" };
         let dur_color = if color { "\x1b[1;33m" } else { "" };
 
-        if let Some(t) = total {
-            let ms = t.as_secs_f64() * 1000.0;
+        let connection = self
+            .request_done
+            .map(|t| t.duration_since(self.request_start));
+        let ttfb = self.request_done.and_then(|req_done| {
+            self.body_done
+                .map(|body_done| body_done.duration_since(req_done))
+        });
+        let total = self.body_done.map(|t| t.duration_since(self.request_start));
+
+        if let Some(dur) = connection {
+            let ms = dur.as_secs_f64() * 1000.0;
+            let _ = writeln!(
+                stderr,
+                "  {label_color}{:<12}{reset} {dur_color}{ms:>8.2} ms{reset}",
+                "Connection"
+            );
+        }
+
+        if let Some(dur) = ttfb {
+            let ms = dur.as_secs_f64() * 1000.0;
+            let _ = writeln!(
+                stderr,
+                "  {label_color}{:<12}{reset} {dur_color}{ms:>8.2} ms{reset}",
+                "TTFB"
+            );
+        }
+
+        if let (Some(req_done), Some(body_done)) = (self.request_done, self.body_done) {
+            let transfer = body_done.duration_since(req_done);
+            let ms = transfer.as_secs_f64() * 1000.0;
+            let _ = writeln!(
+                stderr,
+                "  {label_color}{:<12}{reset} {dur_color}{ms:>8.2} ms{reset}",
+                "Transfer"
+            );
+        }
+
+        if let Some(dur) = total {
+            let ms = dur.as_secs_f64() * 1000.0;
             let _ = writeln!(
                 stderr,
                 "  {label_color}{:<12}{reset} {dur_color}{ms:>8.2} ms{reset}",
                 "Total"
             );
         }
+
         let _ = writeln!(stderr);
     }
 }
@@ -210,4 +252,46 @@ pub(crate) fn copy_to_clipboard(text: &str) -> eyre::Result<()> {
     Err(eyre::eyre!(
         "clipboard requires xclip or xsel (install via package manager)"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timing_waterfall_new_has_no_phases() {
+        let waterfall = TimingWaterfall::new();
+        assert!(waterfall.request_done.is_none());
+        assert!(waterfall.body_done.is_none());
+    }
+
+    #[test]
+    fn timing_waterfall_mark_request_done() {
+        let mut waterfall = TimingWaterfall::new();
+        waterfall.mark_request_done();
+        assert!(waterfall.request_done.is_some());
+    }
+
+    #[test]
+    fn timing_waterfall_mark_body_done() {
+        let mut waterfall = TimingWaterfall::new();
+        waterfall.mark_request_done();
+        waterfall.mark_body_done();
+        assert!(waterfall.body_done.is_some());
+    }
+
+    #[test]
+    fn timing_waterfall_print_does_not_panic() {
+        let mut waterfall = TimingWaterfall::new();
+        waterfall.mark_request_done();
+        waterfall.mark_body_done();
+        waterfall.print(false);
+        waterfall.print(true);
+    }
+
+    #[test]
+    fn timing_waterfall_print_no_phases_does_not_panic() {
+        let waterfall = TimingWaterfall::new();
+        waterfall.print(false);
+    }
 }
