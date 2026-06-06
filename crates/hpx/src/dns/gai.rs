@@ -97,6 +97,7 @@ impl Future for GaiFuture {
 
 impl Drop for GaiFuture {
     fn drop(&mut self) {
+        debug!("GaiFuture dropped, aborting in-flight getaddrinfo");
         self.inner.abort();
     }
 }

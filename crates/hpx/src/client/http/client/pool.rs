@@ -61,7 +61,6 @@ pub enum Ver {
 ///
 /// Specifically, HTTP/1 requires a unique reservation, but HTTP/2 can be
 /// used for multiple requests.
-// FIXME: allow() required due to `impl Trait` leaking types to this lint
 pub enum Reservation<T> {
     /// This connection could be used multiple times, the first one will be
     /// reinserted into the `idle` pool, and the second will be given to
@@ -268,18 +267,19 @@ impl<T: Poolable, K: Key> Pool<T, K> {
 
     fn reuse(&self, key: &K, value: T) -> Pooled<T, K> {
         debug!("reuse idle connection for {:?}", key);
-        // TODO: unhack this
-        // In Pool::pooled(), which is used for inserting brand new connections,
-        // there's some code that adjusts the pool reference taken depending
-        // on if the Reservation can be shared or is unique. By the time
-        // reuse() is called, the reservation has already been made, and
-        // we just have the final value, without knowledge of if this is
-        // unique or shared. So, the hack is to just assume Ver::Http2 means
-        // shared... :(
+        // Invariant: any connection returning `can_share() == false` from
+        // `reserve()` is a unique-reservation connection (HTTP/1 or
+        // equivalent), so its `Pooled` wrapper must keep a pool reference
+        // for reinsertion on Drop. Shared reservations (HTTP/2) are already
+        // tracked in the idle list and need no pool reference.
+        let needs_pool_ref = !value.can_share();
+        debug_assert!(
+            !needs_pool_ref || self.inner.is_some(),
+            "Unique reservation on a connection but pool is not enabled"
+        );
+
         let mut pool_ref = WeakOpt::none();
-        if !value.can_share()
-            && let Some(ref enabled) = self.inner
-        {
+        if needs_pool_ref && let Some(ref enabled) = self.inner {
             pool_ref = WeakOpt::downgrade(enabled);
         }
 
@@ -300,6 +300,25 @@ struct IdlePopper<'a, T, K> {
 
 impl<'a, T: Poolable + 'a, K: Debug> IdlePopper<'a, T, K> {
     fn pop(self, expiration: &Expiration) -> Option<Idle<T>> {
+        // The idle list is appended in chronological order: newer entries are
+        // at the back (`pop()` removes from the end). Because `Instant` is
+        // monotonically non-decreasing when entries are inserted, if the
+        // most-recent idle entry has already expired then every earlier entry
+        // in the list must also be expired. Clearing in that case avoids
+        // O(N) scanning on every checkout.
+        match self.list.last() {
+            Some(entry) if expiration.expires(entry.idle_at) => {
+                trace!(
+                    "idle list for {:?} fully expired ({} entries), clearing",
+                    self.key,
+                    self.list.len()
+                );
+                self.list.clear();
+                return None;
+            }
+            _ => {}
+        }
+
         while let Some(entry) = self.list.pop() {
             // If the connection has been closed, or is older than our idle
             // timeout, simply drop it and keep looking...
@@ -307,12 +326,6 @@ impl<'a, T: Poolable + 'a, K: Debug> IdlePopper<'a, T, K> {
                 trace!("removing closed connection for {:?}", self.key);
                 continue;
             }
-            // TODO: Actually, since the `idle` list is pushed to the end always,
-            // that would imply that if *this* entry is expired, then anything
-            // "earlier" in the list would *have* to be expired also... Right?
-            //
-            // In that case, we could just break out of the loop and drop the
-            // whole list...
             if expiration.expires(entry.idle_at) {
                 trace!("removing expired connection for {:?}", self.key);
                 continue;

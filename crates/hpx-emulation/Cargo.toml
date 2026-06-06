@@ -24,6 +24,7 @@ emulation-serde = ["dep:serde"]
 
 [dependencies]
 hpx = { workspace = true }
+parking_lot = { workspace = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 strum = { workspace = true, optional = true }
 strum_macros = { workspace = true, optional = true }

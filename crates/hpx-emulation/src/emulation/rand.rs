@@ -75,10 +75,9 @@ impl Emulation {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        sync::{Arc, Mutex},
-        thread,
-    };
+    use std::{sync::Arc, thread};
+
+    use parking_lot::Mutex;
 
     use super::*;
 
@@ -96,7 +95,7 @@ mod tests {
             let handle = thread::spawn(move || {
                 for _ in 0..ITERATIONS {
                     let emulation = Emulation::random();
-                    let mut results = results.lock().unwrap();
+                    let mut results = results.lock();
                     results.push(emulation);
                 }
             });
@@ -104,10 +103,10 @@ mod tests {
         }
 
         for handle in handles {
-            handle.join().unwrap();
+            handle.join().expect("worker thread panicked");
         }
 
-        let results = results.lock().unwrap();
+        let results = results.lock();
         println!("Total results: {}", results.len());
     }
 }

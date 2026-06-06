@@ -1,19 +1,13 @@
 //! HTTP Cookies
 
-use std::{convert::TryInto, fmt, sync::Arc, time::SystemTime};
+use std::{fmt, sync::Arc, time::SystemTime};
 
-use arc_swap::ArcSwap;
 use bytes::Bytes;
 use cookie::{Cookie as RawCookie, CookieJar, Expiration, SameSite};
 use http::Uri;
+use scc::HashMap as SccHashMap;
 
-use crate::{
-    IntoUri,
-    error::Error,
-    ext::UriExt,
-    hash::{HASHER, HashMap},
-    header::HeaderValue,
-};
+use crate::{IntoUri, error::Error, ext::UriExt, header::HeaderValue};
 
 /// Cookie header values in two forms.
 #[derive(Debug, Clone)]
@@ -68,10 +62,12 @@ pub struct Cookie<'a>(RawCookie<'a>);
 /// This type is exposed to allow creating one and filling it with some
 /// existing cookies more easily, before creating a [`crate::Client`].
 ///
-/// Uses `ArcSwap` for lock-free reads with copy-on-write for mutations.
+/// Uses `scc::HashMap` for lock-free reads with fine-grained entry-level
+/// mutations, avoiding the full-map clone that `ArcSwap` requires on every
+/// write.
 pub struct Jar {
     compression: bool,
-    store: Arc<ArcSwap<HashMap<String, HashMap<String, CookieJar>>>>,
+    store: Arc<SccHashMap<String, SccHashMap<String, CookieJar>>>,
 }
 
 // ===== impl CookieStore =====
@@ -235,21 +231,12 @@ impl<'c> From<Cookie<'c>> for RawCookie<'c> {
 
 // ===== impl Jar =====
 
-macro_rules! into_uri {
-    ($expr:expr) => {
-        match $expr.into_uri() {
-            Ok(u) => u,
-            Err(_) => return,
-        }
-    };
-}
-
 impl Jar {
     /// Creates a new [`Jar`] with the specified compression setting.
     pub fn new(compression: bool) -> Self {
         Self {
             compression,
-            store: Arc::new(ArcSwap::from_pointee(HashMap::with_hasher(HASHER))),
+            store: Arc::new(SccHashMap::new()),
         }
     }
 
@@ -287,14 +274,14 @@ impl Jar {
     /// ```
     pub fn get<U: IntoUri>(&self, name: &str, uri: U) -> Option<Cookie<'static>> {
         let uri = uri.into_uri().ok()?;
-        let store = self.store.load();
-        let cookie = store
-            .get(uri.host()?)?
-            .get(uri.path())?
-            .get(name)?
-            .clone()
-            .into_owned();
-        Some(Cookie(cookie))
+        let host = uri.host()?;
+        let path = uri.path();
+        let path_entry = self.store.get_sync(host)?;
+        let cookie_jar = path_entry.get_sync(path)?;
+        cookie_jar
+            .get()
+            .get(name)
+            .map(|c| Cookie(c.clone().into_owned()))
     }
 
     /// Get all cookies in this jar.
@@ -311,19 +298,18 @@ impl Jar {
     ///     println!("{}={}", cookie.name(), cookie.value());
     /// }
     /// ```
-    pub fn get_all(&self) -> impl Iterator<Item = Cookie<'static>> {
-        let store = self.store.load();
-        store
-            .values()
-            .flat_map(|path_map| {
-                path_map.values().flat_map(|name_map| {
-                    name_map
-                        .iter()
-                        .map(|cookie| Cookie(cookie.clone().into_owned()))
-                })
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
+    pub fn get_all(&self) -> Vec<Cookie<'static>> {
+        let mut cookies = Vec::new();
+        self.store.iter_sync(|_, path_map| {
+            path_map.iter_sync(|_, cookie_jar| {
+                for cookie in cookie_jar.iter() {
+                    cookies.push(Cookie(cookie.clone().into_owned()));
+                }
+                true
+            });
+            true
+        });
+        cookies
     }
 
     /// Add a cookie str to this jar.
@@ -360,42 +346,47 @@ impl Jar {
     /// // You can also use a string directly
     /// jar.add("foo=bar; Domain=example.com; Path=/", "http://example.com");
     /// ```
+    #[allow(clippy::unwrap_or_default)]
     pub fn add<C, U>(&self, cookie: C, uri: U)
     where
         C: IntoCookie,
         U: IntoUri,
     {
-        if let Some(cookie) = cookie.into_cookie() {
-            let cookie: RawCookie<'static> = cookie.into();
-            let uri = into_uri!(uri);
-            let domain = cookie
-                .domain()
-                .map(normalize_domain)
-                .or_else(|| uri.host())
-                .unwrap_or_default();
-            let path = cookie.path().unwrap_or_else(|| normalize_path(&uri));
+        let Some(cookie) = cookie.into_cookie() else {
+            return;
+        };
+        let cookie: RawCookie<'static> = cookie.into();
+        let Ok(uri) = uri.into_uri() else { return };
+        let domain = cookie
+            .domain()
+            .map(normalize_domain)
+            .or_else(|| uri.host())
+            .unwrap_or_default();
+        let path = cookie.path().unwrap_or_else(|| normalize_path(&uri));
 
-            self.store.rcu(|current| {
-                let mut inner = (**current).clone();
-                let name_map = inner
-                    .entry(domain.to_owned())
-                    .or_insert_with(|| HashMap::with_hasher(HASHER))
-                    .entry(path.to_owned())
-                    .or_default();
+        let expired = cookie
+            .expires_datetime()
+            .is_some_and(|dt| dt <= SystemTime::now())
+            || cookie.max_age().is_some_and(|age| age.is_zero());
 
-                // RFC 6265: If Max-Age=0 or Expires in the past, remove the cookie
-                let expired = cookie
-                    .expires_datetime()
-                    .is_some_and(|dt| dt <= SystemTime::now())
-                    || cookie.max_age().is_some_and(|age| age.is_zero());
+        self.store
+            .entry_sync(domain.to_owned())
+            .or_insert_with(SccHashMap::new)
+            .get()
+            .entry_sync(path.to_owned())
+            .or_insert_with(CookieJar::default)
+            .get_mut()
+            .remove(cookie.name().to_owned());
 
-                if expired {
-                    name_map.remove(cookie.clone());
-                } else {
-                    name_map.add(cookie.clone());
-                }
-                inner
-            });
+        if !expired {
+            self.store
+                .entry_sync(domain.to_owned())
+                .or_insert_with(SccHashMap::new)
+                .get()
+                .entry_sync(path.to_owned())
+                .or_insert_with(CookieJar::default)
+                .get_mut()
+                .add(cookie);
         }
     }
 
@@ -415,13 +406,14 @@ impl Jar {
     ///     .build();
     /// jar.add_cookie(cookie, "http://example.com");
     /// ```
+    #[allow(clippy::unwrap_or_default)]
     pub fn add_cookie<C, U>(&self, cookie: C, uri: U)
     where
         C: Into<RawCookie<'static>>,
         U: IntoUri,
     {
         let cookie: RawCookie<'static> = cookie.into();
-        let uri = into_uri!(uri);
+        let Ok(uri) = uri.into_uri() else { return };
         let domain = cookie
             .domain()
             .map(normalize_domain)
@@ -429,27 +421,30 @@ impl Jar {
             .unwrap_or_default();
         let path = cookie.path().unwrap_or_else(|| normalize_path(&uri));
 
-        self.store.rcu(|current| {
-            let mut inner = (**current).clone();
-            let name_map = inner
-                .entry(domain.to_owned())
-                .or_insert_with(|| HashMap::with_hasher(HASHER))
-                .entry(path.to_owned())
-                .or_default();
+        let expired = cookie
+            .expires_datetime()
+            .is_some_and(|dt| dt <= SystemTime::now())
+            || cookie.max_age().is_some_and(|age| age.is_zero());
 
-            // RFC 6265: If Max-Age=0 or Expires in the past, remove the cookie
-            let expired = cookie
-                .expires_datetime()
-                .is_some_and(|dt| dt <= SystemTime::now())
-                || cookie.max_age().is_some_and(|age| age.is_zero());
+        self.store
+            .entry_sync(domain.to_owned())
+            .or_insert_with(SccHashMap::new)
+            .get()
+            .entry_sync(path.to_owned())
+            .or_insert_with(CookieJar::default)
+            .get_mut()
+            .remove(cookie.name().to_owned());
 
-            if expired {
-                name_map.remove(cookie.clone());
-            } else {
-                name_map.add(cookie.clone());
-            }
-            inner
-        });
+        if !expired {
+            self.store
+                .entry_sync(domain.to_owned())
+                .or_insert_with(SccHashMap::new)
+                .get()
+                .entry_sync(path.to_owned())
+                .or_insert_with(CookieJar::default)
+                .get_mut()
+                .add(cookie);
+        }
     }
 
     /// Remove a cookie by name for a given Uri.
@@ -469,25 +464,25 @@ impl Jar {
     /// jar.remove("foo", "http://example.com/foo");
     /// assert!(jar.get("foo", "http://example.com/foo").is_none());
     /// ```
+    #[allow(clippy::unwrap_or_default)]
     pub fn remove<C, U>(&self, cookie: C, uri: U)
     where
         C: Into<RawCookie<'static>>,
         U: IntoUri,
     {
         let cookie_raw = cookie.into();
-        let uri = into_uri!(uri);
-        if let Some(host) = uri.host() {
-            let path = uri.path().to_owned();
-            self.store.rcu(|current| {
-                let mut inner = (**current).clone();
-                if let Some(path_map) = inner.get_mut(host)
-                    && let Some(name_map) = path_map.get_mut(&path)
-                {
-                    name_map.remove(cookie_raw.clone());
-                }
-                inner
-            });
-        }
+        let Ok(uri) = uri.into_uri() else { return };
+        let Some(host) = uri.host() else { return };
+        let path = uri.path().to_owned();
+
+        self.store
+            .entry_sync(host.to_owned())
+            .or_insert_with(SccHashMap::new)
+            .get()
+            .entry_sync(path)
+            .or_insert_with(CookieJar::default)
+            .get_mut()
+            .remove(cookie_raw.name().to_owned());
     }
 
     /// Clear all cookies from this jar.
@@ -504,7 +499,7 @@ impl Jar {
     /// assert_eq!(jar.get_all().count(), 0);
     /// ```
     pub fn clear(&self) {
-        self.store.store(Arc::new(HashMap::with_hasher(HASHER)));
+        self.store.clear_sync();
     }
 }
 
@@ -526,41 +521,36 @@ impl CookieStore for Jar {
             None => return Cookies::Empty,
         };
 
-        let store = self.store.load();
-        let iter = store
-            .iter()
-            .filter(|(domain, _)| domain_match(host, domain))
-            .flat_map(|(_, path_map)| {
-                path_map
-                    .iter()
-                    .filter(|(path, _)| path_match(uri.path(), path))
-                    .flat_map(|(_, name_map)| {
-                        name_map.iter().filter(|cookie| {
-                            if cookie.secure() == Some(true) && uri.is_http() {
-                                return false;
-                            }
-
-                            if cookie
-                                .expires_datetime()
-                                .is_some_and(|dt| dt <= SystemTime::now())
-                            {
-                                return false;
-                            }
-
-                            true
-                        })
-                    })
-            });
-
         if self.compression {
-            let cookies = iter.fold(String::new(), |mut cookies, cookie| {
-                if !cookies.is_empty() {
-                    cookies.push_str("; ");
+            let mut cookies = String::new();
+            self.store.iter_sync(|domain, path_map| {
+                if !domain_match(host, domain) {
+                    return true;
                 }
-                cookies.push_str(cookie.name());
-                cookies.push('=');
-                cookies.push_str(cookie.value());
-                cookies
+                path_map.iter_sync(|path, cookie_jar| {
+                    if !path_match(uri.path(), path) {
+                        return true;
+                    }
+                    for cookie in cookie_jar.iter() {
+                        if cookie.secure() == Some(true) && uri.is_http() {
+                            continue;
+                        }
+                        if cookie
+                            .expires_datetime()
+                            .is_some_and(|dt| dt <= SystemTime::now())
+                        {
+                            continue;
+                        }
+                        if !cookies.is_empty() {
+                            cookies.push_str("; ");
+                        }
+                        cookies.push_str(cookie.name());
+                        cookies.push('=');
+                        cookies.push_str(cookie.value());
+                    }
+                    true
+                });
+                true
             });
 
             if cookies.is_empty() {
@@ -571,19 +561,41 @@ impl CookieStore for Jar {
                 .map(Cookies::Compressed)
                 .unwrap_or(Cookies::Empty)
         } else {
-            let cookies = iter
-                .map(|cookie| {
-                    let name = cookie.name();
-                    let value = cookie.value();
+            let mut cookie_strs = Vec::new();
+            self.store.iter_sync(|domain, path_map| {
+                if !domain_match(host, domain) {
+                    return true;
+                }
+                path_map.iter_sync(|path, cookie_jar| {
+                    if !path_match(uri.path(), path) {
+                        return true;
+                    }
+                    for cookie in cookie_jar.iter() {
+                        if cookie.secure() == Some(true) && uri.is_http() {
+                            continue;
+                        }
+                        if cookie
+                            .expires_datetime()
+                            .is_some_and(|dt| dt <= SystemTime::now())
+                        {
+                            continue;
+                        }
+                        let name = cookie.name();
+                        let value = cookie.value();
+                        let mut s = String::with_capacity(name.len() + 1 + value.len());
+                        s.push_str(name);
+                        s.push('=');
+                        s.push_str(value);
+                        cookie_strs.push(s);
+                    }
+                    true
+                });
+                true
+            });
 
-                    let mut cookie_str = String::with_capacity(name.len() + 1 + value.len());
-                    cookie_str.push_str(name);
-                    cookie_str.push('=');
-                    cookie_str.push_str(value);
-
-                    HeaderValue::from_maybe_shared(Bytes::from(cookie_str))
-                })
-                .filter_map(Result::ok)
+            let cookies = cookie_strs
+                .into_iter()
+                .filter_map(|s| HeaderValue::from_maybe_shared(Bytes::from(s)).ok())
                 .collect();
 
             Cookies::Uncompressed(cookies)
