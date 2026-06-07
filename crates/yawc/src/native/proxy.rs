@@ -38,7 +38,9 @@ pub async fn connect_through_proxy(
                 proxy_url.port().unwrap_or(8080)
             );
             let proxy_stream = TcpStream::connect(&proxy_addr).await?;
-            http_connect_tunnel(proxy_stream, target_host, target_port).await
+            let auth_header = extract_proxy_auth(proxy_url);
+            http_connect_tunnel(proxy_stream, target_host, target_port, auth_header.as_deref())
+                .await
         }
         #[cfg(feature = "socks")]
         ProxyConfig::Socks5(proxy_url) => {
@@ -48,10 +50,25 @@ pub async fn connect_through_proxy(
                 proxy_url.port().unwrap_or(1080)
             );
             let target = format!("{target_host}:{target_port}");
-            let stream = tokio_socks::tcp::Socks5Stream::connect(&*proxy_addr, target)
+
+            let stream = if let Some((user, pass)) = proxy_url.username_password() {
+                tokio_socks::tcp::Socks5Stream::connect_with_password(
+                    &*proxy_addr,
+                    target,
+                    user,
+                    pass,
+                )
                 .await
-                .map_err(|e| io::Error::new(io::ErrorKind::ConnectionRefused, e))?;
-            Ok(stream.into_inner())
+                .map_err(|e| io::Error::new(io::ErrorKind::ConnectionRefused, e))?
+                .into_inner()
+            } else {
+                tokio_socks::tcp::Socks5Stream::connect(&*proxy_addr, target)
+                    .await
+                    .map_err(|e| io::Error::new(io::ErrorKind::ConnectionRefused, e))?
+                    .into_inner()
+            };
+
+            Ok(stream)
         }
     }
 }
@@ -65,6 +82,7 @@ async fn http_connect_tunnel(
     mut proxy_stream: TcpStream,
     target_host: &str,
     target_port: u16,
+    auth_header: Option<&str>,
 ) -> io::Result<TcpStream> {
     let authority = if target_host.contains(':') {
         format!("[{target_host}]:{target_port}")
@@ -72,11 +90,16 @@ async fn http_connect_tunnel(
         format!("{target_host}:{target_port}")
     };
 
-    let connect_req = format!(
+    let mut connect_req = format!(
         "CONNECT {authority} HTTP/1.1\r\n\
-         Host: {authority}\r\n\
-         \r\n"
+         Host: {authority}\r\n"
     );
+
+    if let Some(auth) = auth_header {
+        connect_req.push_str(&format!("Proxy-Authorization: {auth}\r\n"));
+    }
+
+    connect_req.push_str("\r\n");
 
     proxy_stream.write_all(connect_req.as_bytes()).await?;
 
@@ -156,6 +179,21 @@ fn parse_status_code(status_line: &str) -> io::Result<u16> {
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
+/// Extract Basic auth header from proxy URL credentials.
+fn extract_proxy_auth(url: &Url) -> Option<String> {
+    let user = url.username();
+    let pass = url.password().unwrap_or("");
+
+    if user.is_empty() {
+        return None;
+    }
+
+    use base64::Engine;
+    let credentials = format!("{user}:{pass}");
+    let encoded = base64::engine::general_purpose::STANDARD.encode(credentials.as_bytes());
+    Some(format!("Basic {encoded}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,7 +212,7 @@ mod tests {
         });
 
         let proxy_stream = TcpStream::connect(addr).await.unwrap();
-        let result = http_connect_tunnel(proxy_stream, "example.com", 443).await;
+        let result = http_connect_tunnel(proxy_stream, "example.com", 443, None).await;
         assert!(result.is_ok());
     }
 
@@ -192,8 +230,74 @@ mod tests {
         });
 
         let proxy_stream = TcpStream::connect(addr).await.unwrap();
-        let result = http_connect_tunnel(proxy_stream, "example.com", 443).await;
+        let result = http_connect_tunnel(proxy_stream, "example.com", 443, None).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_proxy_auth_header_is_sent() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut req_buf = vec![0u8; 4096];
+            let n = stream.read(&mut req_buf).await.unwrap();
+            let _ = tx.send(req_buf[..n].to_vec());
+            // Send a 200 response so the tunnel completes
+            let response = b"HTTP/1.1 200 Connection Established\r\n\r\n";
+            stream.write_all(response).await.unwrap();
+        });
+
+        let proxy_stream = TcpStream::connect(addr).await.unwrap();
+        let proxy_url =
+            url::Url::parse("http://user:pass@proxy.local:8080").unwrap();
+        let auth_header = extract_proxy_auth(&proxy_url);
+
+        let result = http_connect_tunnel(
+            proxy_stream,
+            "example.com",
+            443,
+            auth_header.as_deref(),
+        )
+        .await;
+        assert!(result.is_ok());
+
+        let received = rx.await.unwrap();
+        let request = String::from_utf8_lossy(&received);
+        assert!(request.contains("Proxy-Authorization: Basic"));
+        assert!(request.contains("CONNECT example.com:443"));
+    }
+
+    #[tokio::test]
+    async fn test_extract_proxy_auth_with_credentials() {
+        let url = url::Url::parse("http://admin:secret@proxy.local:8080").unwrap();
+        let auth = extract_proxy_auth(&url);
+        assert!(auth.is_some());
+        let auth = auth.unwrap();
+        assert!(auth.starts_with("Basic "));
+        // Verify base64 encoding
+        use base64::Engine;
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(auth.strip_prefix("Basic ").unwrap())
+            .unwrap();
+        assert_eq!(String::from_utf8(decoded).unwrap(), "admin:secret");
+    }
+
+    #[tokio::test]
+    async fn test_extract_proxy_auth_without_credentials() {
+        let url = url::Url::parse("http://proxy.local:8080").unwrap();
+        let auth = extract_proxy_auth(&url);
+        assert!(auth.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_extract_proxy_auth_empty_username() {
+        let url = url::Url::parse("http://:pass@proxy.local:8080").unwrap();
+        let auth = extract_proxy_auth(&url);
+        assert!(auth.is_none());
     }
 
     #[tokio::test]
@@ -215,7 +319,7 @@ mod tests {
         });
 
         let proxy_stream = TcpStream::connect(addr).await.unwrap();
-        let result = http_connect_tunnel(proxy_stream, "example.com", 443).await;
+        let result = http_connect_tunnel(proxy_stream, "example.com", 443, None).await;
         assert!(result.is_ok());
     }
 }
