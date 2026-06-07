@@ -39,8 +39,13 @@ pub async fn connect_through_proxy(
             );
             let proxy_stream = TcpStream::connect(&proxy_addr).await?;
             let auth_header = extract_proxy_auth(proxy_url);
-            http_connect_tunnel(proxy_stream, target_host, target_port, auth_header.as_deref())
-                .await
+            http_connect_tunnel(
+                proxy_stream,
+                target_host,
+                target_port,
+                auth_header.as_deref(),
+            )
+            .await
         }
         #[cfg(feature = "socks")]
         ProxyConfig::Socks5(proxy_url) => {
@@ -191,9 +196,7 @@ fn extract_proxy_auth(url: &Url) -> Option<String> {
     use base64::Engine;
     use percent_encoding::percent_decode_str;
 
-    let user = percent_decode_str(user)
-        .decode_utf8_lossy()
-        .into_owned();
+    let user = percent_decode_str(user).decode_utf8_lossy().into_owned();
     let pass = percent_decode_str(url.password().unwrap_or(""))
         .decode_utf8_lossy()
         .into_owned();
@@ -260,17 +263,11 @@ mod tests {
         });
 
         let proxy_stream = TcpStream::connect(addr).await.unwrap();
-        let proxy_url =
-            url::Url::parse("http://user:pass@proxy.local:8080").unwrap();
+        let proxy_url = url::Url::parse("http://user:pass@proxy.local:8080").unwrap();
         let auth_header = extract_proxy_auth(&proxy_url);
 
-        let result = http_connect_tunnel(
-            proxy_stream,
-            "example.com",
-            443,
-            auth_header.as_deref(),
-        )
-        .await;
+        let result =
+            http_connect_tunnel(proxy_stream, "example.com", 443, auth_header.as_deref()).await;
         assert!(result.is_ok());
 
         let received = rx.await.unwrap();
@@ -342,5 +339,159 @@ mod tests {
         let proxy_stream = TcpStream::connect(addr).await.unwrap();
         let result = http_connect_tunnel(proxy_stream, "example.com", 443, None).await;
         assert!(result.is_ok());
+    }
+
+    fn mock_proxy(
+        listener: tokio::net::TcpListener,
+        response: Vec<u8>,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            let _ = stream.read(&mut buf).await;
+            let _ = stream.write_all(&response).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        })
+    }
+
+    #[tokio::test]
+    async fn test_http_connect_200_success() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let response = b"HTTP/1.1 200 Connection Established\r\n\r\n".to_vec();
+        let server = mock_proxy(listener, response);
+
+        let stream = TcpStream::connect(addr).await.unwrap();
+        let result = http_connect_tunnel(stream, "example.com", 443, None).await;
+
+        assert!(result.is_ok());
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn test_http_connect_407_proxy_auth_required() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let response = b"HTTP/1.1 407 Proxy Authentication Required\r\n\r\n".to_vec();
+        let server = mock_proxy(listener, response);
+
+        let stream = TcpStream::connect(addr).await.unwrap();
+        let result = http_connect_tunnel(stream, "example.com", 443, None).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::ConnectionRefused);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn test_http_connect_502_bad_gateway() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let response = b"HTTP/1.1 502 Bad Gateway\r\n\r\n".to_vec();
+        let server = mock_proxy(listener, response);
+
+        let stream = TcpStream::connect(addr).await.unwrap();
+        let result = http_connect_tunnel(stream, "example.com", 443, None).await;
+
+        assert!(result.is_err());
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn test_http_connect_partial_response() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            let _ = stream.read(&mut buf).await;
+
+            stream.write_all(b"HTTP/1.1 200 OK\r\n").await.unwrap();
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+            stream.write_all(b"X-Custom: value\r\n\r\n").await.unwrap();
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        });
+
+        let stream = TcpStream::connect(addr).await.unwrap();
+        let result = http_connect_tunnel(stream, "example.com", 443, None).await;
+
+        assert!(result.is_ok());
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn test_http_connect_ipv6_address() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            let n = stream.read(&mut buf).await.unwrap();
+            let request = String::from_utf8_lossy(&buf[..n]);
+
+            assert!(request.contains("CONNECT [::1]:443 HTTP/1.1"));
+
+            stream.write_all(b"HTTP/1.1 200 OK\r\n\r\n").await.unwrap();
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        });
+
+        let stream = TcpStream::connect(addr).await.unwrap();
+        let result = http_connect_tunnel(stream, "::1", 443, None).await;
+
+        assert!(result.is_ok());
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn test_http_connect_connection_closed() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            let _ = stream.read(&mut buf).await;
+            drop(stream);
+        });
+
+        let stream = TcpStream::connect(addr).await.unwrap();
+        let result = http_connect_tunnel(stream, "example.com", 443, None).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn test_http_connect_with_auth_header() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            let n = stream.read(&mut buf).await.unwrap();
+            let request = String::from_utf8_lossy(&buf[..n]);
+
+            assert!(request.contains("Proxy-Authorization: Basic dXNlcjpwYXNz"));
+
+            stream.write_all(b"HTTP/1.1 200 OK\r\n\r\n").await.unwrap();
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        });
+
+        let stream = TcpStream::connect(addr).await.unwrap();
+        let result =
+            http_connect_tunnel(stream, "example.com", 443, Some("Basic dXNlcjpwYXNz")).await;
+
+        assert!(result.is_ok());
+        server.abort();
     }
 }
