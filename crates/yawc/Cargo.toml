@@ -34,10 +34,12 @@ rustdoc-args = ["--cfg", "docsrs"]
 axum = ["axum-core", "http"]
 default = ["rustls-ring"]
 hotpath = ["dep:hotpath"]
+proxy = []
 rustls-aws-lc-rs = ["tokio-rustls/aws-lc-rs"]
 rustls-ring = ["tokio-rustls/ring"]
 simd = ["simdutf8"]
 smol = ["dep:smol"]
+socks = ["proxy", "dep:tokio-socks"]
 zlib = ["flate2/any_zlib", "flate2/zlib-rs"]
 
 # Examples configuration
@@ -156,6 +158,7 @@ sha1 = { workspace = true }
 
 # Utilities
 nom = { workspace = true }
+percent-encoding = { workspace = true }
 pin-project = { workspace = true }
 tracing = { workspace = true }
 
@@ -163,6 +166,7 @@ tracing = { workspace = true }
 simdutf8 = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 smol = { workspace = true, optional = true }
+tokio-socks = { workspace = true, optional = true }
 
 # Compression
 flate2 = { workspace = true }

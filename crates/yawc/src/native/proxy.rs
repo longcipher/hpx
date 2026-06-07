@@ -51,12 +51,14 @@ pub async fn connect_through_proxy(
             );
             let target = format!("{target_host}:{target_port}");
 
-            let stream = if let Some((user, pass)) = proxy_url.username_password() {
+            let stream = if !proxy_url.username().is_empty() {
+                let user = proxy_url.username().to_string();
+                let pass = proxy_url.password().unwrap_or("").to_string();
                 tokio_socks::tcp::Socks5Stream::connect_with_password(
                     &*proxy_addr,
                     target,
-                    user,
-                    pass,
+                    &user,
+                    &pass,
                 )
                 .await
                 .map_err(|e| io::Error::new(io::ErrorKind::ConnectionRefused, e))?
@@ -182,13 +184,19 @@ fn parse_status_code(status_line: &str) -> io::Result<u16> {
 /// Extract Basic auth header from proxy URL credentials.
 fn extract_proxy_auth(url: &Url) -> Option<String> {
     let user = url.username();
-    let pass = url.password().unwrap_or("");
-
     if user.is_empty() {
         return None;
     }
 
     use base64::Engine;
+    use percent_encoding::percent_decode_str;
+
+    let user = percent_decode_str(user)
+        .decode_utf8_lossy()
+        .into_owned();
+    let pass = percent_decode_str(url.password().unwrap_or(""))
+        .decode_utf8_lossy()
+        .into_owned();
     let credentials = format!("{user}:{pass}");
     let encoded = base64::engine::general_purpose::STANDARD.encode(credentials.as_bytes());
     Some(format!("Basic {encoded}"))
@@ -271,8 +279,8 @@ mod tests {
         assert!(request.contains("CONNECT example.com:443"));
     }
 
-    #[tokio::test]
-    async fn test_extract_proxy_auth_with_credentials() {
+    #[test]
+    fn test_extract_proxy_auth_with_credentials() {
         let url = url::Url::parse("http://admin:secret@proxy.local:8080").unwrap();
         let auth = extract_proxy_auth(&url);
         assert!(auth.is_some());
@@ -286,18 +294,31 @@ mod tests {
         assert_eq!(String::from_utf8(decoded).unwrap(), "admin:secret");
     }
 
-    #[tokio::test]
-    async fn test_extract_proxy_auth_without_credentials() {
+    #[test]
+    fn test_extract_proxy_auth_without_credentials() {
         let url = url::Url::parse("http://proxy.local:8080").unwrap();
         let auth = extract_proxy_auth(&url);
         assert!(auth.is_none());
     }
 
-    #[tokio::test]
-    async fn test_extract_proxy_auth_empty_username() {
+    #[test]
+    fn test_extract_proxy_auth_empty_username() {
         let url = url::Url::parse("http://:pass@proxy.local:8080").unwrap();
         let auth = extract_proxy_auth(&url);
         assert!(auth.is_none());
+    }
+
+    #[test]
+    fn test_extract_proxy_auth_percent_encoded_credentials() {
+        let url = url::Url::parse("http://user%40domain:p%40ss@proxy.local:8080").unwrap();
+        let auth = extract_proxy_auth(&url);
+        assert!(auth.is_some());
+        let auth = auth.unwrap();
+        use base64::Engine;
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(auth.strip_prefix("Basic ").unwrap())
+            .unwrap();
+        assert_eq!(String::from_utf8(decoded).unwrap(), "user@domain:p@ss");
     }
 
     #[tokio::test]
