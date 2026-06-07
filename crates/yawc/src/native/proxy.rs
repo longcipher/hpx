@@ -494,4 +494,77 @@ mod tests {
         assert!(result.is_ok());
         server.abort();
     }
+
+    #[tokio::test]
+    async fn test_connect_through_http_proxy() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            let _ = stream.read(&mut buf).await;
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\n\r\n")
+                .await
+                .unwrap();
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        });
+
+        let proxy_url = url::Url::parse(&format!("http://{addr}")).unwrap();
+        let proxy = ProxyConfig::Http(proxy_url);
+
+        let result = connect_through_proxy(&proxy, "example.com", 443).await;
+        assert!(result.is_ok());
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn test_connect_through_http_proxy_with_auth() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            let n = stream.read(&mut buf).await.unwrap();
+            let request = String::from_utf8_lossy(&buf[..n]);
+
+            assert!(request.contains("Proxy-Authorization: Basic"));
+
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\n\r\n")
+                .await
+                .unwrap();
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        });
+
+        let proxy_url = url::Url::parse(&format!("http://user:pass@{addr}")).unwrap();
+        let proxy = ProxyConfig::Http(proxy_url);
+
+        let result = connect_through_proxy(&proxy, "example.com", 443).await;
+        assert!(result.is_ok());
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn test_connect_through_proxy_connection_refused() {
+        let proxy_url = url::Url::parse("http://127.0.0.1:1").unwrap();
+        let proxy = ProxyConfig::Http(proxy_url);
+
+        let result = connect_through_proxy(&proxy, "example.com", 443).await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_proxy_default_ports() {
+        let url = url::Url::parse("http://proxy.local").unwrap();
+        let proxy = ProxyConfig::Http(url);
+        if let ProxyConfig::Http(ref url) = proxy {
+            assert_eq!(url.port(), None);
+        }
+
+        let url = url::Url::parse("http://proxy.local:3128").unwrap();
+        assert_eq!(url.port(), Some(3128));
+    }
 }
