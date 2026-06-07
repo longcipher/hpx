@@ -504,10 +504,7 @@ mod tests {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut buf = vec![0u8; 4096];
             let _ = stream.read(&mut buf).await;
-            stream
-                .write_all(b"HTTP/1.1 200 OK\r\n\r\n")
-                .await
-                .unwrap();
+            stream.write_all(b"HTTP/1.1 200 OK\r\n\r\n").await.unwrap();
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
         });
 
@@ -532,10 +529,7 @@ mod tests {
 
             assert!(request.contains("Proxy-Authorization: Basic"));
 
-            stream
-                .write_all(b"HTTP/1.1 200 OK\r\n\r\n")
-                .await
-                .unwrap();
+            stream.write_all(b"HTTP/1.1 200 OK\r\n\r\n").await.unwrap();
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
         });
 
@@ -559,10 +553,7 @@ mod tests {
     #[test]
     fn test_proxy_default_ports() {
         let url = url::Url::parse("http://proxy.local").unwrap();
-        let proxy = ProxyConfig::Http(url);
-        if let ProxyConfig::Http(ref url) = proxy {
-            assert_eq!(url.port(), None);
-        }
+        assert_eq!(url.port(), None);
 
         let url = url::Url::parse("http://proxy.local:3128").unwrap();
         assert_eq!(url.port(), Some(3128));

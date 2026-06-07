@@ -12,6 +12,8 @@ use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use url::Url;
 
+#[cfg(feature = "proxy")]
+use super::proxy::ProxyConfig;
 use super::{Options, WebSocket};
 use crate::{Result, stream::MaybeTlsStream};
 
@@ -79,6 +81,8 @@ pub(super) struct WsBuilderOpts {
     pub(super) connector: Option<TlsConnector>,
     pub(super) establish_options: Option<Options>,
     pub(super) http_builder: Option<HttpRequestBuilder>,
+    #[cfg(feature = "proxy")]
+    pub(super) proxy: Option<ProxyConfig>,
 }
 
 impl WebSocketBuilder {
@@ -97,6 +101,8 @@ impl WebSocketBuilder {
                 connector: None,
                 establish_options: None,
                 http_builder: None,
+                #[cfg(feature = "proxy")]
+                proxy: None,
             }),
             future: None,
         }
@@ -190,6 +196,25 @@ impl WebSocketBuilder {
         opts.http_builder = Some(builder);
         self
     }
+
+    /// Sets a proxy for the WebSocket connection.
+    ///
+    /// When a proxy is set, the connection will be established through the
+    /// specified proxy server before performing the WebSocket handshake.
+    ///
+    /// # Parameters
+    /// - `proxy`: The proxy configuration to use
+    ///
+    /// # Returns
+    /// The builder for method chaining
+    #[cfg(feature = "proxy")]
+    pub fn with_proxy(mut self, proxy: ProxyConfig) -> Self {
+        let Some(opts) = &mut self.opts else {
+            unreachable!()
+        };
+        opts.proxy = Some(proxy);
+        self
+    }
 }
 
 impl Future for WebSocketBuilder {
@@ -214,6 +239,8 @@ impl Future for WebSocketBuilder {
                 opts.connector,
                 opts.establish_options.unwrap_or_default(),
                 opts.http_builder.unwrap_or_else(HttpRequest::builder),
+                #[cfg(feature = "proxy")]
+                opts.proxy,
             );
             this.future = Some(Box::pin(future));
         }

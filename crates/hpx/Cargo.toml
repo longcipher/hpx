@@ -67,13 +67,13 @@ hickory-dns = ["dep:hickory-resolver"]
 stream = ["tokio/fs", "dep:tokio-util", "dep:sync_wrapper"]
 
 # Enable SOCKS proxy support.
-socks = ["dep:tokio-socks"]
+socks = ["dep:tokio-socks", "hpx-yawc/socks"]
 
 # Enable WebSocket support (defaults to yawc backend).
 ws = ["ws-yawc"]
 
 # Enable WebSocket support via yawc backend.
-ws-yawc = ["dep:hpx-yawc"]
+ws-yawc = ["dep:hpx-yawc", "hpx-yawc/proxy"]
 
 # Enable WebSocket support via fastwebsockets backend.
 ws-fastwebsockets = ["dep:sha1", "dep:fastwebsockets"]

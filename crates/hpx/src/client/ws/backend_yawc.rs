@@ -42,6 +42,7 @@ impl Default for WebSocketConfig {
 /// websocket handshake when sent.
 pub struct WebSocketRequestBuilder {
     inner: RequestBuilder,
+    proxy: Option<Proxy>,
     unsupported: UnsupportedSettings,
     config: WebSocketConfig,
 }
@@ -51,6 +52,7 @@ impl WebSocketRequestBuilder {
     pub fn new(inner: RequestBuilder) -> Self {
         Self {
             inner: inner.version(Version::HTTP_11),
+            proxy: None,
             unsupported: UnsupportedSettings::default(),
             config: WebSocketConfig::default(),
         }
@@ -188,12 +190,9 @@ impl WebSocketRequestBuilder {
     }
 
     /// Set the proxy for this request.
-    ///
-    /// The yawc backend does not wire through proxy settings, so this option is
-    /// rejected at send time.
     #[inline]
-    pub fn proxy(mut self, _proxy: Proxy) -> Self {
-        self.unsupported.proxy = true;
+    pub fn proxy(mut self, proxy: Proxy) -> Self {
+        self.proxy = Some(proxy);
         self
     }
 
@@ -266,6 +265,19 @@ impl WebSocketRequestBuilder {
     {
         self.unsupported.emulation = true;
         self
+    }
+
+    /// Creates a [`hpx_yawc::ProxyConfig`] from a proxy URL, selecting the
+    /// appropriate variant based on the URL scheme.
+    fn make_proxy_config(proxy_url: url::Url) -> hpx_yawc::ProxyConfig {
+        #[cfg(feature = "socks")]
+        {
+            let scheme = proxy_url.scheme();
+            if scheme == "socks5" || scheme == "socks5h" {
+                return hpx_yawc::ProxyConfig::Socks5(proxy_url);
+            }
+        }
+        hpx_yawc::ProxyConfig::Http(proxy_url)
     }
 
     /// Sends the request and returns a [`WebSocketResponse`].
@@ -377,9 +389,25 @@ impl WebSocketRequestBuilder {
             options = options.with_max_payload_read(max_size);
         }
 
-        let ws = hpx_yawc::WebSocket::connect(url)
+        let mut ws_builder = hpx_yawc::WebSocket::connect(url)
             .with_options(options)
-            .with_request(http_builder)
+            .with_request(http_builder);
+
+        // Extract proxy configuration if a proxy was set
+        if let Some(proxy) = &self.proxy {
+            let matcher = proxy.clone().into_matcher();
+            if let Some(crate::proxy::Intercepted::Proxy(intercept)) = matcher.intercept(&uri) {
+                let proxy_uri = intercept.uri();
+                let proxy_url: url::Url = proxy_uri
+                    .to_string()
+                    .parse()
+                    .map_err(|e: url::ParseError| Error::builder(e))?;
+                let proxy_config = Self::make_proxy_config(proxy_url);
+                ws_builder = ws_builder.with_proxy(proxy_config);
+            }
+        }
+
+        let ws = ws_builder
             .await
             .map_err(|e| Error::upgrade(e.to_string()))?;
 
@@ -573,7 +601,6 @@ struct UnsupportedSettings {
     accept_key: bool,
     force_http2: bool,
     protocols: bool,
-    proxy: bool,
     local_address: bool,
     local_addresses: bool,
     interface: bool,
@@ -592,9 +619,6 @@ impl UnsupportedSettings {
         }
         if self.protocols {
             unsupported.push("protocols");
-        }
-        if self.proxy {
-            unsupported.push("proxy");
         }
         if self.local_address {
             unsupported.push("local_address");

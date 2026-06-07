@@ -115,6 +115,8 @@
 
 mod builder;
 mod options;
+#[cfg(feature = "proxy")]
+pub mod proxy;
 mod split;
 pub mod streaming;
 mod upgrade;
@@ -142,6 +144,8 @@ use http_body_util::Empty;
 use hyper::{Request, Response, StatusCode, body::Incoming, header, upgrade::Upgraded};
 use hyper_util::rt::TokioIo;
 pub use options::{CompressionLevel, DeflateOptions, Fragmentation, Options};
+#[cfg(feature = "proxy")]
+pub use proxy::ProxyConfig;
 pub use split::{ReadHalf, WriteHalf};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -756,18 +760,30 @@ impl WebSocket<MaybeTlsStream<TcpStream>> {
         connector: Option<TlsConnector>,
         options: Options,
         builder: HttpRequestBuilder,
+        #[cfg(feature = "proxy")] proxy: Option<proxy::ProxyConfig>,
     ) -> Result<TcpWebSocket> {
         let host = url
             .host()
             .ok_or_else(|| WebSocketError::InvalidHttpScheme)?
             .to_string();
 
+        let port = url
+            .port_or_known_default()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "URL has no port"))?;
+
+        #[cfg(feature = "proxy")]
+        let tcp_stream = if let Some(proxy_config) = &proxy {
+            proxy::connect_through_proxy(proxy_config, &host, port).await?
+        } else if let Some(tcp_address) = tcp_address {
+            TcpStream::connect(tcp_address).await?
+        } else {
+            TcpStream::connect(format!("{host}:{port}")).await?
+        };
+
+        #[cfg(not(feature = "proxy"))]
         let tcp_stream = if let Some(tcp_address) = tcp_address {
             TcpStream::connect(tcp_address).await?
         } else {
-            let port = url
-                .port_or_known_default()
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "URL has no port"))?;
             TcpStream::connect(format!("{host}:{port}")).await?
         };
 
