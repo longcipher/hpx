@@ -346,20 +346,71 @@ impl Storage for SqliteStorage {
     }
 
     async fn list(&self) -> Result<Vec<DownloadRecord>, DownloadError> {
-        let rows = sqlx::query("SELECT id FROM downloads ORDER BY created_at")
+        let download_rows = sqlx::query(
+            "SELECT id, url, destination, request_json, state, priority, etag, last_modified, \
+               content_length, bytes_downloaded, last_error, created_at, updated_at \
+             FROM downloads ORDER BY created_at",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| DownloadError::Storage(e.to_string()))?;
+
+        let segment_rows = sqlx::query("SELECT * FROM segments ORDER BY download_id, idx")
             .fetch_all(&self.pool)
             .await
             .map_err(|e| DownloadError::Storage(e.to_string()))?;
 
-        let mut records = Vec::with_capacity(rows.len());
-        for row in rows {
+        // Group segments by download_id for efficient lookup.
+        let mut segments_by_id: std::collections::HashMap<String, Vec<SegmentState>> =
+            std::collections::HashMap::new();
+        for row in segment_rows {
+            let download_id: String = row.get("download_id");
+            let state_str: String = row.get("state");
+            let state = parse_segment_status(&state_str)?;
+            segments_by_id
+                .entry(download_id)
+                .or_default()
+                .push(SegmentState {
+                    index: row.get::<i64, _>("idx") as u32,
+                    start: to_u64(row.get::<i64, _>("start")),
+                    end: to_u64(row.get::<i64, _>("end")),
+                    state,
+                    bytes_downloaded: to_u64(row.get::<i64, _>("bytes_downloaded")),
+                });
+        }
+
+        let mut records = Vec::with_capacity(download_rows.len());
+        for row in download_rows {
             let id_str: String = row.get("id");
             let uuid = uuid::Uuid::parse_str(&id_str)
                 .map_err(|e| DownloadError::Storage(e.to_string()))?;
             let id = DownloadId(uuid);
-            if let Some(record) = self.load(id).await? {
-                records.push(record);
-            }
+
+            let state_str: String = row.get("state");
+            let priority_str: String = row.get("priority");
+            let url: String = row.get("url");
+            let destination = PathBuf::from(row.get::<String, _>("destination"));
+            let priority = parse_priority(&priority_str)?;
+            let request_json = row.get::<Option<String>, _>("request_json");
+            let request = deserialize_request(request_json.as_deref(), url, destination, priority)?;
+            let segments = segments_by_id.remove(&id_str).unwrap_or_default();
+
+            records.push(DownloadRecord {
+                id,
+                url: request.url.clone(),
+                destination: request.destination.clone(),
+                state: parse_download_state(&state_str)?,
+                priority: request.priority,
+                request,
+                etag: row.get("etag"),
+                last_modified: row.get("last_modified"),
+                content_length: row.get::<Option<i64>, _>("content_length").map(to_u64),
+                bytes_downloaded: to_u64(row.get::<i64, _>("bytes_downloaded")),
+                last_error: row.get("last_error"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                segments,
+            });
         }
 
         Ok(records)

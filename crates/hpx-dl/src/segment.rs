@@ -332,27 +332,27 @@ where
 /// Manages concurrent download of multiple segments to a single destination file.
 pub struct SegmentDownloader {
     /// HTTP client for making requests.
-    pub client: hpx::Client,
+    pub(crate) client: hpx::Client,
     /// URL to download from.
-    pub url: String,
+    pub(crate) url: String,
     /// Segment byte ranges to download concurrently.
-    pub segments: Vec<SegmentRange>,
+    pub(crate) segments: Vec<SegmentRange>,
     /// Destination file path.
-    pub destination: PathBuf,
+    pub(crate) destination: PathBuf,
     /// Custom headers applied to requests.
-    pub headers: HashMap<String, String>,
+    pub(crate) headers: HashMap<String, String>,
     /// Speed limiter enforced for each downloaded chunk.
-    pub limiter: CompositeLimiter,
+    pub(crate) limiter: CompositeLimiter,
     /// Optional segment state updates.
     pub(crate) segment_tx: Option<tokio::sync::mpsc::UnboundedSender<SegmentProgressUpdate>>,
     /// Maximum retry attempts per segment.
-    pub max_retries: u32,
+    pub(crate) max_retries: u32,
     /// Initial backoff delay.
-    pub retry_initial_delay: Duration,
+    pub(crate) retry_initial_delay: Duration,
     /// Maximum backoff delay.
-    pub retry_max_delay: Duration,
+    pub(crate) retry_max_delay: Duration,
     /// Jitter factor (0.0 to 1.0).
-    pub retry_jitter: f64,
+    pub(crate) retry_jitter: f64,
 }
 
 impl std::fmt::Debug for SegmentDownloader {

@@ -33,6 +33,10 @@ pub struct DecompressionLayer {
 }
 
 /// Service that decompresses response bodies based on the [`AcceptEncoding`] configuration.
+///
+/// Uses `Option` internally to support per-request reconfiguration via
+/// `take()` + `replace()`. The invariant (`Some` before every `call`/`poll_ready`)
+/// is maintained by the implementation and guarded by `debug_assert`.
 #[derive(Clone)]
 pub struct Decompression<S>(Option<decompression::Decompression<S>>);
 
@@ -70,7 +74,7 @@ impl<S> Layer<S> for DecompressionLayer {
 
     #[inline(always)]
     fn layer(&self, service: S) -> Self::Service {
-        Decompression(Some(Decompression::<S>::accept_in_place(
+        Decompression(Some(Decompression::<S>::apply_accept(
             decompression::Decompression::new(service),
             &self.accept,
         )))
@@ -80,9 +84,7 @@ impl<S> Layer<S> for DecompressionLayer {
 // ===== impl Decompression =====
 
 impl<S> Decompression<S> {
-    const BUG_MSG: &str = "[BUG] Decompression service not initialized; bug in setup";
-
-    fn accept_in_place(
+    fn apply_accept(
         mut decoder: decompression::Decompression<S>,
         accept: &AcceptEncoding,
     ) -> decompression::Decompression<S> {
@@ -108,6 +110,13 @@ impl<S> Decompression<S> {
 
         decoder
     }
+
+    #[inline]
+    fn get_inner(&mut self) -> &mut decompression::Decompression<S> {
+        self.0
+            .as_mut()
+            .expect("[BUG] Decompression service not initialized")
+    }
 }
 
 impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for Decompression<S>
@@ -122,18 +131,17 @@ where
 
     #[inline(always)]
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.0.as_mut().expect(Self::BUG_MSG).poll_ready(cx)
+        self.get_inner().poll_ready(cx)
     }
 
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
         if let Some(accept) = RequestConfig::<AcceptEncoding>::get(req.extensions()) {
             if let Some(decoder) = self.0.take() {
-                self.0
-                    .replace(Decompression::accept_in_place(decoder, accept));
+                self.0.replace(Decompression::apply_accept(decoder, accept));
             }
             debug_assert!(self.0.is_some());
         }
 
-        self.0.as_mut().expect(Self::BUG_MSG).call(req)
+        self.get_inner().call(req)
     }
 }

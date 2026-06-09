@@ -14,6 +14,9 @@ use crate::error::DownloadError;
 ///
 /// Refills tokens at a fixed rate (bytes per second).
 /// Before reading each chunk, the caller waits until enough tokens are available.
+///
+/// Uses a lock-free atomic CAS loop for token management, avoiding async mutex
+/// contention under high concurrency.
 #[derive(Debug)]
 pub struct SpeedLimiter {
     /// Maximum tokens (burst capacity).
@@ -22,8 +25,11 @@ pub struct SpeedLimiter {
     tokens: Arc<AtomicU64>,
     /// Refill rate in bytes per second.
     bytes_per_second: u64,
-    /// Last refill timestamp (protected by async mutex, held only briefly).
-    last_refill: Arc<tokio::sync::Mutex<Instant>>,
+    /// Last refill timestamp as nanoseconds since a monotonic reference point.
+    /// Uses `AtomicU64` with CAS for lock-free updates.
+    last_refill_nanos: Arc<AtomicU64>,
+    /// Reference instant for monotonic time calculations.
+    origin: Instant,
 }
 
 impl SpeedLimiter {
@@ -36,7 +42,8 @@ impl SpeedLimiter {
             capacity: bytes_per_second,
             tokens: Arc::new(AtomicU64::new(bytes_per_second)),
             bytes_per_second,
-            last_refill: Arc::new(tokio::sync::Mutex::new(Instant::now())),
+            last_refill_nanos: Arc::new(AtomicU64::new(0)),
+            origin: Instant::now(),
         }
     }
 
@@ -47,7 +54,8 @@ impl SpeedLimiter {
             capacity: bytes_per_second,
             tokens: Arc::new(AtomicU64::new(0)),
             bytes_per_second,
-            last_refill: Arc::new(tokio::sync::Mutex::new(Instant::now())),
+            last_refill_nanos: Arc::new(AtomicU64::new(0)),
+            origin: Instant::now(),
         }
     }
 
@@ -58,7 +66,8 @@ impl SpeedLimiter {
             capacity: 0,
             tokens: Arc::new(AtomicU64::new(0)),
             bytes_per_second: 0,
-            last_refill: Arc::new(tokio::sync::Mutex::new(Instant::now())),
+            last_refill_nanos: Arc::new(AtomicU64::new(0)),
+            origin: Instant::now(),
         }
     }
 
@@ -74,6 +83,81 @@ impl SpeedLimiter {
         self.bytes_per_second == 0
     }
 
+    /// Convert an `Instant` to nanos relative to `self.origin`.
+    fn instant_to_nanos(&self, instant: Instant) -> u64 {
+        instant.duration_since(self.origin).as_nanos() as u64
+    }
+
+    /// Refill tokens based on elapsed time using a CAS loop.
+    fn refill_tokens(&self, now_nanos: u64) {
+        loop {
+            let last = self.last_refill_nanos.load(Ordering::Acquire);
+            if now_nanos <= last {
+                return;
+            }
+            let elapsed_nanos = now_nanos - last;
+            let new_tokens = elapsed_nanos
+                .saturating_mul(self.bytes_per_second)
+                .div_ceil(1_000_000_000);
+            if new_tokens == 0 {
+                return;
+            }
+            let current = self.tokens.load(Ordering::Acquire);
+            let updated = current.saturating_add(new_tokens).min(self.capacity);
+            if updated == current {
+                // No change needed, just update the timestamp.
+                let _ = self.last_refill_nanos.compare_exchange_weak(
+                    last,
+                    now_nanos,
+                    Ordering::Release,
+                    Ordering::Relaxed,
+                );
+                return;
+            }
+            // Try to atomically update tokens and timestamp.
+            // We update tokens first, then timestamp. The timestamp CAS
+            // may fail if another thread updated it, which is fine —
+            // the next refill will pick up from the new timestamp.
+            if self
+                .tokens
+                .compare_exchange_weak(current, updated, Ordering::Release, Ordering::Relaxed)
+                .is_ok()
+            {
+                let _ = self.last_refill_nanos.compare_exchange_weak(
+                    last,
+                    now_nanos,
+                    Ordering::Release,
+                    Ordering::Relaxed,
+                );
+                return;
+            }
+            // CAS failed, retry.
+        }
+    }
+
+    /// Try to consume `requested` tokens. Returns the number actually consumed.
+    fn try_consume(&self, requested: u64) -> u64 {
+        loop {
+            let available = self.tokens.load(Ordering::Acquire);
+            if available == 0 {
+                return 0;
+            }
+            let granted = available.min(requested);
+            if self
+                .tokens
+                .compare_exchange_weak(
+                    available,
+                    available - granted,
+                    Ordering::Release,
+                    Ordering::Relaxed,
+                )
+                .is_ok()
+            {
+                return granted;
+            }
+        }
+    }
+
     /// Wait until `bytes` tokens are available, then consume them.
     ///
     /// For unlimited limiters, returns immediately.
@@ -84,40 +168,20 @@ impl SpeedLimiter {
 
         let mut remaining = bytes;
         loop {
-            let sleep_duration = {
-                let mut last = self.last_refill.lock().await;
-                let now = Instant::now();
-                let elapsed = now.duration_since(*last);
+            let now_nanos = self.instant_to_nanos(Instant::now());
+            self.refill_tokens(now_nanos);
 
-                // Refill tokens based on elapsed time.
-                if elapsed > Duration::ZERO {
-                    let new_tokens = (elapsed.as_millis() as u64)
-                        .saturating_mul(self.bytes_per_second)
-                        .div_ceil(1000);
-                    let current = self.tokens.load(Ordering::Relaxed);
-                    let updated = current.saturating_add(new_tokens).min(self.capacity);
-                    self.tokens.store(updated, Ordering::Relaxed);
-                    *last = now;
-                }
+            let granted = self.try_consume(remaining);
+            remaining -= granted;
+            if remaining == 0 {
+                return Ok(());
+            }
 
-                // Consume as much as we can from the shared bucket.
-                let available = self.tokens.load(Ordering::Relaxed);
-                if available > 0 {
-                    let granted = available.min(remaining);
-                    self.tokens.fetch_sub(granted, Ordering::Relaxed);
-                    remaining -= granted;
-                    if remaining == 0 {
-                        return Ok(());
-                    }
-                }
-
-                // Calculate how long this waiter should sleep before trying again.
-                let deficit = remaining;
-                let sleep_ms = deficit.saturating_mul(1000).div_ceil(self.bytes_per_second);
-                Duration::from_millis(sleep_ms)
-            };
-
-            tokio::time::sleep(sleep_duration).await;
+            // Calculate sleep duration based on deficit.
+            let sleep_ms = remaining
+                .saturating_mul(1000)
+                .div_ceil(self.bytes_per_second);
+            tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
         }
     }
 }
@@ -128,7 +192,8 @@ impl Clone for SpeedLimiter {
             capacity: self.capacity,
             tokens: Arc::clone(&self.tokens),
             bytes_per_second: self.bytes_per_second,
-            last_refill: Arc::clone(&self.last_refill),
+            last_refill_nanos: Arc::clone(&self.last_refill_nanos),
+            origin: self.origin,
         }
     }
 }

@@ -16,7 +16,7 @@ use http::{
 use tower::{
     Layer, Service, ServiceBuilder, ServiceExt,
     retry::RetryLayer,
-    util::{BoxCloneSyncService, BoxCloneSyncServiceLayer, Either},
+    util::{BoxCloneSyncService, BoxCloneSyncServiceLayer},
 };
 #[cfg(feature = "cookies")]
 use {super::super::layer::cookie::CookieServiceLayer, crate::cookie};
@@ -262,13 +262,13 @@ impl ClientBuilder {
                         .layer(super::super::layer::hooks::HooksLayer::new(hooks))
                         .service(service);
 
-                    ClientRef::Right(Either::Left(service))
+                    ClientRef::Hooked(service)
                 } else {
                     let service = ServiceBuilder::new()
                         .layer(TimeoutLayer::new(config.protocol.timeout_options))
                         .service(service);
 
-                    ClientRef::Left(service)
+                    ClientRef::Standard(service)
                 }
             } else {
                 // Start with boxed service
@@ -298,7 +298,7 @@ impl ClientBuilder {
                     .service(service)
                     .map_err(error::map_timeout_to_request_error);
 
-                ClientRef::Right(Either::Right(BoxCloneSyncService::new(service)))
+                ClientRef::Boxed(BoxCloneSyncService::new(service))
             }
         };
 

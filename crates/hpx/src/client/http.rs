@@ -7,8 +7,10 @@ mod builder;
 use std::{
     borrow::Cow,
     collections::HashMap,
+    future::Future,
     net::SocketAddr,
     num::NonZeroU32,
+    pin::Pin,
     sync::Arc,
     task::{Context, Poll},
     time::Duration,
@@ -17,7 +19,7 @@ use std::{
 use http::header::HeaderMap;
 use tower::{
     retry::Retry,
-    util::{BoxCloneSyncService, BoxCloneSyncServiceLayer, Either, MapErr, Oneshot},
+    util::{BoxCloneSyncService, BoxCloneSyncServiceLayer, MapErr, Oneshot},
 };
 
 #[cfg(feature = "boring")]
@@ -146,7 +148,49 @@ type BoxedClientLayer = BoxCloneSyncServiceLayer<
 >;
 
 /// Client reference type that can be either a typed service path or a boxed service.
-pub type ClientRef = Either<ClientService, Either<HookedClientService, BoxedClientService>>;
+///
+/// This enum replaces the previous nested `Either` type for better readability
+/// and debug output.
+pub(crate) enum ClientRef {
+    /// Standard service path (no hooks, no custom layers).
+    Standard(ClientService),
+    /// Hooks-enabled service path (hooks but no custom layers).
+    Hooked(HookedClientService),
+    /// Type-erased service path (custom layers, with or without hooks).
+    Boxed(BoxedClientService),
+}
+
+impl Clone for ClientRef {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Standard(s) => Self::Standard(s.clone()),
+            Self::Hooked(s) => Self::Hooked(s.clone()),
+            Self::Boxed(s) => Self::Boxed(s.clone()),
+        }
+    }
+}
+
+impl tower::Service<http::Request<Body>> for ClientRef {
+    type Response = http::Response<super::ClientResponseBody>;
+    type Error = BoxError;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        match self {
+            Self::Standard(s) => s.poll_ready(cx),
+            Self::Hooked(s) => s.poll_ready(cx),
+            Self::Boxed(s) => s.poll_ready(cx),
+        }
+    }
+
+    fn call(&mut self, req: http::Request<Body>) -> Self::Future {
+        match self {
+            Self::Standard(s) => Box::pin(s.call(req)),
+            Self::Hooked(s) => Box::pin(s.call(req)),
+            Self::Boxed(s) => Box::pin(s.call(req)),
+        }
+    }
+}
 
 /// An [`Client`] to make Requests with.
 ///
@@ -644,8 +688,6 @@ impl tower::Service<Request> for &'_ Client {
 mod tests {
     use std::{sync::Arc, time::Duration};
 
-    use tower::util::Either;
-
     use super::*;
 
     struct NoopBeforeRequestHook;
@@ -664,10 +706,7 @@ mod tests {
 
         let client = Client::builder().hooks(hooks).build().unwrap();
 
-        assert!(matches!(
-            client.into_inner(),
-            Either::Right(Either::Left(_))
-        ));
+        assert!(matches!(client.into_inner(), ClientRef::Hooked(_)));
     }
 
     #[test]

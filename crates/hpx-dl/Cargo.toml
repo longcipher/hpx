@@ -58,6 +58,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 
 # Optional dependencies
+parking_lot.workspace = true
 sqlx = { workspace = true, optional = true, features = [
     "runtime-tokio",
     "sqlite",

@@ -305,7 +305,7 @@ impl RequestIdHook {
 
 impl BeforeRequestHook for RequestIdHook {
     fn on_request(&self, request: &mut Request<Body>) -> Result<(), Error> {
-        // Generate a simple unique ID based on timestamp and random value
+        // Generate a unique ID using a combination of timestamp and random bytes
         use std::time::{SystemTime, UNIX_EPOCH};
 
         let timestamp = SystemTime::now()
@@ -313,7 +313,8 @@ impl BeforeRequestHook for RequestIdHook {
             .map(|d| d.as_nanos())
             .unwrap_or(0);
 
-        let id = format!("{:x}", timestamp);
+        let random_part = rand::random::<u64>();
+        let id = format!("{timestamp:x}-{random_part:x}");
         if let Ok(value) = http::HeaderValue::from_str(&id) {
             request
                 .headers_mut()

@@ -148,11 +148,43 @@ impl AuthMethod {
     }
 
     /// Create a dynamic bearer token provider authentication method.
+    ///
+    /// # Warning
+    ///
+    /// This variant requires an async token refresh mechanism. The auth layer
+    /// operates synchronously, so this method returns an error at request time.
+    /// Use [`CachedTokenProvider`] or hooks-based auth instead.
+    #[deprecated(
+        since = "2.5.0",
+        note = "BearerProvider cannot be used synchronously. Use `cached_token_provider()` or hooks instead."
+    )]
     pub fn bearer_provider(provider: Arc<dyn BearerTokenProvider>) -> Self {
         Self::BearerProvider { provider }
     }
 
     /// Create an API key authentication method.
+    ///
+    /// Returns `None` if the header name is invalid.
+    pub fn try_api_key(name: impl TryInto<HeaderName>, value: impl Into<String>) -> Option<Self> {
+        Some(Self::ApiKey {
+            header_name: name.try_into().ok()?,
+            header_value: value.into(),
+        })
+    }
+
+    /// Create an API key authentication method with a pre-validated header name.
+    pub fn api_key_with_name(name: HeaderName, value: impl Into<String>) -> Self {
+        Self::ApiKey {
+            header_name: name,
+            header_value: value.into(),
+        }
+    }
+
+    /// Create an API key authentication method.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `name` is not a valid HTTP header name.
     pub fn api_key(name: impl Into<String>, value: impl Into<String>) -> Self {
         Self::ApiKey {
             header_name: HeaderName::try_from(name.into())

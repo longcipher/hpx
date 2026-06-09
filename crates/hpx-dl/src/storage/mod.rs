@@ -55,10 +55,17 @@ pub enum SegmentStatus {
     /// Segment has not been started.
     Pending,
     /// Segment is actively downloading.
+    ///
+    /// Currently unused by the engine — segments transition directly from
+    /// `Pending` to `Completed`. Reserved for future per-segment progress
+    /// tracking.
     Downloading,
     /// Segment finished successfully.
     Completed,
     /// Segment failed.
+    ///
+    /// Currently unused by the engine — failures are tracked at the download
+    /// level. Reserved for future per-segment error handling.
     Failed,
 }
 
@@ -110,6 +117,11 @@ pub trait Storage: Send + Sync {
     ) -> Result<(), DownloadError>;
 
     /// Insert or replace a download record atomically.
+    ///
+    /// The default implementation is **not atomic** — it performs a
+    /// load-then-delete-then-save sequence that has a TOCTOU window under
+    /// concurrent access. Implementors **must** override this method with
+    /// an atomic operation (e.g., SQL `INSERT ... ON CONFLICT DO UPDATE`).
     async fn upsert(&self, download: &DownloadRecord) -> Result<(), DownloadError> {
         let mut normalized = download.clone();
         normalized.sync_request_fields();

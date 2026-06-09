@@ -658,6 +658,3 @@ pub fn request<T: IntoUri>(method: Method, uri: T) -> RequestBuilder {
 pub fn websocket<T: IntoUri>(uri: T) -> ws::WebSocketRequestBuilder {
     Client::new().websocket(uri)
 }
-
-#[cfg(feature = "http1")]
-use smallvec as _;

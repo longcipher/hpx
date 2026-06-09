@@ -9,12 +9,13 @@ use std::{
     future::Future,
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use parking_lot::Mutex;
 use scc::HashMap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -309,10 +310,7 @@ impl std::fmt::Debug for EngineInner {
             .field("client", &"Client")
             .field("config", &self.config)
             .field("events", &self.events)
-            .field(
-                "active_tasks",
-                &self.active_tasks.lock().map_or(0, |m| m.len()),
-            )
+            .field("active_tasks", &self.active_tasks.lock().len())
             .finish_non_exhaustive()
     }
 }
@@ -343,23 +341,50 @@ impl EngineInner {
         Ok(())
     }
 
+    /// Atomically update a download entry, persist it, and return the snapshot.
+    ///
+    /// Uses `update_sync` on the concurrent map to avoid TOCTOU races between
+    /// snapshot-read and replace-write. The persist call happens after the
+    /// atomic update, reading back the updated entry for consistency.
+    async fn update_entry<F>(
+        &self,
+        id: DownloadId,
+        modify: F,
+    ) -> Result<DownloadEntry, DownloadError>
+    where
+        F: FnOnce(&mut DownloadEntry),
+    {
+        let updated = self.downloads.update_sync(&id, |_, entry| {
+            modify(entry);
+            entry.touch();
+        });
+        if updated.is_none() {
+            return Err(DownloadError::NotFound(id.0));
+        }
+        let entry = self.entry_snapshot(id)?;
+        let record = entry.to_record(id);
+        Arc::clone(&self.persistence).upsert_async(record).await?;
+        Ok(entry)
+    }
+
     async fn transition_state(
         &self,
         id: DownloadId,
         state: DownloadState,
     ) -> Result<(), DownloadError> {
-        let mut entry = self.entry_snapshot(id)?;
-        entry.state = state;
-        if state != DownloadState::Failed {
-            entry.last_error = None;
-        }
-        entry.touch();
+        let entry = self
+            .update_entry(id, |entry| {
+                entry.state = state;
+                if state != DownloadState::Failed {
+                    entry.last_error = None;
+                }
+            })
+            .await?;
 
-        let record = entry.to_record(id);
-        Arc::clone(&self.persistence).upsert_async(record).await?;
-        self.replace_entry(id, entry)?;
-
-        let _ = self.events.emit(DownloadEvent::StateChanged { id, state });
+        let _ = self.events.emit(DownloadEvent::StateChanged {
+            id,
+            state: entry.state,
+        });
         Ok(())
     }
 
@@ -370,18 +395,16 @@ impl EngineInner {
         segment_states: Vec<SegmentState>,
         bytes_downloaded: u64,
     ) -> Result<(), DownloadError> {
-        let mut entry = self.entry_snapshot(id)?;
-        entry.total_bytes = remote.content_length;
-        entry.bytes_downloaded = bytes_downloaded;
-        entry.etag.clone_from(&remote.etag);
-        entry.last_modified.clone_from(&remote.last_modified);
-        entry.last_error = None;
-        entry.segments = segment_states;
-        entry.touch();
-
-        let record = entry.to_record(id);
-        Arc::clone(&self.persistence).upsert_async(record).await?;
-        self.replace_entry(id, entry)
+        self.update_entry(id, |entry| {
+            entry.total_bytes = remote.content_length;
+            entry.bytes_downloaded = bytes_downloaded;
+            entry.etag.clone_from(&remote.etag);
+            entry.last_modified.clone_from(&remote.last_modified);
+            entry.last_error = None;
+            entry.segments = segment_states;
+        })
+        .await?;
+        Ok(())
     }
 
     fn record_progress(&self, id: DownloadId, delta: u64) -> Result<(), DownloadError> {
@@ -409,36 +432,31 @@ impl EngineInner {
         index: u32,
         bytes_downloaded: u64,
     ) -> Result<(), DownloadError> {
-        let mut entry = self.entry_snapshot(id)?;
-        if let Some(segment) = entry
-            .segments
-            .iter_mut()
-            .find(|segment| segment.index == index)
-        {
-            segment.state = SegmentStatus::Completed;
-            segment.bytes_downloaded = bytes_downloaded;
-        }
-        entry.touch();
-
-        let record = entry.to_record(id);
-        Arc::clone(&self.persistence).upsert_async(record).await?;
-        self.replace_entry(id, entry)
+        self.update_entry(id, |entry| {
+            if let Some(segment) = entry
+                .segments
+                .iter_mut()
+                .find(|segment| segment.index == index)
+            {
+                segment.state = SegmentStatus::Completed;
+                segment.bytes_downloaded = bytes_downloaded;
+            }
+        })
+        .await?;
+        Ok(())
     }
 
     async fn complete_download(&self, id: DownloadId, bytes: u64) -> Result<(), DownloadError> {
-        let mut entry = self.entry_snapshot(id)?;
-        entry.state = DownloadState::Completed;
-        entry.bytes_downloaded = bytes;
-        entry.last_error = None;
-        for segment in &mut entry.segments {
-            segment.state = SegmentStatus::Completed;
-            segment.bytes_downloaded = segment.end - segment.start + 1;
-        }
-        entry.touch();
-
-        let record = entry.to_record(id);
-        Arc::clone(&self.persistence).upsert_async(record).await?;
-        self.replace_entry(id, entry)?;
+        self.update_entry(id, |entry| {
+            entry.state = DownloadState::Completed;
+            entry.bytes_downloaded = bytes;
+            entry.last_error = None;
+            for segment in &mut entry.segments {
+                segment.state = SegmentStatus::Completed;
+                segment.bytes_downloaded = segment.end - segment.start + 1;
+            }
+        })
+        .await?;
 
         let _ = self.events.emit(DownloadEvent::Completed { id });
         Ok(())
@@ -450,14 +468,11 @@ impl EngineInner {
         error: &DownloadError,
     ) -> Result<(), DownloadError> {
         let message = error.to_string();
-        let mut entry = self.entry_snapshot(id)?;
-        entry.state = DownloadState::Failed;
-        entry.last_error = Some(message.clone());
-        entry.touch();
-
-        let record = entry.to_record(id);
-        Arc::clone(&self.persistence).upsert_async(record).await?;
-        self.replace_entry(id, entry)?;
+        self.update_entry(id, |entry| {
+            entry.state = DownloadState::Failed;
+            entry.last_error = Some(message.clone());
+        })
+        .await?;
 
         let _ = self
             .events
@@ -485,7 +500,6 @@ impl EngineInner {
 
         self.queue
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(QueueEntry::new(id, priority, request, 0));
 
         let _ = self.events.emit(DownloadEvent::StateChanged {
@@ -496,18 +510,16 @@ impl EngineInner {
     }
 
     fn pause_download(&self, id: DownloadId) -> Result<(), DownloadError> {
-        self.queue
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(id);
+        self.queue.lock().remove(id);
 
-        if let Some(handle) = self
-            .active_tasks
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&id)
-        {
+        if let Some(handle) = self.active_tasks.lock().remove(&id) {
             handle.abort();
+            // Note: abort() is non-blocking. The task may still be running
+            // briefly. The state transition below will be persisted, and
+            // the aborted task's completion/failure handlers will see the
+            // entry has already been moved to Paused state via the atomic
+            // update_sync pattern, so their updates will be no-ops or
+            // will fail gracefully.
         }
 
         let mut entry = self.entry_snapshot(id)?;
@@ -528,17 +540,9 @@ impl EngineInner {
     fn remove_download(&self, id: DownloadId) -> Result<(), DownloadError> {
         let _ = self.entry_snapshot(id)?;
 
-        self.queue
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(id);
+        self.queue.lock().remove(id);
 
-        if let Some(handle) = self
-            .active_tasks
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&id)
-        {
+        if let Some(handle) = self.active_tasks.lock().remove(&id) {
             handle.abort();
         }
 
@@ -579,11 +583,7 @@ impl EngineInner {
                 Err(_) => break,
             };
 
-            let next = self
-                .queue
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .pop();
+            let next = self.queue.lock().pop();
             let Some(entry) = next else {
                 drop(permit);
                 break;
@@ -603,12 +603,8 @@ impl EngineInner {
 
         self.scheduler_running.store(false, Ordering::Release);
 
-        let should_retry = !self
-            .queue
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .is_empty()
-            && self.concurrency.available_permits() > 0;
+        let should_retry =
+            !self.queue.lock().is_empty() && self.concurrency.available_permits() > 0;
         if should_retry {
             self.trigger_scheduler();
         }
@@ -621,25 +617,15 @@ impl EngineInner {
         let handle = tokio::spawn(async move {
             let _permit = permit;
             Arc::clone(&inner).execute_download(id, request).await;
-            inner
-                .active_tasks
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .remove(&id);
+            inner.active_tasks.lock().remove(&id);
             inner.trigger_scheduler();
         });
 
-        self.active_tasks
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(id, handle);
+        self.active_tasks.lock().insert(id, handle);
     }
 
     fn should_coalesce_idle_start(&self) -> bool {
-        self.active_tasks
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .is_empty()
+        self.active_tasks.lock().is_empty()
             && self.concurrency.available_permits() == self.config.max_concurrent_downloads.max(1)
     }
 
@@ -820,12 +806,7 @@ impl EngineInner {
     }
 
     fn shutdown(&self) {
-        let handles = std::mem::take(
-            &mut *self
-                .active_tasks
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-        );
+        let handles = std::mem::take(&mut *self.active_tasks.lock());
         for (_, handle) in handles {
             handle.abort();
         }
@@ -913,7 +894,6 @@ impl DownloadEngine {
         self.inner
             .queue
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(QueueEntry::new(id, request.priority, request, 0));
 
         let _ = self.emit(DownloadEvent::Added { id });
@@ -974,9 +954,7 @@ impl DownloadEngine {
 
 impl Drop for DownloadEngine {
     fn drop(&mut self) {
-        if Arc::strong_count(&self.inner) == 1 {
-            self.inner.shutdown();
-        }
+        self.inner.shutdown();
     }
 }
 

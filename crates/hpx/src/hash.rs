@@ -1,8 +1,7 @@
 use std::{
     borrow::Borrow,
     hash::{BuildHasher, Hash, Hasher},
-    num::NonZeroU64,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
 use ahash::RandomState;
@@ -38,6 +37,7 @@ where
 {
     value: T,
     hash: AtomicU64,
+    computed: AtomicBool,
     hasher: H,
 }
 
@@ -53,7 +53,8 @@ where
     pub const fn with_hasher(value: T, hasher: H) -> Self {
         Self {
             value,
-            hash: AtomicU64::new(u64::MIN),
+            hash: AtomicU64::new(0),
+            computed: AtomicBool::new(false),
             hasher,
         }
     }
@@ -65,22 +66,15 @@ where
     H: BuildHasher,
 {
     fn hash<H2: Hasher>(&self, state: &mut H2) {
-        let hash = self.hash.load(Ordering::Relaxed);
-        if hash != 0 {
-            state.write_u64(hash);
+        if self.computed.load(Ordering::Relaxed) {
+            state.write_u64(self.hash.load(Ordering::Relaxed));
             return;
         }
 
-        let computed_hash = NonZeroU64::new(self.hasher.hash_one(&self.value))
-            .map(NonZeroU64::get)
-            .unwrap_or(1);
+        let computed_hash = self.hasher.hash_one(&self.value);
 
-        let _ = self.hash.compare_exchange(
-            u64::MIN,
-            computed_hash,
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        );
+        self.hash.store(computed_hash, Ordering::Relaxed);
+        self.computed.store(true, Ordering::Relaxed);
         state.write_u64(computed_hash);
     }
 }

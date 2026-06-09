@@ -1,6 +1,6 @@
 use std::{
     sync::{
-        Arc, Mutex,
+        Arc,
         mpsc::{self, Sender},
     },
     thread,
@@ -25,7 +25,6 @@ enum PersistenceCommand {
 
 pub(crate) struct PersistenceHandle {
     tx: Sender<PersistenceCommand>,
-    worker: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
 impl std::fmt::Debug for PersistenceHandle {
@@ -39,7 +38,7 @@ impl PersistenceHandle {
         let (tx, rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::channel();
 
-        let worker = thread::Builder::new()
+        let _worker = thread::Builder::new()
             .name("hpx-dl-storage".to_string())
             .spawn(move || {
                 let runtime = match tokio::runtime::Builder::new_current_thread()
@@ -77,10 +76,7 @@ impl PersistenceHandle {
             .recv()
             .map_err(|error| DownloadError::Storage(error.to_string()))??;
 
-        Ok(Self {
-            tx,
-            worker: Mutex::new(Some(worker)),
-        })
+        Ok(Self { tx })
     }
 
     pub(crate) fn upsert(&self, record: DownloadRecord) -> Result<(), DownloadError> {
@@ -115,10 +111,12 @@ impl PersistenceHandle {
 
 impl Drop for PersistenceHandle {
     fn drop(&mut self) {
+        // Send shutdown signal. The worker thread will exit its loop
+        // when it receives this command or when the channel is closed.
         let _ = self.tx.send(PersistenceCommand::Shutdown);
-        if let Some(worker) = self.worker.lock().ok().and_then(|mut guard| guard.take()) {
-            let _ = worker.join();
-        }
+        // Do NOT join the worker thread here — that would block the Tokio
+        // runtime thread. The worker will terminate on its own after
+        // processing the Shutdown command (or when the channel disconnects).
     }
 }
 

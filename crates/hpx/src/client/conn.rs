@@ -150,13 +150,13 @@ impl PoisonPill {
     /// Poison this pill.
     #[inline]
     fn poison(&self) {
-        self.poisoned.store(true, Ordering::Relaxed)
+        self.poisoned.store(true, Ordering::Release)
     }
 
     /// Check if this pill is poisoned.
     #[inline]
     fn poisoned(&self) -> bool {
-        self.poisoned.load(Ordering::Relaxed)
+        self.poisoned.load(Ordering::Acquire)
     }
 }
 

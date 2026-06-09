@@ -118,7 +118,6 @@ pub struct SimpleRequestBuilder {
     method: crate::Method,
     bearer_token: Option<String>,
     api_key: Option<(String, String)>,
-    retry_count: Option<u32>,
     timeout: Option<Duration>,
     headers: Vec<(String, String)>,
 }
@@ -130,7 +129,6 @@ impl SimpleRequestBuilder {
             method: crate::Method::GET,
             bearer_token: None,
             api_key: None,
-            retry_count: None,
             timeout: None,
             headers: Vec::new(),
         }
@@ -154,13 +152,6 @@ impl SimpleRequestBuilder {
     #[inline]
     pub fn api_key(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.api_key = Some((name.into(), value.into()));
-        self
-    }
-
-    /// Set the number of retries for this request.
-    #[inline]
-    pub fn retry(mut self, count: u32) -> Self {
-        self.retry_count = Some(count);
         self
     }
 
@@ -203,9 +194,6 @@ impl SimpleRequestBuilder {
         if let Some(timeout) = self.timeout {
             builder = builder.timeout(timeout);
         }
-
-        // Apply retry via hooks (simple retry for common cases)
-        let _ = self.retry_count; // Retry handled by client defaults
 
         builder.send().await
     }
@@ -269,12 +257,6 @@ mod tests {
     fn test_simple_builder_timeout() {
         let builder = get("https://example.com").timeout(Duration::from_secs(5));
         assert_eq!(builder.timeout, Some(Duration::from_secs(5)));
-    }
-
-    #[test]
-    fn test_simple_builder_retry() {
-        let builder = get("https://example.com").retry(3);
-        assert_eq!(builder.retry_count, Some(3));
     }
 
     #[test]
