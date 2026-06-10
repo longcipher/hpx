@@ -66,10 +66,9 @@ pin_project! {
     }
 }
 
-/// Generates the common `try_clone_inner` method shared between `Body` and
-/// `ClientResponseBody`. Both types follow the same three-variant pattern
-/// (Reusable / Streaming / Boxed) with identical logic for the reusable
-/// variant and `None` for the other two.
+/// Generates the common methods shared between `Body` and `ClientResponseBody`.
+/// Both types follow the same three-variant pattern (Reusable / Streaming / Boxed)
+/// with identical logic for the reusable variant.
 macro_rules! impl_body_common {
     ($ty:ident, $inner:ident) => {
         impl $ty {
@@ -87,12 +86,43 @@ macro_rules! impl_body_common {
             pub(crate) fn try_clone_inner(&self) -> Option<Bytes> {
                 self.reusable_bytes().cloned()
             }
+
+            /// Convert the body into a mutable `BytesMut` if possible.
+            #[inline]
+            pub(crate) fn into_bytes_mut(self) -> Option<bytes::BytesMut> {
+                let bytes = self.try_clone_inner()?;
+                match bytes.try_into_mut() {
+                    Ok(bytes_mut) => Some(bytes_mut),
+                    Err(bytes) => Some(bytes::BytesMut::from(bytes.as_ref())),
+                }
+            }
         }
     };
 }
 
 impl_body_common!(Body, BodyInner);
 impl_body_common!(ClientResponseBody, ClientResponseBodyInner);
+
+// Body::as_bytes also checks the Client variant, which wraps a
+// ClientResponseBody that may itself hold reusable bytes.
+impl Body {
+    pub(crate) fn as_bytes(&self) -> Option<&[u8]> {
+        if let Some(bytes) = self.reusable_bytes() {
+            return Some(bytes.as_ref());
+        }
+        match &self.inner {
+            BodyInner::Client { body } => body.as_ref().get_ref().as_bytes(),
+            _ => None,
+        }
+    }
+}
+
+// ClientResponseBody::as_bytes only needs to check the reusable variant.
+impl ClientResponseBody {
+    pub(crate) fn as_bytes(&self) -> Option<&[u8]> {
+        self.reusable_bytes().map(Bytes::as_ref)
+    }
+}
 
 pin_project! {
     /// We can't use `map_frame()` because that loses the hint data (for good reason).
@@ -106,19 +136,6 @@ pin_project! {
 // ===== impl Body =====
 
 impl Body {
-    /// Returns a reference to the internal data of the `Body`.
-    ///
-    /// `None` is returned, if the underlying data is a stream.
-    pub fn as_bytes(&self) -> Option<&[u8]> {
-        if let Some(bytes) = self.reusable_bytes() {
-            return Some(bytes.as_ref());
-        }
-        match &self.inner {
-            BodyInner::Client { body } => body.as_ref().get_ref().as_bytes(),
-            _ => None,
-        }
-    }
-
     /// Wrap a [`HttpBody`] in a box inside `Body`.
     ///
     /// # Example
@@ -230,34 +247,6 @@ impl Body {
         }
     }
 
-    /// Convert the body into a mutable [`bytes::BytesMut`] if possible.
-    ///
-    /// This is useful for zero-copy operations where you need a mutable buffer,
-    /// such as with SIMD JSON parsing.
-    ///
-    /// Returns `Some(BytesMut)` if the body is a reusable `Bytes` chunk,
-    /// `None` if the body is a streaming body.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use bytes::BytesMut;
-    /// use hpx::Body;
-    ///
-    /// let body = Body::from("hello world");
-    /// if let Some(bytes_mut) = body.into_bytes_mut() {
-    ///     // Use mutable bytes for zero-copy operations
-    ///     println!("Got {} bytes", bytes_mut.len());
-    /// }
-    /// ```
-    pub fn into_bytes_mut(self) -> Option<bytes::BytesMut> {
-        let bytes = self.try_clone_inner()?;
-        match bytes.try_into_mut() {
-            Ok(bytes_mut) => Some(bytes_mut),
-            Err(bytes) => Some(bytes::BytesMut::from(bytes.as_ref())),
-        }
-    }
-
     /// Get an [`tokio::io::AsyncRead`] adapter for the body.
     ///
     /// This enables efficient streaming of the body using standard async I/O traits.
@@ -338,20 +327,6 @@ impl ClientResponseBody {
     fn reusable(bytes: Bytes) -> Self {
         Self {
             inner: ClientResponseBodyInner::Reusable { bytes },
-        }
-    }
-
-    #[inline]
-    pub(crate) fn as_bytes(&self) -> Option<&[u8]> {
-        self.reusable_bytes().map(Bytes::as_ref)
-    }
-
-    #[inline]
-    pub(crate) fn into_bytes_mut(self) -> Option<bytes::BytesMut> {
-        let bytes = self.try_clone_inner()?;
-        match bytes.try_into_mut() {
-            Ok(bytes_mut) => Some(bytes_mut),
-            Err(bytes) => Some(bytes::BytesMut::from(bytes.as_ref())),
         }
     }
 

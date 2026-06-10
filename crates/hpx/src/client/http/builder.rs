@@ -110,8 +110,10 @@ impl ClientBuilder {
     pub fn build(self) -> crate::Result<Client> {
         let mut config = self.config;
 
-        if let Some(err) = config.error {
-            return Err(err);
+        if let Some(raw) = config.pending_user_agent {
+            return Err(Error::builder(format!(
+                "invalid user-agent header value: {raw}"
+            )));
         }
 
         // Prepare proxies
@@ -333,7 +335,9 @@ impl ClientBuilder {
                 self.config.headers.insert(USER_AGENT, value);
             }
             Err(err) => {
-                self.config.error = Some(Error::builder(err.into()));
+                // Store the raw string so we can report the error at build()
+                // time without polluting CoreConfig with an error field.
+                self.config.pending_user_agent = Some(Cow::Owned(err.into().to_string()));
             }
         };
         self

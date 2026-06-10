@@ -305,16 +305,14 @@ impl RequestIdHook {
 
 impl BeforeRequestHook for RequestIdHook {
     fn on_request(&self, request: &mut Request<Body>) -> Result<(), Error> {
-        // Generate a unique ID using a combination of timestamp and random bytes
         use std::time::{SystemTime, UNIX_EPOCH};
 
-        let timestamp = SystemTime::now()
+        let millis = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-
-        let random_part = rand::random::<u64>();
-        let id = format!("{timestamp:x}-{random_part:x}");
+            .map_or(0u64, |d| d.as_millis() as u64);
+        let rand = rand::random::<u64>();
+        // Fixed-width hex: 16 chars timestamp + 16 chars random = 32 chars total
+        let id = format!("{millis:016x}{rand:016x}");
         if let Ok(value) = http::HeaderValue::from_str(&id) {
             request
                 .headers_mut()

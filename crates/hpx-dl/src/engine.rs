@@ -6,7 +6,6 @@
 
 use std::{
     collections::HashMap as StdHashMap,
-    future::Future,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -167,20 +166,29 @@ impl EngineBuilder {
         let events = Arc::new(EventBroadcaster::new(256));
         let downloads = Arc::new(HashMap::new());
         let config = self.config;
-        let storage = build_storage_backend(&config.storage_path, self.storage)?;
+        let (storage, legacy_records) = build_storage_backend(&config.storage_path, self.storage)?;
 
-        for mut record in load_records_from_storage(&storage)? {
+        // Create PersistenceHandle first so all storage I/O goes through its
+        // dedicated worker thread instead of spawning ad-hoc runtimes.
+        let persistence = Arc::new(PersistenceHandle::start(Arc::clone(&storage))?);
+
+        // Migrate legacy snapshot records (if any) through the persistence handle.
+        if let Some(records) = legacy_records {
+            for record in &records {
+                persistence.upsert(record.clone())?;
+            }
+        }
+
+        for mut record in persistence.list()? {
             if is_active_state(record.state) || record.state == DownloadState::Queued {
                 record.state = DownloadState::Paused;
                 record.last_error = None;
                 record.updated_at = current_timestamp();
-                persist_record_direct(&storage, &record)?;
+                persistence.upsert(record.clone())?;
             }
 
             let _ = downloads.insert_sync(record.id, DownloadEntry::from_record(record));
         }
-
-        let persistence = Arc::new(PersistenceHandle::start(Arc::clone(&storage))?);
 
         let inner = Arc::new(EngineInner {
             client,
@@ -320,25 +328,6 @@ impl EngineInner {
         self.downloads
             .read_sync(&id, |_, entry| entry.clone())
             .ok_or(DownloadError::NotFound(id.0))
-    }
-
-    fn replace_entry(
-        &self,
-        id: DownloadId,
-        next_entry: DownloadEntry,
-    ) -> Result<(), DownloadError> {
-        let mut replacement = Some(next_entry);
-        let updated = self.downloads.update_sync(&id, move |_, entry| {
-            if let Some(replacement) = replacement.take() {
-                *entry = replacement;
-            }
-        });
-
-        if updated.is_none() {
-            return Err(DownloadError::NotFound(id.0));
-        }
-
-        Ok(())
     }
 
     /// Atomically update a download entry, persist it, and return the snapshot.
@@ -481,22 +470,31 @@ impl EngineInner {
     }
 
     fn requeue(&self, id: DownloadId) -> Result<(), DownloadError> {
-        let mut entry = self.entry_snapshot(id)?;
-        if entry.state != DownloadState::Paused && entry.state != DownloadState::Failed {
+        // Validate state and update atomically to avoid TOCTOU races.
+        let updated = self.downloads.update_sync(&id, |_, entry| {
+            if entry.state != DownloadState::Paused && entry.state != DownloadState::Failed {
+                return;
+            }
+            entry.state = DownloadState::Queued;
+            entry.last_error = None;
+            entry.touch();
+        });
+        if updated.is_none() {
+            return Err(DownloadError::NotFound(id.0));
+        }
+
+        // Re-read to validate the transition happened and get the updated entry.
+        let entry = self.entry_snapshot(id)?;
+        if entry.state != DownloadState::Queued {
             return Err(DownloadError::InvalidState {
                 expected: "paused or failed".to_string(),
                 actual: entry.state.to_string(),
             });
         }
 
-        entry.state = DownloadState::Queued;
-        entry.last_error = None;
-        entry.touch();
-
         let request = entry.request.clone();
         let priority = request.priority;
         self.persistence.upsert(entry.to_record(id))?;
-        self.replace_entry(id, entry)?;
 
         self.queue
             .lock()
@@ -514,21 +512,22 @@ impl EngineInner {
 
         if let Some(handle) = self.active_tasks.lock().remove(&id) {
             handle.abort();
-            // Note: abort() is non-blocking. The task may still be running
-            // briefly. The state transition below will be persisted, and
-            // the aborted task's completion/failure handlers will see the
-            // entry has already been moved to Paused state via the atomic
-            // update_sync pattern, so their updates will be no-ops or
-            // will fail gracefully.
         }
 
-        let mut entry = self.entry_snapshot(id)?;
-        entry.state = DownloadState::Paused;
-        entry.last_error = None;
-        entry.touch();
+        // Use atomic update_sync to avoid TOCTOU races with concurrent
+        // progress updates. This ensures we never overwrite bytes_downloaded
+        // with a stale snapshot.
+        let updated = self.downloads.update_sync(&id, |_, entry| {
+            entry.state = DownloadState::Paused;
+            entry.last_error = None;
+            entry.touch();
+        });
+        if updated.is_none() {
+            return Err(DownloadError::NotFound(id.0));
+        }
 
+        let entry = self.entry_snapshot(id)?;
         self.persistence.upsert(entry.to_record(id))?;
-        self.replace_entry(id, entry)?;
 
         let _ = self.events.emit(DownloadEvent::StateChanged {
             id,
@@ -883,12 +882,21 @@ impl DownloadEngine {
         let id = DownloadId::new();
         let entry = DownloadEntry::new(request.clone());
 
-        self.inner.persistence.upsert(entry.to_record(id))?;
-
+        // Insert into memory first to avoid the window where a persisted
+        // record exists but isn't visible in the in-memory map.
         let inserted = self.inner.downloads.insert_sync(id, entry);
         if inserted.is_err() {
-            let _ = self.inner.persistence.delete(id);
             return Err(DownloadError::AlreadyExists(id.0));
+        }
+
+        // Persist to storage. If this fails, remove from memory to stay consistent.
+        if let Err(err) = self
+            .inner
+            .persistence
+            .upsert(self.inner.entry_snapshot(id)?.to_record(id))
+        {
+            self.inner.downloads.remove_sync(&id);
+            return Err(err);
         }
 
         self.inner
@@ -958,12 +966,16 @@ impl Drop for DownloadEngine {
     }
 }
 
+/// Result of building the storage backend: the storage handle and any
+/// legacy records that need migration.
+type StorageBuildResult = Result<(Arc<dyn Storage>, Option<Vec<DownloadRecord>>), DownloadError>;
+
 fn build_storage_backend(
     storage_path: &Path,
     storage: Option<Arc<dyn Storage>>,
-) -> Result<Arc<dyn Storage>, DownloadError> {
+) -> StorageBuildResult {
     if let Some(storage) = storage {
-        return Ok(storage);
+        return Ok((storage, None));
     }
 
     #[cfg(feature = "sqlite")]
@@ -978,77 +990,39 @@ fn build_storage_backend(
         if legacy_records.is_some() {
             backup_legacy_snapshot(storage_path)?;
         }
-        let storage: Arc<dyn Storage> =
-            Arc::new(block_on_storage(SqliteStorage::new(storage_path))?);
 
-        if let Some(records) = legacy_records {
-            for record in &records {
-                persist_record_direct(&storage, record)?;
-            }
-        }
+        let path = storage_path.to_path_buf();
+        let init = move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| DownloadError::Storage(error.to_string()))?;
+            runtime.block_on(SqliteStorage::new(&path))
+        };
 
-        Ok(storage)
+        // If we are already inside a Tokio runtime, creating a nested one
+        // would panic. Spawn a dedicated thread instead.
+        let sqlite = if tokio::runtime::Handle::try_current().is_ok() {
+            std::thread::Builder::new()
+                .name("hpx-dl-storage-init".into())
+                .spawn(init)
+                .map_err(|error| DownloadError::Storage(error.to_string()))?
+                .join()
+                .map_err(|_| DownloadError::Storage("storage init panicked".into()))?
+        } else {
+            init()
+        }?;
+
+        Ok((Arc::new(sqlite), legacy_records))
     }
 
     #[cfg(not(feature = "sqlite"))]
     {
-        let _ = storage_path;
+        let _ = (storage_path, storage);
         Err(DownloadError::InvalidConfiguration(
             "engine storage requires the sqlite feature or an injected Storage backend".to_string(),
         ))
     }
-}
-
-fn load_records_from_storage(
-    storage: &Arc<dyn Storage>,
-) -> Result<Vec<DownloadRecord>, DownloadError> {
-    block_on_storage(storage.list())
-}
-
-fn persist_record_direct(
-    storage: &Arc<dyn Storage>,
-    record: &DownloadRecord,
-) -> Result<(), DownloadError> {
-    block_on_storage(storage.upsert(record))
-}
-
-fn block_on_storage<T>(
-    future: impl Future<Output = Result<T, DownloadError>> + Send,
-) -> Result<T, DownloadError>
-where
-    T: Send,
-{
-    if tokio::runtime::Handle::try_current().is_ok() {
-        return std::thread::scope(|scope| {
-            let join_handle = scope.spawn(move || {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|error| DownloadError::Storage(error.to_string()))?;
-                runtime.block_on(future)
-            });
-
-            join_handle.join().map_err(storage_thread_panic)?
-        });
-    }
-
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| DownloadError::Storage(error.to_string()))?;
-    runtime.block_on(future)
-}
-
-fn storage_thread_panic(panic: Box<dyn std::any::Any + Send + 'static>) -> DownloadError {
-    if let Some(message) = panic.downcast_ref::<&str>() {
-        return DownloadError::Storage((*message).to_string());
-    }
-
-    if let Some(message) = panic.downcast_ref::<String>() {
-        return DownloadError::Storage(message.clone());
-    }
-
-    DownloadError::Storage("storage worker panicked".to_string())
 }
 
 fn load_legacy_snapshot(path: &Path) -> Result<Option<Vec<DownloadRecord>>, DownloadError> {

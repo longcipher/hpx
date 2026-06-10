@@ -20,6 +20,9 @@ enum PersistenceCommand {
         id: DownloadId,
         reply: Sender<Result<(), DownloadError>>,
     },
+    List {
+        reply: Sender<Result<Vec<DownloadRecord>, DownloadError>>,
+    },
     Shutdown,
 }
 
@@ -66,6 +69,10 @@ impl PersistenceHandle {
                             let result = runtime.block_on(storage.delete(id));
                             let _ = reply.send(result);
                         }
+                        PersistenceCommand::List { reply } => {
+                            let result = runtime.block_on(storage.list());
+                            let _ = reply.send(result);
+                        }
                         PersistenceCommand::Shutdown => break,
                     }
                 }
@@ -93,6 +100,16 @@ impl PersistenceHandle {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
             .send(PersistenceCommand::delete(id, reply_tx))
+            .map_err(|_| DownloadError::Storage("persistence worker stopped".to_string()))?;
+        reply_rx
+            .recv()
+            .map_err(|_| DownloadError::Storage("persistence worker stopped".to_string()))?
+    }
+
+    pub(crate) fn list(&self) -> Result<Vec<DownloadRecord>, DownloadError> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(PersistenceCommand::List { reply: reply_tx })
             .map_err(|_| DownloadError::Storage("persistence worker stopped".to_string()))?;
         reply_rx
             .recv()

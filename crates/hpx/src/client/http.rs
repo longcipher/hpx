@@ -313,7 +313,6 @@ struct MiddlewareConfig {
 
 /// Layered root configuration for [`ClientBuilder`].
 struct CoreConfig {
-    error: Option<Error>,
     headers: HeaderMap,
     orig_headers: OrigHeaderMap,
     transport: TransportConfig,
@@ -323,6 +322,9 @@ struct CoreConfig {
     proxy: ProxyConfig,
     dns: DnsConfig,
     middleware: MiddlewareConfig,
+    /// Deferred user-agent value that hasn't been validated yet.
+    /// Converted to HeaderValue at build time so the builder stays infallible.
+    pending_user_agent: Option<Cow<'static, str>>,
 }
 
 impl CoreConfig {
@@ -449,7 +451,6 @@ impl Client {
     pub fn builder() -> ClientBuilder {
         ClientBuilder {
             config: CoreConfig {
-                error: None,
                 headers: HeaderMap::new(),
                 orig_headers: OrigHeaderMap::new(),
                 transport: TransportConfig {
@@ -517,6 +518,7 @@ impl Client {
                     connector_layers: Vec::new(),
                     hooks: None,
                 },
+                pending_user_agent: None,
             },
         }
     }

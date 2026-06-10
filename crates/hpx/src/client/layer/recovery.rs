@@ -214,15 +214,22 @@ where
                 return Ok(response.map(ClientResponseBody::from_inner_response));
             };
 
-            let body_limit = recoveries.max_body_bytes() as u64;
+            let body_limit = recoveries.max_body_bytes();
             let upper = response.body().size_hint().upper();
-            if upper.is_none_or(|upper| upper > body_limit) {
+            if upper.is_none_or(|upper| upper > body_limit as u64) {
                 return Ok(response.map(ClientResponseBody::from_inner_response));
             }
 
             let (parts, body) = response.into_parts();
             let collected = BodyExt::collect(body).await?;
             let bytes = collected.to_bytes();
+            // Truncate to the configured limit as a defensive measure
+            // against size_hint inaccuracies.
+            let bytes = if bytes.len() > body_limit {
+                bytes.slice(..body_limit)
+            } else {
+                bytes
+            };
             let context = StatusRecoveryContext::new(
                 parts.status,
                 parts.headers.clone(),

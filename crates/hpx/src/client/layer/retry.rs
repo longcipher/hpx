@@ -79,12 +79,9 @@ impl Policy<Req, Res, BoxError> for RetryPolicy {
             }
             Action::Retryable => {
                 if self.budget.as_ref().map(|b| b.withdraw()).unwrap_or(true) {
-                    self.retry_cnt += 1;
-
                     trace!(
-                        "Retrying request ({}/{} attempts): {} {} - {}",
+                        "Retrying request ({} attempts so far): {} {} - {}",
                         self.retry_cnt,
-                        self.max_retries_per_request,
                         req.method(),
                         req.uri(),
                         match result {
@@ -117,6 +114,7 @@ impl Policy<Req, Res, BoxError> for RetryPolicy {
             return None;
         }
 
+        self.retry_cnt += 1;
         clone_http_request(req)
     }
 }
