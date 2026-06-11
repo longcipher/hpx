@@ -15,10 +15,12 @@ An ergonomic all-in-one HTTP client for browser emulation with TLS, JA3/JA4, and
 
 | Crate | Version | Description |
 |-------|---------|-------------|
- | [`hpx`](https://crates.io/crates/hpx) | 2.x | High Performance HTTP Client |
- | [`hpx-emulation`](https://crates.io/crates/hpx-emulation) | 2.x | Browser emulation profiles |
- | [`hpx-yawc`](https://crates.io/crates/hpx-yawc) | 2.x | WebSocket library (RFC 6455 + compression) |
- | [`hpx-fastwebsockets`](https://crates.io/crates/hpx-fastwebsockets) | 2.x | Fast minimal WebSocket implementation |
+| [`hpx`](https://crates.io/crates/hpx) | 2.x | High Performance HTTP Client |
+| [`hpx-emulation`](https://crates.io/crates/hpx-emulation) | 2.x | Browser emulation profiles for hpx (TLS fingerprinting, HTTP/2 settings) |
+| [`hpx-yawc`](https://crates.io/crates/hpx-yawc) | 2.x | Yet another websocket library. A fast, secure WebSocket implementation with RFC 6455 compliance and compression support |
+| [`hpx-fastwebsockets`](https://crates.io/crates/hpx-fastwebsockets) | 2.x | A fast RFC6455 WebSocket server implementation |
+| [`hpx-streams`](https://crates.io/crates/hpx-streams) | 2.x | HTTP response streaming support for hpx: JSON/CSV/Protobuf/Arrow |
+| [`hpx-dl`](https://crates.io/crates/hpx-dl) | 2.x | High-performance download engine built on hpx |
 
 ## Features
 
