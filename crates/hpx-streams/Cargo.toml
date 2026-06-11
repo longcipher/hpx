@@ -1,0 +1,39 @@
+[package]
+name = "hpx-streams"
+version.workspace = true
+description = "HTTP response streaming support for hpx: JSON/CSV/Protobuf/Arrow"
+keywords = ["http", "stream", "json", "csv", "protobuf", "arrow"]
+categories = ["asynchronous", "network-programming", "web-programming"]
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+include = ["Cargo.toml", "src/**/*.rs", "README.md", "LICENSE"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+arrow = ["dep:arrow"]
+csv = ["dep:csv", "dep:serde"]
+default = []
+json = ["dep:serde", "dep:serde_json", "hpx/json"]
+protobuf = ["dep:prost"]
+
+[dependencies]
+async-trait = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+hpx = { workspace = true, features = ["stream"] }
+tokio-util = { workspace = true, features = ["io", "codec"] }
+
+# Optional deps
+arrow = { version = "59", optional = true, features = ["ipc", "arrow-ipc"] }
+csv = { version = "1.3", optional = true }
+prost = { version = "0.14", optional = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+serde_json = { workspace = true, optional = true }
+
+[lints]
+workspace = true
