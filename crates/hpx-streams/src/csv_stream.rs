@@ -75,15 +75,16 @@ impl CsvStreamResponse for hpx::Response {
         #[expect(clippy::bool_to_int_with_if)]
         let skip_header_if_expected = if with_csv_header { 1 } else { 0 };
 
+        let mut builder = csv::ReaderBuilder::new();
+        builder.delimiter(delimiter);
+        builder.has_headers(false);
+
         frames_reader
             .into_stream()
             .skip(skip_header_if_expected)
             .map(move |frame_res| match frame_res {
                 Ok(frame_str) => {
-                    let mut csv_reader = csv::ReaderBuilder::new()
-                        .delimiter(delimiter)
-                        .has_headers(false)
-                        .from_reader(frame_str.as_bytes());
+                    let mut csv_reader = builder.from_reader(frame_str.as_bytes());
 
                     let mut iter = csv_reader.deserialize::<T>();
 
@@ -106,5 +107,99 @@ impl CsvStreamResponse for hpx::Response {
                     None,
                 )),
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde::Deserialize;
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    struct Record {
+        name: String,
+        age: u32,
+        city: String,
+    }
+
+    fn deserialize_row(builder: &mut csv::ReaderBuilder, row: &str) -> Option<Record> {
+        let mut csv_reader = builder.from_reader(row.as_bytes());
+        let mut iter = csv_reader.deserialize::<Record>();
+        iter.next()?.ok()
+    }
+
+    #[test]
+    fn test_csv_builder_reuse_produces_identical_results() {
+        let csv_rows = [
+            "Alice,30,NYC",
+            "Bob,25,LA",
+            "Charlie,35,Chicago",
+        ];
+
+        let mut builder = csv::ReaderBuilder::new();
+        builder.delimiter(b',');
+        builder.has_headers(false);
+
+        let results: Vec<Record> = csv_rows
+            .iter()
+            .filter_map(|row| deserialize_row(&mut builder, row))
+            .collect();
+
+        assert_eq!(results.len(), 3);
+        assert_eq!(
+            results[0],
+            Record {
+                name: "Alice".to_owned(),
+                age: 30,
+                city: "NYC".to_owned()
+            }
+        );
+        assert_eq!(
+            results[1],
+            Record {
+                name: "Bob".to_owned(),
+                age: 25,
+                city: "LA".to_owned()
+            }
+        );
+        assert_eq!(
+            results[2],
+            Record {
+                name: "Charlie".to_owned(),
+                age: 35,
+                city: "Chicago".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn test_csv_builder_reuse_with_tab_delimiter() {
+        let csv_rows = ["Alice\t30\tNYC", "Bob\t25\tLA"];
+
+        let mut builder = csv::ReaderBuilder::new();
+        builder.delimiter(b'\t');
+        builder.has_headers(false);
+
+        let results: Vec<Record> = csv_rows
+            .iter()
+            .filter_map(|row| deserialize_row(&mut builder, row))
+            .collect();
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(
+            results[0],
+            Record {
+                name: "Alice".to_owned(),
+                age: 30,
+                city: "NYC".to_owned()
+            }
+        );
+        assert_eq!(
+            results[1],
+            Record {
+                name: "Bob".to_owned(),
+                age: 25,
+                city: "LA".to_owned()
+            }
+        );
     }
 }

@@ -1,7 +1,5 @@
 //! Pluggable storage backends for download metadata persistence.
 
-use std::path::PathBuf;
-
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -14,14 +12,8 @@ pub struct DownloadRecord {
     pub id: DownloadId,
     /// Full request payload needed to resume the download after restart.
     pub request: DownloadRequest,
-    /// Source URL.
-    pub url: String,
-    /// Local destination path.
-    pub destination: PathBuf,
     /// Current download state.
     pub state: DownloadState,
-    /// Scheduling priority.
-    pub priority: DownloadPriority,
     /// ETag from the server response.
     pub etag: Option<String>,
     /// Last-Modified header from the server response.
@@ -41,11 +33,22 @@ pub struct DownloadRecord {
 }
 
 impl DownloadRecord {
-    /// Keep convenience fields in sync with the canonical request payload.
-    pub fn sync_request_fields(&mut self) {
-        self.url = self.request.url.clone();
-        self.destination = self.request.destination.clone();
-        self.priority = self.request.priority;
+    /// Source URL.
+    #[must_use]
+    pub fn url(&self) -> &str {
+        &self.request.url
+    }
+
+    /// Local destination path.
+    #[must_use]
+    pub fn destination(&self) -> &std::path::Path {
+        &self.request.destination
+    }
+
+    /// Scheduling priority.
+    #[must_use]
+    pub const fn priority(&self) -> DownloadPriority {
+        self.request.priority
     }
 }
 
@@ -123,14 +126,11 @@ pub trait Storage: Send + Sync {
     /// concurrent access. Implementors **must** override this method with
     /// an atomic operation (e.g., SQL `INSERT ... ON CONFLICT DO UPDATE`).
     async fn upsert(&self, download: &DownloadRecord) -> Result<(), DownloadError> {
-        let mut normalized = download.clone();
-        normalized.sync_request_fields();
-
-        if self.load(normalized.id).await?.is_some() {
-            self.delete(normalized.id).await?;
+        if self.load(download.id).await?.is_some() {
+            self.delete(download.id).await?;
         }
 
-        self.save(&normalized).await
+        self.save(download).await
     }
 }
 

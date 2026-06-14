@@ -42,6 +42,26 @@ use crate::{
 
 type Connecting = Pin<Box<dyn Future<Output = Result<Conn, BoxError>> + Send>>;
 
+/// Returns a redacted string for a proxy URI, masking any password component.
+///
+/// For URIs with credentials like `http://user:pass@proxy:8080`, returns
+/// `http://***@proxy:8080`. For URIs without credentials, returns the original URI.
+fn redact_proxy_uri(uri: &Uri) -> String {
+    if let Some(authority) = uri.authority() {
+        let auth_str = authority.as_str();
+        if let Some(at_pos) = auth_str.find('@') {
+            // Has credentials — mask everything before @
+            let host_part = &auth_str[at_pos + 1..];
+            let scheme = uri
+                .scheme_str()
+                .map(|s| format!("{s}://"))
+                .unwrap_or_default();
+            return format!("{scheme}***@{host_part}");
+        }
+    }
+    uri.to_string()
+}
+
 /// Configuration for the connector service.
 #[derive(Clone)]
 struct Config {
@@ -414,7 +434,10 @@ impl ConnectorService {
                         Some("socks5h") => Some((Version::V5, DnsResolve::Remote)),
                         _ => None,
                     } {
-                        trace!("connecting via SOCKS proxy: {:?}", proxy_uri);
+                        trace!(
+                            "connecting via SOCKS proxy: {}",
+                            redact_proxy_uri(&proxy_uri)
+                        );
 
                         // Connect to the proxy and establish the SOCKS connection.
                         let conn = {
@@ -447,7 +470,10 @@ impl ConnectorService {
 
                 // Handle HTTPS proxy tunneling connection
                 if uri.is_https() {
-                    trace!("tunneling over HTTP(s) proxy: {:?}", proxy_uri);
+                    trace!(
+                        "tunneling over HTTP(s) proxy: {}",
+                        redact_proxy_uri(&proxy_uri)
+                    );
 
                     // Build separate connectors for the outer proxy handshake and the inner
                     // origin handshake so origin mTLS credentials are only used inside the
@@ -576,5 +602,40 @@ impl Service<ConnectRequest> for ConnectorService {
     #[inline]
     fn call(&mut self, req: ConnectRequest) -> Self::Future {
         Box::pin(self.clone().connect_auto(req))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_redact_proxy_uri_with_credentials() {
+        let uri: Uri = "http://user:pass@proxy:8080".parse().unwrap();
+        assert_eq!(redact_proxy_uri(&uri), "http://***@proxy:8080");
+    }
+
+    #[test]
+    fn test_redact_proxy_uri_without_credentials() {
+        let uri: Uri = "http://proxy:8080".parse().unwrap();
+        assert_eq!(redact_proxy_uri(&uri), "http://proxy:8080/");
+    }
+
+    #[test]
+    fn test_redact_proxy_uri_https_with_credentials() {
+        let uri: Uri = "https://admin:secret@proxy.local:3128".parse().unwrap();
+        assert_eq!(redact_proxy_uri(&uri), "https://***@proxy.local:3128");
+    }
+
+    #[test]
+    fn test_redact_proxy_uri_no_authority() {
+        let uri: Uri = "/path".parse().unwrap();
+        assert_eq!(redact_proxy_uri(&uri), "/path");
+    }
+
+    #[test]
+    fn test_redact_proxy_uri_user_only() {
+        let uri: Uri = "http://user@proxy:8080".parse().unwrap();
+        assert_eq!(redact_proxy_uri(&uri), "http://***@proxy:8080");
     }
 }

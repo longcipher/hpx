@@ -1,5 +1,6 @@
 #![deny(unused)]
 #![deny(unsafe_code)]
+#![allow(clippy::extra_unused_lifetimes)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(test, deny(warnings))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]

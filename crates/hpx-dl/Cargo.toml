@@ -33,6 +33,7 @@ test = []
 
 [dependencies]
 async-trait = { workspace = true }
+crossbeam-channel = { workspace = true }
 digest = { workspace = true }
 fastrand = { workspace = true }
 futures-util = { workspace = true }
@@ -58,6 +59,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 
 # Optional dependencies
+arrayvec = "0.7.6"
 parking_lot.workspace = true
 sqlx = { workspace = true, optional = true, features = [
     "runtime-tokio",

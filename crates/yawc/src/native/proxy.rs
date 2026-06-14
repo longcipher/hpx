@@ -80,6 +80,36 @@ pub async fn connect_through_proxy(
     }
 }
 
+/// Validates that a hostname contains only valid characters.
+///
+/// Rejects hosts containing control characters (CR, LF) or other characters
+/// not valid in HTTP request lines and headers to prevent CRLF injection.
+fn validate_host(host: &str) -> io::Result<()> {
+    if host.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "hostname must not be empty",
+        ));
+    }
+
+    for ch in host.chars() {
+        if !ch.is_ascii_alphanumeric()
+            && ch != '.'
+            && ch != '-'
+            && ch != ':'
+            && ch != '['
+            && ch != ']'
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("invalid character '{}' in hostname", ch.escape_debug()),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 /// Performs an HTTP CONNECT tunnel through a proxy.
 ///
 /// Sends a CONNECT request to the proxy and reads the response. If the proxy
@@ -91,6 +121,8 @@ async fn http_connect_tunnel(
     target_port: u16,
     auth_header: Option<&str>,
 ) -> io::Result<TcpStream> {
+    validate_host(target_host)?;
+
     let authority = if target_host.contains(':') {
         format!("[{target_host}]:{target_port}")
     } else {
@@ -557,5 +589,52 @@ mod tests {
 
         let url = url::Url::parse("http://proxy.local:3128").unwrap();
         assert_eq!(url.port(), Some(3128));
+    }
+
+    #[test]
+    fn test_validate_host_valid() {
+        assert!(validate_host("example.com").is_ok());
+        assert!(validate_host("192.168.1.1").is_ok());
+        assert!(validate_host("[::1]").is_ok());
+        assert!(validate_host("sub.domain.example.com").is_ok());
+        assert!(validate_host("host-with-hyphens.com").is_ok());
+        assert!(validate_host("10.0.0.1").is_ok());
+        assert!(validate_host("[2001:db8::1]").is_ok());
+    }
+
+    #[test]
+    fn test_validate_host_rejects_crlf() {
+        let err = validate_host("example.com\r\nInjected: header").unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+
+        let err = validate_host("example.com\r").unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+
+        let err = validate_host("example.com\n").unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn test_validate_host_rejects_spaces() {
+        let err = validate_host("example .com").unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn test_validate_host_rejects_empty() {
+        let err = validate_host("").unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn test_validate_host_rejects_special_chars() {
+        let err = validate_host("example.com/path").unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+
+        let err = validate_host("example.com?query=1").unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+
+        let err = validate_host("user@example.com").unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
     }
 }

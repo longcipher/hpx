@@ -329,10 +329,7 @@ impl Storage for SqliteStorage {
 
         Ok(Some(DownloadRecord {
             id,
-            url: request.url.clone(),
-            destination: request.destination.clone(),
             state: parse_download_state(&state_str)?,
-            priority: request.priority,
             request,
             etag: row.get("etag"),
             last_modified: row.get("last_modified"),
@@ -397,10 +394,7 @@ impl Storage for SqliteStorage {
 
             records.push(DownloadRecord {
                 id,
-                url: request.url.clone(),
-                destination: request.destination.clone(),
                 state: parse_download_state(&state_str)?,
-                priority: request.priority,
                 request,
                 etag: row.get("etag"),
                 last_modified: row.get("last_modified"),
@@ -642,10 +636,7 @@ mod tests {
         DownloadRecord {
             id,
             request: request.clone(),
-            url: request.url.clone(),
-            destination: request.destination.clone(),
             state: DownloadState::Queued,
-            priority: request.priority,
             etag: Some("\"abc123\"".to_string()),
             last_modified: Some("Mon, 01 Jan 2024 00:00:00 GMT".to_string()),
             content_length: Some(10_000),
@@ -666,10 +657,7 @@ mod tests {
         DownloadRecord {
             id,
             request: request.clone(),
-            url: request.url.clone(),
-            destination: request.destination.clone(),
             state: DownloadState::Downloading,
-            priority: request.priority,
             etag: Some("\"def456\"".to_string()),
             last_modified: None,
             content_length: Some(20_000),
@@ -741,12 +729,12 @@ mod tests {
             .expect("load")
             .expect("record exists");
         assert_eq!(loaded.id, id);
-        assert_eq!(loaded.url, record.url);
-        assert_eq!(loaded.destination, record.destination);
+        assert_eq!(loaded.url(), record.url());
+        assert_eq!(loaded.destination(), record.destination());
         assert_eq!(loaded.request.url, record.request.url);
         assert_eq!(loaded.request.destination, record.request.destination);
         assert_eq!(loaded.state, DownloadState::Queued);
-        assert_eq!(loaded.priority, DownloadPriority::Normal);
+        assert_eq!(loaded.priority(), DownloadPriority::Normal);
         assert_eq!(loaded.etag, record.etag);
         assert_eq!(loaded.last_modified, record.last_modified);
         assert_eq!(loaded.content_length, record.content_length);
@@ -797,10 +785,7 @@ mod tests {
         let record = DownloadRecord {
             id,
             request: request.clone(),
-            url: request.url.clone(),
-            destination: request.destination.clone(),
             state: DownloadState::Queued,
-            priority: request.priority,
             etag: None,
             last_modified: None,
             content_length: None,
@@ -840,7 +825,6 @@ mod tests {
         r2.request = DownloadRequest::builder("https://example.org/other.bin", "/tmp/file.bin")
             .priority(DownloadPriority::Normal)
             .build();
-        r2.sync_request_fields();
 
         storage.save(&r1).await.expect("save r1");
         storage.save(&r2).await.expect("save r2");
@@ -982,16 +966,18 @@ mod tests {
             DownloadRequest::builder("https://example.org/replaced.bin", "/tmp/replaced.bin")
                 .priority(DownloadPriority::Critical)
                 .build();
-        record.sync_request_fields();
         record.state = DownloadState::Paused;
 
         storage.upsert(&record).await.expect("upsert");
 
         let loaded = storage.load(id).await.expect("load").expect("exists");
         assert_eq!(loaded.request.url, "https://example.org/replaced.bin");
-        assert_eq!(loaded.url, "https://example.org/replaced.bin");
-        assert_eq!(loaded.destination, PathBuf::from("/tmp/replaced.bin"));
-        assert_eq!(loaded.priority, DownloadPriority::Critical);
+        assert_eq!(loaded.url(), "https://example.org/replaced.bin");
+        assert_eq!(
+            loaded.destination(),
+            PathBuf::from("/tmp/replaced.bin").as_path()
+        );
+        assert_eq!(loaded.priority(), DownloadPriority::Critical);
         assert_eq!(loaded.state, DownloadState::Paused);
     }
 
@@ -1009,14 +995,13 @@ mod tests {
             let mut record = sample_record();
             record.id = DownloadId::new();
             record.request.priority = priority;
-            record.sync_request_fields();
             storage.save(&record).await.expect("save");
             let loaded = storage
                 .load(record.id)
                 .await
                 .expect("load")
                 .expect("exists");
-            assert_eq!(loaded.priority, priority);
+            assert_eq!(loaded.priority(), priority);
         }
     }
 
@@ -1115,10 +1100,10 @@ mod tests {
             .await
             .expect("load")
             .expect("record persists");
-        assert_eq!(loaded.url, "https://example.com/large.bin");
+        assert_eq!(loaded.url(), "https://example.com/large.bin");
         assert_eq!(loaded.segments.len(), 2);
         assert_eq!(loaded.state, DownloadState::Downloading);
-        assert_eq!(loaded.priority, DownloadPriority::High);
+        assert_eq!(loaded.priority(), DownloadPriority::High);
         assert_eq!(loaded.bytes_downloaded, 7_000);
     }
 

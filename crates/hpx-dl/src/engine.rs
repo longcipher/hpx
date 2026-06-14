@@ -259,8 +259,7 @@ impl DownloadEntry {
         }
     }
 
-    fn from_record(mut record: DownloadRecord) -> Self {
-        record.sync_request_fields();
+    fn from_record(record: DownloadRecord) -> Self {
         Self {
             request: record.request,
             state: record.state,
@@ -279,10 +278,7 @@ impl DownloadEntry {
         DownloadRecord {
             id,
             request: self.request.clone(),
-            url: self.request.url.clone(),
-            destination: self.request.destination.clone(),
             state: self.state,
-            priority: self.request.priority,
             etag: self.etag.clone(),
             last_modified: self.last_modified.clone(),
             content_length: self.total_bytes,
@@ -343,14 +339,14 @@ impl EngineInner {
     where
         F: FnOnce(&mut DownloadEntry),
     {
-        let updated = self.downloads.update_sync(&id, |_, entry| {
-            modify(entry);
-            entry.touch();
-        });
-        if updated.is_none() {
-            return Err(DownloadError::NotFound(id.0));
-        }
-        let entry = self.entry_snapshot(id)?;
+        let entry = self
+            .downloads
+            .update_sync(&id, |_, entry| {
+                modify(entry);
+                entry.touch();
+                entry.clone()
+            })
+            .ok_or(DownloadError::NotFound(id.0))?;
         let record = entry.to_record(id);
         Arc::clone(&self.persistence).upsert_async(record).await?;
         Ok(entry)
@@ -422,11 +418,7 @@ impl EngineInner {
         bytes_downloaded: u64,
     ) -> Result<(), DownloadError> {
         self.update_entry(id, |entry| {
-            if let Some(segment) = entry
-                .segments
-                .iter_mut()
-                .find(|segment| segment.index == index)
-            {
+            if let Some(segment) = entry.segments.get_mut(index as usize) {
                 segment.state = SegmentStatus::Completed;
                 segment.bytes_downloaded = bytes_downloaded;
             }
@@ -1084,11 +1076,13 @@ fn build_segment_states(
         _ => &[],
     };
 
+    let completed: std::collections::HashSet<u32> = completed_indices.iter().copied().collect();
+
     segments
         .iter()
         .enumerate()
         .map(|(index, segment)| {
-            let completed = completed_indices.contains(&(index as u32));
+            let completed = completed.contains(&(index as u32));
             SegmentState {
                 index: index as u32,
                 start: segment.start,
@@ -1341,10 +1335,7 @@ mod tests {
         let storage = Arc::new(TestStorage::with_record(DownloadRecord {
             id,
             request: request.clone(),
-            url: request.url.clone(),
-            destination: request.destination.clone(),
             state: DownloadState::Downloading,
-            priority: request.priority,
             etag: Some("etag".to_string()),
             last_modified: Some("now".to_string()),
             content_length: Some(128),
@@ -1381,6 +1372,128 @@ mod tests {
         assert!(
             matches!(error, DownloadError::Storage(message) if message.contains("save failed"))
         );
+    }
+
+    #[tokio::test]
+    async fn mark_segment_completed_updates_correct_segment() {
+        let engine = EngineBuilder::new()
+            .storage(Arc::new(TestStorage::default()))
+            .build()
+            .expect("build engine");
+
+        let request =
+            DownloadRequest::builder("https://example.com/file.bin", "/tmp/file.bin").build();
+        let id = engine.add(request).expect("add download");
+
+        let segments: Vec<SegmentState> = (0..5u32)
+            .map(|i| SegmentState {
+                index: i,
+                start: u64::from(i) * 1024,
+                end: u64::from(i) * 1024 + 1023,
+                state: SegmentStatus::Pending,
+                bytes_downloaded: 0,
+            })
+            .collect();
+
+        engine.inner.downloads.update_sync(&id, |_, entry| {
+            entry.segments = segments;
+        });
+
+        engine
+            .inner
+            .mark_segment_completed(id, 2, 1024)
+            .await
+            .expect("mark segment completed");
+
+        let entry = engine.inner.entry_snapshot(id).expect("get entry");
+        assert_eq!(entry.segments.len(), 5);
+        assert_eq!(entry.segments[0].state, SegmentStatus::Pending);
+        assert_eq!(entry.segments[0].bytes_downloaded, 0);
+        assert_eq!(entry.segments[1].state, SegmentStatus::Pending);
+        assert_eq!(entry.segments[1].bytes_downloaded, 0);
+        assert_eq!(entry.segments[2].state, SegmentStatus::Completed);
+        assert_eq!(entry.segments[2].bytes_downloaded, 1024);
+        assert_eq!(entry.segments[3].state, SegmentStatus::Pending);
+        assert_eq!(entry.segments[3].bytes_downloaded, 0);
+        assert_eq!(entry.segments[4].state, SegmentStatus::Pending);
+        assert_eq!(entry.segments[4].bytes_downloaded, 0);
+    }
+
+    #[tokio::test]
+    async fn clone_reduced_state_transitions_persist_correctly() {
+        let storage = Arc::new(TestStorage::default());
+        let engine = EngineBuilder::new()
+            .storage(storage)
+            .build()
+            .expect("build engine");
+
+        let url = "https://example.com/file.bin";
+        let dest = "/tmp/file.bin";
+        let request = DownloadRequest::builder(url, dest).build();
+        let id = engine.add(request).expect("add download");
+
+        // Verify initial persisted state: Queued
+        let records = engine
+            .inner
+            .persistence
+            .list()
+            .expect("list persisted after add");
+        assert_eq!(records.len(), 1);
+        let record = &records[0];
+        assert_eq!(record.id, id);
+        assert_eq!(record.state, DownloadState::Queued);
+        assert_eq!(record.url(), url);
+        assert_eq!(record.bytes_downloaded, 0);
+        assert!(record.last_error.is_none());
+        let created_at = record.created_at;
+        let updated_at_after_add = record.updated_at;
+
+        // Transition to Downloading
+        engine
+            .inner
+            .transition_state(id, DownloadState::Downloading)
+            .await
+            .expect("transition to Downloading");
+
+        let records = engine
+            .inner
+            .persistence
+            .list()
+            .expect("list persisted after Downloading");
+        assert_eq!(records.len(), 1);
+        let record = &records[0];
+        assert_eq!(record.id, id);
+        assert_eq!(record.state, DownloadState::Downloading);
+        assert_eq!(record.url(), url);
+        assert_eq!(record.bytes_downloaded, 0);
+        assert!(record.last_error.is_none());
+        assert_eq!(record.created_at, created_at);
+        let updated_at_after_downloading = record.updated_at;
+        assert!(updated_at_after_downloading >= updated_at_after_add);
+
+        // Transition to Completed
+        let total_bytes = 1024;
+        engine
+            .inner
+            .complete_download(id, total_bytes)
+            .await
+            .expect("complete download");
+
+        let records = engine
+            .inner
+            .persistence
+            .list()
+            .expect("list persisted after Completed");
+        assert_eq!(records.len(), 1);
+        let record = &records[0];
+        assert_eq!(record.id, id);
+        assert_eq!(record.state, DownloadState::Completed);
+        assert_eq!(record.url(), url);
+        assert_eq!(record.bytes_downloaded, total_bytes);
+        assert_eq!(record.content_length, None);
+        assert!(record.last_error.is_none());
+        assert_eq!(record.created_at, created_at);
+        assert!(record.updated_at >= updated_at_after_downloading);
     }
 
     #[test]

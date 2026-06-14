@@ -4,13 +4,15 @@
 //! calculation, and single-segment download for parallel HTTP range downloads.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
+    fmt::Write as _,
     future::Future,
     path::{Path, PathBuf},
     pin::Pin,
     time::Duration,
 };
 
+use arrayvec::ArrayString;
 use futures_util::StreamExt;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tracing::debug;
@@ -189,8 +191,10 @@ pub fn calculate_segments(
 
 /// Format a byte range header value string `"bytes=start-end"`.
 #[must_use]
-pub fn range_header_value(range: &SegmentRange) -> String {
-    format!("bytes={}-{}", range.start, range.end)
+pub fn range_header_value(range: &SegmentRange) -> ArrayString<64> {
+    let mut buf = ArrayString::new();
+    let _ = write!(buf, "bytes={}-{}", range.start, range.end);
+    buf
 }
 
 /// Download a single byte range from a URL and write to file.
@@ -226,7 +230,7 @@ async fn download_segment_with_options(
     let header_value = range_header_value(range);
     debug!(url, range = %header_value, "starting segment download");
 
-    let mut request = client.get(url).header(hpx::header::RANGE, header_value);
+    let mut request = client.get(url).header(hpx::header::RANGE, &*header_value);
     for (name, value) in headers {
         request = request.header(name, value);
     }
@@ -240,6 +244,8 @@ async fn download_segment_with_options(
     let mut stream = response.bytes_stream();
     let mut offset = range.start;
 
+    file.seek(std::io::SeekFrom::Start(range.start)).await?;
+
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result?;
         let chunk_len = chunk.len();
@@ -247,7 +253,6 @@ async fn download_segment_with_options(
             .wait_for(u64::try_from(chunk_len).unwrap_or(u64::MAX))
             .await?;
 
-        file.seek(std::io::SeekFrom::Start(offset)).await?;
         file.write_all(&chunk).await?;
         offset += u64::try_from(chunk_len).unwrap_or(u64::MAX);
 
@@ -676,10 +681,11 @@ pub fn filter_remaining_segments(
     segments: &[SegmentRange],
     completed_indices: &[u32],
 ) -> Vec<SegmentRange> {
+    let completed: HashSet<u32> = completed_indices.iter().copied().collect();
     segments
         .iter()
         .enumerate()
-        .filter(|(i, _)| !completed_indices.contains(&(*i as u32)))
+        .filter(|(i, _)| !completed.contains(&(*i as u32)))
         .map(|(_, seg)| seg.clone())
         .collect()
 }
@@ -1116,25 +1122,25 @@ mod tests {
     #[test]
     fn range_header_value_basic() {
         let seg = SegmentRange::new(0, 99);
-        assert_eq!(range_header_value(&seg), "bytes=0-99");
+        assert_eq!(range_header_value(&seg).as_str(), "bytes=0-99");
     }
 
     #[test]
     fn range_header_value_single_byte() {
         let seg = SegmentRange::new(42, 42);
-        assert_eq!(range_header_value(&seg), "bytes=42-42");
+        assert_eq!(range_header_value(&seg).as_str(), "bytes=42-42");
     }
 
     #[test]
     fn range_header_value_large_offsets() {
         let seg = SegmentRange::new(1_000_000, 9_999_999);
-        assert_eq!(range_header_value(&seg), "bytes=1000000-9999999");
+        assert_eq!(range_header_value(&seg).as_str(), "bytes=1000000-9999999");
     }
 
     #[test]
     fn range_header_value_full_file() {
         let seg = SegmentRange::new(0, 1023);
-        assert_eq!(range_header_value(&seg), "bytes=0-1023");
+        assert_eq!(range_header_value(&seg).as_str(), "bytes=0-1023");
     }
 
     // --- File offset write tests (no HTTP needed) ---
@@ -1866,6 +1872,153 @@ mod tests {
         }
         for byte in &buf[200..250] {
             assert_eq!(*byte, 0x03);
+        }
+    }
+
+    // --- Seek-once-before-loop correctness tests ---
+
+    #[tokio::test]
+    async fn seek_once_then_write_chunks_places_bytes_correctly() {
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
+
+        let tmp = tempfile::NamedTempFile::new().expect("tempfile");
+        let path = tmp.path().to_path_buf();
+
+        // Create a 20-byte file filled with 0x00
+        {
+            let f = tokio::fs::File::create(&path).await.expect("create");
+            f.set_len(20).await.expect("set_len");
+        }
+
+        // Simulate download_segment_with_options pattern:
+        // seek once to range.start, then write chunks sequentially
+        {
+            let mut f = tokio::fs::OpenOptions::new()
+                .write(true)
+                .open(&path)
+                .await
+                .expect("open");
+
+            let range_start = 5u64;
+
+            // Seek once before the write loop
+            f.seek(std::io::SeekFrom::Start(range_start))
+                .await
+                .expect("seek");
+
+            // Chunk A: 5 bytes of 0xAA
+            let chunk_a = [0xAA_u8; 5];
+            f.write_all(&chunk_a).await.expect("write chunk_a");
+
+            // Chunk B: 3 bytes of 0xBB
+            let chunk_b = [0xBB_u8; 3];
+            f.write_all(&chunk_b).await.expect("write chunk_b");
+
+            f.flush().await.expect("flush");
+        }
+
+        // Verify byte placement
+        let mut buf = vec![0u8; 20];
+        {
+            let mut f = tokio::fs::File::open(&path).await.expect("open");
+            f.read_exact(&mut buf).await.expect("read");
+        }
+
+        // Bytes 0-4: untouched (0x00)
+        for byte in &buf[..5] {
+            assert_eq!(
+                *byte,
+                0x00,
+                "byte at offset {} should be 0x00",
+                byte - buf.as_ptr() as u8
+            );
+        }
+        // Bytes 5-9: chunk A (0xAA)
+        for byte in &buf[5..10] {
+            assert_eq!(
+                *byte,
+                0xAA,
+                "byte at offset {} should be 0xAA",
+                byte - buf.as_ptr() as u8
+            );
+        }
+        // Bytes 10-12: chunk B (0xBB)
+        for byte in &buf[10..13] {
+            assert_eq!(
+                *byte,
+                0xBB,
+                "byte at offset {} should be 0xBB",
+                byte - buf.as_ptr() as u8
+            );
+        }
+        // Bytes 13-19: untouched (0x00)
+        for byte in &buf[13..20] {
+            assert_eq!(
+                *byte,
+                0x00,
+                "byte at offset {} should be 0x00",
+                byte - buf.as_ptr() as u8
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn seek_to_middle_then_write_chunks_preserves_both_sides() {
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
+
+        let tmp = tempfile::NamedTempFile::new().expect("tempfile");
+        let path = tmp.path().to_path_buf();
+
+        // Pre-fill 30 bytes with 0xFF
+        {
+            let mut f = tokio::fs::File::create(&path).await.expect("create");
+            f.write_all(&[0xFF_u8; 30]).await.expect("write");
+            f.flush().await.expect("flush");
+        }
+
+        // Simulate writing segment [10-19] using seek-once pattern
+        {
+            let mut f = tokio::fs::OpenOptions::new()
+                .write(true)
+                .open(&path)
+                .await
+                .expect("open");
+
+            let range_start = 10u64;
+            f.seek(std::io::SeekFrom::Start(range_start))
+                .await
+                .expect("seek");
+
+            // Two chunks: 4 bytes of 0x01, then 6 bytes of 0x02
+            f.write_all(&[0x01_u8; 4]).await.expect("write first chunk");
+            f.write_all(&[0x02_u8; 6])
+                .await
+                .expect("write second chunk");
+
+            f.flush().await.expect("flush");
+        }
+
+        let mut buf = vec![0u8; 30];
+        {
+            let mut f = tokio::fs::File::open(&path).await.expect("open");
+            f.read_exact(&mut buf).await.expect("read");
+        }
+
+        // Bytes 0-9: preserved (0xFF)
+        for byte in &buf[..10] {
+            assert_eq!(*byte, 0xFF);
+        }
+        // Bytes 10-13: first chunk (0x01)
+        for byte in &buf[10..14] {
+            assert_eq!(*byte, 0x01);
+        }
+        // Bytes 14-19: second chunk (0x02)
+        for byte in &buf[14..20] {
+            assert_eq!(*byte, 0x02);
+        }
+        // Bytes 20-29: preserved (0xFF)
+        for byte in &buf[20..30] {
+            assert_eq!(*byte, 0xFF);
         }
     }
 

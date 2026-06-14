@@ -129,7 +129,7 @@ use std::{
     net::SocketAddr,
     pin::{Pin, pin},
     str::FromStr,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     task::{Context, Poll, ready},
     time::{Duration, Instant},
 };
@@ -792,7 +792,7 @@ impl WebSocket<MaybeTlsStream<TcpStream>> {
         let stream = match url.scheme() {
             "ws" => MaybeTlsStream::Plain(tcp_stream),
             "wss" => {
-                let connector = connector.unwrap_or_else(tls_connector);
+                let connector = connector.unwrap_or_else(|| tls_connector().clone());
                 let domain = ServerName::try_from(host)
                     .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid dnsname"))?;
 
@@ -1327,43 +1327,47 @@ fn generate_key() -> String {
 }
 
 /// Creates a TLS connector with root certificates for secure WebSocket connections.
-fn tls_connector() -> TlsConnector {
-    let mut root_cert_store = rustls::RootCertStore::empty();
-    root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().map(|ta| TrustAnchor {
-        subject: ta.subject.clone(),
-        subject_public_key_info: ta.subject_public_key_info.clone(),
-        name_constraints: ta.name_constraints.clone(),
-    }));
+static TLS_CONNECTOR: OnceLock<TlsConnector> = OnceLock::new();
 
-    let maybe_provider = rustls::crypto::CryptoProvider::get_default().cloned();
+fn tls_connector() -> &'static TlsConnector {
+    TLS_CONNECTOR.get_or_init(|| {
+        let mut root_cert_store = rustls::RootCertStore::empty();
+        root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().map(|ta| TrustAnchor {
+            subject: ta.subject.clone(),
+            subject_public_key_info: ta.subject_public_key_info.clone(),
+            name_constraints: ta.name_constraints.clone(),
+        }));
 
-    #[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc-rs"))]
-    let provider = maybe_provider.unwrap_or_else(|| {
-        #[cfg(feature = "rustls-ring")]
-        let _provider = rustls::crypto::ring::default_provider();
-        #[cfg(feature = "rustls-aws-lc-rs")]
-        let _provider = rustls::crypto::aws_lc_rs::default_provider();
+        let maybe_provider = rustls::crypto::CryptoProvider::get_default().cloned();
 
-        Arc::new(_provider)
-    });
+        #[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc-rs"))]
+        let provider = maybe_provider.unwrap_or_else(|| {
+            #[cfg(feature = "rustls-ring")]
+            let _provider = rustls::crypto::ring::default_provider();
+            #[cfg(feature = "rustls-aws-lc-rs")]
+            let _provider = rustls::crypto::aws_lc_rs::default_provider();
 
-    #[cfg(not(any(feature = "rustls-ring", feature = "rustls-aws-lc-rs")))]
-    let provider = maybe_provider.expect(
-        r#"No Rustls crypto provider was enabled for yawc to connect to a `wss://` endpoint!
+            Arc::new(_provider)
+        });
+
+        #[cfg(not(any(feature = "rustls-ring", feature = "rustls-aws-lc-rs")))]
+        let provider = maybe_provider.expect(
+            r#"No Rustls crypto provider was enabled for yawc to connect to a `wss://` endpoint!
 
 Either:
     - provide a `connector` in the WebSocketBuilder options
     - enable one of the following features: `rustls-ring`, `rustls-aws-lc-rs`"#,
-    );
+        );
 
-    let mut config = rustls::ClientConfig::builder_with_provider(provider)
-        .with_protocol_versions(rustls::ALL_VERSIONS)
-        .expect("versions")
-        .with_root_certificates(root_cert_store)
-        .with_no_client_auth();
-    config.alpn_protocols = vec!["http/1.1".into()];
+        let mut config = rustls::ClientConfig::builder_with_provider(provider)
+            .with_protocol_versions(rustls::ALL_VERSIONS)
+            .expect("versions")
+            .with_root_certificates(root_cert_store)
+            .with_no_client_auth();
+        config.alpn_protocols = vec!["http/1.1".into()];
 
-    TlsConnector::from(Arc::new(config))
+        TlsConnector::from(Arc::new(config))
+    })
 }
 
 #[cfg(test)]
@@ -2224,6 +2228,16 @@ mod tests {
         assert_eq!(
             received, original_payload,
             "Compressed fragmented payload mismatch"
+        );
+    }
+
+    #[test]
+    fn test_tls_connector_caching() {
+        let first = tls_connector();
+        let second = tls_connector();
+        assert!(
+            std::ptr::eq(first, second),
+            "tls_connector() should return the same &'static reference on repeated calls"
         );
     }
 }

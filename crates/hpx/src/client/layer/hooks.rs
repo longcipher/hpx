@@ -191,6 +191,13 @@ pub struct LoggingHook {
     log_headers: bool,
 }
 
+/// Header names whose values must be redacted in log output.
+const SENSITIVE_HEADERS: &[http::header::HeaderName] = &[
+    http::header::AUTHORIZATION,
+    http::header::COOKIE,
+    http::header::PROXY_AUTHORIZATION,
+];
+
 impl LoggingHook {
     /// Creates a new logging hook.
     pub fn new() -> Self {
@@ -215,7 +222,11 @@ impl BeforeRequestHook for LoggingHook {
             );
             if self.log_headers {
                 for (name, value) in request.headers() {
-                    tracing::trace!(header = %name, value = ?value);
+                    if SENSITIVE_HEADERS.contains(name) {
+                        tracing::trace!(header = %name, value = "[REDACTED]");
+                    } else {
+                        tracing::trace!(header = %name, value = ?value);
+                    }
                 }
             }
         }
@@ -237,7 +248,11 @@ impl AfterResponseHook for LoggingHook {
             );
             if self.log_headers {
                 for (name, value) in headers {
-                    tracing::trace!(header = %name, value = ?value);
+                    if SENSITIVE_HEADERS.contains(name) {
+                        tracing::trace!(header = %name, value = "[REDACTED]");
+                    } else {
+                        tracing::trace!(header = %name, value = ?value);
+                    }
                 }
             }
         }
@@ -504,5 +519,54 @@ mod tests {
 
         hook.on_request(&mut req).unwrap();
         assert!(req.headers().contains_key("x-request-id"));
+    }
+
+    #[test]
+    fn test_sensitive_headers_constant() {
+        assert!(SENSITIVE_HEADERS.contains(&http::header::AUTHORIZATION));
+        assert!(SENSITIVE_HEADERS.contains(&http::header::COOKIE));
+        assert!(SENSITIVE_HEADERS.contains(&http::header::PROXY_AUTHORIZATION));
+        assert!(!SENSITIVE_HEADERS.contains(&http::header::CONTENT_TYPE));
+    }
+
+    #[test]
+    fn test_logging_hook_redacts_sensitive_request_headers() {
+        use http::header;
+
+        let hook = LoggingHook::new().with_headers();
+
+        let mut req = Request::builder()
+            .uri("https://example.com")
+            .header(header::AUTHORIZATION, "Bearer secret-token")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::empty())
+            .unwrap();
+
+        // Should not panic and should process without error
+        hook.on_request(&mut req).unwrap();
+
+        // Verify the original header values are still intact (redaction only affects logging)
+        assert_eq!(
+            req.headers().get(header::AUTHORIZATION).unwrap(),
+            "Bearer secret-token"
+        );
+        assert_eq!(
+            req.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
+    }
+
+    #[test]
+    fn test_logging_hook_redacts_sensitive_response_headers() {
+        use http::header;
+
+        let hook = LoggingHook::new().with_headers();
+
+        let mut headers = HeaderMap::new();
+        headers.insert(header::SET_COOKIE, "session=abc123".parse().unwrap());
+        headers.insert(header::CONTENT_TYPE, "text/html".parse().unwrap());
+
+        // Should not panic and should process without error
+        hook.on_response(StatusCode::OK, &headers).unwrap();
     }
 }
