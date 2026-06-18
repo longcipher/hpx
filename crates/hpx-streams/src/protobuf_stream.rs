@@ -1,8 +1,8 @@
-use crate::protobuf_len_codec::ProtobufLenPrefixCodec;
-use crate::StreamBodyResult;
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use tokio_util::io::StreamReader;
+
+use crate::{StreamBodyResult, protobuf_len_codec::ProtobufLenPrefixCodec};
 
 /// Extension trait for [`hpx::Response`] that provides streaming support for the [Protobuf
 /// format].
@@ -32,7 +32,8 @@ pub trait ProtobufStreamResponse {
     ///     const MAX_OBJ_LEN: usize = 64 * 1024;
     ///
     ///     let client = hpx::Client::new()?;
-    ///     let stream = client.get("http://localhost:8080/protobuf")
+    ///     let stream = client
+    ///         .get("http://localhost:8080/protobuf")
     ///         .send()
     ///         .await?
     ///         .protobuf_stream::<MyTestStructure>(MAX_OBJ_LEN);
@@ -58,10 +59,7 @@ impl ProtobufStreamResponse for hpx::Response {
     where
         T: prost::Message + Default + Send,
     {
-        let reader = StreamReader::new(
-            self.bytes_stream()
-                .map_err(std::io::Error::other),
-        );
+        let reader = StreamReader::new(self.bytes_stream().map_err(std::io::Error::other));
 
         let codec = ProtobufLenPrefixCodec::<T>::new_with_max_length(max_obj_len);
         let frames_reader = tokio_util::codec::FramedRead::new(reader, codec);

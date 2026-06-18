@@ -21,13 +21,13 @@ pub use checksum::{compute_checksum, verify_checksum};
 #[cfg(feature = "http")]
 pub use engine::{DownloadEngine, EngineBuilder, EngineConfig};
 pub use error::DownloadError;
-pub use event::{EventBroadcaster, EventError, ProgressTracker};
+pub use event::{EventBroadcaster, EventError};
 pub use metalink::{MetalinkFile, MetalinkUrl, parse_metalink};
-pub use queue::{ConcurrencyLimiter, PriorityQueue, QueueEntry};
+pub use queue::{PriorityQueue, QueueEntry};
 #[cfg(feature = "http")]
 pub use segment::{
-    RemoteInfo, ResumeState, SegmentDownloader, SegmentRange, calculate_segments, check_resume,
-    compare_content_headers, compute_backoff_delay, determine_resume_state, download_segment,
+    RemoteInfo, ResumeState, SegmentDownloader, SegmentRange, calculate_segments,
+    compare_content_headers, compute_backoff_delay, determine_resume_state,
     filter_remaining_segments, probe_remote, range_header_value, with_retry,
 };
 pub use speed::{CompositeLimiter, SpeedLimiter};

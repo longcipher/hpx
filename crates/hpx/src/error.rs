@@ -67,7 +67,7 @@ impl Error {
         Error::new(Kind::Upgrade, Some(e))
     }
 
-    #[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
+    #[cfg(feature = "ws-yawc")]
     pub(crate) fn websocket<E: Into<BoxError>>(e: E) -> Error {
         Error::new(Kind::WebSocket, Some(e))
     }
@@ -142,29 +142,15 @@ impl Error {
 
     /// Returns true if the error is related to a timeout.
     pub fn is_timeout(&self) -> bool {
-        let mut source = self.source();
-
-        while let Some(err) = source {
-            if err.is::<TimedOut>() {
-                return true;
-            }
-
-            if let Some(core_err) = err.downcast_ref::<crate::client::CoreError>()
-                && core_err.is_timeout()
-            {
-                return true;
-            }
-
-            if let Some(io) = err.downcast_ref::<io::Error>()
-                && io.kind() == io::ErrorKind::TimedOut
-            {
-                return true;
-            }
-
-            source = err.source();
-        }
-
-        false
+        walk_source_chain(self, |err| {
+            err.is::<TimedOut>()
+                || err
+                    .downcast_ref::<crate::client::CoreError>()
+                    .is_some_and(|e| e.is_timeout())
+                || err
+                    .downcast_ref::<io::Error>()
+                    .is_some_and(|e| e.kind() == io::ErrorKind::TimedOut)
+        })
     }
 
     /// Returns true if the error is related to the request
@@ -176,54 +162,27 @@ impl Error {
     pub fn is_connect(&self) -> bool {
         use crate::client::Error;
 
-        let mut source = self.source();
-
-        while let Some(err) = source {
-            if let Some(err) = err.downcast_ref::<Error>()
-                && err.is_connect()
-            {
-                return true;
-            }
-
-            source = err.source();
-        }
-
-        false
+        walk_source_chain(self, |err| {
+            err.downcast_ref::<Error>().is_some_and(|e| e.is_connect())
+        })
     }
 
     /// Returns true if the error is related to proxy connect
     pub fn is_proxy_connect(&self) -> bool {
         use crate::client::Error;
 
-        let mut source = self.source();
-
-        while let Some(err) = source {
-            if let Some(err) = err.downcast_ref::<Error>()
-                && err.is_proxy_connect()
-            {
-                return true;
-            }
-
-            source = err.source();
-        }
-
-        false
+        walk_source_chain(self, |err| {
+            err.downcast_ref::<Error>()
+                .is_some_and(|e| e.is_proxy_connect())
+        })
     }
 
     /// Returns true if the error is related to a connection reset.
     pub fn is_connection_reset(&self) -> bool {
-        let mut source = self.source();
-
-        while let Some(err) = source {
-            if let Some(io) = err.downcast_ref::<io::Error>()
-                && io.kind() == io::ErrorKind::ConnectionReset
-            {
-                return true;
-            }
-            source = err.source();
-        }
-
-        false
+        walk_source_chain(self, |err| {
+            err.downcast_ref::<io::Error>()
+                .is_some_and(|e| e.kind() == io::ErrorKind::ConnectionReset)
+        })
     }
 
     /// Returns true if the error is related to the request or response body
@@ -246,7 +205,7 @@ impl Error {
         matches!(self.inner.kind, Kind::Upgrade)
     }
 
-    #[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
+    #[cfg(feature = "ws-yawc")]
     /// Returns true if the error is related to WebSocket operations
     pub fn is_websocket(&self) -> bool {
         matches!(self.inner.kind, Kind::WebSocket)
@@ -259,6 +218,20 @@ impl Error {
             _ => None,
         }
     }
+}
+
+fn walk_source_chain(
+    e: &dyn StdError,
+    predicate: impl Fn(&(dyn StdError + 'static)) -> bool,
+) -> bool {
+    let mut source = e.source();
+    while let Some(err) = source {
+        if predicate(err) {
+            return true;
+        }
+        source = err.source();
+    }
+    false
 }
 
 /// Maps external timeout errors (such as `tower::timeout::error::Elapsed`)
@@ -313,7 +286,7 @@ impl fmt::Display for Error {
             Kind::Decode => f.write_str("error decoding response body")?,
             Kind::Redirect => f.write_str("error following redirect")?,
             Kind::Upgrade => f.write_str("error upgrading connection")?,
-            #[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
+            #[cfg(feature = "ws-yawc")]
             Kind::WebSocket => f.write_str("websocket error")?,
             Kind::Status(ref code, ref reason) => {
                 let prefix = if code.is_client_error() {
@@ -363,7 +336,7 @@ pub(crate) enum Kind {
     Body,
     Decode,
     Upgrade,
-    #[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
+    #[cfg(feature = "ws-yawc")]
     WebSocket,
 }
 

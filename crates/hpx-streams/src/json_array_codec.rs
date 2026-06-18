@@ -1,8 +1,9 @@
-use crate::error::StreamBodyKind;
-use crate::StreamBodyError;
+use std::marker::PhantomData;
+
 use bytes::{Buf, BytesMut};
 use serde::Deserialize;
-use std::marker::PhantomData;
+
+use crate::{StreamBodyError, error::StreamBodyKind};
 
 #[derive(Clone, Debug)]
 pub(crate) struct JsonArrayCodec<T> {

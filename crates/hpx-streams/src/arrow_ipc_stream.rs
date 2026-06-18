@@ -1,8 +1,8 @@
-use crate::arrow_ipc_len_codec::ArrowIpcCodec;
-use crate::StreamBodyResult;
 use arrow::array::RecordBatch;
 use async_trait::async_trait;
 use futures::TryStreamExt;
+
+use crate::{StreamBodyResult, arrow_ipc_len_codec::ArrowIpcCodec};
 
 /// Extension trait for [`hpx::Response`] that provides streaming support for the [Apache Arrow
 /// IPC format].
@@ -27,7 +27,8 @@ pub trait ArrowIpcStreamResponse {
     ///     const MAX_OBJ_LEN: usize = 64 * 1024;
     ///
     ///     let client = hpx::Client::new()?;
-    ///     let stream = client.get("http://localhost:8080/arrow")
+    ///     let stream = client
+    ///         .get("http://localhost:8080/arrow")
     ///         .send()
     ///         .await?
     ///         .arrow_ipc_stream(MAX_OBJ_LEN);
@@ -48,10 +49,8 @@ impl ArrowIpcStreamResponse for hpx::Response {
         self,
         max_obj_len: usize,
     ) -> impl futures::Stream<Item = StreamBodyResult<RecordBatch>> + Send {
-        let reader = tokio_util::io::StreamReader::new(
-            self.bytes_stream()
-                .map_err(std::io::Error::other),
-        );
+        let reader =
+            tokio_util::io::StreamReader::new(self.bytes_stream().map_err(std::io::Error::other));
 
         let codec = ArrowIpcCodec::new_with_max_length(max_obj_len);
         let frames_reader = tokio_util::codec::FramedRead::new(reader, codec);

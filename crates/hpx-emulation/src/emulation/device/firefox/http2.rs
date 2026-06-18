@@ -20,23 +20,6 @@ macro_rules! pseudo_order {
     };
 }
 
-macro_rules! settings_order {
-    () => {
-        SettingsOrder::builder()
-            .extend([
-                SettingId::HeaderTableSize,
-                SettingId::EnablePush,
-                SettingId::MaxConcurrentStreams,
-                SettingId::InitialWindowSize,
-                SettingId::MaxFrameSize,
-                SettingId::MaxHeaderListSize,
-                SettingId::EnableConnectProtocol,
-                SettingId::NoRfc7540Priorities,
-            ])
-            .build()
-    };
-}
-
 macro_rules! http2_options {
     (@base $builder:expr) => {
         $builder

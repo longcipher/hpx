@@ -6,8 +6,6 @@
 use std::{fmt, ops::Deref};
 
 use bytes::Bytes;
-#[cfg(feature = "ws-fastwebsockets")]
-use fastwebsockets::{Frame, OpCode, Payload};
 
 use crate::Error;
 
@@ -238,49 +236,6 @@ pub enum Message {
 }
 
 impl Message {
-    /// Converts this `Message` into a `fastwebsockets::Frame`.
-    #[cfg(feature = "ws-fastwebsockets")]
-    pub(crate) fn into_frame(self) -> Frame<'static> {
-        match self {
-            Self::Text(text) => Frame::text(Payload::Owned(text.0.into_bytes())),
-            Self::Binary(data) => Frame::binary(Payload::Owned(data.to_vec())),
-            Self::Ping(data) => Frame::new(true, OpCode::Ping, None, Payload::Owned(data.to_vec())),
-            Self::Pong(data) => Frame::new(true, OpCode::Pong, None, Payload::Owned(data.to_vec())),
-            Self::Close(Some(close)) => {
-                Frame::close(close.code.0, close.reason.as_str().as_bytes())
-            }
-            Self::Close(None) => Frame::new(true, OpCode::Close, None, Payload::Owned(vec![])),
-        }
-    }
-
-    /// Converts a `fastwebsockets::Frame` into a `Message`.
-    #[cfg(feature = "ws-fastwebsockets")]
-    pub(crate) fn from_frame(frame: Frame) -> Self {
-        let data = Vec::from(frame.payload);
-        match frame.opcode {
-            OpCode::Text => {
-                let s = String::from_utf8_lossy(&data).to_string();
-                Self::Text(Utf8Bytes(s))
-            }
-            OpCode::Binary => Self::Binary(Bytes::from(data)),
-            OpCode::Ping => Self::Ping(Bytes::from(data)),
-            OpCode::Pong => Self::Pong(Bytes::from(data)),
-            OpCode::Close => {
-                if data.len() >= 2 {
-                    let code = u16::from_be_bytes([data[0], data[1]]);
-                    let reason = String::from_utf8_lossy(&data[2..]).to_string();
-                    Self::Close(Some(CloseFrame {
-                        code: CloseCode(code),
-                        reason: Utf8Bytes(reason),
-                    }))
-                } else {
-                    Self::Close(None)
-                }
-            }
-            OpCode::Continuation => Self::Binary(Bytes::from(data)),
-        }
-    }
-
     /// Consume the WebSocket and return it as binary data.
     pub fn into_data(self) -> Bytes {
         match self {

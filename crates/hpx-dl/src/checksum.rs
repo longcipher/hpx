@@ -2,10 +2,28 @@
 
 use std::path::Path;
 
+use digest::Digest;
+
 use crate::{
     error::DownloadError,
     types::{ChecksumSpec, HashAlgorithm},
 };
+
+async fn hash_file<H: Digest>(
+    file: &mut tokio::fs::File,
+    buf: &mut [u8],
+) -> Result<String, DownloadError> {
+    use tokio::io::AsyncReadExt;
+    let mut hasher = H::new();
+    loop {
+        let n = file.read(buf).await?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
 
 /// Compute the checksum of a file using the given algorithm.
 ///
@@ -14,46 +32,13 @@ pub async fn compute_checksum(
     file: &Path,
     algorithm: HashAlgorithm,
 ) -> Result<String, DownloadError> {
-    use digest::Digest;
-    use tokio::io::AsyncReadExt;
-
     let mut file = tokio::fs::File::open(file).await?;
     let mut buf = [0u8; 8192];
 
     match algorithm {
-        HashAlgorithm::Md5 => {
-            let mut hasher = md5::Md5::new();
-            loop {
-                let n = file.read(&mut buf).await?;
-                if n == 0 {
-                    break;
-                }
-                hasher.update(&buf[..n]);
-            }
-            Ok(hex::encode(hasher.finalize()))
-        }
-        HashAlgorithm::Sha1 => {
-            let mut hasher = sha1::Sha1::new();
-            loop {
-                let n = file.read(&mut buf).await?;
-                if n == 0 {
-                    break;
-                }
-                hasher.update(&buf[..n]);
-            }
-            Ok(hex::encode(hasher.finalize()))
-        }
-        HashAlgorithm::Sha256 => {
-            let mut hasher = sha2::Sha256::new();
-            loop {
-                let n = file.read(&mut buf).await?;
-                if n == 0 {
-                    break;
-                }
-                hasher.update(&buf[..n]);
-            }
-            Ok(hex::encode(hasher.finalize()))
-        }
+        HashAlgorithm::Md5 => hash_file::<md5::Md5>(&mut file, &mut buf).await,
+        HashAlgorithm::Sha1 => hash_file::<sha1::Sha1>(&mut file, &mut buf).await,
+        HashAlgorithm::Sha256 => hash_file::<sha2::Sha256>(&mut file, &mut buf).await,
     }
 }
 

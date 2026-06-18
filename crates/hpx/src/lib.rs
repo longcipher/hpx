@@ -294,6 +294,8 @@ use rustls as _;
 use rustls_pemfile as _;
 #[cfg(feature = "rustls-tls")]
 use rustls_pki_types as _;
+#[cfg(all(feature = "rustls-tls", feature = "boring"))]
+use sha1 as _;
 #[cfg(feature = "rustls-tls")]
 use sha2 as _;
 #[cfg(feature = "http1")]
@@ -316,7 +318,6 @@ mod hash;
 mod into_uri;
 mod proxy;
 pub mod proxy_pool;
-mod sync;
 mod util;
 
 #[cfg(feature = "cookies")]
@@ -333,8 +334,6 @@ pub mod auth {
 pub mod circuit_breaker {
     pub use crate::client::layer::circuit_breaker::*;
 }
-/// Simplified one-liner API for common HTTP operations.
-pub mod simple;
 /// Lifecycle hooks for HTTP requests and responses.
 pub mod hooks {
     pub use crate::client::layer::hooks::*;
@@ -365,7 +364,7 @@ pub use self::client::http1;
 pub use self::client::http2;
 #[cfg(feature = "multipart")]
 pub use self::client::multipart;
-#[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
+#[cfg(feature = "ws-yawc")]
 pub use self::client::ws;
 pub use self::{
     client::{
@@ -398,13 +397,13 @@ fn _assert_impls() {
 
     assert_send::<Request>();
     assert_send::<RequestBuilder>();
-    #[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
+    #[cfg(feature = "ws-yawc")]
     assert_send::<ws::WebSocketRequestBuilder>();
 
     assert_send::<Response>();
-    #[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
+    #[cfg(feature = "ws-yawc")]
     assert_send::<ws::WebSocketResponse>();
-    #[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
+    #[cfg(feature = "ws-yawc")]
     assert_send::<ws::WebSocket>();
 
     assert_send::<Error>();
@@ -650,11 +649,8 @@ pub fn request<T: IntoUri>(method: Method, uri: T) -> RequestBuilder {
 /// # }
 /// ```
 #[inline]
-#[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
-#[cfg_attr(
-    docsrs,
-    doc(cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets")))
-)]
+#[cfg(feature = "ws-yawc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "ws-yawc")))]
 pub fn websocket<T: IntoUri>(uri: T) -> ws::WebSocketRequestBuilder {
     Client::new().websocket(uri)
 }

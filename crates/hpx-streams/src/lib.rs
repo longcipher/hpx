@@ -47,33 +47,37 @@
 //! [Apache Arrow IPC]: https://arrow.apache.org/docs/format/Columnar.html#serialization-and-interprocess-communication-ipc
 //! [Protobuf]: https://protobuf.dev/programming-guides/encoding/
 
-#[macro_use]
-mod macros;
+#[cfg(feature = "json")]
+#[cfg_attr(docsrs, doc(cfg(feature = "json")))]
+pub use json_stream::JsonStreamResponse;
+#[cfg(feature = "json")]
+mod json_array_codec;
+#[cfg(feature = "json")]
+mod json_stream;
 
-cfg_json! {
-    pub use json_stream::JsonStreamResponse;
-    mod json_stream;
-    mod json_array_codec;
-}
+#[cfg(feature = "csv")]
+#[cfg_attr(docsrs, doc(cfg(feature = "csv")))]
+pub use csv_stream::CsvStreamResponse;
+#[cfg(feature = "csv")]
+mod csv_stream;
 
-cfg_csv! {
-    pub use csv_stream::CsvStreamResponse;
-    mod csv_stream;
-}
+#[cfg(feature = "protobuf")]
+#[cfg_attr(docsrs, doc(cfg(feature = "protobuf")))]
+pub use protobuf_stream::ProtobufStreamResponse;
 
 use crate::error::StreamBodyError;
+#[cfg(feature = "protobuf")]
+mod protobuf_len_codec;
+#[cfg(feature = "protobuf")]
+mod protobuf_stream;
 
-cfg_protobuf! {
-    pub use protobuf_stream::ProtobufStreamResponse;
-    mod protobuf_stream;
-    mod protobuf_len_codec;
-}
-
-cfg_arrow! {
-    pub use arrow_ipc_stream::ArrowIpcStreamResponse;
-    mod arrow_ipc_stream;
-    mod arrow_ipc_len_codec;
-}
+#[cfg(feature = "arrow")]
+#[cfg_attr(docsrs, doc(cfg(feature = "arrow")))]
+pub use arrow_ipc_stream::ArrowIpcStreamResponse;
+#[cfg(feature = "arrow")]
+mod arrow_ipc_len_codec;
+#[cfg(feature = "arrow")]
+mod arrow_ipc_stream;
 
 /// Error types for streaming responses.
 pub mod error;

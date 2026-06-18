@@ -37,7 +37,7 @@ use self::future::Pending;
     feature = "deflate",
 ))]
 use super::layer::decoder::AcceptEncoding;
-#[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
+#[cfg(feature = "ws-yawc")]
 use super::ws::WebSocketRequestBuilder;
 use super::{
     Body,
@@ -611,11 +611,8 @@ impl Client {
     /// this after you set up your request, and just before you send the
     /// request.
     #[inline]
-    #[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
-    #[cfg_attr(
-        docsrs,
-        doc(cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets")))
-    )]
+    #[cfg(feature = "ws-yawc")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "ws-yawc")))]
     pub fn websocket<U: IntoUri>(&self, uri: U) -> WebSocketRequestBuilder {
         WebSocketRequestBuilder::new(self.request(Method::GET, uri))
     }

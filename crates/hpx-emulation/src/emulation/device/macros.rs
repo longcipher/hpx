@@ -1,3 +1,33 @@
+macro_rules! settings_order {
+    () => {
+        SettingsOrder::builder()
+            .extend([
+                SettingId::HeaderTableSize,
+                SettingId::EnablePush,
+                SettingId::MaxConcurrentStreams,
+                SettingId::InitialWindowSize,
+                SettingId::MaxFrameSize,
+                SettingId::MaxHeaderListSize,
+                SettingId::EnableConnectProtocol,
+                SettingId::NoRfc7540Priorities,
+            ])
+            .build()
+    };
+}
+
+macro_rules! pseudo_order {
+    () => {
+        PseudoOrder::builder()
+            .extend([
+                PseudoId::Method,
+                PseudoId::Authority,
+                PseudoId::Scheme,
+                PseudoId::Path,
+            ])
+            .build()
+    };
+}
+
 macro_rules! header_chrome_sec_ch_ua {
     ($headers:expr, $ua:expr, $platform:expr, $is_mobile:expr) => {
         let mobile = if $is_mobile { "?1" } else { "?0" };
@@ -7,7 +37,7 @@ macro_rules! header_chrome_sec_ch_ua {
     };
 }
 
-macro_rules! header_chrome_sec_fetch {
+macro_rules! header_sec_fetch {
     ($headers:expr) => {
         $headers.insert("sec-fetch-dest", HeaderValue::from_static("document"));
         $headers.insert("sec-fetch-mode", HeaderValue::from_static("navigate"));
@@ -40,14 +70,6 @@ macro_rules! header_chrome_accept {
         );
         $headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("en-US,en;q=0.9"));
     }
-}
-
-macro_rules! header_firefox_sec_fetch {
-    ($headers:expr) => {
-        $headers.insert("sec-fetch-dest", HeaderValue::from_static("document"));
-        $headers.insert("sec-fetch-mode", HeaderValue::from_static("navigate"));
-        $headers.insert("sec-fetch-site", HeaderValue::from_static("none"));
-    };
 }
 
 macro_rules! header_firefox_accept {

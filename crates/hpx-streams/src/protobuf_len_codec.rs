@@ -1,7 +1,8 @@
-use crate::error::StreamBodyKind;
-use crate::StreamBodyError;
-use bytes::{Buf, BytesMut};
 use std::marker::PhantomData;
+
+use bytes::{Buf, BytesMut};
+
+use crate::{StreamBodyError, error::StreamBodyKind};
 
 #[derive(Clone, Debug)]
 pub(crate) struct ProtobufLenPrefixCodec<T> {
@@ -60,9 +61,8 @@ where
             ))
         } else if buf_len >= self.cursor.current_obj_len {
             let obj_bytes = buf.copy_to_bytes(self.cursor.current_obj_len);
-            let result: Result<Option<T>, StreamBodyError> = prost::Message::decode(obj_bytes)
-                .map(Some)
-                .map_err(|err| {
+            let result: Result<Option<T>, StreamBodyError> =
+                prost::Message::decode(obj_bytes).map(Some).map_err(|err| {
                     StreamBodyError::new(StreamBodyKind::CodecError, Some(Box::new(err)), None)
                 });
             self.cursor.current_obj_len = 0;

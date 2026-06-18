@@ -262,6 +262,16 @@ pub(crate) struct Cli {
     pub help: bool,
 }
 
+fn parse_pairs(items: &[String], sep: char) -> Vec<(String, String)> {
+    items
+        .iter()
+        .filter_map(|item| {
+            item.split_once(sep)
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        })
+        .collect()
+}
+
 impl Cli {
     /// Returns true if the URL is a WebSocket URL.
     pub(crate) fn is_websocket_url(&self) -> bool {
@@ -273,24 +283,15 @@ impl Cli {
 
     /// Parse headers into (name, value) pairs.
     pub(crate) fn parsed_headers(&self) -> Vec<(String, String)> {
-        self.headers
-            .iter()
-            .filter_map(|h| {
-                let (name, value) = h.split_once(':')?;
-                Some((name.trim().to_string(), value.trim().to_string()))
-            })
+        parse_pairs(&self.headers, ':')
+            .into_iter()
+            .map(|(k, v)| (k.trim().to_owned(), v.trim().to_owned()))
             .collect()
     }
 
     /// Parse --form fields into (key, value) pairs.
     pub(crate) fn parsed_form_fields(&self) -> Vec<(String, String)> {
-        self.form
-            .iter()
-            .filter_map(|f| {
-                let (key, value) = f.split_once('=')?;
-                Some((key.to_string(), value.to_string()))
-            })
-            .collect()
+        parse_pairs(&self.form, '=')
     }
 
     /// Parse --form fields, returning file references for @-prefixed values.
@@ -318,34 +319,22 @@ impl Cli {
 
     /// Parse --multipart fields into (key, value) pairs.
     pub(crate) fn parsed_multipart_fields(&self) -> Vec<(String, String)> {
-        self.multipart
-            .iter()
-            .filter_map(|f| {
-                let (key, value) = f.split_once('=')?;
-                Some((key.to_string(), value.to_string()))
-            })
-            .collect()
+        parse_pairs(&self.multipart, '=')
     }
 
     /// Parse --multipart-file fields into (key, path) pairs.
     pub(crate) fn parsed_multipart_files(&self) -> Vec<(String, String)> {
-        self.multipart_file
-            .iter()
-            .filter_map(|f| {
-                let (key, value) = f.split_once('=')?;
-                Some((key.to_string(), value.strip_prefix('@')?.to_string()))
-            })
+        parse_pairs(&self.multipart_file, '=')
+            .into_iter()
+            .filter_map(|(k, v)| Some((k, v.strip_prefix('@')?.to_owned())))
             .collect()
     }
 
     /// Parse --cookie values into (name, value) pairs.
     pub(crate) fn parsed_cookies(&self) -> Vec<(String, String)> {
-        self.cookie
-            .iter()
-            .filter_map(|c| {
-                let (name, value) = c.split_once('=')?;
-                Some((name.trim().to_string(), value.trim().to_string()))
-            })
+        parse_pairs(&self.cookie, '=')
+            .into_iter()
+            .map(|(k, v)| (k.trim().to_owned(), v.trim().to_owned()))
             .collect()
     }
 }
@@ -389,12 +378,9 @@ pub(crate) fn parse_proxy_config(url: &str) -> eyre::Result<hpx_dl::ProxyConfig>
 ///
 /// Filters out entries that don't contain `:`.
 pub(crate) fn parsed_dl_headers(headers: &[String]) -> Vec<(String, String)> {
-    headers
-        .iter()
-        .filter_map(|h| {
-            let (name, value) = h.split_once(':')?;
-            Some((name.trim().to_string(), value.trim().to_string()))
-        })
+    parse_pairs(headers, ':')
+        .into_iter()
+        .map(|(k, v)| (k.trim().to_owned(), v.trim().to_owned()))
         .collect()
 }
 

@@ -150,7 +150,8 @@ impl Default for PriorityQueue {
 
 /// Limits the number of concurrent downloads.
 #[derive(Clone)]
-pub struct ConcurrencyLimiter {
+#[expect(dead_code)]
+pub(crate) struct ConcurrencyLimiter {
     semaphore: Arc<Semaphore>,
     max_concurrent: usize,
 }
@@ -164,10 +165,11 @@ impl std::fmt::Debug for ConcurrencyLimiter {
     }
 }
 
+#[expect(dead_code)]
 impl ConcurrencyLimiter {
     /// Create a new limiter allowing up to `max_concurrent` concurrent downloads.
     #[must_use]
-    pub fn new(max_concurrent: usize) -> Self {
+    pub(crate) fn new(max_concurrent: usize) -> Self {
         Self {
             semaphore: Arc::new(Semaphore::new(max_concurrent)),
             max_concurrent,
@@ -179,7 +181,7 @@ impl ConcurrencyLimiter {
     /// # Errors
     ///
     /// Returns `DownloadError::RateLimited` if the semaphore is closed.
-    pub async fn acquire(&self) -> Result<SemaphorePermit<'_>, DownloadError> {
+    pub(crate) async fn acquire(&self) -> Result<SemaphorePermit<'_>, DownloadError> {
         self.semaphore
             .acquire()
             .await
@@ -188,13 +190,13 @@ impl ConcurrencyLimiter {
 
     /// Number of currently available permits.
     #[must_use]
-    pub fn available_permits(&self) -> usize {
+    pub(crate) fn available_permits(&self) -> usize {
         self.semaphore.available_permits()
     }
 
     /// Maximum concurrent downloads.
     #[must_use]
-    pub const fn max_concurrent(&self) -> usize {
+    pub(crate) const fn max_concurrent(&self) -> usize {
         self.max_concurrent
     }
 }

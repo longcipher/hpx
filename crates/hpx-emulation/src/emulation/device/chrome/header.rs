@@ -13,7 +13,7 @@ pub fn header_initializer(
         emulation_os.is_mobile()
     );
     header_chrome_ua!(headers, ua);
-    header_chrome_sec_fetch!(headers);
+    header_sec_fetch!(headers);
     header_chrome_accept!(headers);
     headers
 }
@@ -31,7 +31,7 @@ pub fn header_initializer_with_zstd(
         emulation_os.is_mobile()
     );
     header_chrome_ua!(headers, ua);
-    header_chrome_sec_fetch!(headers);
+    header_sec_fetch!(headers);
     header_chrome_accept!(zstd, headers);
     headers
 }
@@ -49,7 +49,7 @@ pub fn header_initializer_with_zstd_priority(
         emulation_os.is_mobile()
     );
     header_chrome_ua!(headers, ua);
-    header_chrome_sec_fetch!(headers);
+    header_sec_fetch!(headers);
     header_chrome_accept!(zstd, headers);
     headers.insert(
         HeaderName::from_static("priority"),

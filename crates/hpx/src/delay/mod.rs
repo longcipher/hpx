@@ -76,50 +76,12 @@ fn jittered_duration(base: Duration, pct: f64) -> Duration {
         return base;
     }
 
-    // XOR-Shift PRNG — same proven approach used in emulation::rand.
-    let rand = fast_random();
+    // ponytail: rand dep already exists, use it instead of hand-rolled PRNG
+    let rand = rand::random::<u64>();
 
     // Convert to fraction in [0, 1)
     let frac = (rand as f64) / (u64::MAX as f64);
 
     let span = (high - low).as_secs_f64();
     low + Duration::from_secs_f64(span * frac)
-}
-
-/// Fast thread-local XOR-Shift PRNG seeded from `RandomState`.
-fn fast_random() -> u64 {
-    use std::{
-        cell::Cell,
-        collections::hash_map::RandomState,
-        hash::{BuildHasher, Hasher},
-        num::Wrapping,
-    };
-
-    thread_local! {
-        static RNG: Cell<Wrapping<u64>> = Cell::new(Wrapping(seed()));
-    }
-
-    #[inline]
-    fn seed() -> u64 {
-        let seed = RandomState::new();
-        let mut out = 0;
-        let mut cnt = 0;
-        while out == 0 {
-            cnt += 1;
-            let mut hasher = seed.build_hasher();
-            hasher.write_usize(cnt);
-            out = hasher.finish();
-        }
-        out
-    }
-
-    RNG.with(|rng| {
-        let mut n = rng.get();
-        debug_assert_ne!(n.0, 0);
-        n ^= n >> 12;
-        n ^= n << 25;
-        n ^= n >> 27;
-        rng.set(n);
-        n.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
-    })
 }

@@ -157,7 +157,6 @@ base64 = { workspace = true }
 sha1 = { workspace = true }
 
 # Utilities
-nom = { workspace = true }
 percent-encoding = { workspace = true }
 pin-project = { workspace = true }
 tracing = { workspace = true }

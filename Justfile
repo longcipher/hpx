@@ -17,6 +17,8 @@ test:
 bdd:
   cargo test -p hpx-dl --test cucumber --all-features
 test-all: test bdd
+test-proxy:
+  cargo run -p test-proxy
 build-docs:
   RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items --all-features
 test-coverage:

@@ -4,36 +4,6 @@ macro_rules! headers_stream_dependency {
     };
 }
 
-macro_rules! pseudo_order {
-    () => {
-        PseudoOrder::builder()
-            .extend([
-                PseudoId::Method,
-                PseudoId::Authority,
-                PseudoId::Scheme,
-                PseudoId::Path,
-            ])
-            .build()
-    };
-}
-
-macro_rules! settings_order {
-    () => {
-        SettingsOrder::builder()
-            .extend([
-                SettingId::HeaderTableSize,
-                SettingId::EnablePush,
-                SettingId::MaxConcurrentStreams,
-                SettingId::InitialWindowSize,
-                SettingId::MaxFrameSize,
-                SettingId::MaxHeaderListSize,
-                SettingId::EnableConnectProtocol,
-                SettingId::NoRfc7540Priorities,
-            ])
-            .build()
-    };
-}
-
 macro_rules! http2_options {
     () => {
         Http2Options::builder()

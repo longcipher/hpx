@@ -2,13 +2,6 @@ use std::io;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use flate2::{CompressError, DecompressError, FlushCompress, Status};
-use nom::{
-    IResult, Parser,
-    bytes::complete::{tag, take_while1},
-    character::complete::{digit1, space0},
-    combinator::opt,
-    sequence::{pair, preceded},
-};
 
 use crate::{CompressionLevel, DeflateOptions};
 
@@ -106,10 +99,13 @@ impl WebSocketExtensions {
     /// # Returns
     /// - `Ok(Self)`: A configured `WebSocketExtensions` instance if parsing is successful.
     /// - `Err(nom::Err)`: An error if parsing fails due to an unexpected format.
-    fn parse(input: &str) -> Result<Self, nom::Err<nom::error::Error<&str>>> {
+    fn parse(input: &str) -> Result<Self, String> {
         let mut this = Self::default();
-        let (remaining, _) = tag(PERMESSAGE_DEFLATE)(input)?;
-        this.parse_extensions(remaining)?;
+        let trimmed = input.trim();
+        let rest = trimmed
+            .strip_prefix(PERMESSAGE_DEFLATE)
+            .ok_or_else(|| format!("expected 'permessage-deflate', got: {trimmed}"))?;
+        this.parse_extensions(rest)?;
         Ok(this)
     }
 
@@ -125,12 +121,9 @@ impl WebSocketExtensions {
     /// # Returns
     /// - `Ok(())`: If parsing is successful and parameters are set accordingly.
     /// - `Err(nom::Err)`: If parsing fails due to an invalid format.
-    fn parse_extensions<'a>(
-        &mut self,
-        mut input: &'a str,
-    ) -> Result<(), nom::Err<nom::error::Error<&'a str>>> {
+    fn parse_extensions(&mut self, mut input: &str) -> Result<(), String> {
         while !input.is_empty() {
-            let (remaining, (key, value)) = Self::parse_extension(input)?;
+            let (remaining, key, value) = Self::parse_extension(input)?;
             match key {
                 "client_no_context_takeover" => {
                     self.client_no_context_takeover = true;
@@ -146,46 +139,41 @@ impl WebSocketExtensions {
                 }
                 _ => {}
             }
-
             input = remaining;
         }
 
         Ok(())
     }
 
-    /// Parses a single extension parameter from the input string.
-    ///
-    /// This method identifies key-value pairs in the form `key=value` and returns both
-    /// the key and an optional value if it exists. The method handles spaces around
-    /// both the semicolon separator and equals sign.
-    ///
-    /// # Parameters
-    /// - `input`: A string containing a single extension parameter, prefixed with a semicolon (`;`).
-    ///
-    /// # Returns
-    /// - `IResult<&str, (&str, Option<&str>)>`: The remaining input after the parsed key-value pair,
-    ///   along with a tuple of the key and optional value.
-    fn parse_extension(input: &str) -> IResult<&str, (&str, Option<&str>)> {
-        // ; server_no_context_takeover
-        let mut parser = preceded(
-            // allow strings preceded by spaces
-            preceded(space0, tag(";")),
-            preceded(
-                space0,
-                pair(
-                    take_while1(|c: char| c.is_alphanumeric() || c == '_'),
-                    opt(preceded(
-                        // allow space precedence before the `=`
-                        preceded(space0, tag("=")),
-                        preceded(space0, opt(digit1)),
-                    )),
-                ),
-            ),
-        );
+    fn parse_extension(input: &str) -> Result<(&str, &str, Option<&str>), String> {
+        let input = input.trim_start();
+        let input = input
+            .strip_prefix(';')
+            .ok_or_else(|| format!("expected ';', got: {input:?}"))?;
+        let input = input.trim_start();
 
-        parser
-            .parse(input)
-            .map(|(key, (key2, value))| (key, (key2, value.flatten())))
+        // Parse key: alphanumeric or underscore
+        let key_end = input
+            .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .unwrap_or(input.len());
+        let key = &input[..key_end];
+        let rest = input[key_end..].trim_start();
+
+        // Optionally parse =value
+        if let Some(rest) = rest.strip_prefix('=') {
+            let rest = rest.trim_start();
+            let val_end = rest
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(rest.len());
+            let value = if val_end > 0 {
+                Some(&rest[..val_end])
+            } else {
+                None
+            };
+            Ok((rest[val_end..].trim_start(), key, value))
+        } else {
+            Ok((rest, key, None))
+        }
     }
 }
 
@@ -204,7 +192,7 @@ impl std::str::FromStr for WebSocketExtensions {
     type Err = String;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        Self::parse(input).map_err(|err| err.to_string())
+        Self::parse(input)
     }
 }
 /// A compressor for handling WebSocket payload compression, supporting both contextual and no-context-takeover modes.

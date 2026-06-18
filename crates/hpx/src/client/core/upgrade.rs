@@ -33,13 +33,13 @@ use std::{
 };
 
 use bytes::Bytes;
+use parking_lot::Mutex;
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
     sync::oneshot,
 };
 
 use super::{Error, Result, common::rewind::Rewind};
-use crate::sync::Mutex;
 
 /// An upgraded HTTP connection.
 ///

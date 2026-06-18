@@ -11,7 +11,7 @@ pub mod tower_compat;
 pub mod layer;
 #[cfg(feature = "multipart")]
 pub mod multipart;
-#[cfg(any(feature = "ws-yawc", feature = "ws-fastwebsockets"))]
+#[cfg(feature = "ws-yawc")]
 pub mod ws;
 
 #[allow(unused_imports)]

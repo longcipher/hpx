@@ -10,19 +10,12 @@ use hpx::{header, ws::message::Message};
 
 #[tokio::main]
 async fn main() -> hpx::Result<()> {
-    // Use the API you're already familiar with
     let resp = hpx::websocket("wss://127.0.0.1:3000/ws")
-        .force_http2()
         .header(header::USER_AGENT, env!("CARGO_PKG_NAME"))
         .send()
         .await?;
 
-    assert_eq!(resp.version(), http::Version::HTTP_2);
-
     let websocket = resp.into_websocket().await?;
-    if let Some(protocol) = websocket.protocol() {
-        println!("WebSocket subprotocol: {:?}", protocol);
-    }
 
     let (mut tx, mut rx) = websocket.split();
 

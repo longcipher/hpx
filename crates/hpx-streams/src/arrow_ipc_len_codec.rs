@@ -1,8 +1,7 @@
-use crate::error::StreamBodyKind;
-use crate::StreamBodyError;
-use arrow::array::RecordBatch;
-use arrow::ipc::reader::StreamDecoder;
+use arrow::{array::RecordBatch, ipc::reader::StreamDecoder};
 use bytes::{Buf, BytesMut};
+
+use crate::{StreamBodyError, error::StreamBodyKind};
 
 #[derive(Debug)]
 pub(crate) struct ArrowIpcCodec {

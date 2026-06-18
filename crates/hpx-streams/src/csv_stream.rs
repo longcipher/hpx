@@ -1,9 +1,9 @@
-use crate::error::StreamBodyKind;
-use crate::{StreamBodyError, StreamBodyResult};
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use serde::Deserialize;
 use tokio_util::io::StreamReader;
+
+use crate::{StreamBodyError, StreamBodyResult, error::StreamBodyKind};
 
 /// Extension trait for [`hpx::Response`] that provides streaming support for the CSV format.
 #[async_trait]
@@ -27,7 +27,7 @@ pub trait CsvStreamResponse {
     ///
     /// #[derive(Debug, Clone, Deserialize)]
     /// struct MyTestStructure {
-    ///     some_test_field: String
+    ///     some_test_field: String,
     /// }
     ///
     /// #[tokio::main]
@@ -35,7 +35,8 @@ pub trait CsvStreamResponse {
     ///     const MAX_OBJ_LEN: usize = 64 * 1024;
     ///
     ///     let client = hpx::Client::new()?;
-    ///     let _stream = client.get("http://localhost:8080/csv")
+    ///     let _stream = client
+    ///         .get("http://localhost:8080/csv")
     ///         .send()
     ///         .await?
     ///         .csv_stream::<MyTestStructure>(MAX_OBJ_LEN, true, b',');
@@ -64,10 +65,7 @@ impl CsvStreamResponse for hpx::Response {
     where
         T: for<'de> Deserialize<'de>,
     {
-        let reader = StreamReader::new(
-            self.bytes_stream()
-                .map_err(std::io::Error::other),
-        );
+        let reader = StreamReader::new(self.bytes_stream().map_err(std::io::Error::other));
 
         let codec = tokio_util::codec::LinesCodec::new_with_max_length(max_obj_len);
         let frames_reader = tokio_util::codec::FramedRead::new(reader, codec);
@@ -129,11 +127,7 @@ mod tests {
 
     #[test]
     fn test_csv_builder_reuse_produces_identical_results() {
-        let csv_rows = [
-            "Alice,30,NYC",
-            "Bob,25,LA",
-            "Charlie,35,Chicago",
-        ];
+        let csv_rows = ["Alice,30,NYC", "Bob,25,LA", "Charlie,35,Chicago"];
 
         let mut builder = csv::ReaderBuilder::new();
         builder.delimiter(b',');

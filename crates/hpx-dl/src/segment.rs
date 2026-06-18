@@ -206,7 +206,8 @@ pub fn range_header_value(range: &SegmentRange) -> ArrayString<64> {
 ///
 /// Returns [`DownloadError::Http`] if the HTTP request fails,
 /// [`DownloadError::Io`] if file I/O fails.
-pub async fn download_segment(
+#[expect(dead_code)]
+pub(crate) async fn download_segment(
     client: &hpx::Client,
     url: &str,
     range: &SegmentRange,
@@ -699,7 +700,8 @@ pub fn filter_remaining_segments(
 ///
 /// Returns [`DownloadError::Http`] if the HEAD request fails.
 /// Returns storage errors if the record cannot be loaded.
-pub async fn check_resume(
+#[expect(dead_code)]
+pub(crate) async fn check_resume(
     client: &hpx::Client,
     url: &str,
     existing_file: &Path,

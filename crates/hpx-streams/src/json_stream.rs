@@ -1,10 +1,11 @@
-use crate::error::StreamBodyKind;
-use crate::json_array_codec::JsonArrayCodec;
-use crate::{StreamBodyError, StreamBodyResult};
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use serde::Deserialize;
 use tokio_util::io::StreamReader;
+
+use crate::{
+    StreamBodyError, StreamBodyResult, error::StreamBodyKind, json_array_codec::JsonArrayCodec,
+};
 
 /// Extension trait for [`hpx::Response`] that provides streaming support for the JSON array
 /// and JSON Lines (NL/NewLines) formats.
@@ -25,7 +26,7 @@ pub trait JsonStreamResponse {
     ///
     /// #[derive(Debug, Clone, Deserialize)]
     /// struct MyTestStructure {
-    ///     some_test_field: String
+    ///     some_test_field: String,
     /// }
     ///
     /// #[tokio::main]
@@ -33,7 +34,8 @@ pub trait JsonStreamResponse {
     ///     const MAX_OBJ_LEN: usize = 64 * 1024;
     ///
     ///     let client = hpx::Client::new()?;
-    ///     let _stream = client.get("http://localhost:8080/json-array")
+    ///     let _stream = client
+    ///         .get("http://localhost:8080/json-array")
     ///         .send()
     ///         .await?
     ///         .json_array_stream::<MyTestStructure>(MAX_OBJ_LEN);
@@ -103,10 +105,7 @@ impl JsonStreamResponse for hpx::Response {
     where
         T: for<'de> Deserialize<'de> + Send,
     {
-        let reader = StreamReader::new(
-            self.bytes_stream()
-                .map_err(std::io::Error::other),
-        );
+        let reader = StreamReader::new(self.bytes_stream().map_err(std::io::Error::other));
 
         let codec = tokio_util::codec::LinesCodec::new_with_max_length(max_obj_len);
         let frames_reader =
@@ -144,10 +143,7 @@ impl JsonStreamResponse for hpx::Response {
     where
         T: for<'de> Deserialize<'de> + Send,
     {
-        let reader = StreamReader::new(
-            self.bytes_stream()
-                .map_err(std::io::Error::other),
-        );
+        let reader = StreamReader::new(self.bytes_stream().map_err(std::io::Error::other));
 
         let codec = JsonArrayCodec::<T>::new_with_max_length(max_obj_len);
         let frames_reader =

@@ -78,7 +78,8 @@ impl EventBroadcaster {
 }
 
 /// Tracks download progress and emits events at configurable intervals.
-pub struct ProgressTracker {
+#[expect(dead_code)]
+pub(crate) struct ProgressTracker {
     download_id: DownloadId,
     total_bytes: Option<u64>,
     bytes_downloaded: Arc<AtomicU64>,
@@ -101,10 +102,11 @@ impl std::fmt::Debug for ProgressTracker {
     }
 }
 
+#[expect(dead_code)]
 impl ProgressTracker {
     /// Create a new progress tracker.
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         download_id: DownloadId,
         total_bytes: Option<u64>,
         broadcaster: Arc<EventBroadcaster>,
@@ -121,7 +123,7 @@ impl ProgressTracker {
     }
 
     /// Report bytes downloaded. Emits progress event if interval has elapsed.
-    pub fn report_progress(&self, additional_bytes: u64) {
+    pub(crate) fn report_progress(&self, additional_bytes: u64) {
         let total = self
             .bytes_downloaded
             .fetch_add(additional_bytes, Ordering::Relaxed)
@@ -150,7 +152,7 @@ impl ProgressTracker {
     }
 
     /// Force emit current progress (e.g., on completion).
-    pub fn flush(&self) {
+    pub(crate) fn flush(&self) {
         let downloaded = self.bytes_downloaded.load(Ordering::Relaxed);
         let _ = self.broadcaster.emit(DownloadEvent::Progress {
             id: self.download_id,
@@ -163,7 +165,7 @@ impl ProgressTracker {
     }
 
     /// Emit a state change event.
-    pub fn emit_state_change(&self, state: DownloadState) {
+    pub(crate) fn emit_state_change(&self, state: DownloadState) {
         let _ = self.broadcaster.emit(DownloadEvent::StateChanged {
             id: self.download_id,
             state,
@@ -171,21 +173,21 @@ impl ProgressTracker {
     }
 
     /// Emit started event.
-    pub fn emit_started(&self) {
+    pub(crate) fn emit_started(&self) {
         let _ = self.broadcaster.emit(DownloadEvent::Started {
             id: self.download_id,
         });
     }
 
     /// Emit completed event.
-    pub fn emit_completed(&self) {
+    pub(crate) fn emit_completed(&self) {
         let _ = self.broadcaster.emit(DownloadEvent::Completed {
             id: self.download_id,
         });
     }
 
     /// Emit failed event.
-    pub fn emit_failed(&self, error: &str) {
+    pub(crate) fn emit_failed(&self, error: &str) {
         let _ = self.broadcaster.emit(DownloadEvent::Failed {
             id: self.download_id,
             error: error.to_string(),
@@ -194,7 +196,7 @@ impl ProgressTracker {
 
     /// Get current bytes downloaded.
     #[must_use]
-    pub fn bytes_downloaded(&self) -> u64 {
+    pub(crate) fn bytes_downloaded(&self) -> u64 {
         self.bytes_downloaded.load(Ordering::Relaxed)
     }
 }
