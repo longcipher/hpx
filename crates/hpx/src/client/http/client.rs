@@ -156,6 +156,7 @@ where
     B::Error: Into<BoxError>,
 {
     /// Send a constructed `Request` using this `HttpClient`.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn request(&self, mut req: Request<B>) -> ResponseFuture {
         let is_http_connect = req.method() == Method::CONNECT;
         // Validate HTTP version early

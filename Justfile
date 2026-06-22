@@ -13,10 +13,13 @@ lint:
   cargo machete
   just build-docs
 test:
+  cargo nextest run -p hpx-streams -p hpx-emulation -p hpx-yawc --all-features
+  cargo test -p hpx --lib --all-features
+test-full:
   cargo nextest run --workspace --all-features
 bdd:
   cargo test -p hpx-dl --test cucumber --all-features
-test-all: test bdd
+test-all: test-full bdd
 test-proxy:
   cargo run -p test-proxy
 build-docs:

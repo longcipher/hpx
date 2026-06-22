@@ -65,6 +65,7 @@ where
     T: Eq + Hash,
     H: BuildHasher,
 {
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn hash<H2: Hasher>(&self, state: &mut H2) {
         if self.computed.load(Ordering::Relaxed) {
             state.write_u64(self.hash.load(Ordering::Relaxed));

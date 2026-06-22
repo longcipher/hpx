@@ -1065,6 +1065,7 @@ fn current_timestamp() -> i64 {
         .map_or(0, |duration| duration.as_secs() as i64)
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn build_segment_states(
     segments: &[crate::segment::SegmentRange],
     resume_state: &ResumeState,
@@ -1076,7 +1077,7 @@ fn build_segment_states(
         _ => &[],
     };
 
-    let completed: std::collections::HashSet<u32> = completed_indices.iter().copied().collect();
+    let completed: ahash::HashSet<u32> = completed_indices.iter().copied().collect();
 
     segments
         .iter()

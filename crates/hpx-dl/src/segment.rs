@@ -219,6 +219,7 @@ pub(crate) async fn download_segment(
     download_segment_with_options(client, url, range, file, progress_tx, &headers, &limiter).await
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 async fn download_segment_with_options(
     client: &hpx::Client,
     url: &str,
@@ -655,20 +656,17 @@ pub fn resume_state_from_segments(
         return base_state;
     }
 
-    let completed_segments: Vec<u32> = segments
+    let (completed_segments, bytes_completed): (Vec<u32>, u64) = segments
         .iter()
         .filter(|segment| segment.state == SegmentStatus::Completed)
-        .map(|segment| segment.index)
-        .collect();
+        .fold((Vec::new(), 0u64), |(mut indices, mut bytes), segment| {
+            indices.push(segment.index);
+            bytes += segment.bytes_downloaded;
+            (indices, bytes)
+        });
     if completed_segments.is_empty() {
         return ResumeState::Fresh;
     }
-
-    let bytes_completed = segments
-        .iter()
-        .filter(|segment| segment.state == SegmentStatus::Completed)
-        .map(|segment| segment.bytes_downloaded)
-        .sum();
 
     ResumeState::CanResume {
         bytes_completed,

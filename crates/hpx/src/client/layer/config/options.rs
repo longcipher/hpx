@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use http::Version;
 
 #[cfg(feature = "http1")]
@@ -11,7 +13,7 @@ use crate::{client::conn::TcpConnectOptions, proxy::Matcher, tls::TlsOptions};
 #[derive(Debug, Default, Clone, Hash, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct RequestOptions {
-    proxy_matcher: Option<Matcher>,
+    proxy_matcher: Option<Arc<Matcher>>,
     enforced_version: Option<Version>,
     tcp_connect_opts: TcpConnectOptions,
     transport_opts: TransportOptions,
@@ -100,13 +102,13 @@ impl TransportOptions {
 impl RequestOptions {
     /// Get a reference to the proxy matcher.
     #[inline]
-    pub fn proxy_matcher(&self) -> Option<&Matcher> {
+    pub fn proxy_matcher(&self) -> Option<&Arc<Matcher>> {
         self.proxy_matcher.as_ref()
     }
 
     /// Get a mutable reference to the proxy matcher.
     #[inline]
-    pub fn proxy_matcher_mut(&mut self) -> &mut Option<Matcher> {
+    pub fn proxy_matcher_mut(&mut self) -> &mut Option<Arc<Matcher>> {
         &mut self.proxy_matcher
     }
 

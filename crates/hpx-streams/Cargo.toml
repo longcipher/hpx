@@ -2,7 +2,7 @@
 name = "hpx-streams"
 version.workspace = true
 description = "HTTP response streaming support for hpx: JSON/CSV/Protobuf/Arrow"
-keywords = ["http", "stream", "json", "csv", "protobuf", "arrow"]
+keywords = ["http", "stream", "json", "csv", "protobuf"]
 categories = ["asynchronous", "network-programming", "web-programming"]
 repository.workspace = true
 authors.workspace = true

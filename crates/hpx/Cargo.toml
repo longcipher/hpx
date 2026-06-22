@@ -84,6 +84,9 @@ system-proxy = ["dep:system-configuration", "dep:windows-registry"]
 # Enable tracing logging.
 tracing = ["http2/tracing", "dep:tracing"]
 
+# Enable hotpath profiling instrumentation.
+hotpath = ["dep:hotpath"]
+
 # Enable BoringSSL support.
 boring = [
     "dep:boring",
@@ -248,6 +251,9 @@ hpx-yawc = { workspace = true, optional = true }
 
 ## hickory-dns
 hickory-resolver = { workspace = true, optional = true }
+
+## hotpath
+hotpath = { workspace = true, optional = true }
 
 ## tracing
 base64 = { workspace = true }

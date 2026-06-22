@@ -89,6 +89,7 @@ impl SpeedLimiter {
     }
 
     /// Refill tokens based on elapsed time using a CAS loop.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn refill_tokens(&self, now_nanos: u64) {
         loop {
             let last = self.last_refill_nanos.load(Ordering::Acquire);
@@ -136,6 +137,7 @@ impl SpeedLimiter {
     }
 
     /// Try to consume `requested` tokens. Returns the number actually consumed.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn try_consume(&self, requested: u64) -> u64 {
         loop {
             let available = self.tokens.load(Ordering::Acquire);
@@ -161,6 +163,7 @@ impl SpeedLimiter {
     /// Wait until `bytes` tokens are available, then consume them.
     ///
     /// For unlimited limiters, returns immediately.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub async fn wait_for(&self, bytes: u64) -> Result<(), DownloadError> {
         if self.is_unlimited() || bytes == 0 {
             return Ok(());

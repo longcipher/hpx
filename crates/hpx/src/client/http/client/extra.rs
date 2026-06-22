@@ -56,7 +56,7 @@ impl ConnectExtra {
 
     /// Return a reference to the [`ProxyMacher`].
     #[inline]
-    pub fn proxy_matcher(&self) -> Option<&ProxyMacher> {
+    pub fn proxy_matcher(&self) -> Option<&Arc<ProxyMacher>> {
         self.extra.as_ref().and_then(RequestOptions::proxy_matcher)
     }
 

@@ -9,6 +9,7 @@ use crate::{
     types::{ChecksumSpec, HashAlgorithm},
 };
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 async fn hash_file<H: Digest>(
     file: &mut tokio::fs::File,
     buf: &mut [u8],
@@ -27,13 +28,14 @@ async fn hash_file<H: Digest>(
 
 /// Compute the checksum of a file using the given algorithm.
 ///
-/// Reads the file in 8 KiB chunks and feeds each chunk to the appropriate hasher.
+/// Reads the file in 64 KiB chunks and feeds each chunk to the appropriate hasher.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub async fn compute_checksum(
     file: &Path,
     algorithm: HashAlgorithm,
 ) -> Result<String, DownloadError> {
     let mut file = tokio::fs::File::open(file).await?;
-    let mut buf = [0u8; 8192];
+    let mut buf = vec![0u8; 65536];
 
     match algorithm {
         HashAlgorithm::Md5 => hash_file::<md5::Md5>(&mut file, &mut buf).await,

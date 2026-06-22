@@ -3,6 +3,7 @@ use std::{
     fmt,
     future::Future,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    sync::Arc,
     time::Duration,
 };
 
@@ -11,11 +12,6 @@ use http::{Extensions, Request as HttpRequest, Uri, Version};
 use serde::Serialize;
 #[cfg(feature = "multipart")]
 use {super::multipart, bytes::Bytes, http::header::CONTENT_LENGTH};
-#[cfg(feature = "cookies")]
-use {
-    crate::cookie::{CookieStore, IntoCookieStore},
-    std::sync::Arc,
-};
 
 #[cfg(any(
     feature = "gzip",
@@ -32,6 +28,8 @@ use super::{
         timeout::TimeoutOptions,
     },
 };
+#[cfg(feature = "cookies")]
+use crate::cookie::{CookieStore, IntoCookieStore};
 #[cfg(any(feature = "multipart", feature = "form", feature = "json"))]
 use crate::header::CONTENT_TYPE;
 use crate::{
@@ -722,7 +720,7 @@ impl RequestBuilder {
             req.config_mut::<RequestOptions>()
                 .get_or_insert_default()
                 .proxy_matcher_mut()
-                .replace(proxy.into_matcher());
+                .replace(Arc::new(proxy.into_matcher()));
         }
         self
     }

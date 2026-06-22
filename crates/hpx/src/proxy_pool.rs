@@ -44,7 +44,7 @@ pub struct ProxyPool {
 #[derive(Debug)]
 struct Inner {
     strategy: ProxyPoolStrategy,
-    matchers: Vec<Matcher>,
+    matchers: Vec<Arc<Matcher>>,
     sticky_index: AtomicUsize,
 }
 
@@ -62,7 +62,7 @@ pub(crate) struct ProxyPoolService<S> {
 #[derive(Clone)]
 struct Selection {
     index: usize,
-    matcher: Matcher,
+    matcher: Arc<Matcher>,
 }
 
 // ===== impl ProxyPoolBuilder =====
@@ -116,7 +116,10 @@ impl ProxyPool {
 
     /// Create a proxy pool with the specified strategy.
     pub fn with_strategy(proxies: Vec<Proxy>, strategy: ProxyPoolStrategy) -> crate::Result<Self> {
-        let matchers: Vec<Matcher> = proxies.into_iter().map(Proxy::into_matcher).collect();
+        let matchers: Vec<Arc<Matcher>> = proxies
+            .into_iter()
+            .map(|p| Arc::new(p.into_matcher()))
+            .collect();
 
         if matchers.is_empty() {
             return Err(Error::builder("proxy pool cannot be empty"));
@@ -168,6 +171,7 @@ impl ProxyPool {
         ProxyPoolLayer { pool: self.clone() }
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn select(&self) -> Selection {
         let len = self.inner.matchers.len();
         let index = match self.inner.strategy {
@@ -182,7 +186,7 @@ impl ProxyPool {
 
         Selection {
             index,
-            matcher: self.inner.matchers[index].clone(),
+            matcher: Arc::clone(&self.inner.matchers[index]),
         }
     }
 
@@ -258,6 +262,7 @@ where
         self.inner.poll_ready(cx).map_err(Into::into)
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn call(&mut self, mut req: Request<Body>) -> Self::Future {
         let selected = self.pool.select();
 

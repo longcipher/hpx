@@ -554,6 +554,7 @@ impl ConnectorService {
         }
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     async fn connect_auto(self, req: ConnectRequest) -> Result<Conn, BoxError> {
         debug!("starting new connection: {:?}", req.uri());
 
