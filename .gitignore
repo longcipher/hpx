@@ -11,3 +11,4 @@ Cargo.lock
 *.swo
 *.DS_Store
 Clippy.toml
+.codegraph/
