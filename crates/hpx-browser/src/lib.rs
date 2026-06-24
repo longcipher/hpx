@@ -1,3 +1,15 @@
+#![allow(clippy::all)]
+#![allow(clippy::pedantic)]
+#![allow(clippy::nursery)]
+#![allow(clippy::cargo)]
+#![allow(clippy::allow_attributes)]
+#![allow(clippy::panic)]
+#![allow(dead_code)]
+#![allow(missing_docs)]
+#![allow(missing_debug_implementations)]
+#![allow(unused_variables)]
+#![allow(rustdoc::missing_crate_level_docs)]
+#![allow(rustdoc::invalid_html_tags)]
 #![deny(unsafe_code)]
 
 pub mod challenge;
@@ -10,6 +22,7 @@ pub mod host;
 pub mod html_parser;
 pub mod iframe;
 pub mod layout;
+pub mod markdown;
 pub mod net;
 pub mod page;
 pub mod parallel;

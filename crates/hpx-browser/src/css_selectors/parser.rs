@@ -475,40 +475,40 @@ impl<'a> SelectorParser<'a> {
         } else {
             self.skip_whitespace();
             let selector_list =
-                if !matches!(self.current_kind(), TokenKind::CloseParen | TokenKind::Eof) {
-                    let mut inner_tokens = Vec::new();
-                    let mut depth = 0;
-                    loop {
-                        match self.current_kind() {
-                            TokenKind::CloseParen if depth == 0 => break,
-                            TokenKind::Eof => break,
-                            TokenKind::OpenParen => {
-                                depth += 1;
-                                if let Some(t) = self.current_token() {
-                                    inner_tokens.push(t.clone());
+                (!matches!(self.current_kind(), TokenKind::CloseParen | TokenKind::Eof)).then(
+                    || {
+                        let mut inner_tokens = Vec::new();
+                        let mut depth = 0;
+                        loop {
+                            match self.current_kind() {
+                                TokenKind::CloseParen if depth == 0 => break,
+                                TokenKind::Eof => break,
+                                TokenKind::OpenParen => {
+                                    depth += 1;
+                                    if let Some(t) = self.current_token() {
+                                        inner_tokens.push(t.clone());
+                                    }
+                                    self.advance();
                                 }
-                                self.advance();
-                            }
-                            TokenKind::CloseParen => {
-                                depth -= 1;
-                                if let Some(t) = self.current_token() {
-                                    inner_tokens.push(t.clone());
+                                TokenKind::CloseParen => {
+                                    depth -= 1;
+                                    if let Some(t) = self.current_token() {
+                                        inner_tokens.push(t.clone());
+                                    }
+                                    self.advance();
                                 }
-                                self.advance();
-                            }
-                            _ => {
-                                if let Some(t) = self.current_token() {
-                                    inner_tokens.push(t.clone());
+                                _ => {
+                                    if let Some(t) = self.current_token() {
+                                        inner_tokens.push(t.clone());
+                                    }
+                                    self.advance();
                                 }
-                                self.advance();
                             }
                         }
-                    }
-                    let mut inner_parser = SelectorParser::from_tokens(inner_tokens);
-                    Some(inner_parser.parse_selector_list().unwrap_or_default())
-                } else {
-                    None
-                };
+                        let mut inner_parser = SelectorParser::from_tokens(inner_tokens);
+                        inner_parser.parse_selector_list().unwrap_or_default()
+                    },
+                );
 
             if from_end {
                 Ok(PseudoClass::NthLastChild(nth, selector_list))

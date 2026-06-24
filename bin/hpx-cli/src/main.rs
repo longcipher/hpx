@@ -4,10 +4,12 @@
 #![allow(clippy::print_stderr)]
 #![allow(missing_docs)]
 
+mod browser;
 mod cli;
 mod http;
 mod output;
 mod progress;
+mod proxy_test;
 mod ws;
 
 use clap::{CommandFactory, Parser};
@@ -17,6 +19,12 @@ fn main() -> eyre::Result<()> {
     tracing_subscriber::fmt::init();
 
     let cli = Cli::parse();
+
+    // Apply timezone from env/flag
+    if let Some(tz) = &cli.timezone {
+        // SAFETY: called early in main, before any threads read TZ
+        unsafe { std::env::set_var("TZ", tz) };
+    }
 
     if cli.version {
         println!("hpx {}", env!("CARGO_PKG_VERSION"));
@@ -40,6 +48,97 @@ fn main() -> eyre::Result<()> {
             cli.storage_path,
             cli.max_concurrent,
         ));
+    }
+
+    // Handle browser subcommands
+    match cli.command {
+        Some(cli::Commands::Fetch {
+            url,
+            dump,
+            selector,
+            wait,
+            timeout,
+            wait_until,
+            eval,
+            output,
+            quiet,
+        }) => {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?;
+            return runtime.block_on(browser::handle_fetch(
+                url,
+                dump,
+                selector,
+                wait,
+                timeout,
+                wait_until,
+                eval,
+                output,
+                quiet,
+                cli.obey_robots,
+                cli.allow_private_network,
+                cli.v8_flags,
+                cli.storage_dir,
+            ));
+        }
+        Some(cli::Commands::Scrape {
+            urls,
+            eval,
+            concurrency,
+            format,
+            timeout,
+            quiet,
+        }) => {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?;
+            return runtime.block_on(browser::handle_scrape(
+                urls,
+                eval,
+                concurrency,
+                format,
+                timeout,
+                quiet,
+                cli.obey_robots,
+                cli.allow_private_network,
+                cli.v8_flags,
+                cli.storage_dir,
+            ));
+        }
+        Some(cli::Commands::Serve {
+            port,
+            host,
+            stealth,
+            workers,
+            allow_file_access,
+            storage_dir,
+            quiet,
+        }) => {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?;
+            return runtime.block_on(browser::handle_serve(
+                port,
+                host,
+                stealth,
+                workers,
+                allow_file_access,
+                storage_dir,
+                quiet,
+                cli.obey_robots,
+                cli.allow_private_network,
+                cli.v8_flags,
+            ));
+        }
+        Some(cli::Commands::Dl(_)) => unreachable!(),
+        Some(cli::Commands::ProxyTest { proxy }) => {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?;
+            return runtime.block_on(proxy_test::run(&proxy));
+        }
+        None => {}
     }
 
     // Validate URL is provided for HTTP/WS

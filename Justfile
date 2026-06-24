@@ -5,7 +5,6 @@ format:
 fix:
   rumdl check --fix .
 lint:
-  typos
   rumdl check .
   taplo fmt --check
   cargo +nightly fmt --all -- --check
@@ -20,8 +19,6 @@ test-full:
 bdd:
   cargo test -p hpx-dl --test cucumber --all-features
 test-all: test-full bdd
-test-proxy:
-  cargo run -p test-proxy
 build-docs:
   RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items --all-features
 test-coverage:

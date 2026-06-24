@@ -5,9 +5,12 @@
 //! BoringSSL TLS and browser-profile emulation. Higher-level browser
 //! session concerns (cookies, Client Hints, H1-only host memory) live here.
 
+pub mod blocklist;
 pub mod cookies;
 pub mod csp;
 pub mod headers;
+pub mod robots;
+pub mod ssrf;
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -215,7 +218,9 @@ impl HttpClient {
         let parsed = Url::parse(url)?;
         let builder = self.inner.get(url).emulation(self.browser_profile.clone());
 
-        let builder = self.inject_request_headers(builder, &parsed, extra_headers).await;
+        let builder = self
+            .inject_request_headers(builder, &parsed, extra_headers)
+            .await;
         let hpx_resp = builder.send().await?;
         self.process_response(hpx_resp, url, &parsed).await
     }
@@ -236,7 +241,9 @@ impl HttpClient {
         builder = builder.header("sec-fetch-dest", "empty");
         builder = builder.header("sec-fetch-site", "same-origin");
 
-        builder = self.inject_request_headers(builder, &parsed, extra_headers).await;
+        builder = self
+            .inject_request_headers(builder, &parsed, extra_headers)
+            .await;
         let hpx_resp = builder.send().await?;
         self.process_response(hpx_resp, url, &parsed).await
     }
@@ -257,7 +264,9 @@ impl HttpClient {
         builder = builder.header("sec-fetch-dest", "empty");
         builder = builder.header("sec-fetch-site", "same-origin");
 
-        builder = self.inject_request_headers(builder, &parsed, extra_headers).await;
+        builder = self
+            .inject_request_headers(builder, &parsed, extra_headers)
+            .await;
         let hpx_resp = builder.body(body.to_vec()).send().await?;
         self.process_response(hpx_resp, url, &parsed).await
     }
@@ -288,7 +297,9 @@ impl HttpClient {
         let parsed = Url::parse(url)?;
         let builder = self.inner.post(url).emulation(self.browser_profile.clone());
 
-        let builder = self.inject_request_headers(builder, &parsed, extra_headers).await;
+        let builder = self
+            .inject_request_headers(builder, &parsed, extra_headers)
+            .await;
         let hpx_resp = builder.body(body.to_vec()).send().await?;
         self.process_response(hpx_resp, url, &parsed).await
     }

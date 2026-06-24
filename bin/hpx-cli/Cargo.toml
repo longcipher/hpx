@@ -15,6 +15,7 @@ doc = false
 [dependencies]
 clap = { workspace = true, features = ["derive", "env"] }
 eyre = { workspace = true }
+futures = { workspace = true }
 hpx = { workspace = true, features = [
     "http1",
     "http2",
@@ -27,8 +28,11 @@ hpx = { workspace = true, features = [
     "form",
     "multipart",
 ] }
+hpx-browser = { workspace = true, features = ["cdp"] }
 hpx-dl = { workspace = true }
+hpx-yawc = { workspace = true, features = ["proxy"] }
 http = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = [
     "rt-multi-thread",
@@ -37,6 +41,8 @@ tokio = { workspace = true, features = [
     "io-util",
     "signal",
     "fs",
+    "time",
+    "process",
 ] }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }

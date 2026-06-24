@@ -163,7 +163,7 @@ hpx has solid HTTP client foundations and basic browser emulation, but cannot re
 
 ### 5.1 System Context
 
-```
+```text
 ┌──────────────────────────────────────────────────────────────┐
 │                    hpx-browser crate (NEW)                     │
 │                                                               │
@@ -294,7 +294,7 @@ No template identity mismatches detected. The hpx workspace uses project-matchin
 
 ### 6.1 Module Structure
 
-```
+```text
 crates/hpx-browser/                    # NEW — standalone browser engine crate
 ├── Cargo.toml                         # deps: hpx, html5ever, deno_core, skia-safe, taffy, etc.
 ├── src/
@@ -392,7 +392,7 @@ crates/hpx-browser/                    # NEW — standalone browser engine crate
 │   └── csp_collector.rs              # Meta-tag CSP collection
 ```
 
-```
+```text
 crates/hpx/src/                       # MODIFIED — minimal changes to existing hpx crate
 ├── client/
 │   └── emulation.rs                   # MODIFIED — extend Emulation with StealthProfile adapter
@@ -761,6 +761,7 @@ impl EngineHandle {
 ### 6.4 Logic Flow
 
 **Page navigate() loop (full browser):**
+
 1. Fetch URL via hpx::Client with stealth headers + TLS fingerprint
 2. Parse CSP headers + meta tags → install CSP policy
 3. Parse HTML → build DOM tree (html5ever → arena Dom)
@@ -775,26 +776,30 @@ impl EngineHandle {
 12. Return Page with rendered DOM, ready for `evaluate()`, `title()`, `text_of()` queries
 
 **Challenge-aware request flow:**
+
 1. Client sends request via normal Tower stack
-2. Response received → check `engine_classify(body)` 
+2. Response received → check `engine_classify(body)`
 3. If `ChallengeVerdict::Pass` → return `ChallengeOutcome::Clean(response)`
 4. If challenge detected → run solver `detect()` on each registered solver
 5. Return `ChallengeOutcome::Challenge { verdict, kind, response }`
 6. User can then invoke solver's `solve()` if they have a Page
 
 **Critical-CH retry flow:**
+
 1. Send request, receive response with `Accept-CH` header
 2. Store origin in Accept-CH set
 3. If response has `Critical-CH` and we didn't send those hints → re-request with high-entropy CH
 4. Use profile fields (arch, bitness, platform-version, model, wow64, full-version-list) for CH values
 
 **Cookie persistence flow:**
+
 1. On `CookieJar2::new(path)` → load from JSON file if exists
 2. On `set_cookies()` → parse Set-Cookie headers, apply domain/path scoping per RFC 6265
 3. On drop or explicit `save()` → atomic write (tempfile + rename)
 4. Collision scrub: on `add()`, check if cookie domain collides with known pairs (twitter.com/x.com)
 
 **JS extension loading:**
+
 1. On BrowserJsRuntime creation → register 16 extension modules
 2. Each extension injects globals into V8 (document, fetch, setTimeout, crypto, etc.)
 3. DOM extension bridges V8 ↔ arena Dom via NodeId references
@@ -803,6 +808,7 @@ impl EngineHandle {
 ### 6.5 Configuration
 
 New feature flags:
+
 - `challenge` — enables challenge detection module (classify + verdict + trait)
 - `stealth-profile` — enables StealthProfile, BehaviorProfile, GpuProfile, presets
 - `humanize` — enables mouse/keystroke/scroll generation (depends on `stealth-profile`)

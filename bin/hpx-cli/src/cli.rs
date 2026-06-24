@@ -47,12 +47,104 @@ pub(crate) enum ColorMode {
     Off,
 }
 
+/// Dump format for browser page content.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub(crate) enum DumpFormat {
+    #[default]
+    Html,
+    Text,
+    Links,
+    Markdown,
+    Original,
+    Assets,
+    Cookies,
+}
+
 /// Download management commands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum Commands {
     /// Download management commands.
     #[command(subcommand)]
     Dl(DlCommands),
+    /// Fetch and render a single page via the browser engine.
+    Fetch {
+        /// URL to fetch.
+        url: String,
+        /// Output dump format.
+        #[arg(long, value_enum, default_value_t)]
+        dump: DumpFormat,
+        /// Wait for CSS selector before dumping.
+        #[arg(long)]
+        selector: Option<String>,
+        /// Post-load settle time in seconds.
+        #[arg(long, default_value_t = 5)]
+        wait: u64,
+        /// Timeout in seconds.
+        #[arg(long, default_value_t = 30)]
+        timeout: u64,
+        /// Wait until load event condition.
+        #[arg(long, default_value = "load")]
+        wait_until: String,
+        /// Evaluate JavaScript expression.
+        #[arg(long, short = 'e')]
+        eval: Option<String>,
+        /// Write output to file instead of stdout.
+        #[arg(long, short = 'o')]
+        output: Option<std::path::PathBuf>,
+        /// Suppress progress messages.
+        #[arg(long, short)]
+        quiet: bool,
+    },
+    /// Scrape multiple URLs in parallel via worker processes.
+    Scrape {
+        /// URLs to scrape.
+        urls: Vec<String>,
+        /// Evaluate JavaScript expression on each page.
+        #[arg(long, short = 'e')]
+        eval: Option<String>,
+        /// Maximum concurrent workers.
+        #[arg(long, short, default_value_t = 10)]
+        concurrency: usize,
+        /// Output format (json or text).
+        #[arg(long, default_value = "json")]
+        format: String,
+        /// Per-URL timeout in seconds.
+        #[arg(long, default_value_t = 60)]
+        timeout: u64,
+        /// Suppress progress messages.
+        #[arg(long, short)]
+        quiet: bool,
+    },
+    /// Start a CDP WebSocket server for Puppeteer/Playwright.
+    Serve {
+        /// Port to listen on.
+        #[arg(short, long, default_value_t = 9222)]
+        port: u16,
+        /// Host to bind to.
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        /// Enable stealth mode.
+        #[arg(long)]
+        stealth: bool,
+        /// Number of worker processes.
+        #[arg(long, default_value_t = 1)]
+        workers: u16,
+        /// Allow file:// URL access.
+        #[arg(long)]
+        allow_file_access: bool,
+        /// Cookie storage directory.
+        #[arg(long)]
+        storage_dir: Option<std::path::PathBuf>,
+        /// Suppress log output.
+        #[arg(long)]
+        quiet: bool,
+    },
+    /// Run proxy integration smoke tests (HTTP, HTTPS, WS, WSS through a proxy).
+    ProxyTest {
+        /// Proxy URL to test against (e.g. "http://127.0.0.1:7890").
+        #[arg(long, default_value = "http://127.0.0.1:7890")]
+        proxy: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -260,6 +352,26 @@ pub(crate) struct Cli {
     /// Print help.
     #[arg(short = 'h', long)]
     pub help: bool,
+
+    /// Respect robots.txt rules when fetching.
+    #[arg(long, global = true, env = "HPX_OBEY_ROBOTS")]
+    pub obey_robots: bool,
+
+    /// Allow fetching from private/local network IPs.
+    #[arg(long, global = true, env = "HPX_ALLOW_PRIVATE_NETWORK")]
+    pub allow_private_network: bool,
+
+    /// Raw flags to pass to V8 engine.
+    #[arg(long, global = true, env = "HPX_V8_FLAGS")]
+    pub v8_flags: Option<String>,
+
+    /// Directory for persistent browser storage (cookies, etc.).
+    #[arg(long, global = true)]
+    pub storage_dir: Option<std::path::PathBuf>,
+
+    /// Override timezone for the process.
+    #[arg(long, global = true, env = "HPX_TIMEZONE")]
+    pub timezone: Option<String>,
 }
 
 fn parse_pairs(items: &[String], sep: char) -> Vec<(String, String)> {
@@ -447,6 +559,9 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
+
+    /// Mutex to serialize env var tests (env vars are process-global).
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn parse_speed_limit_raw_bytes() {
@@ -997,7 +1112,8 @@ mod tests {
     #[test]
     fn env_var_timeout() {
         use clap::Parser;
-        // SAFETY: single-threaded test, no concurrent env access
+        let _g = ENV_LOCK.lock().unwrap();
+        // SAFETY: serialized by ENV_LOCK, no concurrent env access
         unsafe { std::env::set_var("HPX_TIMEOUT", "42") };
         let cli = Cli::try_parse_from(["hpx", "httpbin.org/get"]).unwrap();
         assert_eq!(cli.timeout, Some(42.0));
@@ -1007,7 +1123,8 @@ mod tests {
     #[test]
     fn env_var_timeout_flag_overrides() {
         use clap::Parser;
-        // SAFETY: single-threaded test, no concurrent env access
+        let _g = ENV_LOCK.lock().unwrap();
+        // SAFETY: serialized by ENV_LOCK, no concurrent env access
         unsafe { std::env::set_var("HPX_TIMEOUT", "42") };
         let cli = Cli::try_parse_from(["hpx", "--timeout", "10", "httpbin.org/get"]).unwrap();
         assert_eq!(cli.timeout, Some(10.0));
@@ -1017,7 +1134,8 @@ mod tests {
     #[test]
     fn env_var_method() {
         use clap::Parser;
-        // SAFETY: single-threaded test, no concurrent env access
+        let _g = ENV_LOCK.lock().unwrap();
+        // SAFETY: serialized by ENV_LOCK, no concurrent env access
         unsafe { std::env::set_var("HPX_METHOD", "POST") };
         let cli = Cli::try_parse_from(["hpx", "httpbin.org/post"]).unwrap();
         assert_eq!(cli.method, Method::Post);
@@ -1027,7 +1145,8 @@ mod tests {
     #[test]
     fn env_var_method_flag_overrides() {
         use clap::Parser;
-        // SAFETY: single-threaded test, no concurrent env access
+        let _g = ENV_LOCK.lock().unwrap();
+        // SAFETY: serialized by ENV_LOCK, no concurrent env access
         unsafe { std::env::set_var("HPX_METHOD", "POST") };
         let cli = Cli::try_parse_from(["hpx", "-X", "GET", "httpbin.org/get"]).unwrap();
         assert_eq!(cli.method, Method::Get);
@@ -1037,7 +1156,8 @@ mod tests {
     #[test]
     fn env_var_redirects() {
         use clap::Parser;
-        // SAFETY: single-threaded test, no concurrent env access
+        let _g = ENV_LOCK.lock().unwrap();
+        // SAFETY: serialized by ENV_LOCK, no concurrent env access
         unsafe { std::env::set_var("HPX_REDIRECTS", "5") };
         let cli = Cli::try_parse_from(["hpx", "httpbin.org/get"]).unwrap();
         assert_eq!(cli.redirects, Some(5));
@@ -1047,7 +1167,8 @@ mod tests {
     #[test]
     fn env_var_proxy() {
         use clap::Parser;
-        // SAFETY: single-threaded test, no concurrent env access
+        let _g = ENV_LOCK.lock().unwrap();
+        // SAFETY: serialized by ENV_LOCK, no concurrent env access
         unsafe { std::env::set_var("HPX_PROXY", "http://proxy:8080") };
         let cli = Cli::try_parse_from(["hpx", "httpbin.org/get"]).unwrap();
         assert_eq!(cli.proxy.as_deref(), Some("http://proxy:8080"));
@@ -1057,7 +1178,8 @@ mod tests {
     #[test]
     fn env_var_follow() {
         use clap::Parser;
-        // SAFETY: single-threaded test, no concurrent env access
+        let _g = ENV_LOCK.lock().unwrap();
+        // SAFETY: serialized by ENV_LOCK, no concurrent env access
         unsafe { std::env::set_var("HPX_FOLLOW", "true") };
         let cli = Cli::try_parse_from(["hpx", "httpbin.org/get"]).unwrap();
         assert!(cli.follow);
@@ -1871,5 +1993,244 @@ mod tests {
         assert_eq!(arr[1]["state"], "Completed");
         assert_eq!(arr[0]["total_bytes"], serde_json::Value::Null);
         assert_eq!(arr[1]["total_bytes"], 2048);
+    }
+
+    #[test]
+    fn test_fetch_subcommand_parses() {
+        let cli = Cli::try_parse_from(["hpx", "fetch", "https://example.com"]).unwrap();
+        assert!(matches!(cli.command, Some(Commands::Fetch { .. })));
+    }
+
+    #[test]
+    fn test_fetch_with_all_flags() {
+        let cli = Cli::try_parse_from([
+            "hpx",
+            "fetch",
+            "https://example.com",
+            "--dump",
+            "text",
+            "--selector",
+            "#app",
+            "--wait",
+            "3",
+            "--timeout",
+            "10",
+            "--wait-until",
+            "networkidle0",
+            "-e",
+            "document.title",
+            "-o",
+            "/tmp/out.txt",
+            "--quiet",
+        ])
+        .unwrap();
+        if let Some(Commands::Fetch {
+            dump,
+            selector,
+            wait,
+            timeout,
+            wait_until,
+            eval,
+            output,
+            quiet,
+            ..
+        }) = cli.command
+        {
+            assert_eq!(dump, DumpFormat::Text);
+            assert_eq!(selector.as_deref(), Some("#app"));
+            assert_eq!(wait, 3);
+            assert_eq!(timeout, 10);
+            assert_eq!(wait_until, "networkidle0");
+            assert_eq!(eval.as_deref(), Some("document.title"));
+            assert!(output.is_some());
+            assert!(quiet);
+        } else {
+            panic!("Expected Fetch command");
+        }
+    }
+
+    #[test]
+    fn test_scrape_subcommand_parses() {
+        let cli = Cli::try_parse_from([
+            "hpx",
+            "scrape",
+            "https://a.com",
+            "https://b.com",
+            "--concurrency",
+            "5",
+            "-e",
+            "document.title",
+        ])
+        .unwrap();
+        if let Some(Commands::Scrape {
+            urls,
+            concurrency,
+            eval,
+            ..
+        }) = cli.command
+        {
+            assert_eq!(urls.len(), 2);
+            assert_eq!(concurrency, 5);
+            assert_eq!(eval.as_deref(), Some("document.title"));
+        } else {
+            panic!("Expected Scrape command");
+        }
+    }
+
+    #[test]
+    fn test_serve_subcommand_parses() {
+        let cli = Cli::try_parse_from([
+            "hpx",
+            "serve",
+            "--port",
+            "9333",
+            "--workers",
+            "4",
+            "--stealth",
+        ])
+        .unwrap();
+        if let Some(Commands::Serve {
+            port,
+            workers,
+            stealth,
+            ..
+        }) = cli.command
+        {
+            assert_eq!(port, 9333);
+            assert_eq!(workers, 4);
+            assert!(stealth);
+        } else {
+            panic!("Expected Serve command");
+        }
+    }
+
+    #[test]
+    fn test_global_browser_flags() {
+        let cli = Cli::try_parse_from([
+            "hpx",
+            "--obey-robots",
+            "--allow-private-network",
+            "--v8-flags=--expose-gc",
+            "fetch",
+            "https://example.com",
+        ])
+        .unwrap();
+        assert!(cli.obey_robots);
+        assert!(cli.allow_private_network);
+        assert_eq!(cli.v8_flags.as_deref(), Some("--expose-gc"));
+    }
+
+    #[test]
+    fn test_dump_format_default() {
+        assert_eq!(DumpFormat::default(), DumpFormat::Html);
+    }
+
+    #[test]
+    fn test_existing_dl_subcommand_unchanged() {
+        let cli =
+            Cli::try_parse_from(["hpx", "dl", "add", "https://example.com/file.zip"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Dl(DlCommands::Add { .. }))
+        ));
+    }
+
+    #[test]
+    fn test_existing_http_request_unchanged() {
+        let cli = Cli::try_parse_from(["hpx", "https://example.com"]).unwrap();
+        assert!(cli.url.is_some());
+        assert!(cli.command.is_none());
+    }
+
+    #[test]
+    fn env_var_obey_robots() {
+        use clap::Parser;
+        let _g = ENV_LOCK.lock().unwrap();
+        // SAFETY: serialized by ENV_LOCK, no concurrent env access
+        unsafe { std::env::set_var("HPX_OBEY_ROBOTS", "true") };
+        let cli = Cli::try_parse_from(["hpx", "httpbin.org/get"]).unwrap();
+        assert!(cli.obey_robots);
+        unsafe { std::env::remove_var("HPX_OBEY_ROBOTS") };
+    }
+
+    #[test]
+    fn env_var_obey_robots_flag_overrides() {
+        use clap::Parser;
+        let _g = ENV_LOCK.lock().unwrap();
+        // Without env, flag should be false
+        unsafe { std::env::remove_var("HPX_OBEY_ROBOTS") };
+        let cli = Cli::try_parse_from(["hpx", "httpbin.org/get"]).unwrap();
+        assert!(!cli.obey_robots);
+        // With env set, flag should be true
+        // SAFETY: serialized by ENV_LOCK, no concurrent env access
+        unsafe { std::env::set_var("HPX_OBEY_ROBOTS", "true") };
+        let cli = Cli::try_parse_from(["hpx", "httpbin.org/get"]).unwrap();
+        assert!(cli.obey_robots);
+        unsafe { std::env::remove_var("HPX_OBEY_ROBOTS") };
+    }
+
+    #[test]
+    fn env_var_allow_private_network() {
+        use clap::Parser;
+        let _g = ENV_LOCK.lock().unwrap();
+        // SAFETY: serialized by ENV_LOCK, no concurrent env access
+        unsafe { std::env::set_var("HPX_ALLOW_PRIVATE_NETWORK", "true") };
+        let cli = Cli::try_parse_from(["hpx", "httpbin.org/get"]).unwrap();
+        assert!(cli.allow_private_network);
+        unsafe { std::env::remove_var("HPX_ALLOW_PRIVATE_NETWORK") };
+    }
+
+    #[test]
+    fn env_var_v8_flags() {
+        use clap::Parser;
+        let _g = ENV_LOCK.lock().unwrap();
+        // SAFETY: serialized by ENV_LOCK, no concurrent env access
+        unsafe { std::env::set_var("HPX_V8_FLAGS", "--expose-gc") };
+        let cli = Cli::try_parse_from(["hpx", "httpbin.org/get"]).unwrap();
+        assert_eq!(cli.v8_flags.as_deref(), Some("--expose-gc"));
+        unsafe { std::env::remove_var("HPX_V8_FLAGS") };
+    }
+
+    #[test]
+    fn env_var_v8_flags_flag_overrides() {
+        use clap::Parser;
+        let _g = ENV_LOCK.lock().unwrap();
+        // SAFETY: serialized by ENV_LOCK, no concurrent env access
+        unsafe { std::env::set_var("HPX_V8_FLAGS", "--expose-gc") };
+        let cli = Cli::try_parse_from(["hpx", "--v8-flags=--harmony", "httpbin.org/get"]).unwrap();
+        assert_eq!(cli.v8_flags.as_deref(), Some("--harmony"));
+        unsafe { std::env::remove_var("HPX_V8_FLAGS") };
+    }
+
+    #[test]
+    fn env_var_timezone() {
+        use clap::Parser;
+        let _g = ENV_LOCK.lock().unwrap();
+        // SAFETY: serialized by ENV_LOCK, no concurrent env access
+        unsafe { std::env::set_var("HPX_TIMEZONE", "America/New_York") };
+        let cli = Cli::try_parse_from(["hpx", "httpbin.org/get"]).unwrap();
+        assert_eq!(cli.timezone.as_deref(), Some("America/New_York"));
+        unsafe { std::env::remove_var("HPX_TIMEZONE") };
+    }
+
+    #[test]
+    fn env_var_timezone_flag_overrides() {
+        use clap::Parser;
+        let _g = ENV_LOCK.lock().unwrap();
+        // SAFETY: serialized by ENV_LOCK, no concurrent env access
+        unsafe { std::env::set_var("HPX_TIMEZONE", "America/New_York") };
+        let cli = Cli::try_parse_from(["hpx", "--timezone", "UTC", "httpbin.org/get"]).unwrap();
+        assert_eq!(cli.timezone.as_deref(), Some("UTC"));
+        unsafe { std::env::remove_var("HPX_TIMEZONE") };
+    }
+
+    #[test]
+    fn env_var_timezone_default_none() {
+        use clap::Parser;
+        let _g = ENV_LOCK.lock().unwrap();
+        // SAFETY: serialized by ENV_LOCK, no concurrent env access
+        unsafe { std::env::remove_var("HPX_TIMEZONE") };
+        let cli = Cli::try_parse_from(["hpx", "httpbin.org/get"]).unwrap();
+        assert!(cli.timezone.is_none());
     }
 }

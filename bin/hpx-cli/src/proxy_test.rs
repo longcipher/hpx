@@ -1,38 +1,30 @@
 use eyre::{Result, bail, eyre};
 use futures::{SinkExt, StreamExt};
 use hpx_yawc::{Frame, WebSocket, close::CloseCode, proxy::ProxyConfig};
-use url::Url;
 
-const PROXY_URL: &str = "http://127.0.0.1:7890";
+pub(crate) async fn run(proxy_url: &str) -> Result<()> {
+    println!("=== HTTP Proxy Tests (proxy={proxy_url}) ===\n");
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .init();
-
-    println!("=== HTTP Proxy Tests (proxy={PROXY_URL}) ===\n");
-
-    test_http_proxy().await?;
+    test_http_proxy(proxy_url).await?;
     println!("[PASS] HTTP proxy (plain HTTP)\n");
 
-    test_https_proxy().await?;
+    test_https_proxy(proxy_url).await?;
     println!("[PASS] HTTPS proxy (CONNECT tunnel)\n");
 
-    println!("=== WebSocket Proxy Tests (proxy={PROXY_URL}) ===\n");
+    println!("=== WebSocket Proxy Tests (proxy={proxy_url}) ===\n");
 
-    test_ws_proxy().await?;
+    test_ws_proxy(proxy_url).await?;
     println!("[PASS] WebSocket proxy (ws://echo)\n");
 
-    test_wss_proxy().await?;
+    test_wss_proxy(proxy_url).await?;
     println!("[PASS] WebSocket proxy (wss://echo)\n");
 
     println!("=== All proxy tests passed ===");
     Ok(())
 }
 
-async fn test_http_proxy() -> Result<()> {
-    let proxy = hpx::Proxy::http(PROXY_URL)?;
+async fn test_http_proxy(proxy_url: &str) -> Result<()> {
+    let proxy = hpx::Proxy::http(proxy_url)?;
     let client = hpx::Client::builder().proxy(proxy).build()?;
 
     let resp = client
@@ -55,8 +47,8 @@ async fn test_http_proxy() -> Result<()> {
     Ok(())
 }
 
-async fn test_https_proxy() -> Result<()> {
-    let proxy = hpx::Proxy::all(PROXY_URL)?;
+async fn test_https_proxy(proxy_url: &str) -> Result<()> {
+    let proxy = hpx::Proxy::all(proxy_url)?;
     let client = hpx::Client::builder()
         .proxy(proxy)
         .cert_verification(false)
@@ -82,9 +74,8 @@ async fn test_https_proxy() -> Result<()> {
     Ok(())
 }
 
-async fn test_ws_proxy() -> Result<()> {
-    let proxy_url: Url = PROXY_URL.parse()?;
-    let proxy = ProxyConfig::Http(proxy_url);
+async fn test_ws_proxy(proxy_url: &str) -> Result<()> {
+    let proxy = ProxyConfig::Http(proxy_url.parse()?);
 
     let mut ws = WebSocket::connect("wss://ws.postman-echo.com/raw".parse()?)
         .with_proxy(proxy)
@@ -109,9 +100,8 @@ async fn test_ws_proxy() -> Result<()> {
     Ok(())
 }
 
-async fn test_wss_proxy() -> Result<()> {
-    let proxy_url: Url = PROXY_URL.parse()?;
-    let proxy = ProxyConfig::Http(proxy_url);
+async fn test_wss_proxy(proxy_url: &str) -> Result<()> {
+    let proxy = ProxyConfig::Http(proxy_url.parse()?);
 
     let mut ws = WebSocket::connect("wss://ws.postman-echo.com/raw".parse()?)
         .with_proxy(proxy)

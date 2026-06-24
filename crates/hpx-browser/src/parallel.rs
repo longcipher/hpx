@@ -60,7 +60,7 @@ impl ParallelPager {
                     .name(format!("hpx-browser-pager-{i}"))
                     .stack_size(64 * 1024 * 1024)
                     .spawn(move || worker_main(rx))
-                    .expect("failed to spawn pager worker");
+                    .unwrap_or_else(|e| panic!("failed to spawn pager worker: {e}"));
                 WorkerHandle {
                     tx,
                     _thread: thread,

@@ -816,11 +816,7 @@ pub struct DomElement<'a> {
 impl<'a> DomElement<'a> {
     pub fn new(dom: &'a Dom, id: NodeId) -> Option<Self> {
         let node = dom.get(id)?;
-        if node.is_element() {
-            Some(Self { dom, id })
-        } else {
-            None
-        }
+        node.is_element().then_some(Self { dom, id })
     }
 
     pub fn node_id(&self) -> NodeId {

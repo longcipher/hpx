@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use tracing::error;
+
 use crate::{
     css_cascade::ComputedStyle,
     css_parser::{self, ComponentValue, TokenKind},
@@ -149,11 +151,12 @@ impl LayoutEngine {
                     }
                     steps += 1;
                     if steps > LAYOUT_BUILD_LIMIT {
-                        panic!(
+                        error!(
                             "Layout build cycle from {:?} — visited {} unique nodes",
                             root,
                             visited.len()
                         );
+                        return None;
                     }
                     stack.push(Work::Finish(node_id));
                     let kids = dom.children(node_id);
@@ -483,15 +486,9 @@ fn parse_number(prop: &PropertyId, value: f64) -> Option<CssValue> {
     match prop {
         PropertyId::FlexGrow => Some(CssValue::Number(value)),
         PropertyId::FlexShrink => Some(CssValue::Number(value)),
-        PropertyId::FlexBasis => {
-            if value == 0.0 {
-                Some(CssValue::LengthPercentageAuto(
-                    css_length::LengthPercentageAuto::Length(css_length::Length::Zero),
-                ))
-            } else {
-                None
-            }
-        }
+        PropertyId::FlexBasis => (value == 0.0).then_some(CssValue::LengthPercentageAuto(
+            css_length::LengthPercentageAuto::Length(css_length::Length::Zero),
+        )),
         PropertyId::ZIndex => Some(CssValue::Integer(value as i32)),
         PropertyId::Opacity => Some(CssValue::Number(value)),
         PropertyId::FontWeight => {

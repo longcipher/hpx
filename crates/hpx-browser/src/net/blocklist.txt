@@ -1,0 +1,253 @@
+# Tracker domain blocklist — subset of common trackers
+# One domain per line. # comments and blank lines ignored.
+
+# Google / DoubleClick
+google-analytics.com
+googletagmanager.com
+doubleclick.net
+googlesyndication.com
+googleservices.com
+googleadservices.com
+googleapis.com
+googlecommerce.com
+adservice.google.com
+pagead2.googlesyndication.com
+stats.g.doubleclick.net
+
+# Facebook / Meta
+facebook.com
+facebook.net
+fbcdn.net
+connect.facebook.net
+pixel.facebook.com
+analytics.facebook.com
+graph.facebook.com
+
+# Amazon
+amazon-adsystem.com
+fls-na.amazon.com
+ws-na.amazon-adsystem.com
+
+# Microsoft / Bing
+bat.bing.com
+clarity.ms
+ads.microsoft.com
+bing.com
+
+# Twitter / X
+analytics.twitter.com
+ads-twitter.com
+platform.twitter.com
+
+# TikTok
+analytics.tiktok.com
+mon.tiktokv.com
+log.byteoversea.com
+
+# Adobe
+omtrdc.net
+demdex.net
+everesttech.net
+adobe.com
+
+# Segment
+segment.io
+segment.com
+api.segment.io
+cdn.segment.com
+
+# Mixpanel
+mixpanel.com
+api.mixpanel.com
+
+# Amplitude
+amplitude.com
+api.amplitude.com
+
+# Heap
+heap-api.com
+heapanalytics.com
+
+# Hotjar
+hotjar.com
+static.hotjar.com
+vars.hotjar.com
+
+# FullStory
+fullstory.com
+rs.fullstory.com
+
+# New Relic
+nr-data.net
+newrelic.com
+bam.nr-data.net
+
+# Datadog
+datadoghq.com
+browser-intake-datadoghq.com
+
+# Sentry
+sentry.io
+sentry-cdn.com
+browser.sentry-cdn.com
+
+# Snowplow
+snowplowanalytics.com
+sp-js.rudderlabs.com
+
+# Crazy Egg
+crazyegg.com
+script.crazyegg.com
+
+# Mouseflow
+mouseflow.com
+cdn.mouseflow.com
+
+# Lucky Orange
+luckyorange.com
+cdn.luckyorange.com
+
+# Optimizely
+optimizely.com
+cdn.optimizely.com
+logx.optimizely.com
+
+# VWO (Visual Website Optimizer)
+vwo.com
+dev.visualwebsiteoptimizer.com
+
+# HubSpot
+hs-analytics.net
+hs-scripts.com
+hsadspixel.net
+hubspot.com
+
+# Marketo
+marketo.com
+mktoresp.com
+app.marketo.com
+
+# Pardot
+pardot.com
+pi.pardot.com
+
+# Intercom
+intercom.io
+intercomcdn.com
+widget.intercom.io
+
+# Drift
+drift.com
+driftt.com
+api.drift.com
+
+# Zendesk
+zendesk.com
+zdassets.com
+
+# Mailchimp
+list-manage.com
+chimpstatic.com
+
+# Criteo
+criteo.com
+criteo.net
+static.criteo.net
+bidder.criteo.com
+
+# Taboola
+taboola.com
+trc.taboola.com
+cdn.taboola.com
+
+# Outbrain
+outbrain.com
+widgets.outbrain.com
+log.outbrainimg.com
+
+# MediaNet
+media.net
+contextual.media.net
+
+# AdRoll
+adroll.com
+a.adroll.com
+
+# AppNexus / Xandr
+adnxs.com
+ib.adnxs.com
+
+# Rubicon / Magnite
+rubiconproject.com
+fastlane.rubiconproject.com
+
+# Pubmatic
+pubmatic.com
+ads.pubmatic.com
+
+# OpenX
+openx.net
+servedby.openx.com
+
+# Index Exchange
+indexww.com
+casalemedia.com
+
+# The Trade Desk
+thetradedesk.com
+match.adsrvr.org
+
+# Lotame
+lotame.com
+crwdcntrl.net
+
+# Tapad
+tapad.com
+
+# LiveRamp
+rlcdn.com
+liveramp.com
+
+# Branch
+branch.io
+app.link
+
+# Adjust
+adjust.com
+app.adjust.com
+
+# AppsFlyer
+appsflyer.com
+onelink.me
+t.appsflyer.com
+
+# Kochava
+kochava.com
+
+# Singular
+singular.net
+
+# Chartbeat
+chartbeat.com
+static.chartbeat.com
+
+# Parse.ly
+parsely.com
+cdn.parsely.com
+
+# Quantcast
+quantserve.com
+quantcast.com
+pixel.quantserve.com
+
+# Scorecard Research
+scorecardresearch.com
+sb.scorecardresearch.com
+
+# comScore
+comscore.com
+voicefive.com
+
+# Nielsen
+imrworldwidesk.net
+nielsen.com

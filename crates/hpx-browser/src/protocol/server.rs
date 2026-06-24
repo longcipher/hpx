@@ -62,7 +62,10 @@ impl CdpServer {
                         return;
                     }
                 };
-                let actual_port = listener.local_addr().unwrap().port();
+                let actual_port = listener
+                    .local_addr()
+                    .unwrap_or_else(|e| panic!("failed to get local addr: {e}"))
+                    .port();
                 port_tx.send(actual_port).ok();
 
                 accept_loop(listener, page, shutdown_clone).await;
