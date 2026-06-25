@@ -32,7 +32,7 @@ impl TimerState {
 
 #[op2(fast)]
 #[smi]
-pub fn op_set_timeout(state: &mut OpState, #[smi] delay_ms: i32) -> i32 {
+pub(crate) fn op_set_timeout(state: &mut OpState, #[smi] delay_ms: i32) -> i32 {
     let state = state.borrow_mut::<TimerState>();
     let id = state.next_id;
     state.next_id += 1;
@@ -48,7 +48,7 @@ pub fn op_set_timeout(state: &mut OpState, #[smi] delay_ms: i32) -> i32 {
 
 #[op2(fast)]
 #[smi]
-pub fn op_set_interval(state: &mut OpState, #[smi] delay_ms: i32) -> i32 {
+pub(crate) fn op_set_interval(state: &mut OpState, #[smi] delay_ms: i32) -> i32 {
     let state = state.borrow_mut::<TimerState>();
     let id = state.next_id;
     state.next_id += 1;
@@ -63,14 +63,14 @@ pub fn op_set_interval(state: &mut OpState, #[smi] delay_ms: i32) -> i32 {
 }
 
 #[op2(fast)]
-pub fn op_clear_timer(state: &mut OpState, #[smi] id: i32) {
+pub(crate) fn op_clear_timer(state: &mut OpState, #[smi] id: i32) {
     let state = state.borrow_mut::<TimerState>();
     state.cancelled.insert(id);
     state.pending.remove(&id);
 }
 
 #[op2(async(deferred), fast)]
-pub async fn op_timer_sleep(#[smi] ms: i32) {
+pub(crate) async fn op_timer_sleep(#[smi] ms: i32) {
     tokio::time::sleep(tokio::time::Duration::from_millis(ms.max(0) as u64)).await;
 }
 

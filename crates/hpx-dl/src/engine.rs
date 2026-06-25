@@ -592,12 +592,38 @@ impl EngineInner {
             self.spawn_download(entry, permit);
         }
 
-        self.scheduler_running.store(false, Ordering::Release);
+        // CAS loop: atomically release the scheduler lock, but re-enter if
+        // new work arrived between our last pop and now.
+        loop {
+            // Try to transition from running → not-running.
+            if self
+                .scheduler_running
+                .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
+                .is_err()
+            {
+                // Someone else set it to true (a concurrent add() called
+                // trigger_scheduler), so they own the scheduler now.
+                return;
+            }
 
-        let should_retry =
-            !self.queue.lock().is_empty() && self.concurrency.available_permits() > 0;
-        if should_retry {
-            self.trigger_scheduler();
+            // We hold the lock. Check if more work arrived.
+            let has_work =
+                !self.queue.lock().is_empty() && self.concurrency.available_permits() > 0;
+            if !has_work {
+                return;
+            }
+
+            // Re-acquire the scheduler slot. If this fails, another
+            // trigger_scheduler() already started a new loop.
+            if self
+                .scheduler_running
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_err()
+            {
+                return;
+            }
+
+            // We re-acquired — loop back to process the queued work.
         }
     }
 

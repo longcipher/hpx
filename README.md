@@ -7,83 +7,285 @@
 
 ![hpx](https://socialify.git.ci/longcipher/hpx/image?font=Source+Code+Pro&language=1&name=1&owner=1&pattern=Circuit+Board&theme=Auto)
 
-This project is a fork of [wreq](https://github.com/0x676e67/wreq) and indirectly [reqwest](https://github.com/seanmonstar/reqwest), designed for the network layer of crypto exchange HFT high-performance applications. The primary goal of this fork is performance optimization.
+A high-performance HTTP client workspace for crypto exchange HFT applications. Forked from [wreq](https://github.com/0x676e67/wreq) / [reqwest](https://github.com/seanmonstar/reqwest), optimized for low-latency network I/O, browser emulation, and automated scraping.
 
-An ergonomic all-in-one HTTP client for browser emulation with TLS, JA3/JA4, and HTTP/2 fingerprints.
-
-## Version
-
-| Crate | Version | Description |
-|-------|---------|-------------|
-| [`hpx`](https://crates.io/crates/hpx) | 2.x | High Performance HTTP Client |
-| [`hpx-emulation`](https://crates.io/crates/hpx-emulation) | 2.x | Browser emulation profiles for hpx (TLS fingerprinting, HTTP/2 settings) |
-| [`hpx-yawc`](https://crates.io/crates/hpx-yawc) | 2.x | Yet another websocket library. A fast, secure WebSocket implementation with RFC 6455 compliance and compression support |
-| [`hpx-fastwebsockets`](https://crates.io/crates/hpx-fastwebsockets) | 2.x | A fast RFC6455 WebSocket server implementation |
-| [`hpx-streams`](https://crates.io/crates/hpx-streams) | 2.x | HTTP response streaming support for hpx: JSON/CSV/Protobuf/Arrow |
-| [`hpx-dl`](https://crates.io/crates/hpx-dl) | 2.x | High-performance download engine built on hpx |
-
-## Features
-
-- **Browser Emulation**: Simulate various browser TLS/HTTP2 fingerprints (JA3/JA4)
-- **Content Handling**: Plain bodies, JSON, urlencoded, multipart, streaming
-- **Advanced Features**:
-  - Cookies Store
-  - Redirect Policy
-  - Original Header Preservation
-  - Rotating Proxies
-  - Certificate Store
-  - Tower Middleware Support
-  - Request/Response Hooks
-  - Retry Configuration
-  - Compression (gzip, brotli, deflate, zstd)
-  - Character Encoding Support
-- **WebSocket**: Upgrade support with switchable backends (yawc or fastwebsockets)
-- **TLS Backends**: BoringSSL (default) and Rustls
-
-## Architecture
+## Workspace Structure
 
 ```text
-+-----------------------------------------------------------+
-|                        User API                           |
-| (Client, ClientBuilder, RequestBuilder, Response)         |
-+-----------------------------------------------------------+
-|                     Tower Middleware Stack                 |
-| (HooksLayer, RetryLayer, TimeoutLayer, DecompressionLayer)|
-+---------------------------+-------------------------------+
-|        hpx-core           |   hpx-ws (yawc/fastws)       |
-+---------------------------+                               |
-|      Connection Pool      |      WebSocket Handshake      |
-+-------------+-------------+-------------------------------+
-| TLS Backend | (Feature Switched: BoringSSL / Rustls)      |
-+-------------+---------------------------------------------+
-|                Transport (Tokio TCP Stream)                |
-+-----------------------------------------------------------+
+hpx/
+├── bin/
+│   └── hpx-cli/          # CLI binary — HTTP client, scraper, download manager, CDP server
+├── crates/
+│   ├── hpx/              # Core HTTP client library (TLS, HTTP/1+2, pooling, middleware)
+│   ├── hpx-emulation/    # Browser fingerprint profiles (JA3/JA4, HTTP/2 settings)
+│   ├── hpx-browser/      # Headless browser engine (DOM, CSS, layout, JS, challenge detection)
+│   ├── hpx-dl/           # Segmented download engine (resume, queue, persistence)
+│   ├── hpx-streams/      # Streaming response codecs (JSON/CSV/Protobuf/Arrow)
+│   └── yawc/             # WebSocket client/server (RFC 6455, compression)
+└── Justfile              # Task runner (fmt, lint, test, ci)
 ```
 
-## Installation
+## Crates
 
-Add `hpx` to your `Cargo.toml`:
+### [`hpx`](https://crates.io/crates/hpx) — Core HTTP Client
 
-```toml
-[dependencies]
-hpx = "2"
+The foundation crate. Everything else builds on top of this.
+
+**Provides:** `Client`, `ClientBuilder`, `RequestBuilder`, `Response`, `Body`, WebSocket upgrade, cookie store, redirect policy, Tower middleware stack, TLS backends (BoringSSL / Rustls).
+
+**Use when:** You need to make HTTP requests — GET, POST, JSON APIs, file uploads, WebSocket connections, or reverse proxy traffic.
+
+```rust
+// Minimal
+let body = hpx::get("https://api.example.com").send().await?.text().await?;
+
+// Full control
+let client = hpx::Client::builder()
+    .emulation(BrowserProfile::Chrome)
+    .proxy("socks5://127.0.0.1:1080")
+    .cookie_provider(Jar::default())
+    .build()?;
 ```
 
-The default features include **BoringSSL** TLS, **HTTP/1.1**, and **HTTP/2** support.
+**Key feature flags:** `json`, `ws`, `cookies`, `gzip`/`brotli`/`zstd`, `socks`, `hickory-dns`, `hft` (preset), `stealth` (preset).
 
-For browser emulation, add the utility crate:
+---
 
-```toml
-[dependencies]
-hpx = "2"
-hpx-emulation = "2"
+### [`hpx-emulation`](https://crates.io/crates/hpx-emulation) — Browser Fingerprint Profiles
+
+Companion crate for `hpx`. Provides ready-made browser emulation profiles that configure TLS ciphersuites, HTTP/2 settings, and default headers to match real browsers.
+
+**Provides:** `Emulation`, `EmulationOption`, `BrowserProfile` (Chrome, Firefox, Safari, Edge, OkHttp), `EmulationOS`, fingerprint diffing.
+
+**Use when:** You need to impersonate a specific browser for TLS fingerprint checks (JA3/JA4), or when scraping sites that inspect HTTP/2 SETTINGS frames.
+
+```rust
+use hpx_emulation::Emulation;
+
+let resp = hpx::get("https://tls.peet.ws/api/all")
+    .emulation(Emulation::Firefox136)
+    .send()
+    .await?;
 ```
+
+**Depends on:** `hpx` (provides the `EmulationFactory` trait that `hpx::RequestBuilder::emulation()` accepts).
+
+---
+
+### [`hpx-browser`](https://crates.io/crates/hpx-browser) — Headless Browser Engine
+
+A lightweight headless browser built on `hpx`. Parses HTML/CSS, builds a DOM, runs JavaScript (via V8/Deno), detects anti-bot challenges, and renders pages to text/markdown/screenshots.
+
+**Provides:** HTML parser, CSS parser + cascade, DOM tree, layout engine, JS runtime (Deno_core), challenge detection (Cloudflare, AWS-WAF, Kasada, PerimeterX, DataDome, hCaptcha, reCAPTCHA), CDP protocol support, parallel scraping, stealth mode, canvas rendering.
+
+**Use when:** You need to render JavaScript-heavy pages, bypass anti-bot protections, scrape SPAs, or run a headless browser programmatically.
+
+**Key modules:**
+
+| Module | Purpose |
+|--------|---------|
+| `challenge` | Anti-bot challenge classifier (CF, AWS-WAF, Kasada, etc.) |
+| `html_parser` / `css_parser` | DOM + CSSOM construction |
+| `dom` / `layout` | DOM tree + box model layout |
+| `js_runtime` | V8-based JavaScript execution (feature `v8`) |
+| `parallel` | Multi-URL concurrent scraping |
+| `stealth` | Anti-fingerprinting patches |
+| `protocol` | CDP (Chrome DevTools Protocol) server |
+
+**Depends on:** `hpx` (network), `deno_core` (JS), `html5ever` (HTML), `image`/`skia-safe` (canvas, optional).
+
+---
+
+### [`hpx-dl`](https://crates.io/crates/hpx-dl) — Download Engine
+
+Segmented HTTP download engine with resume, priority queue, speed limiting, and SQLite persistence.
+
+**Provides:** `DownloadEngine`, `EngineBuilder`, `SegmentDownloader`, `PriorityQueue`, `SqliteStorage`, checksum verification (SHA-256/384/512, MD5), metalink parsing, event broadcasting.
+
+**Use when:** You need to download large files with pause/resume, parallel segments, integrity verification, or managed download queues.
+
+```rust
+use hpx_dl::{DownloadEngine, EngineConfig};
+
+let engine = DownloadEngine::new(EngineConfig::default());
+let id = engine.add("https://example.com/large-file.bin").await?;
+engine.start(id).await?;
+```
+
+**Key features:** `http` (enable HTTP client integration), `sqlite` (persistent storage), `test` (in-memory storage for tests).
+
+**Depends on:** `hpx` (HTTP client for segments), `sqlx` (persistence), `ahash` (concurrent data structures).
+
+---
+
+### [`hpx-streams`](https://crates.io/crates/hpx-streams) — Streaming Response Codecs
+
+Extension trait for `hpx::Response` that adds streaming decode for structured response formats.
+
+**Provides:** `JsonStreamResponse`, `CsvStreamResponse`, `ProtobufStreamResponse`, `ArrowIpcStreamResponse` — each adds a `.xxx_stream()` method to `hpx::Response`.
+
+**Use when:** You're consuming large paginated APIs, database dumps, or event streams that return JSON arrays, CSV, Protobuf, or Arrow IPC.
+
+```rust
+use hpx_streams::JsonStreamResponse as _;
+
+let mut stream = client
+    .get("http://localhost:8080/large-json-array")
+    .send()
+    .await?
+    .json_array_stream::<MyItem>(1024);
+```
+
+**Depends on:** `hpx` (the `Response` type), `serde_json`/`csv`/`prost`/`arrow-ipc` (per feature).
+
+---
+
+### [`hpx-yawc`](https://crates.io/crates/hpx-yawc) (yawc) — WebSocket
+
+RFC 6455 WebSocket implementation with permessage-deflate compression. Can be used standalone or as the WebSocket backend for `hpx`.
+
+**Provides:** `WebSocket` client/server, frame codec, masking, compression (zlib/deflate), Axum integration, SIMD UTF-8 validation.
+
+**Use when:** You need a standalone WebSocket client or server, or when you want the `ws` feature in `hpx` (this is the default backend).
+
+```rust
+use futures::{SinkExt, StreamExt};
+use hpx_yawc::WebSocket;
+
+let mut ws = WebSocket::connect("wss://echo.websocket.org".parse()?).await?;
+ws.send(hpx_yawc::Frame::text("hello")).await?;
+```
+
+**Depends on:** `tokio`, `rustls` (TLS), optional `axum` integration.
+
+---
+
+### [`hpx-fastwebsockets`](https://crates.io/crates/hpx-fastwebsockets) — WebSocket (Alternative)
+
+Alternative WebSocket backend for `hpx`. Activated via `ws-fastwebsockets` feature flag. Takes priority over `yawc` when both are enabled.
+
+---
+
+## CLI: `hpx`
+
+The `hpx-cli` binary (`bin/hpx-cli/`) is a multi-tool HTTP client that ties all the crates together.
+
+### Direct HTTP Requests
+
+```bash
+# Simple GET
+hpx https://api.example.com/data
+
+# POST with JSON body
+hpx -X POST https://api.example.com/data -j '{"key":"value"}'
+
+# With headers and auth
+hpx -H 'Authorization: Bearer TOKEN' https://api.example.com/protected
+
+# Form data
+hpx -X POST https://httpbin.org/post -f 'name=test' -f 'email=test@example.com'
+
+# Save response to file
+hpx https://example.com/file.zip -o file.zip
+
+# Follow redirects + timing
+hpx -L -T https://httpbin.org/redirect/3
+
+# WebSocket
+hpx wss://echo.websocket.org
+
+# Proxy
+hpx --proxy socks5://127.0.0.1:1080 https://api.example.com
+```
+
+### Browser Commands
+
+```bash
+# Fetch and render a page (JS execution, challenge bypass)
+hpx fetch https://example.com --dump html
+
+# Dump rendered text
+hpx fetch https://example.com --dump text
+
+# Dump all links
+hpx fetch https://example.com --dump links
+
+# Wait for a CSS selector
+hpx fetch https://example.com --selector '#content' --wait 10
+
+# Evaluate JS on the page
+hpx fetch https://example.com -e 'document.title'
+
+# Scrape multiple URLs in parallel
+hpx scrape https://a.com https://b.com --concurrency 20
+
+# Start a CDP (Chrome DevTools Protocol) server
+hpx serve --port 9222
+```
+
+### Download Manager
+
+```bash
+# Add a download
+hpx dl add https://example.com/large.bin -o ./large.bin
+
+# Add with speed limit, checksum, mirrors
+hpx dl add https://example.com/file.bin \
+  --speed-limit 1MB/s \
+  --checksum sha256:abc123... \
+  --mirror https://mirror1.com/file.bin \
+  --max-connections 8
+
+# Pause / resume / remove
+hpx dl pause <id>
+hpx dl resume <id>
+hpx dl remove <id>
+
+# List all downloads
+hpx dl list
+
+# Check status
+hpx dl status <id>
+```
+
+### Proxy Testing
+
+```bash
+# Run proxy integration smoke tests
+hpx proxy-test --proxy http://127.0.0.1:7890
+```
+
+## Crate Dependency Graph
+
+```text
+hpx-cli (binary)
+  ├── hpx            (HTTP client)
+  ├── hpx-emulation  (browser profiles)
+  ├── hpx-browser    (headless browser, challenge detection)
+  ├── hpx-dl         (download engine)
+  └── hpx-streams    (streaming codecs)
+
+hpx (core)
+  ├── hpx-emulation  (optional, via emulation feature)
+  └── hpx-yawc       (optional, via ws feature)
+
+hpx-dl
+  └── hpx            (HTTP client for segments)
+
+hpx-streams
+  └── hpx            (extends Response with streaming methods)
+
+hpx-browser
+  └── hpx            (network layer)
+```
+
+**Standalone usage:** Each crate can be used independently. `hpx-yawc` works without `hpx` for raw WebSocket connections. `hpx-dl` can be used with its own `EngineBuilder` without the CLI.
 
 ## Feature Flags
 
 ### `hpx` Features
 
-The `hpx` crate uses feature flags for fine-grained control. **Default features: `boring`, `http1`, `http2`, `stream`, `tracing`**.
+Default: `boring`, `http1`, `http2`, `stream`, `tracing`.
 
 | Feature | Default | Description |
 |---------|---------|-------------|
@@ -118,71 +320,30 @@ The `hpx` crate uses feature flags for fine-grained control. **Default features:
 | `system-proxy` | No | System proxy configuration |
 | **Observability** | | |
 | `tracing` | No | Tracing/logging support |
-| **Other** | | |
-| `macros` | No | Tokio macros re-export |
 | **Presets** | | |
-| `hft` | No | Low-latency preset: BoringSSL, HTTP/1+2, streaming, tracing, Hickory DNS, SIMD JSON, Zstd, fast WebSocket backend |
-| `stealth` | No | Browser-like preset: BoringSSL, HTTP/1+2, common decompression formats, cookies, charset/query helpers, Hickory DNS, fast WebSocket backend |
-
-### WebSocket Backend Selection
-
-The `ws` feature is an alias for `ws-yawc` (the default WebSocket backend). To use fastwebsockets instead:
-
-```toml
-[dependencies]
-hpx = "2"
-```
-
-When both `ws-yawc` and `ws-fastwebsockets` are enabled, fastwebsockets takes priority.
+| `hft` | No | Low-latency: BoringSSL, HTTP/1+2, streaming, Hickory DNS, SIMD JSON, Zstd, fast WS |
+| `stealth` | No | Browser-like: BoringSSL, HTTP/1+2, decompression, cookies, charset, Hickory DNS, fast WS |
 
 ### Common Feature Combinations
 
-**Minimal HTTP client:**
-
 ```toml
-hpx = "2"  # default: boring + http1 + http2
-```
+# Minimal HTTP client
+hpx = "2"
 
-**JSON API client:**
-
-```toml
+# JSON API client
 hpx = { version = "2", features = ["json", "cookies", "gzip"] }
-```
 
-**WebSocket client:**
-
-```toml
+# WebSocket client
 hpx = { version = "2", features = ["ws"] }
-```
 
-**High-performance trading:**
-
-```toml
+# High-performance trading
 hpx = { version = "2", default-features = false, features = ["hft"] }
-```
 
-**Browser-like scraping / stealth profile:**
-
-```toml
+# Browser-like scraping
 hpx = { version = "2", default-features = false, features = ["stealth"] }
-```
 
-**Pure Rust (no C dependencies):**
-
-```toml
+# Pure Rust (no C dependencies)
 hpx = { version = "2", default-features = false, features = ["rustls-tls", "http1", "http2"] }
-```
-
-**Full-featured:**
-
-```toml
-hpx = { version = "2", features = [
-    "json", "form", "query", "multipart", "stream",
-    "cookies", "charset",
-    "gzip", "brotli", "zstd", "deflate",
-    "ws", "socks", "hickory-dns",
-    "tracing",
-] }
 ```
 
 ### `hpx-emulation` Features
@@ -316,8 +477,6 @@ async fn proxy(
     Ok(http::Response::<Body>::from(upstream_res))
 }
 ```
-
-If you need to inspect or transform chunks instead of transparently forwarding them, use `Response::bytes_stream()` or `Response::into_body()`. For Tower-native composition, `Client::into_tower_service()` returns the `tower_compat::HpxService` alias.
 
 ### Browser Emulation
 

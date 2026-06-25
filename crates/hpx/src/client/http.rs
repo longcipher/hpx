@@ -25,6 +25,7 @@ use tower::{
 #[cfg(feature = "boring")]
 pub(crate) use self::client::extra::ConnectIdentity;
 pub(crate) use self::client::{ConnectRequest, HttpClient, extra::ConnectExtra};
+#[allow(deprecated)]
 pub use self::config_groups::{
     HttpVersionPreference, PoolConfigOptions, ProtocolConfigOptions, ProxyConfigOptions,
     TlsConfigOptions, TransportConfigOptions,
@@ -352,6 +353,7 @@ impl TransportConfig {
     }
 }
 
+#[allow(deprecated)]
 impl From<TransportConfigOptions> for TransportConfig {
     fn from(value: TransportConfigOptions) -> Self {
         Self {
@@ -373,6 +375,7 @@ impl From<TransportConfigOptions> for TransportConfig {
     }
 }
 
+#[allow(deprecated)]
 impl From<PoolConfigOptions> for PoolConfig {
     fn from(value: PoolConfigOptions) -> Self {
         Self {
@@ -383,6 +386,7 @@ impl From<PoolConfigOptions> for PoolConfig {
     }
 }
 
+#[allow(deprecated)]
 impl From<TlsConfigOptions> for TlsConfig {
     fn from(value: TlsConfigOptions) -> Self {
         Self {
@@ -399,6 +403,7 @@ impl From<TlsConfigOptions> for TlsConfig {
     }
 }
 
+#[allow(deprecated)]
 impl From<ProtocolConfigOptions> for ProtocolConfig {
     fn from(value: ProtocolConfigOptions) -> Self {
         Self {
@@ -413,6 +418,7 @@ impl From<ProtocolConfigOptions> for ProtocolConfig {
     }
 }
 
+#[allow(deprecated)]
 impl From<ProxyConfigOptions> for ProxyConfig {
     fn from(value: ProxyConfigOptions) -> Self {
         Self {
@@ -709,6 +715,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn transport_config_options_override_transport_defaults() {
         let connect_timeout = Duration::from_secs(3);
         let builder = Client::builder().transport_config(
@@ -752,6 +759,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn reusable_protocol_config_can_be_applied_to_multiple_builders() {
         let protocol = ProtocolConfigOptions::new().https_only(true).referer(false);
 
@@ -765,6 +773,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn protocol_config_preserves_transport_connect_timeout() {
         let connect_timeout = Duration::from_secs(11);
 
@@ -794,6 +803,7 @@ mod tests {
 
     #[cfg(feature = "http1")]
     #[test]
+    #[allow(deprecated)]
     fn transport_config_preserves_existing_http1_transport_options() {
         let builder = Client::builder()
             .max_poll_iterations(7)

@@ -182,10 +182,12 @@ pub(crate) async fn execute(cli: &Cli) -> Result<()> {
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("<binary>").to_string()))
         .collect();
-    let set_cookie_header = response
+    let set_cookies: Vec<String> = response
         .headers()
-        .get("set-cookie")
-        .and_then(|v| v.to_str().ok().map(String::from));
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|v| v.to_str().ok().map(String::from))
+        .collect();
     let extensions = response.extensions().clone();
 
     // Display redirect history
@@ -204,11 +206,21 @@ pub(crate) async fn execute(cli: &Cli) -> Result<()> {
 
     // Save cookies to jar if requested
     if let Some(ref jar_path) = cli.cookie_jar
-        && let Some(ref cookie_str) = set_cookie_header
+        && !set_cookies.is_empty()
     {
-        std::fs::write(jar_path, format!("{cookie_str}\n"))?;
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(jar_path)?;
+        for cookie_str in &set_cookies {
+            writeln!(file, "{cookie_str}")?;
+        }
         if verbose {
-            eprintln!("[cookie-jar] saved to {jar_path}");
+            eprintln!(
+                "[cookie-jar] saved {} cookie(s) to {jar_path}",
+                set_cookies.len()
+            );
         }
     }
 

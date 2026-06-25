@@ -68,6 +68,7 @@ impl Error {
     }
 
     #[cfg(feature = "ws-yawc")]
+    #[allow(dead_code)] // ponytail: part of error API, used when websocket feature matures
     pub(crate) fn websocket<E: Into<BoxError>>(e: E) -> Error {
         Error::new(Kind::WebSocket, Some(e))
     }
@@ -78,6 +79,46 @@ impl Error {
 
     pub(crate) fn uri_bad_scheme(uri: Uri) -> Error {
         Error::new(Kind::Builder, Some(BadScheme)).with_uri(uri)
+    }
+
+    #[allow(dead_code)] // ponytail: unified error type, will be used when core::Error is deprecated
+    pub(crate) fn connect<E: Into<BoxError>>(e: E) -> Error {
+        Error::new(Kind::Connect, Some(e))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn canceled<E: Into<BoxError>>(e: E) -> Error {
+        Error::new(Kind::Canceled, Some(e))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn channel_closed<E: Into<BoxError>>(e: E) -> Error {
+        Error::new(Kind::ChannelClosed, Some(e))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn io<E: Into<BoxError>>(e: E) -> Error {
+        Error::new(Kind::Io, Some(e))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn body_write<E: Into<BoxError>>(e: E) -> Error {
+        Error::new(Kind::BodyWrite, Some(e))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn shutdown<E: Into<BoxError>>(e: E) -> Error {
+        Error::new(Kind::Shutdown, Some(e))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn http2<E: Into<BoxError>>(e: E) -> Error {
+        Error::new(Kind::Http2, Some(e))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn proxy_connect<E: Into<BoxError>>(e: E) -> Error {
+        Error::new(Kind::ProxyConnect, Some(e))
     }
 }
 
@@ -160,11 +201,11 @@ impl Error {
 
     /// Returns true if the error is related to connect
     pub fn is_connect(&self) -> bool {
-        use crate::client::Error;
-
-        walk_source_chain(self, |err| {
-            err.downcast_ref::<Error>().is_some_and(|e| e.is_connect())
-        })
+        matches!(self.inner.kind, Kind::Connect)
+            || walk_source_chain(self, |err| {
+                err.downcast_ref::<crate::client::Error>()
+                    .is_some_and(|e| e.is_connect())
+            })
     }
 
     /// Returns true if the error is related to proxy connect
@@ -205,7 +246,43 @@ impl Error {
         matches!(self.inner.kind, Kind::Upgrade)
     }
 
+    /// Returns true if the error is a canceled request
+    pub fn is_canceled(&self) -> bool {
+        matches!(self.inner.kind, Kind::Canceled)
+    }
+
+    /// Returns true if the error is a channel closed error
+    pub fn is_channel_closed(&self) -> bool {
+        matches!(self.inner.kind, Kind::ChannelClosed)
+    }
+
+    /// Returns true if the error is an I/O error
+    pub fn is_io(&self) -> bool {
+        matches!(self.inner.kind, Kind::Io)
+    }
+
+    /// Returns true if the error is a body write error
+    pub fn is_body_write(&self) -> bool {
+        matches!(self.inner.kind, Kind::BodyWrite)
+    }
+
+    /// Returns true if the error is a shutdown error
+    pub fn is_shutdown(&self) -> bool {
+        matches!(self.inner.kind, Kind::Shutdown)
+    }
+
+    /// Returns true if the error is an HTTP/2 error
+    pub fn is_http2(&self) -> bool {
+        matches!(self.inner.kind, Kind::Http2)
+    }
+
+    /// Returns true if the error is a proxy connect error
+    pub fn is_proxy_connect_kind(&self) -> bool {
+        matches!(self.inner.kind, Kind::ProxyConnect)
+    }
+
     #[cfg(feature = "ws-yawc")]
+    #[allow(dead_code)] // ponytail: part of public API, used when websocket feature matures
     /// Returns true if the error is related to WebSocket operations
     pub fn is_websocket(&self) -> bool {
         matches!(self.inner.kind, Kind::WebSocket)
@@ -288,6 +365,14 @@ impl fmt::Display for Error {
             Kind::Upgrade => f.write_str("error upgrading connection")?,
             #[cfg(feature = "ws-yawc")]
             Kind::WebSocket => f.write_str("websocket error")?,
+            Kind::Connect => f.write_str("error connecting")?,
+            Kind::Canceled => f.write_str("request canceled")?,
+            Kind::ChannelClosed => f.write_str("channel closed")?,
+            Kind::Io => f.write_str("I/O error")?,
+            Kind::BodyWrite => f.write_str("error writing body")?,
+            Kind::Shutdown => f.write_str("error shutting down connection")?,
+            Kind::Http2 => f.write_str("HTTP/2 error")?,
+            Kind::ProxyConnect => f.write_str("proxy connect error")?,
             Kind::Status(ref code, ref reason) => {
                 let prefix = if code.is_client_error() {
                     "HTTP status client error"
@@ -326,6 +411,32 @@ impl StdError for Error {
     }
 }
 
+impl From<crate::client::CoreError> for Error {
+    fn from(e: crate::client::CoreError) -> Self {
+        if e.is_canceled() {
+            Error::canceled(e)
+        } else if e.is_closed() {
+            Error::channel_closed(e)
+        } else if e.is_timeout() {
+            Error::request(TimedOut)
+        } else {
+            Error::request(e)
+        }
+    }
+}
+
+impl From<crate::client::Error> for Error {
+    fn from(e: crate::client::Error) -> Self {
+        if e.is_connect() {
+            Error::connect(e)
+        } else if e.is_proxy_connect() {
+            Error::proxy_connect(e)
+        } else {
+            Error::request(e)
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum Kind {
     Builder,
@@ -337,7 +448,26 @@ pub(crate) enum Kind {
     Decode,
     Upgrade,
     #[cfg(feature = "ws-yawc")]
+    #[allow(dead_code)] // ponytail: part of error API, used when websocket feature matures
     WebSocket,
+    // Unified from core::Error
+    #[allow(dead_code)] // ponytail: unified error variant, used when core::Error is deprecated
+    Connect,
+    #[allow(dead_code)]
+    Canceled,
+    #[allow(dead_code)]
+    ChannelClosed,
+    #[allow(dead_code)]
+    Io,
+    #[allow(dead_code)]
+    BodyWrite,
+    #[allow(dead_code)]
+    Shutdown,
+    #[allow(dead_code)]
+    Http2,
+    // Unified from client::Error
+    #[allow(dead_code)]
+    ProxyConnect,
 }
 
 #[derive(Debug)]

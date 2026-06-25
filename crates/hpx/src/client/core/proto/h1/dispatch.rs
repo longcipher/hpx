@@ -86,6 +86,7 @@ where
     Bs: Body + 'static,
     Bs::Error: Into<BoxError>,
 {
+    #[allow(dead_code)] // used in tests
     pub(crate) fn new(dispatch: D, conn: Conn<I, Bs::Data, T>) -> Self {
         Self::new_with_config(dispatch, conn, PollConfig::default())
     }

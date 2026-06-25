@@ -30,10 +30,6 @@ where
     header
 }
 
-pub(crate) fn fast_random() -> u64 {
-    rand::random::<u64>()
-}
-
 pub(crate) fn replace_headers(dst: &mut HeaderMap, src: HeaderMap) {
     // IntoIter of HeaderMap yields (Option<HeaderName>, HeaderValue).
     // The first time a name is yielded, it will be Some(name), and if

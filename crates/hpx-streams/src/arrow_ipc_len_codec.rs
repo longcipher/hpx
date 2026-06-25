@@ -63,3 +63,76 @@ impl tokio_util::codec::Decoder for ArrowIpcCodec {
         self.decode(buf)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use arrow::{
+        array::{Int32Array, StringArray},
+        datatypes::{DataType, Field, Schema},
+        ipc::writer::StreamWriter,
+    };
+    use tokio_util::codec::Decoder;
+
+    use super::*;
+
+    fn make_batch() -> RecordBatch {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("name", DataType::Utf8, false),
+            Field::new("value", DataType::Int32, false),
+        ]));
+        let names = Arc::new(StringArray::from(vec!["alice", "bob"]));
+        let values = Arc::new(Int32Array::from(vec![1, 2]));
+        RecordBatch::try_new(schema, vec![names, values]).unwrap()
+    }
+
+    fn encode_ipc(batch: &RecordBatch) -> Vec<u8> {
+        let mut buf = Vec::new();
+        {
+            let mut writer = StreamWriter::try_new(&mut buf, batch.schema().as_ref()).unwrap();
+            writer.write(batch).unwrap();
+            writer.finish().unwrap();
+        }
+        buf
+    }
+
+    #[test]
+    fn normal_parse_single_batch() {
+        let batch = make_batch();
+        let data = encode_ipc(&batch);
+
+        let mut codec = ArrowIpcCodec::new_with_max_length(1024 * 1024);
+        let mut buf = BytesMut::from(&data[..]);
+        let result = codec.decode(&mut buf).unwrap().unwrap();
+        assert_eq!(result.num_rows(), 2);
+        assert_eq!(result.num_columns(), 2);
+    }
+
+    #[test]
+    fn empty_input_returns_none() {
+        let mut codec = ArrowIpcCodec::new_with_max_length(1024);
+        let mut buf = BytesMut::new();
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+    }
+
+    #[test]
+    fn truncated_payload_returns_none() {
+        let batch = make_batch();
+        let data = encode_ipc(&batch);
+
+        let mut codec = ArrowIpcCodec::new_with_max_length(1024 * 1024);
+        let mut buf = BytesMut::from(&data[..4]);
+        let result = codec.decode(&mut buf).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn garbage_data_returns_none() {
+        let mut codec = ArrowIpcCodec::new_with_max_length(1024);
+        let mut buf = BytesMut::from(&b"not arrow"[..]);
+        // Arrow StreamDecoder returns None for unrecognized data, not an error
+        let result = codec.decode(&mut buf).unwrap();
+        assert!(result.is_none());
+    }
+}

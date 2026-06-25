@@ -57,8 +57,8 @@ impl RobotsCache {
         }
 
         // Sort longer (more specific) paths first so matching is deterministic.
-        rules.allow.sort_by(|a, b| b.len().cmp(&a.len()));
-        rules.disallow.sort_by(|a, b| b.len().cmp(&a.len()));
+        rules.allow.sort_by_key(|b| std::cmp::Reverse(b.len()));
+        rules.disallow.sort_by_key(|b| std::cmp::Reverse(b.len()));
 
         rules
     }

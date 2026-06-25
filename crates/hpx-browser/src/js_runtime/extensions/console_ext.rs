@@ -3,7 +3,7 @@ use deno_core::{OpState, op2};
 use crate::js_runtime::state::{ConsoleLevel, ConsoleMessage, DomState};
 
 #[op2(fast)]
-pub fn op_console_log(state: &mut OpState, #[string] msg: String) {
+pub(crate) fn op_console_log(state: &mut OpState, #[string] msg: String) {
     let state = state.borrow_mut::<DomState>();
     state.console_output.push(ConsoleMessage {
         level: ConsoleLevel::Log,
@@ -12,7 +12,7 @@ pub fn op_console_log(state: &mut OpState, #[string] msg: String) {
 }
 
 #[op2(fast)]
-pub fn op_console_warn(state: &mut OpState, #[string] msg: String) {
+pub(crate) fn op_console_warn(state: &mut OpState, #[string] msg: String) {
     let state = state.borrow_mut::<DomState>();
     state.console_output.push(ConsoleMessage {
         level: ConsoleLevel::Warn,
@@ -21,7 +21,7 @@ pub fn op_console_warn(state: &mut OpState, #[string] msg: String) {
 }
 
 #[op2(fast)]
-pub fn op_console_error(state: &mut OpState, #[string] msg: String) {
+pub(crate) fn op_console_error(state: &mut OpState, #[string] msg: String) {
     let state = state.borrow_mut::<DomState>();
     state.console_output.push(ConsoleMessage {
         level: ConsoleLevel::Error,

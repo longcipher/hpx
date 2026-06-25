@@ -72,15 +72,17 @@ impl Ord for QueueEntry {
 pub struct PriorityQueue {
     heap: std::collections::BinaryHeap<QueueEntry>,
     next_seq: u64,
+    tombstones: ahash::AHashSet<DownloadId>,
 }
 
 impl PriorityQueue {
     /// Create an empty priority queue.
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             heap: std::collections::BinaryHeap::new(),
             next_seq: 0,
+            tombstones: ahash::AHashSet::new(),
         }
     }
 
@@ -91,9 +93,15 @@ impl PriorityQueue {
         self.heap.push(entry);
     }
 
-    /// Pop the highest-priority entry.
+    /// Pop the highest-priority entry, skipping tombstoned entries.
     pub fn pop(&mut self) -> Option<QueueEntry> {
-        self.heap.pop()
+        loop {
+            let entry = self.heap.pop()?;
+            if self.tombstones.remove(&entry.id) {
+                continue; // skip tombstoned entry
+            }
+            return Some(entry);
+        }
     }
 
     /// Peek at the highest-priority entry without removing it.
@@ -104,33 +112,19 @@ impl PriorityQueue {
 
     /// Remove an entry by download ID.
     ///
-    /// This is O(n) in the queue size. For typical download queues this is acceptable.
-    pub fn remove(&mut self, id: DownloadId) -> Option<QueueEntry> {
-        let entries: Vec<QueueEntry> = self.heap.drain().collect();
-        let pos = entries.iter().position(|e| e.id == id);
-        if let Some(idx) = pos {
-            let mut entries = entries;
-            let removed = entries.swap_remove(idx);
-            for entry in entries {
-                self.heap.push(entry);
-            }
-            Some(removed)
-        } else {
-            // Restore all entries
-            for entry in entries {
-                self.heap.push(entry);
-            }
-            None
-        }
+    /// O(1) amortized — marks the entry as tombstoned. The actual memory is
+    /// reclaimed when `pop()` encounters the tombstoned entry.
+    pub fn remove(&mut self, id: DownloadId) {
+        self.tombstones.insert(id);
     }
 
-    /// Number of entries in the queue.
+    /// Number of entries in the queue (may include tombstoned entries not yet popped).
     #[must_use]
     pub fn len(&self) -> usize {
         self.heap.len()
     }
 
-    /// Whether the queue is empty.
+    /// Whether the queue is empty (may return false if only tombstoned entries remain).
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.heap.is_empty()
@@ -357,24 +351,21 @@ mod tests {
         q.push(b);
         q.push(c);
 
-        let removed = q.remove(b_id);
-        assert!(removed.is_some());
-        assert_eq!(removed.expect("removed").id, b_id);
-        assert_eq!(q.len(), 2);
+        q.remove(b_id);
 
         // Remaining should be a (Low) and c (Normal) -> Normal pops first
         let first = q.pop().expect("pop 1");
         assert_eq!(first.id, c_id);
         let second = q.pop().expect("pop 2");
         assert_eq!(second.id, a_id);
+        assert!(q.pop().is_none());
     }
 
     #[test]
-    fn remove_nonexistent_returns_none() {
+    fn remove_nonexistent_is_harmless() {
         let mut q = PriorityQueue::new();
         q.push(make_entry(DownloadPriority::Normal));
-        let missing = q.remove(DownloadId::new());
-        assert!(missing.is_none());
+        q.remove(DownloadId::new());
         assert_eq!(q.len(), 1);
     }
 

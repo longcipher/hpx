@@ -67,3 +67,10 @@ impl ProtobufStreamResponse for hpx::Response {
         frames_reader.into_stream()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // ProtobufStreamResponse is an extension trait on hpx::Response.
+    // The codec logic (ProtobufLenPrefixCodec) is tested in protobuf_len_codec.rs.
+    // Integration tests with a live HTTP server are needed to test this module directly.
+}

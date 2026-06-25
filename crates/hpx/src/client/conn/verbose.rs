@@ -18,7 +18,7 @@ impl Verbose {
         #[cfg(feature = "tracing")]
         if self.0 {
             return Box::new(sealed::Wrapper {
-                id: crate::util::fast_random(),
+                id: rand::random::<u64>(),
                 inner: conn,
             });
         }

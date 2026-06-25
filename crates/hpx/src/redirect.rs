@@ -391,7 +391,7 @@ impl redirect::Policy<Body, BoxError> for FollowRedirectPolicy {
         let policy = self
             .policy
             .as_ref()
-            .expect("[BUG] FollowRedirectPolicy should always have a policy set");
+            .ok_or_else(|| Error::request("redirect policy not configured"))?;
 
         // Check if the next URI is already in the list of URLs.
         match policy.check(attempt.status, attempt.headers, next_uri, &self.uris) {
@@ -568,5 +568,33 @@ mod tests {
 
         remove_sensitive_headers(&mut headers, &next, &prev);
         assert_eq!(headers, filtered_headers);
+    }
+
+    #[test]
+    fn missing_policy_returns_error_instead_of_panic() {
+        use crate::client::layer::redirect::Policy as _;
+
+        let mut policy = FollowRedirectPolicy {
+            policy: RequestConfig::new(None),
+            referer: false,
+            uris: Vec::new(),
+            https_only: false,
+            history: None,
+        };
+
+        let previous = Uri::try_from("http://a.com").unwrap();
+        let location = Uri::try_from("http://b.com").unwrap();
+        let attempt = redirect::Attempt {
+            status: StatusCode::FOUND,
+            headers: &HeaderMap::new(),
+            previous: &previous,
+            location: &location,
+        };
+
+        let result = policy.redirect(attempt);
+        assert!(
+            result.is_err(),
+            "missing policy should return error, not panic"
+        );
     }
 }

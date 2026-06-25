@@ -57,7 +57,8 @@ impl PersistenceHandle {
 
                 while let Ok(command) = rx.recv() {
                     match command {
-                        PersistenceCommand::Upsert { record, reply } => {
+                        PersistenceCommand::Upsert { mut record, reply } => {
+                            record.sanitize_for_persistence();
                             let result = runtime.block_on(storage.upsert(record.as_ref()));
                             let _ = reply.send(result);
                         }

@@ -1,5 +1,4 @@
 #![deny(unused)]
-#![allow(dead_code)]
 #![deny(unsafe_code)]
 #![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -366,12 +365,15 @@ pub use self::client::http2;
 pub use self::client::multipart;
 #[cfg(feature = "ws-yawc")]
 pub use self::client::ws;
+#[allow(deprecated)]
+pub use self::client::{
+    HttpVersionPreference, PoolConfigOptions, ProtocolConfigOptions, ProxyConfigOptions,
+    TlsConfigOptions, TransportConfigOptions,
+};
 pub use self::{
     client::{
         AsSendBody, Body, BrowserProfile, Client, ClientBuilder, ClientResponseBody, Emulation,
-        EmulationBuilder, EmulationFactory, HttpInfo, HttpVersionPreference, PoolConfigOptions,
-        ProtocolConfigOptions, ProxyConfigOptions, Request, RequestBuilder, Response,
-        TlsConfigOptions, TransportConfigOptions, Upgraded,
+        EmulationBuilder, EmulationFactory, HttpInfo, Request, RequestBuilder, Response, Upgraded,
     },
     error::{Error, Result},
     ext::{ResponseBuilderExt, ResponseExt},

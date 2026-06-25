@@ -3,7 +3,7 @@ members = ["crates/*", "bin/*"]
 resolver = "3"
 
 [workspace.package]
-version = "2.4.20"
+version = "2.4.21"
 edition = "2024"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license = "Apache-2.0"
@@ -184,12 +184,12 @@ all = "warn"
 
 [workspace.dependencies]
 # local crates
-hpx = { path = "crates/hpx", version = "2.4.20" }
-hpx-browser = { path = "crates/hpx-browser", version = "2.4.20" }
-hpx-dl = { path = "crates/hpx-dl", version = "2.4.20" }
-hpx-streams = { path = "crates/hpx-streams", version = "2.4.20" }
-hpx-yawc = { path = "crates/yawc", version = "2.4.20" }
-yawc = { path = "crates/yawc", version = "2.4.20" }
+hpx = { path = "crates/hpx", version = "2.4.21" }
+hpx-browser = { path = "crates/hpx-browser", version = "2.4.21" }
+hpx-dl = { path = "crates/hpx-dl", version = "2.4.21" }
+hpx-streams = { path = "crates/hpx-streams", version = "2.4.21" }
+hpx-yawc = { path = "crates/yawc", version = "2.4.21" }
+yawc = { path = "crates/yawc", version = "2.4.21" }
 
 # external crates
 ahash = "0.8.12"
@@ -211,7 +211,7 @@ cookie = "0.18.1"
 criterion = "0.8.2"
 crossbeam-channel = "0.5.15"
 cucumber = "0.23.0"
-deno_core = "0.404.0"
+deno_core = "0.405.0"
 der = "0.8.0"
 digest = "0.11.3"
 encoding_rs = "0.8.35"
@@ -243,7 +243,7 @@ hyper = "1.10.1"
 hyper-util = "0.1.20"
 image = "0.25.10"
 ipnet = "2.12.0"
-js-sys = "0.3.102"
+js-sys = "0.3.103"
 libc = "0.2.186"
 md-5 = "0.11.0"
 memchr = "2.8.2"
@@ -313,12 +313,12 @@ typed-builder = "0.23.2"
 ulid = "1.2.1"
 url = "2.5.8"
 utf-8 = "0.7.6"
-uuid = "1.23.3"
+uuid = "1.23.4"
 want = "0.3.1"
-wasm-bindgen = "0.2.125"
-wasm-bindgen-futures = "0.4.75"
-wasm-bindgen-test = "0.3.75"
-web-sys = { version = "0.3.102", default-features = false }
+wasm-bindgen = "0.2.126"
+wasm-bindgen-futures = "0.4.76"
+wasm-bindgen-test = "0.3.76"
+web-sys = { version = "0.3.103", default-features = false }
 webpki-root-certs = "1.0.8"
 webpki-roots = "1.0.8"
 windows-registry = "0.6.1"

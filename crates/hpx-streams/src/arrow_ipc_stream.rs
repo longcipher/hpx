@@ -58,3 +58,10 @@ impl ArrowIpcStreamResponse for hpx::Response {
         frames_reader.into_stream()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // ArrowIpcStreamResponse is an extension trait on hpx::Response.
+    // The codec logic (ArrowIpcCodec) is tested in arrow_ipc_len_codec.rs.
+    // Integration tests with a live HTTP server are needed to test this module directly.
+}

@@ -3,7 +3,7 @@ use sha2::{Digest, Sha256, Sha384, Sha512};
 
 #[op2]
 #[buffer]
-pub fn op_crypto_digest(#[string] algorithm: String, #[buffer] data: &[u8]) -> Vec<u8> {
+pub(crate) fn op_crypto_digest(#[string] algorithm: String, #[buffer] data: &[u8]) -> Vec<u8> {
     let alg = algorithm.to_ascii_uppercase();
     match alg.as_str() {
         "SHA-256" | "SHA256" => {
@@ -26,7 +26,7 @@ pub fn op_crypto_digest(#[string] algorithm: String, #[buffer] data: &[u8]) -> V
 }
 
 #[op2(fast)]
-pub fn op_crypto_random_fill(#[buffer] out: &mut [u8]) {
+pub(crate) fn op_crypto_random_fill(#[buffer] out: &mut [u8]) {
     use rand::Rng;
     rand::rng().fill_bytes(out);
 }

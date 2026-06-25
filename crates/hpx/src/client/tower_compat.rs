@@ -13,16 +13,6 @@ use tower::util::BoxCloneSyncService;
 use super::{Body, Client, ClientResponseBody};
 use crate::{Request as HpxRequest, error::BoxError};
 
-/// Per-request configuration for hpx, stored in `http::Extensions`.
-///
-/// Internal convenience wrapper. Users should use `HpxRequestExt` methods
-/// instead of inserting this directly.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct HpxConfig {
-    /// If true, skip client default headers for this request.
-    pub(crate) skip_default_headers: bool,
-}
-
 /// Extension trait for `http::Request<Body>` providing hpx-specific convenience methods.
 ///
 /// This bridges the gap between standard HTTP request types and hpx's per-request

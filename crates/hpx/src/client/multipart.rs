@@ -551,12 +551,10 @@ impl PercentEncoding {
 }
 
 fn gen_boundary() -> String {
-    use crate::util::fast_random as random;
-
-    let a = random();
-    let b = random();
-    let c = random();
-    let d = random();
+    let a = rand::random::<u64>();
+    let b = rand::random::<u64>();
+    let c = rand::random::<u64>();
+    let d = rand::random::<u64>();
 
     format!("{a:016x}-{b:016x}-{c:016x}-{d:016x}")
 }

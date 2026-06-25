@@ -78,27 +78,18 @@ impl Policy<Req, Res, BoxError> for RetryPolicy {
                 None
             }
             Action::Retryable => {
-                if self.budget.as_ref().map(|b| b.withdraw()).unwrap_or(true) {
-                    trace!(
-                        "Retrying request ({} attempts so far): {} {} - {}",
-                        self.retry_cnt,
-                        req.method(),
-                        req.uri(),
-                        match result {
-                            Ok(res) => format!("HTTP {}", res.status()),
-                            Err(e) => format!("Error: {}", e),
-                        }
-                    );
+                trace!(
+                    "Retrying request ({} attempts so far): {} {} - {}",
+                    self.retry_cnt,
+                    req.method(),
+                    req.uri(),
+                    match result {
+                        Ok(res) => format!("HTTP {}", res.status()),
+                        Err(e) => format!("Error: {}", e),
+                    }
+                );
 
-                    Some(std::future::ready(()))
-                } else {
-                    debug!(
-                        "Request is retryable but retry budget exhausted: {} {}",
-                        req.method(),
-                        req.uri()
-                    );
-                    None
-                }
+                Some(std::future::ready(()))
             }
         }
     }
@@ -114,8 +105,27 @@ impl Policy<Req, Res, BoxError> for RetryPolicy {
             return None;
         }
 
+        // Withdraw budget token only when we're about to actually retry.
+        if !self.budget.as_ref().map(|b| b.withdraw()).unwrap_or(true) {
+            debug!(
+                "Request is retryable but retry budget exhausted: {} {}",
+                req.method(),
+                req.uri()
+            );
+            return None;
+        }
+
         self.retry_cnt += 1;
-        clone_http_request(req)
+        match clone_http_request(req) {
+            Some(cloned) => Some(cloned),
+            None => {
+                // Clone failed — deposit the token back.
+                if let Some(ref budget) = self.budget {
+                    budget.deposit();
+                }
+                None
+            }
+        }
     }
 }
 
@@ -151,4 +161,47 @@ fn is_retryable_error(err: &(dyn StdError + 'static)) -> bool {
     }
 
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use http::Request;
+    use http_body_util::BodyExt;
+    use tower::retry::Policy as _;
+
+    use super::RetryPolicy;
+    use crate::{Body, retry};
+
+    fn make_retry_policy(max_retries: u32) -> RetryPolicy {
+        let policy = retry::Policy {
+            budget: Some(0.2),
+            classifier: crate::client::layer::retry::Classifier::Never,
+            max_retries_per_request: max_retries,
+            scope: crate::client::layer::retry::Scoped::Unscoped,
+        };
+        RetryPolicy::new(policy)
+    }
+
+    #[test]
+    fn budget_preserved_when_clone_fails() {
+        let mut policy = make_retry_policy(2);
+        // Create a request with a non-clonable body (streaming/boxed).
+        let body: Body = http_body_util::Empty::new()
+            .map_err(|e| -> crate::error::BoxError { e.into() })
+            .boxed()
+            .into();
+        let req = Request::new(body);
+
+        // clone_request should return None because the body is not clonable.
+        let result = policy.clone_request(&req);
+        assert!(result.is_none(), "non-clonable body should return None");
+
+        // Verify the budget still has tokens by cloning a clonable request.
+        let clonable_req = Request::new(Body::from("hello"));
+        let result2 = policy.clone_request(&clonable_req);
+        assert!(
+            result2.is_some(),
+            "budget should still have tokens after failed clone"
+        );
+    }
 }

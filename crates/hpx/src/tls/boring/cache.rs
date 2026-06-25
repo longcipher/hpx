@@ -148,6 +148,7 @@ where
         }
     }
 
+    #[allow(dead_code)] // used in tests
     fn shard_count(&self) -> usize {
         self.shard_count
     }

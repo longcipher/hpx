@@ -216,7 +216,7 @@ impl HttpClient {
         extra_headers: &[(String, String)],
     ) -> Result<Response, NetError> {
         let parsed = Url::parse(url)?;
-        let builder = self.inner.get(url).emulation(self.browser_profile.clone());
+        let builder = self.inner.get(url).emulation(self.browser_profile);
 
         let builder = self
             .inject_request_headers(builder, &parsed, extra_headers)
@@ -233,7 +233,7 @@ impl HttpClient {
         _origin: Option<&str>,
     ) -> Result<Response, NetError> {
         let parsed = Url::parse(url)?;
-        let mut builder = self.inner.get(url).emulation(self.browser_profile.clone());
+        let mut builder = self.inner.get(url).emulation(self.browser_profile);
 
         // Fetch-style: accept: */*, sec-fetch-dest: empty
         builder = builder.header("accept", "*/*");
@@ -257,7 +257,7 @@ impl HttpClient {
         _origin: Option<&str>,
     ) -> Result<Response, NetError> {
         let parsed = Url::parse(url)?;
-        let mut builder = self.inner.post(url).emulation(self.browser_profile.clone());
+        let mut builder = self.inner.post(url).emulation(self.browser_profile);
 
         builder = builder.header("accept", "*/*");
         builder = builder.header("sec-fetch-mode", "cors");
@@ -295,7 +295,7 @@ impl HttpClient {
         extra_headers: &[(String, String)],
     ) -> Result<Response, NetError> {
         let parsed = Url::parse(url)?;
-        let builder = self.inner.post(url).emulation(self.browser_profile.clone());
+        let builder = self.inner.post(url).emulation(self.browser_profile);
 
         let builder = self
             .inject_request_headers(builder, &parsed, extra_headers)
@@ -394,7 +394,7 @@ impl HttpClient {
         let _ = self
             .inner
             .head(url)
-            .emulation(self.browser_profile.clone())
+            .emulation(self.browser_profile)
             .send()
             .await;
         Ok(())

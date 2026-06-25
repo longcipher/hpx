@@ -412,6 +412,8 @@ fn chunk(output: &mut BytesMut) -> &mut [u8] {
     }
 
     let uninitbuf = output.spare_capacity_mut();
+    // Zero-initialize spare capacity so the cast to &mut [u8] is sound.
+    uninitbuf.fill(std::mem::MaybeUninit::new(0));
     unsafe { &mut *(uninitbuf as *mut [std::mem::MaybeUninit<u8>] as *mut [u8]) }
 }
 

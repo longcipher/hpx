@@ -10,10 +10,8 @@ lint:
   cargo +nightly fmt --all -- --check
   cargo +nightly clippy --all -- -D warnings
   cargo machete
-  just build-docs
 test:
-  cargo nextest run -p hpx-streams -p hpx-emulation -p hpx-yawc --all-features
-  cargo test -p hpx --lib --all-features
+  cargo nextest run --workspace --all-features
 test-full:
   cargo nextest run --workspace --all-features
 bdd:
@@ -28,6 +26,6 @@ check-feature:
 check-cn:
   rg --line-number --column "\p{Han}"
 # Full CI check
-ci: lint test
+ci: lint test-all build-docs
 publish:
   cargo publish --workspace

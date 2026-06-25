@@ -230,7 +230,7 @@ impl Inner {
 
         // Set random AES hardware override
         if self.config.random_aes_hw_override {
-            let _random = (crate::util::fast_random() & 1) == 0;
+            let _random = (rand::random::<u64>() & 1) == 0;
             // cfg.set_aes_hw_override(random);
         }
 

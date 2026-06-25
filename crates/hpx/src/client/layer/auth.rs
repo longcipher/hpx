@@ -94,24 +94,6 @@ pub trait BearerTokenProvider: Send + Sync {
     async fn get_token(&self) -> Result<Token, Error>;
 }
 
-/// Static bearer token that never changes.
-struct StaticTokenProvider {
-    token: String,
-}
-
-#[async_trait::async_trait]
-impl BearerTokenProvider for StaticTokenProvider {
-    async fn get_token(&self) -> Result<Token, Error> {
-        Ok(Token::permanent(&self.token))
-    }
-}
-
-/// Configuration for API key authentication.
-pub struct ApiKeyConfig {
-    header_name: HeaderName,
-    header_value: String,
-}
-
 /// Configuration for bearer token authentication.
 pub enum AuthMethod {
     /// Static bearer token.

@@ -1,7 +1,7 @@
-#![allow(clippy::all)]
 #![allow(clippy::pedantic)]
 #![allow(clippy::nursery)]
 #![allow(clippy::cargo)]
+#![allow(clippy::style)]
 #![allow(clippy::allow_attributes)]
 #![allow(clippy::panic)]
 #![allow(dead_code)]

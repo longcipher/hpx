@@ -86,16 +86,6 @@ macro_rules! impl_body_common {
             pub(crate) fn try_clone_inner(&self) -> Option<Bytes> {
                 self.reusable_bytes().cloned()
             }
-
-            /// Convert the body into a mutable `BytesMut` if possible.
-            #[inline]
-            pub(crate) fn into_bytes_mut(self) -> Option<bytes::BytesMut> {
-                let bytes = self.try_clone_inner()?;
-                match bytes.try_into_mut() {
-                    Ok(bytes_mut) => Some(bytes_mut),
-                    Err(bytes) => Some(bytes::BytesMut::from(bytes.as_ref())),
-                }
-            }
         }
     };
 }
@@ -106,6 +96,7 @@ impl_body_common!(ClientResponseBody, ClientResponseBodyInner);
 // Body::as_bytes also checks the Client variant, which wraps a
 // ClientResponseBody that may itself hold reusable bytes.
 impl Body {
+    #[allow(dead_code)] // used in tests
     pub(crate) fn as_bytes(&self) -> Option<&[u8]> {
         if let Some(bytes) = self.reusable_bytes() {
             return Some(bytes.as_ref());
@@ -119,6 +110,7 @@ impl Body {
 
 // ClientResponseBody::as_bytes only needs to check the reusable variant.
 impl ClientResponseBody {
+    #[allow(dead_code)] // used in tests
     pub(crate) fn as_bytes(&self) -> Option<&[u8]> {
         self.reusable_bytes().map(Bytes::as_ref)
     }

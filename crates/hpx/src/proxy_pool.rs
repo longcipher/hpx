@@ -222,13 +222,6 @@ impl ProxyPool {
 
 // ===== impl ProxyPoolLayer =====
 
-impl ProxyPoolLayer {
-    #[inline]
-    pub(crate) fn new(pool: ProxyPool) -> Self {
-        Self { pool }
-    }
-}
-
 impl<S> Layer<S> for ProxyPoolLayer {
     type Service = ProxyPoolService<S>;
 

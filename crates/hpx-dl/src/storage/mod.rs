@@ -50,6 +50,17 @@ impl DownloadRecord {
     pub const fn priority(&self) -> DownloadPriority {
         self.request.priority
     }
+
+    /// Strip sensitive credentials (proxy userinfo) before persisting.
+    pub fn sanitize_for_persistence(&mut self) {
+        if let Some(ref mut proxy) = self.request.proxy
+            && let Ok(mut url) = url::Url::parse(&proxy.url)
+        {
+            let _ = url.set_username("");
+            let _ = url.set_password(None);
+            proxy.url = url.into();
+        }
+    }
 }
 
 /// Status of an individual segment.
@@ -153,3 +164,58 @@ mod sqlite;
 
 #[cfg(feature = "sqlite")]
 pub use sqlite::SqliteStorage;
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, path::PathBuf};
+
+    use super::*;
+    use crate::types::{DownloadPriority, ProxyConfig, ProxyKind};
+
+    fn make_record_with_proxy(proxy_url: &str) -> DownloadRecord {
+        DownloadRecord {
+            id: DownloadId::new(),
+            request: DownloadRequest {
+                url: "https://example.com/file".to_string(),
+                destination: PathBuf::from("/tmp/file"),
+                priority: DownloadPriority::Normal,
+                checksum: None,
+                headers: HashMap::new(),
+                max_connections: None,
+                speed_limit: None,
+                mirrors: Vec::new(),
+                proxy: Some(ProxyConfig {
+                    url: proxy_url.to_string(),
+                    kind: ProxyKind::Http,
+                }),
+            },
+            state: crate::DownloadState::Queued,
+            etag: None,
+            last_modified: None,
+            content_length: None,
+            bytes_downloaded: 0,
+            last_error: None,
+            created_at: 0,
+            updated_at: 0,
+            segments: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn sanitize_strips_proxy_credentials() {
+        let mut record = make_record_with_proxy("http://user:pass@proxy:8080");
+        record.sanitize_for_persistence();
+        let url = &record.request.proxy.as_ref().unwrap().url;
+        assert!(!url.contains("user"), "username should be stripped: {url}");
+        assert!(!url.contains("pass"), "password should be stripped: {url}");
+        assert!(url.contains("proxy:8080"), "host:port should remain: {url}");
+    }
+
+    #[test]
+    fn sanitize_preserves_proxy_without_credentials() {
+        let mut record = make_record_with_proxy("http://proxy:8080");
+        record.sanitize_for_persistence();
+        let url = &record.request.proxy.as_ref().unwrap().url;
+        assert!(url.contains("proxy:8080"), "host:port should remain: {url}");
+    }
+}

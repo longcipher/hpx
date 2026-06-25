@@ -1,3 +1,5 @@
+#![allow(deprecated)] // config groups deprecated but still used internally
+
 use std::{
     borrow::Cow,
     convert::TryInto,

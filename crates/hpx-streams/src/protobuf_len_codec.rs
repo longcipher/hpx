@@ -159,3 +159,107 @@ fn decode_varint_slice(bytes: &[u8]) -> Result<(u64, usize), StreamBodyError> {
         Some("invalid varint".into()),
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use prost::Message as _;
+    use tokio_util::codec::Decoder;
+
+    use super::*;
+
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct TestMsg {
+        #[prost(string, tag = "1")]
+        name: String,
+        #[prost(uint32, tag = "2")]
+        value: u32,
+    }
+
+    fn encode_len_prefixed(msg: &TestMsg) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let mut encoded = Vec::new();
+        msg.encode(&mut encoded).unwrap();
+        // write varint length
+        let mut len = encoded.len();
+        while len >= 0x80 {
+            buf.push((len as u8) | 0x80);
+            len >>= 7;
+        }
+        buf.push(len as u8);
+        buf.extend_from_slice(&encoded);
+        buf
+    }
+
+    #[test]
+    fn normal_parse_single_message() {
+        let msg = TestMsg {
+            name: "alice".into(),
+            value: 42,
+        };
+        let data = encode_len_prefixed(&msg);
+        let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(1024);
+        let mut buf = BytesMut::from(&data[..]);
+        // First decode reads varint, returns None
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+        // Second decode reads the message body
+        let result = codec.decode(&mut buf).unwrap();
+        assert_eq!(result, Some(msg));
+    }
+
+    #[test]
+    fn empty_input_returns_none() {
+        let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(1024);
+        let mut buf = BytesMut::new();
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+    }
+
+    #[test]
+    fn truncated_payload_returns_none() {
+        let msg = TestMsg {
+            name: "alice".into(),
+            value: 42,
+        };
+        let data = encode_len_prefixed(&msg);
+        let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(1024);
+        let mut buf = BytesMut::from(&data[..3]);
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+    }
+
+    #[test]
+    fn max_length_exceeded_returns_error() {
+        let msg = TestMsg {
+            name: "alice".into(),
+            value: 42,
+        };
+        let data = encode_len_prefixed(&msg);
+        let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(5);
+        let mut buf = BytesMut::from(&data[..]);
+        // First decode reads varint, returns None
+        let _ = codec.decode(&mut buf);
+        // Second decode: message body (10 bytes) exceeds max_length (5)
+        assert!(codec.decode(&mut buf).is_err());
+    }
+
+    #[test]
+    fn multiple_messages_in_sequence() {
+        let m1 = TestMsg {
+            name: "a".into(),
+            value: 1,
+        };
+        let m2 = TestMsg {
+            name: "b".into(),
+            value: 2,
+        };
+        let mut data = encode_len_prefixed(&m1);
+        data.extend_from_slice(&encode_len_prefixed(&m2));
+
+        let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(1024);
+        let mut buf = BytesMut::from(&data[..]);
+        // First message: varint + body
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+        assert_eq!(codec.decode(&mut buf).unwrap(), Some(m1));
+        // Second message: varint + body
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+        assert_eq!(codec.decode(&mut buf).unwrap(), Some(m2));
+    }
+}

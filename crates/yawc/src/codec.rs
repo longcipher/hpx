@@ -420,3 +420,81 @@ impl codec::Encoder<Frame> for Encoder {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use bytes::BytesMut;
+    use tokio_util::codec::{Decoder as _, Encoder as _};
+
+    use super::{Decoder, Encoder};
+    use crate::{
+        Role,
+        close::CloseCode,
+        frame::{Frame, OpCode},
+    };
+
+    fn roundtrip(frame: &Frame) -> Frame {
+        let mut encoder = Encoder::new(Role::Client);
+        let mut buf = BytesMut::new();
+        encoder.encode(frame.clone(), &mut buf).unwrap();
+
+        let mut decoder = Decoder::new(Role::Server, 1 << 20);
+        decoder.decode(&mut buf).unwrap().unwrap()
+    }
+
+    #[test]
+    fn text_frame_roundtrip() {
+        let frame = Frame::text("hello world");
+        let decoded = roundtrip(&frame);
+        assert_eq!(decoded.opcode(), OpCode::Text);
+        assert!(decoded.is_fin());
+        assert_eq!(&decoded.into_payload()[..], b"hello world");
+    }
+
+    #[test]
+    fn binary_frame_roundtrip() {
+        let frame = Frame::binary(vec![0u8, 1, 2, 3, 255]);
+        let decoded = roundtrip(&frame);
+        assert_eq!(decoded.opcode(), OpCode::Binary);
+        assert_eq!(&decoded.into_payload()[..], &[0u8, 1, 2, 3, 255]);
+    }
+
+    #[test]
+    fn close_frame_roundtrip() {
+        let frame = Frame::close(CloseCode::Normal, b"bye");
+        let decoded = roundtrip(&frame);
+        assert_eq!(decoded.opcode(), OpCode::Close);
+        let payload = decoded.into_payload();
+        assert_eq!(u16::from_be_bytes([payload[0], payload[1]]), 1000);
+        assert_eq!(&payload[2..], b"bye");
+    }
+
+    #[test]
+    fn ping_pong_roundtrip() {
+        let ping = Frame::ping("ping!");
+        let decoded = roundtrip(&ping);
+        assert_eq!(decoded.opcode(), OpCode::Ping);
+        assert_eq!(&decoded.into_payload()[..], b"ping!");
+
+        let pong = Frame::pong("pong!");
+        let decoded = roundtrip(&pong);
+        assert_eq!(decoded.opcode(), OpCode::Pong);
+        assert_eq!(&decoded.into_payload()[..], b"pong!");
+    }
+
+    #[test]
+    fn payload_len_16bit() {
+        let data = vec![42u8; 300]; // > 125, needs 16-bit length
+        let frame = Frame::binary(data.clone());
+        let decoded = roundtrip(&frame);
+        assert_eq!(decoded.into_payload().len(), 300);
+    }
+
+    #[test]
+    fn payload_len_64bit() {
+        let data = vec![7u8; 70000]; // > 65535, needs 64-bit length
+        let frame = Frame::binary(data.clone());
+        let decoded = roundtrip(&frame);
+        assert_eq!(decoded.into_payload().len(), 70000);
+    }
+}

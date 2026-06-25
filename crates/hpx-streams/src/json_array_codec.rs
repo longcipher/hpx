@@ -234,7 +234,113 @@ where
     }
 
     fn decode_eof(&mut self, buf: &mut BytesMut) -> Result<Option<T>, StreamBodyError> {
-        self.decode(buf)
+        // Try normal decode first (handles ]-terminated values)
+        if let Some(item) = self.decode(buf)? {
+            return Ok(Some(item));
+        }
+        // EOF without closing bracket — emit any pending primitive
+        if let Some(prim_start) = self.json_cursor.current_primitive_start.take() {
+            let obj_slice = trim_ascii(&buf[prim_start..buf.len()]);
+            if !obj_slice.is_empty() {
+                let result = serde_json::from_slice(obj_slice).map_err(|err| {
+                    StreamBodyError::new(
+                        StreamBodyKind::CodecError,
+                        Some(Box::new(err)),
+                        None,
+                    )
+                })?;
+                buf.clear();
+                return Ok(Some(result));
+            }
+        }
+        Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio_util::codec::Decoder;
+
+    use super::*;
+
+    #[derive(Debug, serde::Deserialize, PartialEq)]
+    struct Item {
+        name: String,
+        value: u32,
+    }
+
+    fn decode_all<T: for<'de> serde::Deserialize<'de> + std::fmt::Debug + PartialEq>(
+        data: &[u8],
+    ) -> Vec<T> {
+        let mut codec = JsonArrayCodec::<T>::new_with_max_length(1024);
+        let mut buf = BytesMut::from(data);
+        let mut results = Vec::new();
+        loop {
+            match codec.decode(&mut buf) {
+                Ok(Some(item)) => results.push(item),
+                Ok(None) => break,
+                Err(e) => panic!("decode error: {e}"),
+            }
+        }
+        results
+    }
+
+    #[test]
+    fn normal_parse_array_of_objects() {
+        let data = br#"[{"name":"alice","value":1},{"name":"bob","value":2}]"#;
+        let items: Vec<Item> = decode_all(data);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].name, "alice");
+        assert_eq!(items[1].value, 2);
+    }
+
+    #[test]
+    fn empty_input_returns_none() {
+        let mut codec = JsonArrayCodec::<Item>::new_with_max_length(1024);
+        let mut buf = BytesMut::new();
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+    }
+
+    #[test]
+    fn empty_array_returns_none() {
+        let mut codec = JsonArrayCodec::<Item>::new_with_max_length(1024);
+        let mut buf = BytesMut::from(&b"[]"[..]);
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+    }
+
+    #[test]
+    fn truncated_object_returns_none() {
+        let mut codec = JsonArrayCodec::<Item>::new_with_max_length(1024);
+        // Truncated mid-object: missing closing brace and bracket
+        let mut buf = BytesMut::from(&b"[{\"name\":\"alic"[..]);
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+    }
+
+    #[test]
+    fn eof_without_closing_bracket_emits_pending_primitive() {
+        let mut codec = JsonArrayCodec::<i64>::new_with_max_length(1024);
+        let mut buf = BytesMut::from(&b"[1, 2, 3"[..]);
+        // First two values emit via comma delimiter
+        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), 1);
+        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), 2);
+        // Third value has no trailing comma or bracket — decode returns None
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+        // decode_eof should emit the pending value
+        assert_eq!(codec.decode_eof(&mut buf).unwrap().unwrap(), 3);
+    }
+
+    #[test]
+    fn invalid_json_returns_error() {
+        let mut codec = JsonArrayCodec::<Item>::new_with_max_length(1024);
+        let mut buf = BytesMut::from(&b"[not json]"[..]);
+        assert!(codec.decode(&mut buf).is_err());
+    }
+
+    #[test]
+    fn max_length_exceeded_returns_error() {
+        let mut codec = JsonArrayCodec::<Item>::new_with_max_length(2);
+        let mut buf = BytesMut::from(&b"[{\"name\":\"alice\",\"value\":1}]"[..]);
+        assert!(codec.decode(&mut buf).is_err());
     }
 }
 

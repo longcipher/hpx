@@ -212,9 +212,9 @@ fn format_links_tsv(links: &[(String, String)]) -> String {
 fn format_assets_ndjson(assets: &[(String, String)]) -> String {
     let mut out = String::new();
     for (url, asset_type) in assets {
-        out.push_str(&format!(
-            "{{\"url\":\"{url}\",\"type\":\"{asset_type}\"}}\n"
-        ));
+        let line = serde_json::json!({"url": url, "type": asset_type});
+        out.push_str(&line.to_string());
+        out.push('\n');
     }
     out
 }
@@ -389,7 +389,7 @@ async fn scrape_single_url(url: &str, eval: Option<&str>, _timeout: u64) -> Scra
 
 pub(crate) async fn handle_serve(
     port: u16,
-    _host: String,
+    host: String,
     _stealth: bool,
     workers: u16,
     _allow_file_access: bool,
@@ -403,6 +403,12 @@ pub(crate) async fn handle_serve(
     // ponytail: allow_file_access, storage_dir, obey_robots, allow_private_network, v8_flags not wired yet.
 
     let html = "<html><body></body></html>";
+
+    if !host.parse::<std::net::IpAddr>()?.is_loopback() {
+        eprintln!(
+            "WARNING: CDP WebSocket bound to {host}:{port} — accessible to external networks. Full browser control is exposed."
+        );
+    }
 
     if workers <= 1 {
         let server = hpx_browser::protocol::server::CdpServer::start(html, port)
@@ -507,7 +513,7 @@ mod tests {
         let ndjson = format_assets_ndjson(&assets);
         assert_eq!(
             ndjson,
-            "{\"url\":\"/a.js\",\"type\":\"script\"}\n{\"url\":\"/b.css\",\"type\":\"link\"}\n"
+            "{\"type\":\"script\",\"url\":\"/a.js\"}\n{\"type\":\"link\",\"url\":\"/b.css\"}\n"
         );
     }
 
@@ -575,5 +581,32 @@ mod tests {
         assert_eq!(assets.len(), 2);
         assert_eq!(assets[0].0, "/a.js");
         assert_eq!(assets[1].0, "/b.js");
+    }
+
+    #[test]
+    fn ndjson_escapes_special_characters() {
+        let assets = vec![
+            (
+                "https://example.com/path?q=\"hello\"".to_string(),
+                "script".to_string(),
+            ),
+            (
+                "https://example.com/normal".to_string(),
+                "style".to_string(),
+            ),
+        ];
+        let output = super::format_assets_ndjson(&assets);
+        for line in output.lines() {
+            let parsed: serde_json::Value =
+                serde_json::from_str(line).expect("each NDJSON line must be valid JSON");
+            assert!(parsed["url"].is_string());
+            assert!(parsed["type"].is_string());
+        }
+        // Verify the URL with quotes is properly escaped
+        let first_line = output.lines().next().unwrap();
+        assert!(
+            first_line.contains("\\\"hello\\\""),
+            "quotes should be escaped"
+        );
     }
 }
