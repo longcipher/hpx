@@ -29,7 +29,7 @@ check-cn:
 ci: lint test-all build-docs
 publish:
 	@echo "Publishing workspace crates in dependency order..."
-	@CRATES=$$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name'); \
+	@CRATES=`cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name'`; \
 	REMAINING="$$CRATES"; \
 	for i in 1 2 3 4 5 6 7; do \
 		if [ -z "$$REMAINING" ]; then break; fi; \
