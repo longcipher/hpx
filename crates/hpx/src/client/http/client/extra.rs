@@ -75,3 +75,48 @@ impl ConnectExtra {
         self.extra.as_ref().map(RequestOptions::tcp_connect_opts)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::hash::Hash;
+
+    use super::*;
+    use crate::{hash::HASHER, tls::TlsOptions};
+
+    fn hash_of<T: Hash>(v: &T) -> u64 {
+        HASHER.hash_one(v)
+    }
+
+    #[test]
+    fn same_uri_same_options_produce_same_identity() {
+        let uri: Uri = "https://example.com".parse().unwrap();
+        let a = ConnectExtra::new(uri.clone(), None::<RequestOptions>);
+        let b = ConnectExtra::new(uri, None::<RequestOptions>);
+        assert_eq!(hash_of(&a), hash_of(&b));
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn same_uri_different_tls_options_produce_different_identity() {
+        let uri: Uri = "https://example.com".parse().unwrap();
+
+        let mut opts_a = RequestOptions::default();
+        opts_a.transport_opts_mut().tls_options = Some(
+            TlsOptions::builder()
+                .cipher_list("ECDHE-RSA-AES128-GCM-SHA256")
+                .build(),
+        );
+
+        let mut opts_b = RequestOptions::default();
+        opts_b.transport_opts_mut().tls_options = Some(
+            TlsOptions::builder()
+                .cipher_list("ECDHE-RSA-AES256-GCM-SHA384")
+                .build(),
+        );
+
+        let a = ConnectExtra::new(uri.clone(), Some(opts_a));
+        let b = ConnectExtra::new(uri, Some(opts_b));
+        assert_ne!(hash_of(&a), hash_of(&b));
+        assert_ne!(a, b);
+    }
+}

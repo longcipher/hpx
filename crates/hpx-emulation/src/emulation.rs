@@ -129,6 +129,12 @@ define_enum!(
     Chrome141 => ("chrome_141", v141::emulation),
     Chrome142 => ("chrome_142", v142::emulation),
     Chrome143 => ("chrome_143", v143::emulation),
+    Chrome144 => ("chrome_144", v144::emulation),
+    Chrome145 => ("chrome_145", v145::emulation),
+    Chrome146 => ("chrome_146", v146::emulation),
+    Chrome147 => ("chrome_147", v147::emulation),
+    Chrome148 => ("chrome_148", v148::emulation),
+    Chrome149 => ("chrome_149", v149::emulation),
 
     // Edge versions
     Edge101 => ("edge_101", edge101::emulation),
@@ -144,12 +150,30 @@ define_enum!(
     Edge140 => ("edge_140", edge140::emulation),
     Edge141 => ("edge_141", edge141::emulation),
     Edge142 => ("edge_142", edge142::emulation),
+    Edge143 => ("edge_143", edge143::emulation),
+    Edge144 => ("edge_144", edge144::emulation),
+    Edge145 => ("edge_145", edge145::emulation),
+    Edge146 => ("edge_146", edge146::emulation),
+    Edge147 => ("edge_147", edge147::emulation),
+    Edge148 => ("edge_148", edge148::emulation),
 
     // Opera versions
     Opera116 => ("opera_116", opera116::emulation),
     Opera117 => ("opera_117", opera117::emulation),
     Opera118 => ("opera_118", opera118::emulation),
     Opera119 => ("opera_119", opera119::emulation),
+    Opera120 => ("opera_120", opera120::emulation),
+    Opera121 => ("opera_121", opera121::emulation),
+    Opera122 => ("opera_122", opera122::emulation),
+    Opera123 => ("opera_123", opera123::emulation),
+    Opera124 => ("opera_124", opera124::emulation),
+    Opera125 => ("opera_125", opera125::emulation),
+    Opera126 => ("opera_126", opera126::emulation),
+    Opera127 => ("opera_127", opera127::emulation),
+    Opera128 => ("opera_128", opera128::emulation),
+    Opera129 => ("opera_129", opera129::emulation),
+    Opera130 => ("opera_130", opera130::emulation),
+    Opera131 => ("opera_131", opera131::emulation),
 
     // Safari versions
     SafariIos17_2 => ("safari_ios_17.2", safari_ios_17_2::emulation),
@@ -176,9 +200,36 @@ define_enum!(
     Safari26_1 => ("safari_26.1", safari26_1::emulation),
     Safari26_2 => ("safari_26.2", safari26_2::emulation),
     SafariIPad26 => ("safari_ipad_26", safari_ipad_26::emulation),
-    SafariIpad26_2 => ("safari_ipad_26.2", safari_ipad_26_2::emulation),
+    SafariIPad26_2 => ("safari_ipad_26.2", safari_ipad_26_2::emulation),
     SafariIos26 => ("safari_ios_26", safari_ios_26::emulation),
     SafariIos26_2 => ("safari_ios_26.2", safari_ios_26_2::emulation),
+    Safari19 => ("safari_19", safari19::emulation),
+    SafariIos19 => ("safari_ios_19", safari_ios_19::emulation),
+    SafariIPad19 => ("safari_ipad_19", safari_ipad_19::emulation),
+    Safari20 => ("safari_20", safari20::emulation),
+    SafariIos20 => ("safari_ios_20", safari_ios_20::emulation),
+    SafariIPad20 => ("safari_ipad_20", safari_ipad_20::emulation),
+    Safari21 => ("safari_21", safari21::emulation),
+    SafariIos21 => ("safari_ios_21", safari_ios_21::emulation),
+    SafariIPad21 => ("safari_ipad_21", safari_ipad_21::emulation),
+    Safari22 => ("safari_22", safari22::emulation),
+    SafariIos22 => ("safari_ios_22", safari_ios_22::emulation),
+    SafariIPad22 => ("safari_ipad_22", safari_ipad_22::emulation),
+    Safari23 => ("safari_23", safari23::emulation),
+    SafariIos23 => ("safari_ios_23", safari_ios_23::emulation),
+    SafariIPad23 => ("safari_ipad_23", safari_ipad_23::emulation),
+    Safari24 => ("safari_24", safari24::emulation),
+    SafariIos24 => ("safari_ios_24", safari_ios_24::emulation),
+    SafariIPad24 => ("safari_ipad_24", safari_ipad_24::emulation),
+    Safari25 => ("safari_25", safari25::emulation),
+    SafariIos25 => ("safari_ios_25", safari_ios_25::emulation),
+    SafariIPad25 => ("safari_ipad_25", safari_ipad_25::emulation),
+    Safari26_3 => ("safari_26.3", safari26_3::emulation),
+    SafariIos26_3 => ("safari_ios_26.3", safari_ios_26_3::emulation),
+    SafariIPad26_3 => ("safari_ipad_26.3", safari_ipad_26_3::emulation),
+    Safari26_4 => ("safari_26.4", safari26_4::emulation),
+    SafariIos26_4 => ("safari_ios_26.4", safari_ios_26_4::emulation),
+    SafariIPad26_4 => ("safari_ipad_26.4", safari_ipad_26_4::emulation),
 
     // Firefox versions
     Firefox109 => ("firefox_109", ff109::emulation),
@@ -190,12 +241,21 @@ define_enum!(
     FirefoxAndroid135 => ("firefox_android_135", ff_android_135::emulation),
     Firefox136 => ("firefox_136", ff136::emulation),
     FirefoxPrivate136 => ("firefox_private_136", ff_private_136::emulation),
+    Firefox137 => ("firefox_137", ff137::emulation),
+    Firefox138 => ("firefox_138", ff138::emulation),
     Firefox139 => ("firefox_139", ff139::emulation),
+    Firefox140 => ("firefox_140", ff140::emulation),
+    Firefox141 => ("firefox_141", ff141::emulation),
     Firefox142 => ("firefox_142", ff142::emulation),
     Firefox143 => ("firefox_143", ff143::emulation),
     Firefox144 => ("firefox_144", ff144::emulation),
     Firefox145 => ("firefox_145", ff145::emulation),
     Firefox146 => ("firefox_146", ff146::emulation),
+    Firefox147 => ("firefox_147", ff147::emulation),
+    Firefox148 => ("firefox_148", ff148::emulation),
+    Firefox149 => ("firefox_149", ff149::emulation),
+    Firefox150 => ("firefox_150", ff150::emulation),
+    Firefox151 => ("firefox_151", ff151::emulation),
 
     // OkHttp versions
     OkHttp3_9 => ("okhttp_3.9", okhttp3_9::emulation),
@@ -242,6 +302,53 @@ define_enum!(
     IOS => "ios"
 );
 
+define_enum!(
+    /// Represents the platform for emulation.
+    ///
+    /// Maps to [`EmulationOS`] via [`From<Platform> for EmulationOS`].
+    /// Default is `Windows`.
+    plain,
+    Platform, Windows,
+    Windows => "windows",
+    MacOS => "macos",
+    Linux => "linux",
+    Android => "android",
+    IOS => "ios"
+);
+
+impl Platform {
+    /// Returns `true` for mobile platforms (`Android` and `IOS`).
+    #[inline]
+    pub const fn is_mobile(&self) -> bool {
+        matches!(self, Platform::Android | Platform::IOS)
+    }
+
+    /// Returns the `sec-ch-ua-platform` header value for this platform.
+    #[inline]
+    pub const fn sec_ch_ua_platform(self) -> &'static str {
+        match self {
+            Self::Windows => "\"Windows\"",
+            Self::MacOS => "\"macOS\"",
+            Self::Linux => "\"Linux\"",
+            Self::Android => "\"Android\"",
+            Self::IOS => "\"iOS\"",
+        }
+    }
+}
+
+impl From<Platform> for EmulationOS {
+    #[inline]
+    fn from(platform: Platform) -> Self {
+        match platform {
+            Platform::Windows => Self::Windows,
+            Platform::MacOS => Self::MacOS,
+            Platform::Linux => Self::Linux,
+            Platform::Android => Self::Android,
+            Platform::IOS => Self::IOS,
+        }
+    }
+}
+
 /// ======== EmulationOS impls ========
 impl EmulationOS {
     #[inline]
@@ -286,6 +393,10 @@ pub struct EmulationOption {
     #[builder(default)]
     emulation_os: EmulationOS,
 
+    /// The platform.
+    #[builder(default)]
+    platform: Platform,
+
     /// Whether to skip HTTP/2.
     #[builder(default = false)]
     skip_http2: bool,
@@ -298,7 +409,120 @@ pub struct EmulationOption {
 /// ======== EmulationOption impls ========
 impl hpx::EmulationFactory for EmulationOption {
     #[inline]
-    fn emulation(self) -> hpx::Emulation {
+    fn emulation(mut self) -> hpx::Emulation {
+        // ponytail: platform takes precedence over emulation_os when platform
+        // is not the default (Windows). This avoids the ambiguity of MacOS being
+        // both the default and a valid explicit choice.
+        if self.platform != Platform::Windows {
+            self.emulation_os = EmulationOS::from(self.platform);
+        }
         self.emulation.into_emulation(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use hpx::EmulationFactory;
+
+    use super::*;
+
+    #[test]
+    fn platform_is_mobile() {
+        assert!(!Platform::Windows.is_mobile());
+        assert!(!Platform::MacOS.is_mobile());
+        assert!(!Platform::Linux.is_mobile());
+        assert!(Platform::Android.is_mobile());
+        assert!(Platform::IOS.is_mobile());
+    }
+
+    #[test]
+    fn platform_to_emulation_os() {
+        assert!(matches!(
+            EmulationOS::from(Platform::Windows),
+            EmulationOS::Windows
+        ));
+        assert!(matches!(
+            EmulationOS::from(Platform::MacOS),
+            EmulationOS::MacOS
+        ));
+        assert!(matches!(
+            EmulationOS::from(Platform::Linux),
+            EmulationOS::Linux
+        ));
+        assert!(matches!(
+            EmulationOS::from(Platform::Android),
+            EmulationOS::Android
+        ));
+        assert!(matches!(EmulationOS::from(Platform::IOS), EmulationOS::IOS));
+    }
+
+    #[test]
+    fn emulation_option_builder_with_platform() {
+        let option = EmulationOption::builder().platform(Platform::Linux).build();
+        assert!(matches!(option.platform, Platform::Linux));
+    }
+
+    #[test]
+    fn platform_affects_emulation_output() {
+        let mut emu = EmulationOption::builder()
+            .emulation(Emulation::Chrome147)
+            .platform(Platform::Linux)
+            .build()
+            .emulation();
+        let ua = emu
+            .headers_mut()
+            .get(http::header::USER_AGENT)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(
+            ua.contains("Linux"),
+            "expected Linux in User-Agent, got: {ua}"
+        );
+        assert!(
+            !ua.contains("Macintosh"),
+            "did not expect Macintosh in User-Agent, got: {ua}"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "emulation-rand")]
+    fn variant_count_at_least_120() {
+        use strum::VariantArray;
+        assert!(
+            Emulation::VARIANTS.len() >= 120,
+            "Expected at least 120 Emulation variants, found {}",
+            Emulation::VARIANTS.len()
+        );
+    }
+
+    #[test]
+    fn platform_sec_ch_ua_platform() {
+        assert_eq!(Platform::Linux.sec_ch_ua_platform(), "\"Linux\"");
+        assert_eq!(Platform::Windows.sec_ch_ua_platform(), "\"Windows\"");
+        assert_eq!(Platform::MacOS.sec_ch_ua_platform(), "\"macOS\"");
+        assert_eq!(Platform::Android.sec_ch_ua_platform(), "\"Android\"");
+        assert_eq!(Platform::IOS.sec_ch_ua_platform(), "\"iOS\"");
+    }
+
+    #[test]
+    fn explicit_emulation_os_preserved_when_platform_default() {
+        // When platform is default (Windows) but emulation_os is explicitly set,
+        // emulation_os should be preserved.
+        let mut em = EmulationOption::builder()
+            .emulation(Emulation::Chrome147)
+            .emulation_os(EmulationOS::Linux)
+            .build()
+            .emulation();
+        let ua = em
+            .headers_mut()
+            .get(http::header::USER_AGENT)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(
+            ua.contains("Linux"),
+            "expected Linux in User-Agent when emulation_os=Linux, got: {ua}"
+        );
     }
 }

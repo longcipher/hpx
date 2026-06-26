@@ -257,3 +257,192 @@ mod_generator!(
     header_initializer_for_18,
     "Mozilla/5.0 (iPad; CPU OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Mobile/15E148 Safari/604.1"
 );
+
+mod_generator!(
+    safari19,
+    safari18_2::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.0 Safari/605.1.15"
+);
+
+mod_generator!(
+    safari_ios_19,
+    safari18_2::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 19_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.0 Mobile/15E148 Safari/604.1"
+);
+
+mod_generator!(
+    safari_ipad_19,
+    safari18_2::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (iPad; CPU OS 19_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.0 Mobile/15E148 Safari/604.1"
+);
+
+mod_generator!(
+    safari20,
+    safari18_2::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/20.0 Safari/605.1.15"
+);
+
+mod_generator!(
+    safari_ios_20,
+    safari18_2::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 20_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/20.0 Mobile/15E148 Safari/604.1"
+);
+
+mod_generator!(
+    safari_ipad_20,
+    safari18_2::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (iPad; CPU OS 20_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/20.0 Mobile/15E148 Safari/604.1"
+);
+
+mod_generator!(
+    safari21,
+    safari18_2::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/21.0 Safari/605.1.15"
+);
+
+mod_generator!(
+    safari_ios_21,
+    safari18_2::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 21_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/21.0 Mobile/15E148 Safari/604.1"
+);
+
+mod_generator!(
+    safari_ipad_21,
+    safari18_2::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (iPad; CPU OS 21_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/21.0 Mobile/15E148 Safari/604.1"
+);
+
+mod_generator!(
+    safari22,
+    safari18_5::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/22.0 Safari/605.1.15"
+);
+
+mod_generator!(
+    safari_ios_22,
+    safari18_5::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 22_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/22.0 Mobile/15E148 Safari/604.1"
+);
+
+mod_generator!(
+    safari_ipad_22,
+    safari18_5::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (iPad; CPU OS 22_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/22.0 Mobile/15E148 Safari/604.1"
+);
+
+mod_generator!(
+    safari23,
+    safari18_5::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/23.0 Safari/605.1.15"
+);
+
+mod_generator!(
+    safari_ios_23,
+    safari18_5::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 23_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/23.0 Mobile/15E148 Safari/604.1"
+);
+
+mod_generator!(
+    safari_ipad_23,
+    safari18_5::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (iPad; CPU OS 23_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/23.0 Mobile/15E148 Safari/604.1"
+);
+
+mod_generator!(
+    safari24,
+    safari26::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/24.0 Safari/605.1.15"
+);
+
+mod_generator!(
+    safari_ios_24,
+    safari26::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 24_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/24.0 Mobile/15E148 Safari/604.1"
+);
+
+mod_generator!(
+    safari_ipad_24,
+    safari26::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (iPad; CPU OS 24_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/24.0 Mobile/15E148 Safari/604.1"
+);
+
+mod_generator!(
+    safari25,
+    safari26::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/25.0 Safari/605.1.15"
+);
+
+mod_generator!(
+    safari_ios_25,
+    safari26::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 25_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/25.0 Mobile/15E148 Safari/604.1"
+);
+
+mod_generator!(
+    safari_ipad_25,
+    safari26::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (iPad; CPU OS 25_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/25.0 Mobile/15E148 Safari/604.1"
+);
+
+mod_generator!(
+    safari26_3,
+    safari18_5::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3 Safari/605.1.15"
+);
+
+mod_generator!(
+    safari_ios_26_3,
+    safari26::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_8 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3 Mobile/15E148 Safari/604.1"
+);
+
+mod_generator!(
+    safari_ipad_26_3,
+    safari26::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (iPad; CPU OS 18_8 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3 Mobile/15E148 Safari/604.1"
+);
+
+mod_generator!(
+    safari26_4,
+    safari18_5::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.4 Safari/605.1.15"
+);
+
+mod_generator!(
+    safari_ios_26_4,
+    safari26::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_9 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.4 Mobile/15E148 Safari/604.1"
+);
+
+mod_generator!(
+    safari_ipad_26_4,
+    safari26::build_emulation,
+    header_initializer_for_18,
+    "Mozilla/5.0 (iPad; CPU OS 18_9 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.4 Mobile/15E148 Safari/604.1"
+);

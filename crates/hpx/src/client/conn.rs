@@ -83,6 +83,23 @@ struct PoisonPill {
     poisoned: Arc<AtomicBool>,
 }
 
+/// A handle to poison a connection from response extensions.
+///
+/// This is inserted into response extensions by [`Connected::set_extras`] so that
+/// [`Response::forbid_recycle`](super::response::Response::forbid_recycle) can
+/// mark the underlying connection as non-reusable.
+#[derive(Clone, Debug)]
+pub(crate) struct PoisonPillHandle {
+    poisoned: Arc<AtomicBool>,
+}
+
+impl PoisonPillHandle {
+    /// Poison the connection associated with this handle.
+    pub(crate) fn poison(&self) {
+        self.poisoned.store(true, Ordering::Release);
+    }
+}
+
 /// A boxed asynchronous connection with associated information.
 #[derive(Debug)]
 struct Extra(Box<dyn ExtraInner>);
@@ -188,6 +205,7 @@ impl Connected {
         if let Some(extra) = &self.extra {
             extra.set(extensions);
         }
+        extensions.insert(self.poison_pill_handle());
     }
 
     /// Set that the proxy was used for this connected transport.
@@ -251,6 +269,13 @@ impl Connected {
         debug!(
             "connection was poisoned. this connection will not be reused for subsequent requests"
         );
+    }
+
+    /// Create a [`PoisonPillHandle`] from this connection's poison pill.
+    fn poison_pill_handle(&self) -> PoisonPillHandle {
+        PoisonPillHandle {
+            poisoned: Arc::clone(&self.poisoned.poisoned),
+        }
     }
 
     // Don't public expose that `Connected` is `Clone`, unsure if we want to

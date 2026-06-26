@@ -79,10 +79,13 @@ impl CertificateCompressor for ZlibCertificateCompressor {
     }
 }
 
+// ponytail: ZstdCertificateCompressor omitted — boring crate lacks CertificateCompressionAlgorithm::ZSTD.
+// Uncomment when boring adds the ZSTD variant. The compressor logic is already written below.
+//
 // #[derive(Debug, Clone, Default)]
 // #[non_exhaustive]
 // pub struct ZstdCertificateCompressor;
-
+//
 // impl CertificateCompressor for ZstdCertificateCompressor {
 //     const ALGORITHM: CertificateCompressionAlgorithm = CertificateCompressionAlgorithm::ZSTD;
 //     const CAN_COMPRESS: bool = true;
@@ -123,3 +126,64 @@ impl CertificateCompressor for ZlibCertificateCompressor {
 //         Ok(())
 //     }
 // }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn brotli_round_trip() {
+        let compressor = BrotliCertificateCompressor;
+        let input = b"Hello, TLS certificate compression with Brotli!";
+        let mut compressed = Vec::new();
+        compressor.compress(input, &mut compressed).unwrap();
+        assert!(!compressed.is_empty());
+
+        let mut decompressed = Vec::new();
+        compressor
+            .decompress(&compressed, &mut decompressed)
+            .unwrap();
+        assert_eq!(decompressed, input);
+    }
+
+    #[test]
+    fn zlib_round_trip() {
+        let compressor = ZlibCertificateCompressor;
+        let input = b"Hello, TLS certificate compression with Zlib!";
+        let mut compressed = Vec::new();
+        compressor.compress(input, &mut compressed).unwrap();
+        assert!(!compressed.is_empty());
+
+        let mut decompressed = Vec::new();
+        compressor
+            .decompress(&compressed, &mut decompressed)
+            .unwrap();
+        assert_eq!(decompressed, input);
+    }
+
+    #[test]
+    fn brotli_empty_input() {
+        let compressor = BrotliCertificateCompressor;
+        let mut compressed = Vec::new();
+        compressor.compress(b"", &mut compressed).unwrap();
+
+        let mut decompressed = Vec::new();
+        compressor
+            .decompress(&compressed, &mut decompressed)
+            .unwrap();
+        assert_eq!(decompressed, b"");
+    }
+
+    #[test]
+    fn zlib_empty_input() {
+        let compressor = ZlibCertificateCompressor;
+        let mut compressed = Vec::new();
+        compressor.compress(b"", &mut compressed).unwrap();
+
+        let mut decompressed = Vec::new();
+        compressor
+            .decompress(&compressed, &mut decompressed)
+            .unwrap();
+        assert_eq!(decompressed, b"");
+    }
+}

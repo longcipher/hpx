@@ -208,6 +208,19 @@ impl Error {
             })
     }
 
+    /// Returns true if the error is related to DNS resolution.
+    ///
+    /// Walks the source chain looking for DNS-related errors, which typically
+    /// manifest as `io::Error` whose message contains "dns", "resolve", or "lookup".
+    pub fn is_dns(&self) -> bool {
+        walk_source_chain(self, |err| {
+            err.downcast_ref::<io::Error>().is_some_and(|e| {
+                let msg = e.to_string().to_lowercase();
+                msg.contains("dns") || msg.contains("resolve") || msg.contains("lookup")
+            })
+        })
+    }
+
     /// Returns true if the error is related to proxy connect
     pub fn is_proxy_connect(&self) -> bool {
         use crate::client::Error;
@@ -589,6 +602,15 @@ mod tests {
     }
 
     #[test]
+    fn is_timeout_nested_3_levels() {
+        // tower::timeout::error::Elapsed -> io::Error -> hpx::Error
+        let inner = Error::request(super::TimedOut);
+        let io = io::Error::other(inner);
+        let outer = Error::request(io);
+        assert!(outer.is_timeout());
+    }
+
+    #[test]
     fn is_connection_reset() {
         let err = Error::request(io::Error::new(
             io::ErrorKind::ConnectionReset,
@@ -599,5 +621,37 @@ mod tests {
         let io = io::Error::other(err);
         let nested = Error::request(io);
         assert!(nested.is_connection_reset());
+    }
+
+    #[test]
+    fn is_connect_direct() {
+        let err = Error::connect("connection refused");
+        assert!(err.is_connect());
+    }
+
+    #[test]
+    fn is_dns_direct() {
+        let err = Error::request(io::Error::new(
+            io::ErrorKind::NotFound,
+            "dns resolution failed",
+        ));
+        assert!(err.is_dns());
+    }
+
+    #[test]
+    fn is_dns_nested() {
+        let inner = io::Error::new(io::ErrorKind::Other, "resolve lookup failed for host");
+        let wrapper = io::Error::other(inner);
+        let err = Error::request(wrapper);
+        assert!(err.is_dns());
+    }
+
+    #[test]
+    fn is_dns_no_match() {
+        let err = Error::request(io::Error::new(
+            io::ErrorKind::ConnectionRefused,
+            "connection refused",
+        ));
+        assert!(!err.is_dns());
     }
 }

@@ -19,7 +19,7 @@ use serde::de::DeserializeOwned;
 
 use super::{
     ClientResponseBody,
-    conn::HttpInfo,
+    conn::{HttpInfo, PoisonPillHandle},
     core::{ext::ReasonPhrase, upgrade},
 };
 #[cfg(feature = "cookies")]
@@ -581,6 +581,18 @@ impl Response {
         self.res.extensions_mut()
     }
 
+    /// Prevent the underlying connection from being reused by the pool.
+    ///
+    /// If the response has a [`PoisonPillHandle`] in its extensions (set by the
+    /// client's connection machinery), this marks the connection as poisoned so
+    /// the pool will not return it to service. If no handle is present, this is
+    /// a silent no-op.
+    pub fn forbid_recycle(&self) {
+        if let Some(handle) = self.res.extensions().get::<PoisonPillHandle>() {
+            handle.poison();
+        }
+    }
+
     // util methods
 
     /// Turn a response into an error if the server returned an error.
@@ -796,5 +808,21 @@ mod tests {
 
         assert_eq!(buffer.as_ref(), bytes.as_ref());
         assert_ne!(buffer.as_ptr(), ptr);
+    }
+
+    #[test]
+    fn forbid_recycle_poisons_connection() {
+        use crate::client::conn::Connected;
+
+        let connected = Connected::new();
+        assert!(!connected.poisoned());
+
+        let mut http_res = http::Response::new(Body::empty());
+        connected.set_extras(http_res.extensions_mut());
+
+        let response: Response = http_res.into();
+        response.forbid_recycle();
+
+        assert!(connected.poisoned());
     }
 }
