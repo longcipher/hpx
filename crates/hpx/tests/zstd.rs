@@ -306,7 +306,10 @@ async fn test_chunked_fragmented_response_with_extra_bytes() {
                 &zstded_content,
             ]
             .concat();
-            let response_second_part = b"\r\n2ab\r\n0\r\n\r\n";
+            let extra_bytes = vec![b'X'; 0x2ab];
+            let mut response_second_part = Vec::from(b"\r\n2ab\r\n");
+            response_second_part.extend_from_slice(&extra_bytes);
+            response_second_part.extend_from_slice(b"\r\n0\r\n\r\n");
 
             client_socket
                 .write_all(response_first_part.as_slice())
@@ -320,7 +323,7 @@ async fn test_chunked_fragmented_response_with_extra_bytes() {
             tokio::time::sleep(DELAY_BETWEEN_RESPONSE_PARTS).await;
 
             client_socket
-                .write_all(response_second_part)
+                .write_all(&response_second_part)
                 .await
                 .expect("response_second_part write_all failed");
             client_socket

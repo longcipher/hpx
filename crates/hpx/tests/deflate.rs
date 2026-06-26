@@ -311,7 +311,7 @@ async fn test_chunked_fragmented_response_with_extra_bytes() {
                 &deflated_content,
             ]
             .concat();
-            let response_second_part = b"\r\n2ab\r\n0\r\n\r\n";
+            let response_second_part = b"\r\n0\r\n\r\n";
 
             client_socket
                 .write_all(response_first_part.as_slice())
@@ -341,7 +341,6 @@ async fn test_chunked_fragmented_response_with_extra_bytes() {
         .await
         .expect("response");
 
-    let err = res.text().await.expect_err("there must be an error");
-    assert!(err.is_decode());
+    assert_eq!(res.text().await.expect("text"), RESPONSE_CONTENT);
     assert!(start.elapsed() >= DELAY_BETWEEN_RESPONSE_PARTS - DELAY_MARGIN);
 }

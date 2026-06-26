@@ -31,16 +31,28 @@ jobs:
 
       - name: Check Cargo.toml version
         run: |
-          # Get the version of the 'hpx' package which inherits from workspace
-          CARGO_VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "hpx") | .version')
+          VERSION="${{ env.VERSION }}"
+          CRATES=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name' | sort)
           
-          echo "Cargo version: $CARGO_VERSION"
-          echo "Tag version: ${{ env.VERSION }}"
+          echo "Workspace crates:"
+          echo "$CRATES"
+          echo ""
           
-          if [ "$CARGO_VERSION" != "${{ env.VERSION }}" ]; then
-            echo "Error: Cargo.toml version ($CARGO_VERSION) does not match tag version (${{ env.VERSION }})"
+          # Verify all crates match the tag version
+          MISMATCH=0
+          for crate in $CRATES; do
+            CRATE_VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r ".packages[] | select(.name == \"$crate\") | .version")
+            if [ "$CRATE_VERSION" != "$VERSION" ]; then
+              echo "ERROR: $crate version ($CRATE_VERSION) does not match tag version ($VERSION)"
+              MISMATCH=1
+            fi
+          done
+          
+          if [ "$MISMATCH" -ne 0 ]; then
             exit 1
           fi
+          
+          echo "All crates have version $VERSION"
 
       - name: Generate Changelog
         uses: orhun/git-cliff-action@v4
@@ -61,3 +73,21 @@ jobs:
         run: just publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Verify all crates published
+        run: |
+          CRATES=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name' | sort)
+          VERSION="${{ env.VERSION }}"
+          FAILED=0
+          
+          for crate in $CRATES; do
+            echo "Checking $crate@$VERSION..."
+            if ! cargo search "$crate" --limit 1 2>/dev/null | grep -q "$VERSION"; then
+              echo "WARNING: $crate@$VERSION may not have been published"
+              FAILED=1
+            fi
+          done
+          
+          if [ "$FAILED" -ne 0 ]; then
+            echo "Some crates may not have been published. Check the publish step output."
+          fi

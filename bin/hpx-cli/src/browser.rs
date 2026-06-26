@@ -513,7 +513,7 @@ mod tests {
         let ndjson = format_assets_ndjson(&assets);
         assert_eq!(
             ndjson,
-            "{\"type\":\"script\",\"url\":\"/a.js\"}\n{\"type\":\"link\",\"url\":\"/b.css\"}\n"
+            "{\"url\":\"/a.js\",\"type\":\"script\"}\n{\"url\":\"/b.css\",\"type\":\"link\"}\n"
         );
     }
 

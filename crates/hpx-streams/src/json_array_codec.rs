@@ -243,11 +243,7 @@ where
             let obj_slice = trim_ascii(&buf[prim_start..buf.len()]);
             if !obj_slice.is_empty() {
                 let result = serde_json::from_slice(obj_slice).map_err(|err| {
-                    StreamBodyError::new(
-                        StreamBodyKind::CodecError,
-                        Some(Box::new(err)),
-                        None,
-                    )
+                    StreamBodyError::new(StreamBodyKind::CodecError, Some(Box::new(err)), None)
                 })?;
                 buf.clear();
                 return Ok(Some(result));

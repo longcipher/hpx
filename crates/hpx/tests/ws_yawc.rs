@@ -1,4 +1,4 @@
-#![cfg(all(feature = "ws-yawc", not(feature = "ws-fastwebsockets")))]
+#![cfg(feature = "ws-yawc")]
 
 mod support;
 

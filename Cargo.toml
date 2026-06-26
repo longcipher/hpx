@@ -3,7 +3,7 @@ members = ["crates/*", "bin/*"]
 resolver = "3"
 
 [workspace.package]
-version = "2.4.21"
+version = "2.4.23"
 edition = "2024"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license = "Apache-2.0"
@@ -302,7 +302,6 @@ tokio-rustls = "0.26"
 tokio-socks = "0.5.3"
 tokio-stream = "0.1.18"
 tokio-test = "0.4.5"
-tokio-tungstenite = "0.29.0"
 tokio-util = "0.7.18"
 tower = "0.5.3"
 tower-http = "0.7.0"

@@ -1,32 +1,25 @@
 //! WebSocket CDP server — accepts connections and dispatches to CdpSession.
-//!
-//! `Page` is `!Send` (V8 internals), so the server runs on a dedicated
-//! thread with a single-threaded tokio runtime.
 
-use std::{cell::RefCell, rc::Rc};
+use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
-use tokio::net::TcpListener;
-use tokio_tungstenite::tungstenite::Message;
+use hpx_yawc::{Frame, frame::OpCode};
+use tokio::{net::TcpListener, sync::Mutex};
 
 use crate::protocol::{session::CdpSession, types::*};
 
 /// A running CDP server. Stops when dropped.
 pub struct CdpServer {
     port: u16,
-    shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    shutdown: Arc<std::sync::atomic::AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl CdpServer {
     /// Start a CDP WebSocket server on `127.0.0.1:{port}`.
-    ///
-    /// Spawns a dedicated thread with a single-threaded tokio runtime (required
-    /// because `Page` is `!Send`). The HTML is used to create a fresh Page on
-    /// that thread.
     pub fn start(html: &str, port: u16) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let html = html.to_string();
-        let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let shutdown_clone = shutdown.clone();
         let (port_tx, port_rx) = std::sync::mpsc::channel();
 
@@ -41,9 +34,8 @@ impl CdpServer {
                     return;
                 }
             };
-            let local = tokio::task::LocalSet::new();
 
-            local.block_on(&rt, async move {
+            rt.block_on(async move {
                 let page = match crate::page::Page::from_html(&html, None).await {
                     Ok(p) => p,
                     Err(e) => {
@@ -52,7 +44,7 @@ impl CdpServer {
                         return;
                     }
                 };
-                let page = Rc::new(RefCell::new(page));
+                let page = Arc::new(Mutex::new(page));
 
                 let listener = match TcpListener::bind(format!("127.0.0.1:{}", port)).await {
                     Ok(l) => l,
@@ -120,8 +112,8 @@ impl Drop for CdpServer {
 
 async fn accept_loop(
     listener: TcpListener,
-    page: Rc<RefCell<crate::page::Page>>,
-    shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    page: Arc<Mutex<crate::page::Page>>,
+    shutdown: Arc<std::sync::atomic::AtomicBool>,
 ) {
     loop {
         if shutdown.load(std::sync::atomic::Ordering::Relaxed) {
@@ -134,7 +126,7 @@ async fn accept_loop(
         match accept {
             Ok(Ok((stream, addr))) => {
                 let page = page.clone();
-                tokio::task::spawn_local(async move {
+                tokio::task::spawn(async move {
                     if let Err(e) = handle_connection(stream, page).await {
                         tracing::warn!("CDP connection from {} error: {}", addr, e);
                     }
@@ -148,14 +140,19 @@ async fn accept_loop(
     }
 }
 
-#[allow(
-    clippy::await_holding_refcell_ref,
-    reason = "single-threaded CDP runtime; RefCell borrow dropped before await"
-)]
+fn bad_request(msg: &str) -> hyper::Response<String> {
+    hyper::Response::builder()
+        .status(hyper::StatusCode::BAD_REQUEST)
+        .body(msg.to_string())
+        .unwrap_or_else(|_| hyper::Response::new(String::new()))
+}
+
 async fn handle_connection(
     stream: tokio::net::TcpStream,
-    page: Rc<RefCell<crate::page::Page>>,
+    page: Arc<Mutex<crate::page::Page>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    use hyper_util::rt::TokioIo;
+
     // Peek to check for HTTP vs WebSocket
     let mut buf = [0u8; 512];
     let n = stream.peek(&mut buf).await?;
@@ -165,31 +162,87 @@ async fn handle_connection(
         return handle_http(stream, &page).await;
     }
 
-    let mut ws_stream = tokio_tungstenite::accept_async(stream).await?;
+    // Use hyper to handle the upgrade to WebSocket (HTTP/1 + HTTP/2)
+    let io = TokioIo::new(stream);
+    let page_clone = page.clone();
+
+    let service =
+        hyper::service::service_fn(move |mut req: hyper::Request<hyper::body::Incoming>| {
+            let page = page_clone.clone();
+            async move {
+                if req
+                    .headers()
+                    .get(hyper::header::SEC_WEBSOCKET_KEY)
+                    .is_none()
+                {
+                    return Ok::<_, std::convert::Infallible>(bad_request(
+                        "missing Sec-WebSocket-Key",
+                    ));
+                }
+
+                if req
+                    .headers()
+                    .get(hyper::header::SEC_WEBSOCKET_VERSION)
+                    .map(|v| v.as_bytes())
+                    != Some(b"13")
+                {
+                    return Ok(bad_request("invalid Sec-WebSocket-Version"));
+                }
+
+                let (response, upgrade_fut) = match hpx_yawc::WebSocket::upgrade(&mut req) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return Ok(bad_request(&format!("upgrade error: {e}")));
+                    }
+                };
+
+                tokio::task::spawn(async move {
+                    match upgrade_fut.await {
+                        Ok(ws) => {
+                            if let Err(e) = handle_ws_connection(ws, page).await {
+                                tracing::warn!("CDP websocket error: {}", e);
+                            }
+                        }
+                        Err(e) => tracing::warn!("CDP upgrade error: {}", e),
+                    }
+                });
+
+                Ok(response.map(|_| String::new()))
+            }
+        });
+
+    hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+        .serve_connection_with_upgrades(io, service)
+        .await
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+
+    Ok(())
+}
+
+async fn handle_ws_connection(
+    mut ws: hpx_yawc::WebSocket<hpx_yawc::HttpStream>,
+    page: Arc<Mutex<crate::page::Page>>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut session = CdpSession::new();
 
-    loop {
-        let msg = match ws_stream.next().await {
-            Some(Ok(msg)) => msg,
-            Some(Err(e)) => return Err(e.into()),
-            None => break,
-        };
-        match msg {
-            Message::Text(text) => {
-                let req: CdpRequest = match serde_json::from_str(&text) {
+    while let Some(frame) = ws.next().await {
+        match frame.opcode() {
+            OpCode::Text => {
+                let text = frame.as_str();
+                let req: CdpRequest = match serde_json::from_str(text) {
                     Ok(r) => r,
                     Err(e) => {
                         let err_msg = format!(
                             r#"{{"error":{{"code":-32700,"message":"Parse error: {}"}}}}"#,
                             e.to_string().replace('"', "'")
                         );
-                        ws_stream.send(Message::Text(err_msg.into())).await?;
+                        ws.send(Frame::text(err_msg)).await?;
                         continue;
                     }
                 };
 
                 let (response, events) = {
-                    let mut page_ref = page.borrow_mut();
+                    let mut page_ref = page.lock().await;
                     session.handle_request(&mut page_ref, &req).await
                 };
 
@@ -199,13 +252,11 @@ async fn handle_connection(
                 }
 
                 for event in events {
-                    ws_stream
-                        .send(Message::Text(to_json(&event).into()))
-                        .await?;
+                    ws.send(Frame::text(to_json(&event))).await?;
                 }
-                ws_stream.send(Message::Text(response.into())).await?;
+                ws.send(Frame::text(response)).await?;
             }
-            Message::Close(_) => break,
+            OpCode::Close => break,
             _ => {}
         }
     }
@@ -215,7 +266,7 @@ async fn handle_connection(
 
 async fn handle_http(
     stream: tokio::net::TcpStream,
-    page: &Rc<RefCell<crate::page::Page>>,
+    page: &Arc<Mutex<crate::page::Page>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -246,7 +297,7 @@ async fn handle_http(
         .to_string(),
         "/json" | "/json/list" => {
             let (title, url) = {
-                let page_ref = page.borrow();
+                let page_ref = page.lock().await;
                 (page_ref.title(), page_ref.url().to_string())
             };
             serde_json::json!([{

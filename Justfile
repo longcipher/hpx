@@ -28,4 +28,26 @@ check-cn:
 # Full CI check
 ci: lint test-all build-docs
 publish:
-  cargo publish --workspace
+	@echo "Publishing workspace crates in dependency order..."
+	@CRATES=$$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name'); \
+	REMAINING="$$CRATES"; \
+	for i in 1 2 3 4 5 6 7; do \
+		if [ -z "$$REMAINING" ]; then break; fi; \
+		NEXT=""; \
+		for crate in $$REMAINING; do \
+			echo "[$$i/7] Publishing $$crate..."; \
+			if cargo publish -p "$$crate" --allow-dirty 2>/dev/null; then \
+				echo "  ✓ $$crate published"; \
+				sleep 15; \
+			else \
+				echo "  → $$crate deferred (dependency not ready?)"; \
+				NEXT="$$NEXT $$crate"; \
+			fi; \
+		done; \
+		REMAINING="$$NEXT"; \
+	done; \
+	if [ -n "$$REMAINING" ]; then \
+		echo "ERROR: Failed to publish: $$REMAINING"; \
+		exit 1; \
+	fi
+	@echo "All crates published."
