@@ -26,6 +26,9 @@ jobs:
         with:
           tool: just,cargo-hack,cargo-machete,taplo-cli,typos-cli,rumdl,cargo-nextest
 
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y libfreetype-dev libfontconfig1-dev
+
       - name: Lint
         run: just ci
 
