@@ -38,15 +38,20 @@ publish:
     	NEXT=""
     	for crate in $REMAINING; do
     		echo "[$i/7] Publishing $crate..."
-    		if cargo publish -p "$crate" --allow-dirty 2>/dev/null; then
+    		if cargo publish -p "$crate" --allow-dirty 2>&1; then
     			echo "  ✓ $crate published"
-    			sleep 15
+    			sleep 30
     		else
-    			echo "  → $crate deferred (dependency not ready?)"
+    			echo "  → $crate deferred (retrying next round)"
     			NEXT="$NEXT $crate"
+    			sleep 5
     		fi
     	done
     	REMAINING="$NEXT"
+    	if [ -n "$REMAINING" ]; then
+    		echo "Waiting 60s before next round..."
+    		sleep 60
+    	fi
     done
     if [ -n "$REMAINING" ]; then
     	echo "ERROR: Failed to publish: $REMAINING"
