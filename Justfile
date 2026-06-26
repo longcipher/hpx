@@ -30,13 +30,18 @@ ci: lint test-all build-docs
 publish:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "Publishing workspace crates in dependency order..."
+    VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+    echo "Publishing workspace crates v$VERSION in dependency order..."
     CRATES=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name')
     REMAINING="$CRATES"
     for i in {1..7}; do
     	if [ -z "$REMAINING" ]; then break; fi
     	NEXT=""
     	for crate in $REMAINING; do
+    		if cargo search "$crate" --limit 1 2>/dev/null | grep -q "^$crate v$VERSION"; then
+    			echo "  ✓ $crate@$VERSION already published, skipping"
+    			continue
+    		fi
     		echo "[$i/7] Publishing $crate..."
     		if cargo publish -p "$crate" --allow-dirty 2>&1; then
     			echo "  ✓ $crate published"

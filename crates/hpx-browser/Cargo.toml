@@ -1,5 +1,6 @@
 [package]
 name = "hpx-browser"
+description = "Headless browser engine for hpx: HTML parsing, rendering, CDP, and canvas support"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
