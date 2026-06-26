@@ -31,37 +31,26 @@ publish:
     #!/usr/bin/env bash
     set -euo pipefail
     VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
-    echo "Publishing workspace crates v$VERSION in dependency order..."
-    CRATES=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name')
-    REMAINING="$CRATES"
-    for i in {1..7}; do
-    	if [ -z "$REMAINING" ]; then break; fi
-    	NEXT=""
-    	for crate in $REMAINING; do
-    		if cargo search "$crate" --limit 1 2>/dev/null | grep -q "^$crate = \"$VERSION\""; then
-    			echo "  ✓ $crate@$VERSION already published, skipping"
-    			continue
-    		fi
-    		echo "[$i/7] Publishing $crate..."
-    		OUTPUT=$(cargo publish -p "$crate" --allow-dirty 2>&1) && RC=0 || RC=$?
-    		if [ $RC -eq 0 ] || echo "$OUTPUT" | grep -q "already exists on crates.io"; then
-    			echo "  ✓ $crate published (or already exists)"
-    			sleep 30
-    		else
-    			echo "$OUTPUT" | tail -3
-    			echo "  → $crate deferred (retrying next round)"
-    			NEXT="$NEXT $crate"
-    			sleep 5
-    		fi
-    	done
-    	REMAINING="$NEXT"
-    	if [ -n "$REMAINING" ]; then
-    		echo "Waiting 60s before next round..."
-    		sleep 60
+    echo "Publishing workspace crates v$VERSION..."
+    echo ""
+    # Dependency order: hpx-yawc → hpx → {hpx-browser, hpx-dl, hpx-emulation, hpx-streams} → hpx-cli
+    CRATES="hpx-yawc hpx hpx-browser hpx-dl hpx-emulation hpx-streams hpx-cli"
+    for crate in $CRATES; do
+    	# Check if already published at this version
+    	if cargo search "$crate" --limit 1 2>/dev/null | grep -q "^$crate = \"$VERSION\""; then
+    		echo "  ✓ $crate@$VERSION already published, skipping"
+    		continue
+    	fi
+    	echo "  Publishing $crate..."
+    	OUTPUT=$(cargo publish -p "$crate" --allow-dirty 2>&1) && RC=0 || RC=$?
+    	if [ $RC -eq 0 ] || echo "$OUTPUT" | grep -q "already exists on crates.io"; then
+    		echo "  ✓ $crate published"
+    		sleep 30
+    	else
+    		echo "  ✗ $crate failed:"
+    		echo "$OUTPUT" | grep -E "(error|Caused by)" | head -3
+    		exit 1
     	fi
     done
-    if [ -n "$REMAINING" ]; then
-    	echo "ERROR: Failed to publish: $REMAINING"
-    	exit 1
-    fi
+    echo ""
     echo "All crates published."
