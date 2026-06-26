@@ -78,7 +78,7 @@ impl EventBroadcaster {
 }
 
 /// Tracks download progress and emits events at configurable intervals.
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub(crate) struct ProgressTracker {
     download_id: DownloadId,
     total_bytes: Option<u64>,
@@ -102,7 +102,7 @@ impl std::fmt::Debug for ProgressTracker {
     }
 }
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 impl ProgressTracker {
     /// Create a new progress tracker.
     #[must_use]
