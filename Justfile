@@ -38,15 +38,17 @@ publish:
     	if [ -z "$REMAINING" ]; then break; fi
     	NEXT=""
     	for crate in $REMAINING; do
-    		if cargo search "$crate" --limit 1 2>/dev/null | grep -q "^$crate v$VERSION"; then
+    		if cargo search "$crate" --limit 1 2>/dev/null | grep -q "^$crate = \"$VERSION\""; then
     			echo "  ✓ $crate@$VERSION already published, skipping"
     			continue
     		fi
     		echo "[$i/7] Publishing $crate..."
-    		if cargo publish -p "$crate" --allow-dirty 2>&1; then
-    			echo "  ✓ $crate published"
+    		OUTPUT=$(cargo publish -p "$crate" --allow-dirty 2>&1) && RC=0 || RC=$?
+    		if [ $RC -eq 0 ] || echo "$OUTPUT" | grep -q "already exists on crates.io"; then
+    			echo "  ✓ $crate published (or already exists)"
     			sleep 30
     		else
+    			echo "$OUTPUT" | tail -3
     			echo "  → $crate deferred (retrying next round)"
     			NEXT="$NEXT $crate"
     			sleep 5
