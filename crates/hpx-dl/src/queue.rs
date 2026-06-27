@@ -144,7 +144,7 @@ impl Default for PriorityQueue {
 
 /// Limits the number of concurrent downloads.
 #[derive(Clone)]
-#[expect(dead_code)]
+#[cfg_attr(not(test), expect(dead_code))]
 pub(crate) struct ConcurrencyLimiter {
     semaphore: Arc<Semaphore>,
     max_concurrent: usize,
@@ -159,7 +159,7 @@ impl std::fmt::Debug for ConcurrencyLimiter {
     }
 }
 
-#[expect(dead_code)]
+#[cfg_attr(not(test), expect(dead_code))]
 impl ConcurrencyLimiter {
     /// Create a new limiter allowing up to `max_concurrent` concurrent downloads.
     #[must_use]
