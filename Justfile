@@ -43,12 +43,12 @@ publish:
     	fi
     	echo "  Publishing $crate..."
     	OUTPUT=$(cargo publish -p "$crate" --allow-dirty 2>&1) && RC=0 || RC=$?
-    	if [ $RC -eq 0 ] || echo "$OUTPUT" | grep -q "already exists on crates.io"; then
-    		echo "  ✓ $crate published"
+    	if [ $RC -eq 0 ] || echo "$OUTPUT" | grep -qi "already exists"; then
+    		echo "  ✓ $crate published (or already exists)"
     		sleep 30
     	else
     		echo "  ✗ $crate failed:"
-    		echo "$OUTPUT" | grep -E "(error|Caused by)" | head -3
+    		echo "$OUTPUT"
     		exit 1
     	fi
     done
