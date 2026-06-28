@@ -396,7 +396,7 @@ mod tests {
     #[tokio::test]
     async fn handle_page_enable() {
         let mut session = CdpSession::new();
-        let mut page = Page::from_html("<html><head></head><body></body></html>", None)
+        let mut page = Page::from_html("<html><head></head><body></body></html>", false)
             .await
             .unwrap();
         let req = CdpRequest {
@@ -412,7 +412,7 @@ mod tests {
     #[tokio::test]
     async fn handle_runtime_evaluate() {
         let mut session = CdpSession::new();
-        let mut page = Page::from_html("<html><head></head><body></body></html>", None)
+        let mut page = Page::from_html("<html><head></head><body></body></html>", false)
             .await
             .unwrap();
         let req = CdpRequest {
@@ -428,7 +428,7 @@ mod tests {
     #[tokio::test]
     async fn handle_runtime_enable_emits_context() {
         let mut session = CdpSession::new();
-        let mut page = Page::from_html("<html><head></head><body></body></html>", None)
+        let mut page = Page::from_html("<html><head></head><body></body></html>", false)
             .await
             .unwrap();
         let req = CdpRequest {
@@ -445,7 +445,7 @@ mod tests {
     async fn handle_page_navigate() {
         let mut session = CdpSession::new();
         session.enable_domain("Page");
-        let mut page = Page::from_html("<html><head></head><body></body></html>", None)
+        let mut page = Page::from_html("<html><head></head><body></body></html>", false)
             .await
             .unwrap();
         let req = CdpRequest {
@@ -465,7 +465,7 @@ mod tests {
     #[tokio::test]
     async fn handle_dom_get_document() {
         let mut session = CdpSession::new();
-        let mut page = Page::from_html("<html><head></head><body></body></html>", None)
+        let mut page = Page::from_html("<html><head></head><body></body></html>", false)
             .await
             .unwrap();
         let req = CdpRequest {
@@ -481,7 +481,7 @@ mod tests {
     #[tokio::test]
     async fn handle_unknown_method() {
         let mut session = CdpSession::new();
-        let mut page = Page::from_html("<html><head></head><body></body></html>", None)
+        let mut page = Page::from_html("<html><head></head><body></body></html>", false)
             .await
             .unwrap();
         let req = CdpRequest {
@@ -497,7 +497,7 @@ mod tests {
     #[tokio::test]
     async fn handle_browser_get_version() {
         let mut session = CdpSession::new();
-        let mut page = Page::from_html("<html><head></head><body></body></html>", None)
+        let mut page = Page::from_html("<html><head></head><body></body></html>", false)
             .await
             .unwrap();
         let req = CdpRequest {
@@ -512,7 +512,7 @@ mod tests {
     #[tokio::test]
     async fn handle_add_script_on_new_document() {
         let mut session = CdpSession::new();
-        let mut page = Page::from_html("<html><head></head><body></body></html>", None)
+        let mut page = Page::from_html("<html><head></head><body></body></html>", false)
             .await
             .unwrap();
         let req = CdpRequest {

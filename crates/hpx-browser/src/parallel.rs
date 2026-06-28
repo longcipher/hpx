@@ -139,7 +139,9 @@ fn worker_main(rx: mpsc::Receiver<Job>) {
         let profile = job.profile;
 
         let result: NavigateResult = rt.block_on(async move {
-            match Page::from_html("<html><head></head><body></body></html>", profile).await {
+            match Page::from_html("<html><head></head><body></body></html>", profile.is_some())
+                .await
+            {
                 Ok(mut page) => match page.navigate(&url).await {
                     Ok(()) => NavigateResult {
                         html: page.content(),

@@ -41,7 +41,7 @@ impl PagePool {
             page.reload_html("<html><head></head><body></body></html>", "about:blank");
             return Ok(page);
         }
-        Page::from_html("<html><head></head><body></body></html>", profile).await
+        Page::from_html("<html><head></head><body></body></html>", profile.is_some()).await
     }
 
     /// Return a page to the pool.

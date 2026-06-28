@@ -17,7 +17,11 @@ pub struct CdpServer {
 
 impl CdpServer {
     /// Start a CDP WebSocket server on `127.0.0.1:{port}`.
-    pub fn start(html: &str, port: u16) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn start(
+        html: &str,
+        port: u16,
+        stealth: bool,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let html = html.to_string();
         let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let shutdown_clone = shutdown.clone();
@@ -36,7 +40,7 @@ impl CdpServer {
             };
 
             rt.block_on(async move {
-                let page = match crate::page::Page::from_html(&html, None).await {
+                let page = match crate::page::Page::from_html(&html, stealth).await {
                     Ok(p) => p,
                     Err(e) => {
                         tracing::error!("CdpServer: failed to create page: {}", e);
@@ -86,7 +90,7 @@ impl CdpServer {
 
     /// Start on port 0 (OS-assigned) — useful for tests.
     pub fn start_ephemeral(html: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        Self::start(html, 0)
+        Self::start(html, 0, false)
     }
 
     /// The port the server is listening on.
@@ -336,6 +340,13 @@ mod tests {
         let server = CdpServer::start_ephemeral("<html><body>Hello</body></html>").unwrap();
         assert!(server.port() > 0);
         assert!(server.ws_url().contains("127.0.0.1"));
+        drop(server);
+    }
+
+    #[test]
+    fn cdp_server_accepts_stealth_param() {
+        let server = CdpServer::start("<html></html>", 0, true).expect("should start");
+        assert!(server.port() > 0);
         drop(server);
     }
 }

@@ -390,7 +390,7 @@ async fn scrape_single_url(url: &str, eval: Option<&str>, _timeout: u64) -> Scra
 pub(crate) async fn handle_serve(
     port: u16,
     host: String,
-    _stealth: bool,
+    stealth: bool,
     workers: u16,
     _allow_file_access: bool,
     _storage_dir: Option<PathBuf>,
@@ -399,7 +399,6 @@ pub(crate) async fn handle_serve(
     _allow_private_network: bool,
     _v8_flags: Option<String>,
 ) -> eyre::Result<()> {
-    // ponytail: stealth not wired to CDP server yet.
     // ponytail: allow_file_access, storage_dir, obey_robots, allow_private_network, v8_flags not wired yet.
 
     let html = "<html><body></body></html>";
@@ -411,7 +410,7 @@ pub(crate) async fn handle_serve(
     }
 
     if workers <= 1 {
-        let server = hpx_browser::protocol::server::CdpServer::start(html, port)
+        let server = hpx_browser::protocol::server::CdpServer::start(html, port, stealth)
             .map_err(|e| eyre::eyre!("failed to start CDP server: {}", e))?;
 
         if !quiet {
@@ -426,7 +425,7 @@ pub(crate) async fn handle_serve(
         let mut servers = Vec::with_capacity(workers as usize);
         for i in 0..workers {
             let p = port + i;
-            let server = hpx_browser::protocol::server::CdpServer::start(html, p)
+            let server = hpx_browser::protocol::server::CdpServer::start(html, p, stealth)
                 .map_err(|e| eyre::eyre!("failed to start CDP server on port {}: {}", p, e))?;
             if !quiet {
                 println!(
@@ -511,10 +510,15 @@ mod tests {
             ("/b.css".to_string(), "link".to_string()),
         ];
         let ndjson = format_assets_ndjson(&assets);
-        assert_eq!(
-            ndjson,
-            "{\"url\":\"/a.js\",\"type\":\"script\"}\n{\"url\":\"/b.css\",\"type\":\"link\"}\n"
-        );
+        let lines: Vec<serde_json::Value> = ndjson
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0]["url"], "/a.js");
+        assert_eq!(lines[0]["type"], "script");
+        assert_eq!(lines[1]["url"], "/b.css");
+        assert_eq!(lines[1]["type"], "link");
     }
 
     #[test]

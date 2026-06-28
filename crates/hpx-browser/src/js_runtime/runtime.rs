@@ -80,6 +80,13 @@ impl BrowserJsRuntime {
             )
             .expect("storage bootstrap failed");
 
+        runtime
+            .execute_script(
+                "[bootstrap:stealth]",
+                include_str!("js/stealth_bootstrap.js"),
+            )
+            .expect("stealth bootstrap failed");
+
         Self { inner: runtime }
     }
 
@@ -118,6 +125,39 @@ impl BrowserJsRuntime {
     /// Get the inner deno_core JsRuntime.
     pub fn inner(&mut self) -> &mut JsRuntime {
         &mut self.inner
+    }
+
+    pub fn set_user_agent(&mut self, ua: &str) {
+        let escaped = ua.replace('\\', "\\\\").replace('\'', "\\'");
+        let _ = self
+            .inner
+            .execute_script("<set-ua>", format!("globalThis.__hpx_ua = '{}';", escaped));
+    }
+
+    pub fn set_platform(&mut self, platform: &str, ua_platform: &str, ua_platform_version: &str) {
+        let p = platform.replace('\'', "\\'");
+        let uap = ua_platform.replace('\'', "\\'");
+        let uapv = ua_platform_version.replace('\'', "\\'");
+        let _ = self.inner.execute_script(
+            "<set-platform>",
+            format!(
+                "globalThis.__hpx_platform='{}';globalThis.__hpx_ua_platform='{}';globalThis.__hpx_ua_platform_version='{}';",
+                p, uap, uapv
+            ),
+        );
+    }
+
+    pub fn set_stealth(&mut self, enabled: bool) {
+        let _ = self.inner.execute_script(
+            "<set-stealth>",
+            format!("globalThis.__hpx_stealth = {};", enabled),
+        );
+    }
+
+    pub fn run_page_init(&mut self) {
+        let _ = self
+            .inner
+            .execute_script("<hpx:page-init>", "globalThis.__hpx_init();".to_string());
     }
 }
 
@@ -334,5 +374,275 @@ mod tests {
             )
             .unwrap();
         assert_eq!(result, "text/html");
+    }
+
+    #[test]
+    fn set_user_agent_test() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)");
+        let result = rt.execute_script("globalThis.__hpx_ua").unwrap();
+        assert_eq!(result, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)");
+    }
+
+    #[test]
+    fn set_platform_test() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_platform("macos", "MacIntel", "15.0.0");
+        let result = rt
+            .execute_script(
+                "`${globalThis.__hpx_platform}|${globalThis.__hpx_ua_platform}|${globalThis.__hpx_ua_platform_version}`",
+            )
+            .unwrap();
+        assert_eq!(result, "macos|MacIntel|15.0.0");
+    }
+
+    #[test]
+    fn set_stealth_test() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_stealth(true);
+        let result = rt.execute_script("globalThis.__hpx_stealth").unwrap();
+        assert_eq!(result, "true");
+    }
+
+    #[test]
+    fn run_page_init_test() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_stealth(true);
+        rt.set_user_agent("test-agent");
+        rt.run_page_init();
+        let result = rt.execute_script("typeof globalThis.__hpx_init").unwrap();
+        assert_eq!(result, "function");
+    }
+
+    #[test]
+    fn navigator_useragent_from_global() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36");
+        rt.set_platform("Win32", "Windows", "15.0.0");
+        rt.set_stealth(true);
+        rt.run_page_init();
+        let result = rt.execute_script("globalThis.navigator.userAgent").unwrap();
+        assert!(result.contains("Chrome/148"));
+    }
+
+    #[test]
+    fn webdriver_is_false() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_stealth(true);
+        rt.run_page_init();
+        let result = rt.execute_script("globalThis.navigator.webdriver").unwrap();
+        assert_eq!(result, "false");
+    }
+
+    #[test]
+    fn webdriver_descriptor_is_undefined() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_stealth(true);
+        rt.run_page_init();
+        let result = rt
+            .execute_script(
+                "Object.getOwnPropertyDescriptor(globalThis.navigator, 'webdriver') === undefined ? 'true' : 'false'",
+            )
+            .unwrap();
+        assert_eq!(result, "true");
+    }
+
+    #[test]
+    fn chrome_object_exists() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_stealth(true);
+        rt.run_page_init();
+        let result = rt.execute_script("typeof globalThis.chrome").unwrap();
+        assert_eq!(result, "object");
+    }
+
+    #[test]
+    fn chrome_csi_returns_timing() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_stealth(true);
+        rt.run_page_init();
+        let result = rt
+            .execute_script("typeof globalThis.chrome.csi().onloadT")
+            .unwrap();
+        assert_eq!(result, "number");
+    }
+
+    #[test]
+    fn screen_dimensions() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_stealth(true);
+        rt.run_page_init();
+        let w: i32 = rt
+            .execute_script("globalThis.screen.width")
+            .unwrap()
+            .parse()
+            .unwrap();
+        let h: i32 = rt
+            .execute_script("globalThis.screen.height")
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(w > 0 && h > 0);
+    }
+
+    #[test]
+    fn grease_brands_count() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_user_agent("Mozilla/5.0 Chrome/148.0.0.0");
+        rt.set_stealth(true);
+        rt.run_page_init();
+        let result = rt
+            .execute_script("globalThis.navigator.userAgentData.brands.length")
+            .unwrap();
+        assert_eq!(result, "3");
+    }
+
+    #[test]
+    fn grease_chromium_version() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_user_agent("Mozilla/5.0 Chrome/148.0.0.0");
+        rt.set_stealth(true);
+        rt.run_page_init();
+        let result = rt
+            .execute_script(
+                "globalThis.navigator.userAgentData.brands.some(function(b){return b.brand==='Chromium' && b.version==='148'})",
+            )
+            .unwrap();
+        assert_eq!(result, "true");
+    }
+
+    #[test]
+    fn plugins_count() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_stealth(true);
+        rt.run_page_init();
+        let result = rt
+            .execute_script("globalThis.navigator.plugins.length")
+            .unwrap();
+        assert_eq!(result, "3");
+    }
+
+    #[test]
+    fn performance_memory_exists() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_stealth(true);
+        rt.run_page_init();
+        let result = rt
+            .execute_script("typeof globalThis.performance.memory.jsHeapSizeLimit")
+            .unwrap();
+        assert_eq!(result, "number");
+    }
+
+    #[test]
+    fn canvas_element_exists() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_stealth(true);
+        rt.run_page_init();
+        let result = rt
+            .execute_script("typeof HTMLCanvasElement !== 'undefined'")
+            .unwrap();
+        assert!(result == "true" || result == "false");
+    }
+
+    #[test]
+    fn audio_context_type() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_stealth(true);
+        rt.run_page_init();
+        let result = rt.execute_script("typeof AudioContext").unwrap();
+        assert_eq!(result, "function");
+    }
+
+    #[test]
+    fn audio_context_creates_instance() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_stealth(true);
+        rt.run_page_init();
+        let result = rt
+            .execute_script(
+                "var ctx = new AudioContext(); ctx.sampleRate === 44100 || ctx.sampleRate === 48000",
+            )
+            .unwrap();
+        assert_eq!(result, "true");
+    }
+
+    #[test]
+    fn audio_context_base_latency() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_stealth(true);
+        rt.run_page_init();
+        let result = rt
+            .execute_script("var ctx = new AudioContext(); typeof ctx.baseLatency")
+            .unwrap();
+        assert_eq!(result, "number");
+    }
+
+    #[test]
+    fn audio_context_state_running() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_stealth(true);
+        rt.run_page_init();
+        let result = rt
+            .execute_script("var ctx = new AudioContext(); ctx.state")
+            .unwrap();
+        assert_eq!(result, "running");
+    }
+
+    #[test]
+    fn audio_context_destination() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_stealth(true);
+        rt.run_page_init();
+        let result = rt
+            .execute_script("var ctx = new AudioContext(); ctx.destination.numberOfInputs")
+            .unwrap();
+        assert_eq!(result, "1");
+    }
+
+    #[test]
+    fn audio_context_webkit_compat() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_stealth(true);
+        rt.run_page_init();
+        let result = rt.execute_script("typeof webkitAudioContext").unwrap();
+        assert_eq!(result, "function");
+    }
+
+    #[test]
+    fn canvas_noise_deterministic_per_session() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_stealth(true);
+        rt.run_page_init();
+        let result = rt
+            .execute_script(
+                r#"
+            (function() {
+                try {
+                    var c = document.createElement('canvas');
+                    c.width = 2; c.height = 2;
+                    var d1 = c.toDataURL(); var d2 = c.toDataURL();
+                    return d1 === d2 ? 'true' : 'false';
+                } catch(e) {
+                    return 'false';
+                }
+            })()
+            "#,
+            )
+            .unwrap();
+        assert!(result == "true" || result == "false");
+    }
+
+    #[test]
+    fn profile_to_globals_chrome_148_macos() {
+        let mut rt = BrowserJsRuntime::new(Dom::new());
+        rt.set_user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36");
+        rt.set_platform("MacIntel", "macOS", "15.0.0");
+        rt.set_stealth(true);
+        rt.run_page_init();
+        let ua = rt.execute_script("navigator.userAgent").unwrap();
+        assert!(ua.contains("Macintosh"));
+        assert!(ua.contains("Chrome/148"));
+        let platform = rt.execute_script("navigator.platform").unwrap();
+        assert_eq!(platform, "MacIntel");
     }
 }

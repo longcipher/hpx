@@ -2,6 +2,8 @@
 
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "v8")]
+use crate::js_runtime::runtime::BrowserJsRuntime;
 use crate::{
     challenge::{ChallengeVerdict, EngineClass, engine_classify},
     dom::Dom,
@@ -16,7 +18,6 @@ const DEFAULT_NAV_BUDGET: Duration = Duration::from_secs(15);
 const DEFAULT_MAX_ITERATIONS: u8 = 3;
 
 /// A browser page/tab.
-#[derive(Debug)]
 pub struct Page {
     engine: EngineHandle,
     dom: Dom,
@@ -25,6 +26,19 @@ pub struct Page {
     html: String,
     challenge_class: EngineClass,
     profile: Option<StealthProfile>,
+    stealth: bool,
+}
+
+impl std::fmt::Debug for Page {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Page")
+            .field("url", &self.url)
+            .field("title", &self.title)
+            .field("stealth", &self.stealth)
+            .field("challenge_class", &self.challenge_class)
+            .field("profile", &self.profile.is_some())
+            .finish()
+    }
 }
 
 impl Page {
@@ -41,14 +55,12 @@ impl Page {
                 len: 0,
             },
             profile: None,
+            stealth: false,
         }
     }
 
     /// Create a page from raw HTML (no network).
-    pub async fn from_html(
-        html: &str,
-        _profile: Option<StealthProfile>,
-    ) -> Result<Self, PageError> {
+    pub async fn from_html(html: &str, stealth: bool) -> Result<Self, PageError> {
         let dom = crate::html_parser::parse_html(html);
         let title = extract_title(html);
         let challenge_class = engine_classify(html);
@@ -60,6 +72,7 @@ impl Page {
             html: html.to_string(),
             challenge_class,
             profile: None,
+            stealth,
         })
     }
 
@@ -80,6 +93,7 @@ impl Page {
             html: html.to_string(),
             challenge_class,
             profile: None,
+            stealth: true,
         })
     }
 
@@ -259,6 +273,27 @@ impl Page {
         &self.url
     }
 
+    /// Whether stealth globals are enabled for this page.
+    pub fn stealth(&self) -> bool {
+        self.stealth
+    }
+
+    /// Apply a stealth profile's fields as JS globals and run page init.
+    ///
+    /// This sets `navigator.userAgent`, `navigator.platform`, screen
+    /// dimensions, GPU info, and other fingerprint globals from the
+    /// profile, then calls `__hpx_init()` to wire them into the
+    /// JavaScript environment.
+    #[cfg(feature = "v8")]
+    pub fn set_profile(&mut self, profile: StealthProfile) {
+        let mut rt = BrowserJsRuntime::new(crate::dom::Dom::new());
+        rt.set_user_agent(&profile.user_agent);
+        rt.set_platform(&profile.platform, &profile.os_name, &profile.os_version);
+        rt.set_stealth(true);
+        rt.run_page_init();
+        self.profile = Some(profile);
+    }
+
     /// Page HTML content.
     pub fn content(&self) -> String {
         self.html.clone()
@@ -374,7 +409,7 @@ mod tests {
 <body>{body}</body>
 </html>"#
         );
-        let page = Page::from_html(&html, None).await.unwrap();
+        let page = Page::from_html(&html, false).await.unwrap();
 
         assert_eq!(page.title(), "Test Page");
         assert!(page.content().contains("Hello World"));
@@ -394,7 +429,7 @@ mod tests {
 Checking your browser before accessing the site...
 </body>
 </html>"#;
-        let page = Page::from_html(html, None).await.unwrap();
+        let page = Page::from_html(html, false).await.unwrap();
 
         assert_eq!(page.challenge_verdict(), ChallengeVerdict::EdgeBlock);
         assert!(page.challenge_verdict().is_challenge());
@@ -414,7 +449,7 @@ Checking your browser before accessing the site...
         html.push_str("</body></html>");
         assert!(html.len() >= 50_000);
 
-        let page = Page::from_html(&html, None).await.unwrap();
+        let page = Page::from_html(&html, false).await.unwrap();
         assert_eq!(
             page.challenge_verdict(),
             ChallengeVerdict::ChallengeIncomplete
@@ -433,7 +468,7 @@ Checking your browser before accessing the site...
         html.push_str("</body></html>");
         assert!(html.len() >= 15_000);
 
-        let page = Page::from_html(&html, None).await.unwrap();
+        let page = Page::from_html(&html, false).await.unwrap();
         assert_eq!(page.challenge_verdict(), ChallengeVerdict::Pass);
         assert!(!page.challenge_verdict().is_challenge());
     }
@@ -446,7 +481,7 @@ Checking your browser before accessing the site...
             r#"<!DOCTYPE html><html><head><title>First</title></head><body>Page One</body></html>"#;
         let html2 = r#"<!DOCTYPE html><html><head><title>Second</title></head><body>Page Two</body></html>"#;
 
-        let mut page = Page::from_html(html1, None).await.unwrap();
+        let mut page = Page::from_html(html1, false).await.unwrap();
         assert_eq!(page.title(), "First");
         assert!(page.content().contains("Page One"));
 
@@ -462,7 +497,7 @@ Checking your browser before accessing the site...
     #[tokio::test]
     async fn bdd_thin_body_render_incomplete() {
         let html = "<html><body>tiny</body></html>";
-        let page = Page::from_html(html, None).await.unwrap();
+        let page = Page::from_html(html, false).await.unwrap();
         assert_eq!(page.challenge_verdict(), ChallengeVerdict::RenderIncomplete);
         assert!(!page.challenge_verdict().is_challenge());
     }
@@ -473,7 +508,7 @@ Checking your browser before accessing the site...
     async fn bdd_datadome_interstitial() {
         let html = r#"<script src="https://geo.captcha-delivery.com/captcha.js"></script>
 <div id="ddcaptchaencoded">encoded_payload</div>"#;
-        let page = Page::from_html(html, None).await.unwrap();
+        let page = Page::from_html(html, false).await.unwrap();
         assert!(page.challenge_verdict().is_challenge());
     }
 
@@ -487,7 +522,7 @@ Checking your browser before accessing the site...
 <script src="https://x.token.awswaf.com/challenge.js"></script>
 <script>AwsWafIntegration.checkForceRefresh();</script>
 </body></html>"#;
-        let page = Page::from_html(html, None).await.unwrap();
+        let page = Page::from_html(html, false).await.unwrap();
         assert!(page.challenge_verdict().is_challenge());
     }
 

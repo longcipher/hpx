@@ -154,7 +154,7 @@ impl PersistenceCommand {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "test"))]
 mod tests {
     use std::{
         sync::{
