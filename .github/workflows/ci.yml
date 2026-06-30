@@ -32,6 +32,9 @@ jobs:
       - name: Install native dependencies
         run: sudo apt-get update && sudo apt-get install -y libfreetype-dev libfontconfig1-dev
 
+      - name: Pin transitive dependencies
+        run: cargo update -p time --precise 0.3.47
+
       - name: Lint
         run: just ci
 

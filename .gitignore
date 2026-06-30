@@ -1,6 +1,5 @@
 target/
 .rumdl_cache/
-Cargo.lock
 *.db
 *.db-wal
 *.db-shm
