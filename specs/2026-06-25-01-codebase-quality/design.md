@@ -305,7 +305,7 @@ Remove blanket allows incrementally: first enable `clippy::all` and fix correctn
 
 ---
 
-### Finding 14: #![allow(dead_code)] defeats lint in hpx core (DEBT-04)
+### Finding 14: `#![allow(dead_code)]` defeats lint in hpx core (DEBT-04)
 
 - **Category:** debt
 - **Impact:** MEDIUM

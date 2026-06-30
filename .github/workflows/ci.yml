@@ -25,6 +25,9 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just,cargo-hack,cargo-machete,taplo-cli,typos-cli,rumdl,cargo-nextest
+      
+      - name: Install cargo-sort
+        run: cargo install cargo-sort
 
       - name: Install native dependencies
         run: sudo apt-get update && sudo apt-get install -y libfreetype-dev libfontconfig1-dev

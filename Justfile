@@ -1,12 +1,12 @@
 format:
     rumdl fmt .
-    taplo fmt
+    cargo sort -w -g
     cargo +nightly fmt --all
 fix:
     rumdl check --fix .
 lint:
     rumdl check .
-    taplo fmt --check
+    cargo sort -w -g -c
     cargo +nightly fmt --all -- --check
     cargo +nightly clippy --all -- -D warnings
     cargo machete

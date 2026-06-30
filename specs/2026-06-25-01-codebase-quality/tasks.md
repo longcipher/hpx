@@ -260,7 +260,7 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 
 ## Phase 5: Tech Debt
 
-### Task 5.1: Remove blanket #![allow(dead_code)] from hpx core
+### Task 5.1: Remove blanket `#![allow(dead_code)]` from hpx core
 
 > **Context:** `crates/hpx/src/lib.rs:2` has `#![allow(dead_code)]` alongside `#![deny(unused)]`, partially neutering the deny.
 > **Verification:** Clippy passes with dead_code warnings surfaced and fixed or narrowly allowed.

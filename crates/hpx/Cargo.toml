@@ -8,13 +8,7 @@ repository = "https://github.com/longcipher/hpx"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license.workspace = true
 edition.workspace = true
-include = [
-    "README.md",
-    "LICENSE",
-    "src/**/*.rs",
-    "examples/**/*.rs",
-    "tests/**/*.rs",
-]
+include = ["README.md", "LICENSE", "src/**/*.rs", "examples/**/*.rs", "tests/**/*.rs"]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -88,12 +82,7 @@ tracing = ["http2/tracing", "dep:tracing"]
 hotpath = ["dep:hotpath"]
 
 # Enable BoringSSL support.
-boring = [
-    "dep:boring",
-    "dep:tokio-boring",
-    "dep:brotli",
-    "dep:flate2",
-]
+boring = ["dep:boring", "dep:tokio-boring", "dep:brotli", "dep:flate2"]
 
 # Enable Rustls support.
 rustls-tls = [
@@ -157,6 +146,18 @@ stealth = [
     "zstd",
 ]
 
+## macOS system proxy
+[target.'cfg(target_os = "macos")'.dependencies]
+system-configuration = { workspace = true, optional = true }
+
+## interface binding
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+## windows system proxy
+[target.'cfg(windows)'.dependencies]
+windows-registry = { workspace = true, optional = true }
+
 [dependencies]
 ahash = { workspace = true }
 arc-swap = { workspace = true, optional = true }
@@ -212,7 +213,6 @@ tower = { workspace = true, features = ["timeout", "util", "retry"] }
 url = { workspace = true }
 want = { workspace = true }
 webpki-roots = { workspace = true, optional = true }
-
 # Optional deps...
 
 ## serde
@@ -260,18 +260,6 @@ base64 = { workspace = true }
 sha1 = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 tracing = { workspace = true, features = ["std"], optional = true }
-
-## windows system proxy
-[target.'cfg(windows)'.dependencies]
-windows-registry = { workspace = true, optional = true }
-
-## macOS system proxy
-[target.'cfg(target_os = "macos")'.dependencies]
-system-configuration = { workspace = true, optional = true }
-
-## interface binding
-[target.'cfg(unix)'.dependencies]
-libc = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }

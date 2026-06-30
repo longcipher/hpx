@@ -25,8 +25,6 @@ include = ["/src/**/*", "/Cargo.toml", "/README.md", "/LICENSE"]
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
-
-[lints.rust]
 # These were blanket allows; scoped below for targeted suppression only.
 
 # Optional feature configurations
@@ -41,6 +39,114 @@ simd = ["simdutf8"]
 smol = ["dep:smol"]
 socks = ["proxy", "dep:tokio-socks"]
 zlib = ["flate2/any_zlib", "flate2/zlib-rs"]
+
+# ==============================================================================
+# Common dependencies (shared across all targets)
+# ==============================================================================
+[dependencies]
+bytes = { workspace = true }
+futures = { workspace = true }
+hotpath = { workspace = true, features = [
+    "hotpath",
+], optional = true }
+rand = { workspace = true }
+thiserror = { workspace = true }
+url = { workspace = true }
+
+# ==============================================================================
+# Native target-specific dependencies
+# ==============================================================================
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+
+# HTTP servers (optional)
+axum-core = { workspace = true, optional = true }
+
+# Encoding and cryptography
+base64 = { workspace = true }
+
+# Compression
+flate2 = { workspace = true }
+http = { workspace = true, optional = true }
+http-body-util = { workspace = true }
+# HTTP clients
+hyper = { workspace = true, features = ["client", "http1"] }
+hyper-util = { workspace = true, features = ["tokio"] }
+
+# Utilities
+percent-encoding = { workspace = true }
+pin-project = { workspace = true }
+serde = { workspace = true, optional = true }
+sha1 = { workspace = true }
+
+# Optional dependencies
+simdutf8 = { workspace = true, optional = true }
+smol = { workspace = true, optional = true }
+
+# Async runtime and utilities
+tokio = { workspace = true, features = [
+    "rt",
+    "macros",
+    "net",
+    "time",
+    "io-util",
+] }
+tokio-rustls = { workspace = true, features = [
+    "logging",
+    "tls12",
+] }
+tokio-socks = { workspace = true, optional = true }
+tokio-util = { workspace = true, features = ["codec"] }
+tracing = { workspace = true }
+webpki-roots = { workspace = true }
+
+# ==============================================================================
+# WebAssembly target-specific dependencies
+# ==============================================================================
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true, features = ["wasm_js"] }
+js-sys = { workspace = true }
+# Tokio without net features for WASM
+tokio = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+web-sys = { workspace = true, features = [
+    "console",
+    "WebSocket",
+    "BinaryType",
+    "CloseEvent",
+    "MessageEvent",
+] }
+
+# ==============================================================================
+# Development dependencies
+# ==============================================================================
+[dev-dependencies]
+eyre = { workspace = true }
+serde_json = { workspace = true }
+wasm-bindgen-test = { workspace = true }
+
+# ==============================================================================
+# Development dependencies (native only)
+# ==============================================================================
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+axum = { workspace = true }
+criterion = { workspace = true }
+eyre = { workspace = true }
+futures-rustls = { workspace = true }
+hyper = { workspace = true, features = ["http1", "server", "client"] }
+rand = { workspace = true }
+rustls = { workspace = true, features = ["ring"] }
+rustls-native-certs = { workspace = true }
+rustls-pki-types = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+smol = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-stream = { workspace = true, features = ["sync"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+webpki-roots = { workspace = true }
+
+[lints.rust]
 
 # Examples configuration
 [[example]]
@@ -92,109 +198,3 @@ test = false
 [[bench]]
 name = "websocket_core"
 harness = false
-
-# ==============================================================================
-# Common dependencies (shared across all targets)
-# ==============================================================================
-[dependencies]
-bytes = { workspace = true }
-futures = { workspace = true }
-hotpath = { workspace = true, features = [
-    "hotpath",
-], optional = true }
-rand = { workspace = true }
-thiserror = { workspace = true }
-url = { workspace = true }
-
-# ==============================================================================
-# WebAssembly target-specific dependencies
-# ==============================================================================
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-web-sys = { workspace = true, features = [
-    "console",
-    "WebSocket",
-    "BinaryType",
-    "CloseEvent",
-    "MessageEvent",
-] }
-js-sys = { workspace = true }
-wasm-bindgen = { workspace = true }
-wasm-bindgen-futures = { workspace = true }
-getrandom = { workspace = true, features = ["wasm_js"] }
-# Tokio without net features for WASM
-tokio = { workspace = true }
-
-# ==============================================================================
-# Native target-specific dependencies
-# ==============================================================================
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# HTTP clients
-hyper = { workspace = true, features = ["client", "http1"] }
-hyper-util = { workspace = true, features = ["tokio"] }
-tokio-rustls = { workspace = true, features = [
-    "logging",
-    "tls12",
-] }
-webpki-roots = { workspace = true }
-http-body-util = { workspace = true }
-
-# HTTP servers (optional)
-axum-core = { workspace = true, optional = true }
-http = { workspace = true, optional = true }
-
-# Async runtime and utilities
-tokio = { workspace = true, features = [
-    "rt",
-    "macros",
-    "net",
-    "time",
-    "io-util",
-] }
-tokio-util = { workspace = true, features = ["codec"] }
-
-# Encoding and cryptography
-base64 = { workspace = true }
-sha1 = { workspace = true }
-
-# Utilities
-percent-encoding = { workspace = true }
-pin-project = { workspace = true }
-tracing = { workspace = true }
-
-# Optional dependencies
-simdutf8 = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
-smol = { workspace = true, optional = true }
-tokio-socks = { workspace = true, optional = true }
-
-# Compression
-flate2 = { workspace = true }
-
-# ==============================================================================
-# Development dependencies
-# ==============================================================================
-[dev-dependencies]
-eyre = { workspace = true }
-serde_json = { workspace = true }
-wasm-bindgen-test = { workspace = true }
-
-# ==============================================================================
-# Development dependencies (native only)
-# ==============================================================================
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-eyre = { workspace = true }
-axum = { workspace = true }
-hyper = { workspace = true, features = ["http1", "server", "client"] }
-tracing = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
-tracing-subscriber = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
-tokio-stream = { workspace = true, features = ["sync"] }
-webpki-roots = { workspace = true }
-criterion = { workspace = true }
-rand = { workspace = true }
-rustls = { workspace = true, features = ["ring"] }
-futures-rustls = { workspace = true }
-rustls-native-certs = { workspace = true }
-rustls-pki-types = { workspace = true }
-smol = { workspace = true }
