@@ -824,18 +824,22 @@ impl<'a> DomElement<'a> {
     }
 
     fn node(&self) -> &Node {
-        // ponytail: safe — constructor validated node exists and is element
+        // SAFETY: DomElement::new() validated the node exists; this holds for the lifetime.
         match self.dom.get(self.id) {
             Some(n) => n,
-            None => unreachable!(),
+            None => unreachable!(
+                "DomElement::node invariant: node must exist (validated in constructor)"
+            ),
         }
     }
 
     fn element_data(&self) -> &ElementData {
-        // ponytail: safe — constructor validated node is an element
+        // SAFETY: DomElement::new() validated the node is an element; this holds for the lifetime.
         match self.node().as_element() {
             Some(d) => d,
-            None => unreachable!(),
+            None => unreachable!(
+                "DomElement::element_data invariant: node must be element (validated in constructor)"
+            ),
         }
     }
 }

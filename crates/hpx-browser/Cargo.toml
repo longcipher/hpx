@@ -19,6 +19,7 @@ canvas = [
     "dep:rustfft",
 ]
 cdp = ["dep:hpx-yawc", "dep:hyper", "dep:hyper-util", "hpx-yawc/axum"]
+css_engine = ["dep:stylo", "dep:selectors"]
 proptest = ["dep:proptest"]
 v8 = ["dep:deno_core"]
 workers = ["v8"]
@@ -64,6 +65,10 @@ hyper-util = { workspace = true, features = [
     "tokio",
     "server-auto",
 ], optional = true }
+
+# css_engine feature
+selectors = { workspace = true, optional = true }
+stylo = { workspace = true, optional = true }
 
 # property testing
 proptest = { workspace = true, optional = true }

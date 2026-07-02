@@ -22,6 +22,30 @@ use url::Url;
 // Error
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// RedirectPolicy — controls automatic redirect following behaviour.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RedirectPolicy {
+    Follow(u8),
+    Manual,
+}
+
+impl RedirectPolicy {
+    #[inline]
+    pub const fn max_redirects(self) -> u8 {
+        match self {
+            Self::Follow(n) => n,
+            Self::Manual => 0,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Error
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, thiserror::Error)]
 pub enum NetError {
     #[error("HTTP error: {0}")]
@@ -94,17 +118,20 @@ pub struct SharedSession {
     pub h1_only_hosts: scc::HashSet<String>,
 }
 
-static SHARED_SESSION: std::sync::OnceLock<SharedSession> = std::sync::OnceLock::new();
-
-/// Get the process-wide shared session.
-pub fn shared_session() -> SharedSession {
-    SHARED_SESSION
-        .get_or_init(|| SharedSession {
+impl SharedSession {
+    pub fn new() -> Self {
+        Self {
             cookies: Arc::new(Mutex::new(CookieJar::new())),
             accept_ch: scc::HashSet::new(),
             h1_only_hosts: scc::HashSet::new(),
-        })
-        .clone()
+        }
+    }
+}
+
+impl Default for SharedSession {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -121,33 +148,26 @@ pub struct HttpClient {
 }
 
 impl HttpClient {
-    /// Create a new client with the given browser profile.
+    /// Create a new client with an isolated session and the given browser profile.
     pub fn new(browser_profile: hpx::BrowserProfile) -> Result<Self, NetError> {
-        let inner = hpx::Client::builder()
-            .build()
-            .map_err(|e| NetError::Http(format!("failed to build hpx client: {e}")))?;
-
-        Ok(Self {
-            inner,
-            cookies: Arc::new(Mutex::new(CookieJar::new())),
-            accept_ch_origins: scc::HashSet::new(),
-            h1_only_hosts: scc::HashSet::new(),
-            browser_profile,
-        })
+        let session = SharedSession::new();
+        Self::with_session(Arc::new(session), browser_profile)
     }
 
-    /// Build a client that participates in the process-wide shared session.
-    pub fn shared(browser_profile: hpx::BrowserProfile) -> Result<Self, NetError> {
-        let s = shared_session();
+    /// Build a client that participates in a provided shared session.
+    pub fn with_session(
+        session: Arc<SharedSession>,
+        browser_profile: hpx::BrowserProfile,
+    ) -> Result<Self, NetError> {
         let inner = hpx::Client::builder()
             .build()
             .map_err(|e| NetError::Http(format!("failed to build hpx client: {e}")))?;
 
         Ok(Self {
             inner,
-            cookies: s.cookies,
-            accept_ch_origins: s.accept_ch,
-            h1_only_hosts: s.h1_only_hosts,
+            cookies: session.cookies.clone(),
+            accept_ch_origins: session.accept_ch.clone(),
+            h1_only_hosts: session.h1_only_hosts.clone(),
             browser_profile,
         })
     }
@@ -205,50 +225,43 @@ impl HttpClient {
     // ----- Request methods -----
 
     /// Perform a GET request.
+    #[deprecated(note = "Use HttpClient::request() instead")]
     pub async fn get(&self, url: &str) -> Result<Response, NetError> {
-        self.get_with_headers(url, &[]).await
+        self.request("GET", url, None, &[], RedirectPolicy::Manual)
+            .await
     }
 
     /// GET with extra headers.
+    #[deprecated(note = "Use HttpClient::request() instead")]
     pub async fn get_with_headers(
         &self,
         url: &str,
         extra_headers: &[(String, String)],
     ) -> Result<Response, NetError> {
-        let parsed = Url::parse(url)?;
-        let builder = self.inner.get(url).emulation(self.browser_profile);
-
-        let builder = self
-            .inject_request_headers(builder, &parsed, extra_headers)
-            .await;
-        let hpx_resp = builder.send().await?;
-        self.process_response(hpx_resp, url, &parsed).await
+        self.request("GET", url, None, extra_headers, RedirectPolicy::Manual)
+            .await
     }
 
     /// Fetch-API-style GET with `accept: */*` semantics.
+    #[deprecated(note = "Use HttpClient::request() with explicit headers instead")]
     pub async fn fetch_get(
         &self,
         url: &str,
         extra_headers: &[(String, String)],
         _origin: Option<&str>,
     ) -> Result<Response, NetError> {
-        let parsed = Url::parse(url)?;
-        let mut builder = self.inner.get(url).emulation(self.browser_profile);
+        let mut headers = extra_headers.to_vec();
+        headers.push(("accept".to_string(), "*/*".to_string()));
+        headers.push(("sec-fetch-mode".to_string(), "cors".to_string()));
+        headers.push(("sec-fetch-dest".to_string(), "empty".to_string()));
+        headers.push(("sec-fetch-site".to_string(), "same-origin".to_string()));
 
-        // Fetch-style: accept: */*, sec-fetch-dest: empty
-        builder = builder.header("accept", "*/*");
-        builder = builder.header("sec-fetch-mode", "cors");
-        builder = builder.header("sec-fetch-dest", "empty");
-        builder = builder.header("sec-fetch-site", "same-origin");
-
-        builder = self
-            .inject_request_headers(builder, &parsed, extra_headers)
-            .await;
-        let hpx_resp = builder.send().await?;
-        self.process_response(hpx_resp, url, &parsed).await
+        self.request("GET", url, None, &headers, RedirectPolicy::Manual)
+            .await
     }
 
     /// Fetch-API-style POST with raw bytes.
+    #[deprecated(note = "Use HttpClient::request() with explicit headers instead")]
     pub async fn fetch_post_bytes(
         &self,
         url: &str,
@@ -256,103 +269,110 @@ impl HttpClient {
         extra_headers: &[(String, String)],
         _origin: Option<&str>,
     ) -> Result<Response, NetError> {
-        let parsed = Url::parse(url)?;
-        let mut builder = self.inner.post(url).emulation(self.browser_profile);
+        let mut headers = extra_headers.to_vec();
+        headers.push(("accept".to_string(), "*/*".to_string()));
+        headers.push(("sec-fetch-mode".to_string(), "cors".to_string()));
+        headers.push(("sec-fetch-dest".to_string(), "empty".to_string()));
+        headers.push(("sec-fetch-site".to_string(), "same-origin".to_string()));
 
-        builder = builder.header("accept", "*/*");
-        builder = builder.header("sec-fetch-mode", "cors");
-        builder = builder.header("sec-fetch-dest", "empty");
-        builder = builder.header("sec-fetch-site", "same-origin");
-
-        builder = self
-            .inject_request_headers(builder, &parsed, extra_headers)
-            .await;
-        let hpx_resp = builder.body(body.to_vec()).send().await?;
-        self.process_response(hpx_resp, url, &parsed).await
+        self.request("POST", url, Some(body), &headers, RedirectPolicy::Manual)
+            .await
     }
 
     /// Perform a POST request with a string body.
+    #[deprecated(note = "Use HttpClient::request() instead")]
     pub async fn post(&self, url: &str, body: &str) -> Result<Response, NetError> {
-        self.post_with_headers(url, body, &[]).await
+        self.request(
+            "POST",
+            url,
+            Some(body.as_bytes()),
+            &[],
+            RedirectPolicy::Manual,
+        )
+        .await
     }
 
     /// POST with extra headers.
+    #[deprecated(note = "Use HttpClient::request() instead")]
     pub async fn post_with_headers(
         &self,
         url: &str,
         body: &str,
         extra_headers: &[(String, String)],
     ) -> Result<Response, NetError> {
-        self.post_bytes_with_headers(url, body.as_bytes(), extra_headers)
-            .await
+        self.request(
+            "POST",
+            url,
+            Some(body.as_bytes()),
+            extra_headers,
+            RedirectPolicy::Manual,
+        )
+        .await
     }
 
     /// POST with raw bytes and extra headers.
+    #[deprecated(note = "Use HttpClient::request() instead")]
     pub async fn post_bytes_with_headers(
         &self,
         url: &str,
         body: &[u8],
         extra_headers: &[(String, String)],
     ) -> Result<Response, NetError> {
-        let parsed = Url::parse(url)?;
-        let builder = self.inner.post(url).emulation(self.browser_profile);
-
-        let builder = self
-            .inject_request_headers(builder, &parsed, extra_headers)
-            .await;
-        let hpx_resp = builder.body(body.to_vec()).send().await?;
-        self.process_response(hpx_resp, url, &parsed).await
+        self.request(
+            "POST",
+            url,
+            Some(body),
+            extra_headers,
+            RedirectPolicy::Manual,
+        )
+        .await
     }
 
     /// GET with explicit redirect following.
+    #[deprecated(note = "Use HttpClient::request() with RedirectPolicy::Follow(n) instead")]
     pub async fn get_follow(&self, url: &str, max_redirects: u8) -> Result<Response, NetError> {
-        let mut current_url = url.to_string();
-        for _ in 0..max_redirects {
-            let resp = self.get(&current_url).await?;
-            if matches!(resp.status, 301 | 302 | 303 | 307 | 308) {
-                if let Some(loc) = resp.headers.get("location") {
-                    current_url = resolve_redirect(&current_url, loc)?;
-                    continue;
-                }
-            }
-            return Ok(resp);
-        }
-        self.get(&current_url).await
+        self.request("GET", url, None, &[], RedirectPolicy::Follow(max_redirects))
+            .await
     }
 
     /// GET with extra headers and redirect following.
+    #[deprecated(note = "Use HttpClient::request() with RedirectPolicy::Follow(n) instead")]
     pub async fn get_follow_with_headers(
         &self,
         url: &str,
         extra_headers: &[(String, String)],
         max_redirects: u8,
     ) -> Result<Response, NetError> {
-        let mut current_url = url.to_string();
-        for _ in 0..max_redirects {
-            let resp = self.get_with_headers(&current_url, extra_headers).await?;
-            if matches!(resp.status, 301 | 302 | 303 | 307 | 308) {
-                if let Some(loc) = resp.headers.get("location") {
-                    current_url = resolve_redirect(&current_url, loc)?;
-                    continue;
-                }
-            }
-            return Ok(resp);
-        }
-        self.get_with_headers(&current_url, extra_headers).await
+        self.request(
+            "GET",
+            url,
+            None,
+            extra_headers,
+            RedirectPolicy::Follow(max_redirects),
+        )
+        .await
     }
 
     /// POST with redirect following. 307/308 preserve the body.
+    #[deprecated(note = "Use HttpClient::request() with RedirectPolicy::Follow(n) instead")]
     pub async fn post_follow(
         &self,
         url: &str,
         body: &str,
         max_redirects: u8,
     ) -> Result<Response, NetError> {
-        self.post_bytes_follow(url, body.as_bytes(), &[], max_redirects)
-            .await
+        self.request(
+            "POST",
+            url,
+            Some(body.as_bytes()),
+            &[],
+            RedirectPolicy::Follow(max_redirects),
+        )
+        .await
     }
 
     /// POST with raw bytes and redirect following.
+    #[deprecated(note = "Use HttpClient::request() with RedirectPolicy::Follow(n) instead")]
     pub async fn post_bytes_follow(
         &self,
         url: &str,
@@ -360,29 +380,14 @@ impl HttpClient {
         extra_headers: &[(String, String)],
         max_redirects: u8,
     ) -> Result<Response, NetError> {
-        let mut current_url = url.to_string();
-        for _ in 0..max_redirects {
-            let resp = self
-                .post_bytes_with_headers(&current_url, body, extra_headers)
-                .await?;
-
-            if matches!(resp.status, 301 | 302 | 303 | 307 | 308) {
-                if let Some(loc) = resp.headers.get("location") {
-                    let next_url = resolve_redirect(&current_url, loc)?;
-                    if matches!(resp.status, 307 | 308) {
-                        current_url = next_url;
-                        continue;
-                    }
-                    // 301/302/303 on POST → switch to GET
-                    return self
-                        .get_follow(&next_url, max_redirects.saturating_sub(1))
-                        .await;
-                }
-            }
-            return Ok(resp);
-        }
-        self.post_bytes_with_headers(&current_url, body, extra_headers)
-            .await
+        self.request(
+            "POST",
+            url,
+            Some(body),
+            extra_headers,
+            RedirectPolicy::Follow(max_redirects),
+        )
+        .await
     }
 
     /// Pre-establish a connection to a host. hpx handles connection pooling
@@ -398,6 +403,104 @@ impl HttpClient {
             .send()
             .await;
         Ok(())
+    }
+
+    /// Unified request dispatch — single entry point for all HTTP verbs.
+    ///
+    /// `method`: HTTP verb string (e.g. "GET", "POST"). `url`: target.
+    /// `body`: optional request body. `extra_headers`: appended after cookies.
+    /// `policy`: redirect following behaviour.
+    pub async fn request(
+        &self,
+        method: &str,
+        url: &str,
+        body: Option<&[u8]>,
+        extra_headers: &[(String, String)],
+        policy: RedirectPolicy,
+    ) -> Result<Response, NetError> {
+        let mut current_url = url.to_string();
+        let mut current_method = method.to_string();
+        let mut current_body = body.map(<[u8]>::to_vec);
+        let max_redirects = policy.max_redirects();
+        let mut remaining = max_redirects;
+
+        loop {
+            let parsed_current = Url::parse(&current_url)?;
+            let hpx_resp = self
+                .execute_single_request(
+                    &current_method,
+                    &current_url,
+                    current_body.as_deref(),
+                    extra_headers,
+                )
+                .await?;
+
+            let resp = self
+                .process_response(hpx_resp, &current_url, &parsed_current)
+                .await?;
+
+            if !matches!(resp.status, 301 | 302 | 303 | 307 | 308) {
+                return Ok(resp);
+            }
+
+            match policy {
+                RedirectPolicy::Manual => return Ok(resp),
+                RedirectPolicy::Follow(_) => {
+                    let loc = resp.headers.get("location").ok_or_else(|| {
+                        NetError::Request("redirect missing Location header".into())
+                    })?;
+                    let next_url = resolve_redirect(&current_url, loc)?;
+
+                    // 301/302/303 on POST → switch to GET (no body)
+                    if current_method == "POST" && matches!(resp.status, 301 | 302 | 303) {
+                        current_method = "GET".to_string();
+                        current_body = None;
+                    }
+
+                    if remaining == 0 {
+                        return Ok(resp);
+                    }
+                    remaining -= 1;
+                    current_url = next_url;
+                }
+            }
+        }
+    }
+
+    /// Execute a single non-redirecting request.
+    async fn execute_single_request(
+        &self,
+        method: &str,
+        url: &str,
+        body: Option<&[u8]>,
+        extra_headers: &[(String, String)],
+    ) -> Result<hpx::Response, NetError> {
+        let parsed = Url::parse(url)?;
+        let builder = match method {
+            "GET" | "HEAD" => self.inner.get(url),
+            "POST" => self.inner.post(url),
+            "PUT" => self.inner.put(url),
+            "PATCH" => self.inner.patch(url),
+            "DELETE" => self.inner.delete(url),
+            _ => {
+                return Err(NetError::Request(format!(
+                    "unsupported HTTP method: {method}"
+                )));
+            }
+        }
+        .emulation(self.browser_profile);
+
+        let builder = self
+            .inject_request_headers(builder, &parsed, extra_headers)
+            .await;
+
+        let builder = if let Some(b) = body {
+            builder.body(b.to_vec())
+        } else {
+            builder
+        };
+
+        builder.send().await.map_err(|e| e.into())
     }
 
     // ----- Internal helpers -----
@@ -513,9 +616,26 @@ mod tests {
     }
 
     #[test]
-    fn shared_client_creates_successfully() {
-        let client = HttpClient::shared(hpx::BrowserProfile::Chrome);
+    fn with_session_creates_successfully() {
+        let session = Arc::new(SharedSession::new());
+        let client = HttpClient::with_session(session, hpx::BrowserProfile::Chrome);
         assert!(client.is_ok());
+    }
+
+    #[test]
+    fn shared_session_new_isolation() {
+        let s1 = SharedSession::new();
+        let s2 = SharedSession::new();
+        assert!(!Arc::ptr_eq(&s1.cookies, &s2.cookies));
+    }
+
+    #[test]
+    fn shared_session_default() {
+        let s: SharedSession = Default::default();
+        // Default-constructed session has empty cookie jar
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let cookies = rt.block_on(async { s.cookies.lock().await.cookie_count() });
+        assert_eq!(cookies, 0);
     }
 
     #[test]
@@ -687,5 +807,19 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status, 200);
+    }
+
+    #[test]
+    fn redirect_policy_max_redirects() {
+        assert_eq!(RedirectPolicy::Follow(5).max_redirects(), 5);
+        assert_eq!(RedirectPolicy::Follow(0).max_redirects(), 0);
+        assert_eq!(RedirectPolicy::Manual.max_redirects(), 0);
+    }
+
+    #[test]
+    fn redirect_policy_clone_copy() {
+        let p = RedirectPolicy::Follow(3);
+        let q = p;
+        assert_eq!(p, q); // Copy semantics — both still usable
     }
 }

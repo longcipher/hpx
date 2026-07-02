@@ -8,7 +8,7 @@ use crate::{
     challenge::{ChallengeVerdict, EngineClass, engine_classify},
     dom::Dom,
     host::EngineHandle,
-    net::HttpClient,
+    net::{HttpClient, RedirectPolicy},
     stealth::StealthProfile,
 };
 
@@ -112,7 +112,7 @@ impl Page {
     /// Uses 15s budget by default.
     pub async fn navigate(&mut self, url: &str) -> Result<(), PageError> {
         // ponytail: always Chrome profile; per-profile routing via tls_impersonate
-        let client = HttpClient::shared(hpx::BrowserProfile::Chrome).map_err(PageError::Net)?;
+        let client = HttpClient::new(hpx::BrowserProfile::Chrome).map_err(PageError::Net)?;
         self.navigate_inner(url, &client, DEFAULT_MAX_ITERATIONS, DEFAULT_NAV_BUDGET)
             .await
     }
@@ -125,7 +125,7 @@ impl Page {
         url: &str,
         solvers: &[&dyn crate::challenge::ChallengeSolver],
     ) -> Result<(), PageError> {
-        let client = HttpClient::shared(hpx::BrowserProfile::Chrome).map_err(PageError::Net)?;
+        let client = HttpClient::new(hpx::BrowserProfile::Chrome).map_err(PageError::Net)?;
         self.navigate_with_solvers_inner(
             url,
             &client,
@@ -140,8 +140,11 @@ impl Page {
     ///
     /// Faster than cold `navigate()` because it skips profile setup.
     pub async fn navigate_warm(&mut self, url: &str) -> Result<(), PageError> {
-        let client = HttpClient::shared(hpx::BrowserProfile::Chrome).map_err(PageError::Net)?;
-        let resp = client.get_follow(url, 10).await.map_err(PageError::Net)?;
+        let client = HttpClient::new(hpx::BrowserProfile::Chrome).map_err(PageError::Net)?;
+        let resp = client
+            .request("GET", url, None, &[], RedirectPolicy::Follow(10))
+            .await
+            .map_err(PageError::Net)?;
         let html = resp.text();
         let resp_url = resp.url.clone();
 
@@ -173,7 +176,10 @@ impl Page {
         let t0 = Instant::now();
         let iterations = max_iterations.max(1);
 
-        let resp = client.get_follow(url, 10).await.map_err(PageError::Net)?;
+        let resp = client
+            .request("GET", url, None, &[], RedirectPolicy::Follow(10))
+            .await
+            .map_err(PageError::Net)?;
         let mut current_html = resp.text();
         let mut current_url = resp.url.clone();
         let mut cookies_before = cookie_snapshot(client, &current_url).await;
@@ -215,7 +221,7 @@ impl Page {
             if any_solved {
                 // Re-fetch after solver ran.
                 let resp = client
-                    .get_follow(&current_url, 10)
+                    .request("GET", &current_url, None, &[], RedirectPolicy::Follow(10))
                     .await
                     .map_err(PageError::Net)?;
                 current_html = resp.text();
@@ -231,7 +237,7 @@ impl Page {
                 if cookies_after != cookies_before && !cookies_after.is_empty() {
                     tracing::info!(iter, "cookie delta detected — retrying navigation");
                     let resp = client
-                        .get_follow(&current_url, 10)
+                        .request("GET", &current_url, None, &[], RedirectPolicy::Follow(10))
                         .await
                         .map_err(PageError::Net)?;
                     current_html = resp.text();

@@ -14,6 +14,7 @@
 
 pub mod challenge;
 pub mod css_cascade;
+pub mod css_engine;
 pub mod css_parser;
 pub mod css_selectors;
 pub mod css_values;
