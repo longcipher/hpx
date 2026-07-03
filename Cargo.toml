@@ -3,7 +3,7 @@ members = ["bin/*", "crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "2.4.28"
+version = "2.4.29"
 edition = "2024"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license = "Apache-2.0"
@@ -184,12 +184,12 @@ all = "warn"
 
 [workspace.dependencies]
 # local crates
-hpx = { path = "crates/hpx", version = "2.4.27" }
-hpx-browser = { path = "crates/hpx-browser", version = "2.4.27" }
-hpx-dl = { path = "crates/hpx-dl", version = "2.4.27" }
-hpx-streams = { path = "crates/hpx-streams", version = "2.4.27" }
-hpx-yawc = { path = "crates/yawc", version = "2.4.27" }
-yawc = { path = "crates/yawc", version = "2.4.27" }
+hpx = { path = "crates/hpx", version = "2.4.29" }
+hpx-browser = { path = "crates/hpx-browser", version = "2.4.29" }
+hpx-dl = { path = "crates/hpx-dl", version = "2.4.29" }
+hpx-streams = { path = "crates/hpx-streams", version = "2.4.29" }
+hpx-yawc = { path = "crates/yawc", version = "2.4.29" }
+yawc = { path = "crates/yawc", version = "2.4.29" }
 
 # external crates
 ahash = "0.8.12"
