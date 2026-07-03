@@ -9,7 +9,7 @@ lint:
     cargo sort -w -g -c
     cargo +nightly fmt --all -- --check
     cargo +nightly clippy --all -- -D warnings
-    cargo machete
+    cargo shear
 test:
     cargo nextest run --workspace --all-features
 test-full:

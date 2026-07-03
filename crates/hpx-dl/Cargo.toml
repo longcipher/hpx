@@ -84,7 +84,6 @@ tokio = { workspace = true, features = [
     "net",
     "test-util",
 ] }
-tracing-subscriber = { workspace = true }
 
 [[test]]
 name = "cucumber"
