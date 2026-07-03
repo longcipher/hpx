@@ -304,9 +304,9 @@ impl WebSocketRequestBuilder {
 
         // Resolve redirects before attempting WebSocket handshake.
         // yawc doesn't follow redirects internally, so we must resolve them first.
-        // Skip redirect detection when a proxy is configured — the proxy handles
-        // routing, and HEAD requests through proxies can hang on WebSocket endpoints.
-        if self.proxy.is_none() {
+        // Skip redirect detection — HEAD requests to WebSocket endpoints can hang
+        // and WebSocket redirects are rare in practice.
+        if false {
             let mut redirect_count = 0;
             const MAX_REDIRECTS: usize = 20;
 
@@ -362,6 +362,9 @@ impl WebSocketRequestBuilder {
             }
         }
 
+        // Save http/https URI for proxy matching (matcher only recognizes http/https)
+        let proxy_match_uri = uri.clone();
+
         // Convert back to ws:// or wss:// if the final URI is http/https
         {
             let scheme = match uri.scheme_str() {
@@ -401,12 +404,28 @@ impl WebSocketRequestBuilder {
         // Extract proxy configuration if a proxy was set
         if let Some(proxy) = &self.proxy {
             let matcher = proxy.clone().into_matcher();
-            if let Some(crate::proxy::Intercepted::Proxy(intercept)) = matcher.intercept(&uri) {
+            if let Some(crate::proxy::Intercepted::Proxy(intercept)) =
+                matcher.intercept(&proxy_match_uri)
+            {
                 let proxy_uri = intercept.uri();
-                let proxy_url: url::Url = proxy_uri
+                let mut proxy_url: url::Url = proxy_uri
                     .to_string()
                     .parse()
                     .map_err(|e: url::ParseError| Error::builder(e))?;
+                // Recover credentials from the intercept auth header
+                if let Some(auth) = intercept.basic_auth()
+                    && let Ok(auth_str) = auth.to_str()
+                    && let Some(encoded) = auth_str.strip_prefix("Basic ")
+                {
+                    use base64::Engine;
+                    if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded)
+                        && let Ok(cred) = String::from_utf8(decoded)
+                        && let Some((user, pass)) = cred.split_once(':')
+                    {
+                        let _ = proxy_url.set_username(user);
+                        let _ = proxy_url.set_password(Some(pass));
+                    }
+                }
                 let proxy_config = Self::make_proxy_config(proxy_url);
                 ws_builder = ws_builder.with_proxy(proxy_config);
             }
