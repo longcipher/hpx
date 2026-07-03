@@ -304,55 +304,60 @@ impl WebSocketRequestBuilder {
 
         // Resolve redirects before attempting WebSocket handshake.
         // yawc doesn't follow redirects internally, so we must resolve them first.
-        let mut redirect_count = 0;
-        const MAX_REDIRECTS: usize = 20;
+        // Skip redirect detection when a proxy is configured — the proxy handles
+        // routing, and HEAD requests through proxies can hang on WebSocket endpoints.
+        if self.proxy.is_none() {
+            let mut redirect_count = 0;
+            const MAX_REDIRECTS: usize = 20;
 
-        loop {
-            // Make a HEAD request to detect redirects without consuming the body
-            let head_request = crate::Request::new(http::Method::HEAD, uri.clone());
+            loop {
+                // Make a HEAD request to detect redirects without consuming the body
+                let head_request = crate::Request::new(http::Method::HEAD, uri.clone());
 
-            let response = client.execute(head_request).await;
-            match response {
-                Ok(resp) => {
-                    let status = resp.status();
-                    if !status.is_redirection() {
-                        // Not a redirect, use the current URI
+                let response = client.execute(head_request).await;
+                match response {
+                    Ok(resp) => {
+                        let status = resp.status();
+                        if !status.is_redirection() {
+                            // Not a redirect, use the current URI
+                            break;
+                        }
+
+                        redirect_count += 1;
+                        if redirect_count > MAX_REDIRECTS {
+                            return Err(Error::upgrade(format!(
+                                "too many redirects (max {MAX_REDIRECTS})"
+                            )));
+                        }
+
+                        let location = resp
+                            .headers()
+                            .get(http::header::LOCATION)
+                            .and_then(|v| v.to_str().ok())
+                            .ok_or_else(|| {
+                                Error::upgrade("redirect response missing Location header")
+                            })?;
+
+                        // Parse the redirect URI
+                        uri = if location.starts_with("http://") || location.starts_with("https://")
+                        {
+                            Uri::try_from(location).map_err(Error::builder)?
+                        } else {
+                            // Relative URI - resolve against current URI
+                            let base = format!(
+                                "{}://{}",
+                                uri.scheme_str().unwrap_or("http"),
+                                uri.authority().map(|a| a.as_str()).unwrap_or("")
+                            );
+                            let full = format!("{base}{location}");
+                            Uri::try_from(full).map_err(Error::builder)?
+                        };
+                    }
+                    Err(_) => {
+                        // If the HEAD request fails (e.g., method not allowed),
+                        // proceed with the original URI
                         break;
                     }
-
-                    redirect_count += 1;
-                    if redirect_count > MAX_REDIRECTS {
-                        return Err(Error::upgrade(format!(
-                            "too many redirects (max {MAX_REDIRECTS})"
-                        )));
-                    }
-
-                    let location = resp
-                        .headers()
-                        .get(http::header::LOCATION)
-                        .and_then(|v| v.to_str().ok())
-                        .ok_or_else(|| {
-                            Error::upgrade("redirect response missing Location header")
-                        })?;
-
-                    // Parse the redirect URI
-                    uri = if location.starts_with("http://") || location.starts_with("https://") {
-                        Uri::try_from(location).map_err(Error::builder)?
-                    } else {
-                        // Relative URI - resolve against current URI
-                        let base = format!(
-                            "{}://{}",
-                            uri.scheme_str().unwrap_or("http"),
-                            uri.authority().map(|a| a.as_str()).unwrap_or("")
-                        );
-                        let full = format!("{base}{location}");
-                        Uri::try_from(full).map_err(Error::builder)?
-                    };
-                }
-                Err(_) => {
-                    // If the HEAD request fails (e.g., method not allowed),
-                    // proceed with the original URI
-                    break;
                 }
             }
         }
