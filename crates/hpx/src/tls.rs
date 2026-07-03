@@ -53,6 +53,7 @@ use std::hash::{Hash, Hasher};
 
 #[cfg(feature = "boring")]
 use ::boring::ssl;
+#[cfg(feature = "boring")]
 use bytes::{BufMut, BytesMut};
 
 /// A TLS protocol version.
@@ -150,6 +151,7 @@ impl AlpnProtocol {
     /// Encode a single protocol in TLS wire format (length-prefixed).
     ///
     /// This is the format expected by BoringSSL's `set_alpn_protos()`.
+    #[cfg(feature = "boring")]
     #[inline]
     fn encode(self) -> Bytes {
         Self::encode_sequence(std::iter::once(&self))
@@ -158,6 +160,7 @@ impl AlpnProtocol {
     /// Encode a sequence of protocols in TLS wire format (each length-prefixed).
     ///
     /// This is the format expected by BoringSSL's `set_alpn_protos()`.
+    #[cfg(feature = "boring")]
     fn encode_sequence<'a, I>(items: I) -> Bytes
     where
         I: IntoIterator<Item = &'a AlpnProtocol>,
@@ -190,6 +193,7 @@ impl AlpsProtocol {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "boring")]
     #[test]
     fn alpn_protocol_encode() {
         let alpn = AlpnProtocol::encode_sequence(&[AlpnProtocol::HTTP1, AlpnProtocol::HTTP2]);
@@ -212,6 +216,7 @@ mod tests {
         assert_eq!(alpn, Bytes::from_static(b"\x08http/1.1\x02h2\x02h3"));
     }
 
+    #[cfg(feature = "boring")]
     #[test]
     fn alpn_protocol_encode_single() {
         let alpn = AlpnProtocol::HTTP1.encode();
