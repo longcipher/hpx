@@ -452,7 +452,7 @@ impl HttpClient {
                     let next_url = resolve_redirect(&current_url, loc)?;
 
                     // 301/302/303 on POST → switch to GET (no body)
-                    if current_method == "POST" && matches!(resp.status, 301 | 302 | 303) {
+                    if current_method == "POST" && matches!(resp.status, 301..=303) {
                         current_method = "GET".to_string();
                         current_body = None;
                     }

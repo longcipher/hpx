@@ -11,6 +11,8 @@ pub mod tower_compat;
 pub mod layer;
 #[cfg(feature = "multipart")]
 pub mod multipart;
+#[cfg(feature = "sse")]
+pub mod sse;
 #[cfg(feature = "ws-yawc")]
 pub mod ws;
 

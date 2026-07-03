@@ -363,6 +363,9 @@ pub use self::client::http1;
 pub use self::client::http2;
 #[cfg(feature = "multipart")]
 pub use self::client::multipart;
+#[cfg(feature = "sse")]
+#[cfg_attr(docsrs, doc(cfg(feature = "sse")))]
+pub use self::client::sse;
 #[cfg(feature = "ws-yawc")]
 pub use self::client::ws;
 #[allow(deprecated)]

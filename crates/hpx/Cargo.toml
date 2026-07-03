@@ -81,6 +81,9 @@ tracing = ["http2/tracing", "dep:tracing"]
 # Enable hotpath profiling instrumentation.
 hotpath = ["dep:hotpath"]
 
+# Enable Server-Sent Events (SSE) support.
+sse = ["dep:memchr", "dep:fastrand", "stream"]
+
 # Enable BoringSSL support.
 boring = ["dep:boring", "dep:tokio-boring", "dep:brotli", "dep:flate2"]
 
@@ -251,6 +254,10 @@ hpx-yawc = { workspace = true, optional = true }
 
 ## hickory-dns
 hickory-resolver = { workspace = true, optional = true }
+
+## sse
+fastrand = { workspace = true, optional = true }
+memchr = { workspace = true, optional = true }
 
 ## hotpath
 hotpath = { workspace = true, optional = true }
