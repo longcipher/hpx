@@ -147,13 +147,7 @@ async fn tunnel<T>(mut conn: T, host: &str, port: u16, headers: &Headers) -> Res
 where
     T: AsyncRead + AsyncWrite + Unpin,
 {
-    let mut buf = format!(
-        "\
-         CONNECT {host}:{port} HTTP/1.1\r\n\
-         Host: {host}:{port}\r\n\
-         "
-    )
-    .into_bytes();
+    let mut buf = format!("CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\n").into_bytes();
 
     match headers {
         Headers::Auth(auth) => {
@@ -198,7 +192,6 @@ where
             if pos == buf.len() {
                 return Err(TunnelError::ProxyHeadersTooLong);
             }
-        // else read more
         } else if recvd.starts_with(b"HTTP/1.1 407") {
             return Err(TunnelError::ProxyAuthRequired);
         } else {

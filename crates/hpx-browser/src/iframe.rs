@@ -4,6 +4,8 @@
 //! Communication between parent and child is via serialized postMessage.
 
 use crate::dom::{Dom, NodeData, NodeId};
+#[cfg(feature = "v8")]
+use crate::net::RedirectPolicy;
 
 /// Info about an iframe found in the DOM.
 pub struct IframeInfo {
@@ -49,9 +51,12 @@ impl ChildIframe {
         client: &crate::net::HttpClient,
         stealth_profile: Option<&crate::stealth::StealthProfile>,
     ) -> Result<Self, crate::event_loop::EventLoopError> {
-        let resp = client.get(url).await.map_err(|e| {
-            crate::event_loop::EventLoopError::Other(format!("iframe fetch error: {}", e))
-        })?;
+        let resp = client
+            .request("GET", url, None, &[], RedirectPolicy::Manual)
+            .await
+            .map_err(|e| {
+                crate::event_loop::EventLoopError::Other(format!("iframe fetch error: {}", e))
+            })?;
 
         if !resp.ok() {
             return Err(crate::event_loop::EventLoopError::Other(format!(

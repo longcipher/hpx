@@ -3,6 +3,7 @@
 #![allow(clippy::print_stdout)]
 #![allow(clippy::print_stderr)]
 #![allow(missing_docs)]
+#![allow(linker_messages)]
 
 mod browser;
 mod cli;

@@ -789,6 +789,10 @@ impl ConnectingTcpRemote {
     async fn connect(&mut self, config: &Config) -> Result<TcpStream, ConnectError> {
         let mut err = None;
         for addr in &mut self.addrs {
+            eprintln!(
+                "HTX HTTP: trying addr {addr} timeout={:?}",
+                self.connect_timeout
+            );
             debug!("connecting to {}", addr);
             match connect(&addr, config, self.connect_timeout)?.await {
                 Ok(tcp) => {
