@@ -39,7 +39,8 @@ impl CdpServer {
                 }
             };
 
-            rt.block_on(async move {
+            let local = tokio::task::LocalSet::new();
+            rt.block_on(local.run_until(async move {
                 let page = match crate::page::Page::from_html(&html, stealth).await {
                     Ok(p) => p,
                     Err(e) => {
@@ -48,6 +49,7 @@ impl CdpServer {
                         return;
                     }
                 };
+                #[allow(clippy::arc_with_non_send_sync)]
                 let page = Arc::new(Mutex::new(page));
 
                 let listener = match TcpListener::bind(format!("127.0.0.1:{}", port)).await {
@@ -65,7 +67,7 @@ impl CdpServer {
                 port_tx.send(actual_port).ok();
 
                 accept_loop(listener, page, shutdown_clone).await;
-            });
+            }));
         });
 
         let actual_port = port_rx.recv().map_err(|e| {
@@ -130,7 +132,7 @@ async fn accept_loop(
         match accept {
             Ok(Ok((stream, addr))) => {
                 let page = page.clone();
-                tokio::task::spawn(async move {
+                tokio::task::spawn_local(async move {
                     if let Err(e) = handle_connection(stream, page).await {
                         tracing::warn!("CDP connection from {} error: {}", addr, e);
                     }
@@ -200,7 +202,7 @@ async fn handle_connection(
                     }
                 };
 
-                tokio::task::spawn(async move {
+                tokio::task::spawn_local(async move {
                     match upgrade_fut.await {
                         Ok(ws) => {
                             if let Err(e) = handle_ws_connection(ws, page).await {
@@ -215,8 +217,9 @@ async fn handle_connection(
             }
         });
 
-    hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
-        .serve_connection_with_upgrades(io, service)
+    hyper::server::conn::http1::Builder::new()
+        .serve_connection(io, service)
+        .with_upgrades()
         .await
         .map_err(|e| std::io::Error::other(e.to_string()))?;
 

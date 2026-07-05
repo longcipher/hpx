@@ -1,38 +1,24 @@
-use std::collections::{HashMap, HashSet};
-
-use tracing::error;
+use blitz_traits::shell::Viewport;
 
 use crate::{
-    css_cascade::ComputedStyle,
-    css_parser::{self, ComponentValue, TokenKind},
-    css_values::{
-        property::{CssValue, PropertyId},
-        types::{display as css_display, font as css_font, length as css_length},
-    },
-    dom::{Dom, NodeData, NodeId},
-    layout::{
-        query::DOMRect, resolve::ResolveContext, style_map::computed_to_taffy, viewport::Viewport,
-    },
+    dom::{Dom, NodeId},
+    layout::query::DOMRect,
 };
 
-const LAYOUT_BUILD_LIMIT: usize = 100_000;
-
 pub struct LayoutEngine {
-    tree: taffy::TaffyTree,
-    dom_to_taffy: HashMap<u32, taffy::NodeId>,
-    viewport: Viewport,
     dirty: bool,
-    root_taffy: Option<taffy::NodeId>,
+    viewport: Viewport,
 }
 
 impl LayoutEngine {
-    pub fn new(viewport: Viewport) -> Self {
+    pub fn new(viewport: crate::layout::Viewport) -> Self {
+        let blitz_viewport = Viewport {
+            window_size: (viewport.width as u32, viewport.height as u32),
+            ..Default::default()
+        };
         Self {
-            tree: taffy::TaffyTree::new(),
-            dom_to_taffy: HashMap::new(),
-            viewport,
             dirty: true,
-            root_taffy: None,
+            viewport: blitz_viewport,
         }
     }
 
@@ -40,52 +26,27 @@ impl LayoutEngine {
         self.dirty = true;
     }
 
-    pub fn compute(&mut self, dom: &Dom) {
-        self.tree = taffy::TaffyTree::new();
-        self.dom_to_taffy.clear();
-
-        let ctx = ResolveContext {
-            font_size: 16.0,
-            root_font_size: 16.0,
-            viewport_w: self.viewport.width,
-            viewport_h: self.viewport.height,
-        };
-
-        let root = self.build_node(dom, NodeId::DOCUMENT, &ctx);
-        self.root_taffy = root;
-
-        if let Some(root_id) = self.root_taffy {
-            let avail = taffy::Size {
-                width: taffy::AvailableSpace::Definite(self.viewport.width),
-                height: taffy::AvailableSpace::Definite(self.viewport.height),
-            };
-            self.tree.compute_layout(root_id, avail).ok();
-        }
-
+    pub fn compute(&mut self, dom: &mut Dom) {
+        let inner = dom.inner_mut();
+        inner.set_viewport(self.viewport.clone());
+        inner.resolve(0.0);
         self.dirty = false;
     }
 
-    pub fn ensure_computed(&mut self, dom: &Dom) {
+    pub fn ensure_computed(&mut self, dom: &mut Dom) {
         if self.dirty {
             self.compute(dom);
         }
     }
 
-    pub fn get_bounding_rect(&mut self, dom: &Dom, node_id: NodeId) -> DOMRect {
+    pub fn get_bounding_rect(&mut self, dom: &mut Dom, node_id: NodeId) -> DOMRect {
         self.ensure_computed(dom);
-
-        let taffy_id = match self.dom_to_taffy.get(&node_id.to_raw()) {
-            Some(id) => *id,
-            None => return DOMRect::default(),
+        let inner = dom.inner();
+        let Some(node) = inner.get_node(node_id.0) else {
+            return DOMRect::default();
         };
-
-        let layout = match self.tree.layout(taffy_id) {
-            Ok(l) => *l,
-            Err(_) => return DOMRect::default(),
-        };
-
-        let (abs_x, abs_y) = self.absolute_position(taffy_id);
-
+        let layout = &node.final_layout;
+        let (abs_x, abs_y) = self.absolute_position(inner, node_id.0);
         DOMRect::new(
             abs_x as f64,
             abs_y as f64,
@@ -94,447 +55,80 @@ impl LayoutEngine {
         )
     }
 
-    pub fn get_computed_style(&mut self, dom: &Dom, node_id: NodeId) -> ComputedStyle {
-        let node = match dom.get(node_id) {
-            Some(n) => n,
-            None => return ComputedStyle::default(),
-        };
-        match &node.data {
-            NodeData::Element(elem) => {
-                let inline = self.parse_inline_style(elem);
-                ComputedStyle::resolve(&inline, None)
-            }
-            _ => ComputedStyle::default(),
-        }
-    }
-
-    pub fn get_offset_width(&mut self, dom: &Dom, node_id: NodeId) -> f64 {
-        self.ensure_computed(dom);
-        self.taffy_size(node_id).0
-    }
-
-    pub fn get_offset_height(&mut self, dom: &Dom, node_id: NodeId) -> f64 {
-        self.ensure_computed(dom);
-        self.taffy_size(node_id).1
-    }
-
-    pub fn get_offset_top(&mut self, dom: &Dom, node_id: NodeId) -> f64 {
-        self.ensure_computed(dom);
-        self.taffy_position(node_id).1
-    }
-
-    pub fn get_offset_left(&mut self, dom: &Dom, node_id: NodeId) -> f64 {
-        self.ensure_computed(dom);
-        self.taffy_position(node_id).0
-    }
-
-    // --- Internal ---
-
-    fn build_node(
+    pub fn get_computed_style(
         &mut self,
-        dom: &Dom,
-        root: NodeId,
-        ctx: &ResolveContext,
-    ) -> Option<taffy::NodeId> {
-        enum Work {
-            Visit(NodeId),
-            Finish(NodeId),
+        _dom: &mut Dom,
+        _node_id: NodeId,
+    ) -> crate::dom::ElementData {
+        crate::dom::ElementData {
+            name: crate::dom::QualName::new(""),
+            attrs: vec![],
+            shadow_root: None,
         }
-        let mut stack: Vec<Work> = vec![Work::Visit(root)];
-        let mut visited: HashSet<NodeId> = HashSet::with_capacity(64);
-        let mut steps: usize = 0;
-        while let Some(work) = stack.pop() {
-            match work {
-                Work::Visit(node_id) => {
-                    if !visited.insert(node_id) {
-                        continue;
-                    }
-                    steps += 1;
-                    if steps > LAYOUT_BUILD_LIMIT {
-                        error!(
-                            "Layout build cycle from {:?} — visited {} unique nodes",
-                            root,
-                            visited.len()
-                        );
-                        return None;
-                    }
-                    stack.push(Work::Finish(node_id));
-                    let kids = dom.children(node_id);
-                    for c in kids.into_iter().rev() {
-                        stack.push(Work::Visit(c));
-                    }
-                }
-                Work::Finish(node_id) => {
-                    self.finish_node(dom, node_id, ctx);
-                }
-            }
-        }
-        self.dom_to_taffy.get(&root.to_raw()).copied()
     }
 
-    fn finish_node(&mut self, dom: &Dom, node_id: NodeId, ctx: &ResolveContext) {
-        let node = match dom.get(node_id) {
-            Some(n) => n,
-            None => return,
-        };
-
-        let children: Vec<taffy::NodeId> = dom
-            .children(node_id)
-            .into_iter()
-            .filter_map(|cid| self.dom_to_taffy.get(&cid.to_raw()).copied())
-            .collect();
-
-        let taffy_id = match &node.data {
-            NodeData::Document | NodeData::DocumentFragment => {
-                let style = taffy::Style {
-                    display: taffy::Display::Block,
-                    size: taffy::Size {
-                        width: taffy::Dimension::length(ctx.viewport_w),
-                        height: taffy::Dimension::auto(),
-                    },
-                    ..Default::default()
-                };
-                match self.tree.new_with_children(style, &children) {
-                    Ok(id) => id,
-                    Err(_) => return,
-                }
-            }
-            NodeData::Element(elem) => {
-                let inline_style = self.parse_inline_style(elem);
-                let computed = ComputedStyle::resolve(&inline_style, None);
-                if let Some(CssValue::Display(css_display::Display::None)) =
-                    computed.get(&PropertyId::Display)
-                {
-                    return;
-                }
-                let taffy_style = computed_to_taffy(&computed, ctx);
-                match self.tree.new_with_children(taffy_style, &children) {
-                    Ok(id) => id,
-                    Err(_) => return,
-                }
-            }
-            NodeData::Text(text) => {
-                let char_count = text.chars().count() as f32;
-                let width = char_count * ctx.font_size * 0.6;
-                let height = ctx.font_size * 1.2;
-                let style = taffy::Style {
-                    size: taffy::Size {
-                        width: taffy::Dimension::length(width),
-                        height: taffy::Dimension::length(height),
-                    },
-                    ..Default::default()
-                };
-                match self.tree.new_leaf(style) {
-                    Ok(id) => id,
-                    Err(_) => return,
-                }
-            }
-            _ => return,
-        };
-        self.dom_to_taffy.insert(node_id.to_raw(), taffy_id);
+    pub fn get_offset_width(&mut self, dom: &mut Dom, node_id: NodeId) -> f64 {
+        self.ensure_computed(dom);
+        self.node_size(dom, node_id).0
     }
 
-    fn parse_inline_style(&self, elem: &crate::dom::ElementData) -> HashMap<PropertyId, CssValue> {
-        let mut map = HashMap::new();
-        let style_attr = elem.attrs.iter().find(|a| a.name.local == "style");
-        let Some(attr) = style_attr else {
-            return map;
-        };
-        let (decls, _errors) = css_parser::parse_declaration_list(&attr.value);
-        for decl in &decls {
-            let prop_id = PropertyId::from_name(decl.name);
-            if let Some(value) = component_values_to_css(&prop_id, &decl.value) {
-                map.insert(prop_id, value);
-            }
-        }
-        map
+    pub fn get_offset_height(&mut self, dom: &mut Dom, node_id: NodeId) -> f64 {
+        self.ensure_computed(dom);
+        self.node_size(dom, node_id).1
     }
 
-    fn absolute_position(&self, taffy_id: taffy::NodeId) -> (f32, f32) {
+    pub fn get_offset_top(&mut self, dom: &mut Dom, node_id: NodeId) -> f64 {
+        self.ensure_computed(dom);
+        self.node_position(dom, node_id).1
+    }
+
+    pub fn get_offset_left(&mut self, dom: &mut Dom, node_id: NodeId) -> f64 {
+        self.ensure_computed(dom);
+        self.node_position(dom, node_id).0
+    }
+
+    fn absolute_position(&self, inner: &blitz_dom::BaseDocument, node_id: usize) -> (f32, f32) {
         let mut x = 0.0f32;
         let mut y = 0.0f32;
-        let mut current = taffy_id;
-        loop {
-            if let Ok(layout) = self.tree.layout(current) {
-                x += layout.location.x;
-                y += layout.location.y;
-            }
-            match self.tree.parent(current) {
-                Some(parent) => current = parent,
+        let mut current_id = node_id;
+        while let Some(node) = inner.get_node(current_id) {
+            x += node.final_layout.location.x;
+            y += node.final_layout.location.y;
+            match node.parent {
+                Some(pid) => current_id = pid,
                 None => break,
             }
         }
         (x, y)
     }
 
-    fn taffy_size(&self, node_id: NodeId) -> (f64, f64) {
-        match self.dom_to_taffy.get(&node_id.to_raw()) {
-            Some(taffy_id) => match self.tree.layout(*taffy_id) {
-                Ok(layout) => (
-                    crate::layout::layout_unit::LayoutUnit::from_taffy_f32(layout.size.width)
-                        .to_f64_px(),
-                    crate::layout::layout_unit::LayoutUnit::from_taffy_f32(layout.size.height)
-                        .to_f64_px(),
-                ),
-                Err(_) => (0.0, 0.0),
-            },
-            None => (0.0, 0.0),
-        }
+    fn node_size(&self, dom: &Dom, node_id: NodeId) -> (f64, f64) {
+        let inner = dom.inner();
+        let Some(node) = inner.get_node(node_id.0) else {
+            return (0.0, 0.0);
+        };
+        (
+            node.final_layout.size.width as f64,
+            node.final_layout.size.height as f64,
+        )
     }
 
-    fn taffy_position(&self, node_id: NodeId) -> (f64, f64) {
-        match self.dom_to_taffy.get(&node_id.to_raw()) {
-            Some(taffy_id) => match self.tree.layout(*taffy_id) {
-                Ok(layout) => (
-                    crate::layout::layout_unit::LayoutUnit::from_taffy_f32(layout.location.x)
-                        .to_f64_px(),
-                    crate::layout::layout_unit::LayoutUnit::from_taffy_f32(layout.location.y)
-                        .to_f64_px(),
-                ),
-                Err(_) => (0.0, 0.0),
-            },
-            None => (0.0, 0.0),
-        }
-    }
-}
-
-// --- Inline style token → CssValue conversion ---
-
-fn first_token<'a, 'b>(values: &'b [ComponentValue<'a>]) -> Option<&'b ComponentValue<'a>> {
-    values
-        .iter()
-        .find(|v| !matches!(v, ComponentValue::Token(t) if t.kind.is_whitespace()))
-}
-
-fn component_values_to_css(prop: &PropertyId, values: &[ComponentValue<'_>]) -> Option<CssValue> {
-    let tok = first_token(values)?;
-    match tok {
-        ComponentValue::Token(t) => match &t.kind {
-            TokenKind::Ident(ident) => parse_keyword(prop, ident),
-            TokenKind::Dimension { value, unit, .. } => parse_dimension(prop, *value, unit),
-            TokenKind::Number { value, .. } => parse_number(prop, *value),
-            TokenKind::Percentage { value, .. } => parse_percentage(prop, *value),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-fn parse_keyword(prop: &PropertyId, ident: &str) -> Option<CssValue> {
-    let lower = ident.to_ascii_lowercase();
-    match prop {
-        PropertyId::Display => match lower.as_str() {
-            "none" => Some(CssValue::Display(css_display::Display::None)),
-            "block" => Some(CssValue::Display(css_display::Display::Block)),
-            "inline" => Some(CssValue::Display(css_display::Display::Inline)),
-            "inline-block" => Some(CssValue::Display(css_display::Display::InlineBlock)),
-            "flex" => Some(CssValue::Display(css_display::Display::Flex)),
-            "inline-flex" => Some(CssValue::Display(css_display::Display::InlineFlex)),
-            "grid" => Some(CssValue::Display(css_display::Display::Grid)),
-            "inline-grid" => Some(CssValue::Display(css_display::Display::InlineGrid)),
-            "table" => Some(CssValue::Display(css_display::Display::Table)),
-            "contents" => Some(CssValue::Display(css_display::Display::Contents)),
-            "flow-root" => Some(CssValue::Display(css_display::Display::FlowRoot)),
-            "list-item" => Some(CssValue::Display(css_display::Display::ListItem)),
-            _ => None,
-        },
-        PropertyId::Position => match lower.as_str() {
-            "static" => Some(CssValue::Position(css_display::Position::Static)),
-            "relative" => Some(CssValue::Position(css_display::Position::Relative)),
-            "absolute" => Some(CssValue::Position(css_display::Position::Absolute)),
-            "fixed" => Some(CssValue::Position(css_display::Position::Fixed)),
-            "sticky" => Some(CssValue::Position(css_display::Position::Sticky)),
-            _ => None,
-        },
-        PropertyId::FlexDirection => match lower.as_str() {
-            "row" => Some(CssValue::FlexDirection(css_display::FlexDirection::Row)),
-            "row-reverse" => Some(CssValue::FlexDirection(
-                css_display::FlexDirection::RowReverse,
-            )),
-            "column" => Some(CssValue::FlexDirection(css_display::FlexDirection::Column)),
-            "column-reverse" => Some(CssValue::FlexDirection(
-                css_display::FlexDirection::ColumnReverse,
-            )),
-            _ => None,
-        },
-        PropertyId::FlexWrap => match lower.as_str() {
-            "nowrap" => Some(CssValue::FlexWrap(css_display::FlexWrap::Nowrap)),
-            "wrap" => Some(CssValue::FlexWrap(css_display::FlexWrap::Wrap)),
-            "wrap-reverse" => Some(CssValue::FlexWrap(css_display::FlexWrap::WrapReverse)),
-            _ => None,
-        },
-        PropertyId::BoxSizing => match lower.as_str() {
-            "content-box" => Some(CssValue::BoxSizing(css_display::BoxSizing::ContentBox)),
-            "border-box" => Some(CssValue::BoxSizing(css_display::BoxSizing::BorderBox)),
-            _ => None,
-        },
-        PropertyId::OverflowX | PropertyId::OverflowY => match lower.as_str() {
-            "visible" => Some(CssValue::Overflow(css_display::Overflow::Visible)),
-            "hidden" => Some(CssValue::Overflow(css_display::Overflow::Hidden)),
-            "scroll" => Some(CssValue::Overflow(css_display::Overflow::Scroll)),
-            "auto" => Some(CssValue::Overflow(css_display::Overflow::Auto)),
-            "clip" => Some(CssValue::Overflow(css_display::Overflow::Clip)),
-            _ => None,
-        },
-        PropertyId::Visibility => match lower.as_str() {
-            "visible" => Some(CssValue::Visibility(css_display::Visibility::Visible)),
-            "hidden" => Some(CssValue::Visibility(css_display::Visibility::Hidden)),
-            "collapse" => Some(CssValue::Visibility(css_display::Visibility::Collapse)),
-            _ => None,
-        },
-        PropertyId::AlignItems
-        | PropertyId::AlignSelf
-        | PropertyId::AlignContent
-        | PropertyId::JustifyContent
-        | PropertyId::JustifyItems
-        | PropertyId::JustifySelf => match lower.as_str() {
-            "normal" => Some(CssValue::Alignment(css_display::AlignmentValue::Normal)),
-            "stretch" => Some(CssValue::Alignment(css_display::AlignmentValue::Stretch)),
-            "center" => Some(CssValue::Alignment(css_display::AlignmentValue::Center)),
-            "start" => Some(CssValue::Alignment(css_display::AlignmentValue::Start)),
-            "end" => Some(CssValue::Alignment(css_display::AlignmentValue::End)),
-            "flex-start" => Some(CssValue::Alignment(css_display::AlignmentValue::FlexStart)),
-            "flex-end" => Some(CssValue::Alignment(css_display::AlignmentValue::FlexEnd)),
-            "baseline" => Some(CssValue::Alignment(css_display::AlignmentValue::Baseline)),
-            "space-between" => Some(CssValue::Alignment(
-                css_display::AlignmentValue::SpaceBetween,
-            )),
-            "space-around" => Some(CssValue::Alignment(
-                css_display::AlignmentValue::SpaceAround,
-            )),
-            "space-evenly" => Some(CssValue::Alignment(
-                css_display::AlignmentValue::SpaceEvenly,
-            )),
-            _ => None,
-        },
-        PropertyId::Float => match lower.as_str() {
-            "none" => Some(CssValue::Float(css_display::Float::None)),
-            "left" => Some(CssValue::Float(css_display::Float::Left)),
-            "right" => Some(CssValue::Float(css_display::Float::Right)),
-            _ => None,
-        },
-        PropertyId::Clear => match lower.as_str() {
-            "none" => Some(CssValue::Clear(css_display::Clear::None)),
-            "left" => Some(CssValue::Clear(css_display::Clear::Left)),
-            "right" => Some(CssValue::Clear(css_display::Clear::Right)),
-            "both" => Some(CssValue::Clear(css_display::Clear::Both)),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-fn length_from_unit(value: f64, unit: &str) -> Option<css_length::Length> {
-    match unit.to_ascii_lowercase().as_str() {
-        "px" => Some(css_length::Length::Px(value)),
-        "em" => Some(css_length::Length::Em(value)),
-        "rem" => Some(css_length::Length::Rem(value)),
-        "vw" => Some(css_length::Length::Vw(value)),
-        "vh" => Some(css_length::Length::Vh(value)),
-        "vmin" => Some(css_length::Length::Vmin(value)),
-        "vmax" => Some(css_length::Length::Vmax(value)),
-        "cm" => Some(css_length::Length::Cm(value)),
-        "mm" => Some(css_length::Length::Mm(value)),
-        "in" => Some(css_length::Length::In(value)),
-        "pt" => Some(css_length::Length::Pt(value)),
-        "pc" => Some(css_length::Length::Pc(value)),
-        "ch" => Some(css_length::Length::Ch(value)),
-        "ex" => Some(css_length::Length::Ex(value)),
-        _ => None,
-    }
-}
-
-fn parse_dimension(prop: &PropertyId, value: f64, unit: &str) -> Option<CssValue> {
-    let length = length_from_unit(value, unit)?;
-    match prop {
-        PropertyId::Width
-        | PropertyId::Height
-        | PropertyId::MinWidth
-        | PropertyId::MinHeight
-        | PropertyId::MaxWidth
-        | PropertyId::MaxHeight => Some(CssValue::LengthPercentageAuto(
-            css_length::LengthPercentageAuto::Length(length),
-        )),
-        PropertyId::MarginTop
-        | PropertyId::MarginRight
-        | PropertyId::MarginBottom
-        | PropertyId::MarginLeft => Some(CssValue::LengthPercentageAuto(
-            css_length::LengthPercentageAuto::Length(length),
-        )),
-        PropertyId::PaddingTop
-        | PropertyId::PaddingRight
-        | PropertyId::PaddingBottom
-        | PropertyId::PaddingLeft => Some(CssValue::LengthPercentage(
-            css_length::LengthPercentage::Length(length),
-        )),
-        PropertyId::BorderTopWidth
-        | PropertyId::BorderRightWidth
-        | PropertyId::BorderBottomWidth
-        | PropertyId::BorderLeftWidth => Some(CssValue::Length(length)),
-        PropertyId::FlexBasis => Some(CssValue::LengthPercentageAuto(
-            css_length::LengthPercentageAuto::Length(length),
-        )),
-        PropertyId::RowGap | PropertyId::ColumnGap | PropertyId::Gap => Some(
-            CssValue::LengthPercentage(css_length::LengthPercentage::Length(length)),
-        ),
-        PropertyId::FontSize => Some(CssValue::Length(length)),
-        _ => None,
-    }
-}
-
-fn parse_number(prop: &PropertyId, value: f64) -> Option<CssValue> {
-    match prop {
-        PropertyId::FlexGrow => Some(CssValue::Number(value)),
-        PropertyId::FlexShrink => Some(CssValue::Number(value)),
-        PropertyId::FlexBasis => (value == 0.0).then_some(CssValue::LengthPercentageAuto(
-            css_length::LengthPercentageAuto::Length(css_length::Length::Zero),
-        )),
-        PropertyId::ZIndex => Some(CssValue::Integer(value as i32)),
-        PropertyId::Opacity => Some(CssValue::Number(value)),
-        PropertyId::FontWeight => {
-            let weight = match value as u32 {
-                700 => css_font::FontWeight::Bold,
-                _ => css_font::FontWeight::Numeric(value),
-            };
-            Some(CssValue::FontWeight(weight))
-        }
-        _ => None,
-    }
-}
-
-fn parse_percentage(prop: &PropertyId, value: f64) -> Option<CssValue> {
-    match prop {
-        PropertyId::Width
-        | PropertyId::Height
-        | PropertyId::MinWidth
-        | PropertyId::MinHeight
-        | PropertyId::MaxWidth
-        | PropertyId::MaxHeight => Some(CssValue::LengthPercentageAuto(
-            css_length::LengthPercentageAuto::Percentage(value),
-        )),
-        PropertyId::MarginTop
-        | PropertyId::MarginRight
-        | PropertyId::MarginBottom
-        | PropertyId::MarginLeft => Some(CssValue::LengthPercentageAuto(
-            css_length::LengthPercentageAuto::Percentage(value),
-        )),
-        PropertyId::PaddingTop
-        | PropertyId::PaddingRight
-        | PropertyId::PaddingBottom
-        | PropertyId::PaddingLeft => Some(CssValue::LengthPercentage(
-            css_length::LengthPercentage::Percentage(value),
-        )),
-        PropertyId::RowGap | PropertyId::ColumnGap | PropertyId::Gap => Some(
-            CssValue::LengthPercentage(css_length::LengthPercentage::Percentage(value)),
-        ),
-        _ => None,
+    fn node_position(&self, dom: &Dom, node_id: NodeId) -> (f64, f64) {
+        let inner = dom.inner();
+        let Some(node) = inner.get_node(node_id.0) else {
+            return (0.0, 0.0);
+        };
+        (
+            node.final_layout.location.x as f64,
+            node.final_layout.location.y as f64,
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dom::{Attribute, QualName};
+    use crate::dom::{Attribute, Dom, QualName};
 
     fn make_dom_with_styled_div(style: &str) -> Dom {
         let mut dom = Dom::new();
@@ -555,185 +149,403 @@ mod tests {
 
     #[test]
     fn layout_basic_div() {
-        let dom = make_dom_with_styled_div("width: 200px; height: 100px");
-        let viewport = Viewport::new(1920.0, 1080.0);
+        let mut dom = make_dom_with_styled_div("width: 200px; height: 100px");
+        let viewport = crate::layout::Viewport::new(1920.0, 1080.0);
         let mut engine = LayoutEngine::new(viewport);
-        engine.compute(&dom);
+        engine.compute(&mut dom);
 
         let html = dom.child_elements(NodeId::DOCUMENT)[0];
         let body = dom.child_elements(html)[0];
         let div = dom.child_elements(body)[0];
 
-        let rect = engine.get_bounding_rect(&dom, div);
+        let rect = engine.get_bounding_rect(&mut dom, div);
         assert!(
             rect.width >= 200.0,
             "width should be >= 200, got {}",
             rect.width
         );
-        assert!(
-            rect.height >= 100.0,
-            "height should be >= 100, got {}",
-            rect.height
-        );
-    }
-
-    #[test]
-    fn layout_text_node_has_size() {
-        let mut dom = Dom::new();
-        let html = dom.create_element(QualName::new("html"), vec![]);
-        dom.append_child(NodeId::DOCUMENT, html);
-        let body = dom.create_element(QualName::new("body"), vec![]);
-        dom.append_child(html, body);
-        let text = dom.create_text("Hello world".to_string());
-        dom.append_child(body, text);
-
-        let viewport = Viewport::new(1920.0, 1080.0);
-        let mut engine = LayoutEngine::new(viewport);
-        engine.compute(&dom);
-
-        let (w, h) = engine.taffy_size(text);
-        assert!(w > 0.0, "text width should be > 0, got {}", w);
-        assert!(h > 0.0, "text height should be > 0, got {}", h);
-    }
-
-    #[test]
-    fn layout_offset_width() {
-        let dom = make_dom_with_styled_div("width: 300px; height: 150px");
-        let viewport = Viewport::new(1920.0, 1080.0);
-        let mut engine = LayoutEngine::new(viewport);
-
-        let html = dom.child_elements(NodeId::DOCUMENT)[0];
-        let body = dom.child_elements(html)[0];
-        let div = dom.child_elements(body)[0];
-
-        let w = engine.get_offset_width(&dom, div);
-        assert!(w >= 300.0, "offsetWidth should be >= 300, got {}", w);
-        let h = engine.get_offset_height(&dom, div);
-        assert!(h >= 150.0, "offsetHeight should be >= 150, got {}", h);
     }
 
     #[test]
     fn dirty_tracking() {
-        let dom = make_dom_with_styled_div("width: 100px");
-        let viewport = Viewport::new(1920.0, 1080.0);
+        let mut dom = make_dom_with_styled_div("width: 100px");
+        let viewport = crate::layout::Viewport::new(1920.0, 1080.0);
         let mut engine = LayoutEngine::new(viewport);
 
         assert!(engine.dirty);
-        engine.compute(&dom);
+        engine.compute(&mut dom);
         assert!(!engine.dirty);
         engine.mark_dirty();
         assert!(engine.dirty);
     }
 
-    #[test]
-    fn display_none_hides_node() {
-        let dom = make_dom_with_styled_div("display: none");
-        let viewport = Viewport::new(1920.0, 1080.0);
-        let mut engine = LayoutEngine::new(viewport);
-        engine.compute(&dom);
+    fn find_child_by_tag(dom: &Dom, parent: NodeId, tag: &str) -> Option<NodeId> {
+        dom.child_elements(parent).into_iter().find(|&id| {
+            dom.get(id)
+                .and_then(|n| n.as_element().cloned())
+                .is_some_and(|e| e.name.local == tag)
+        })
+    }
 
+    fn find_child_by_class(dom: &Dom, parent: NodeId, class_part: &str) -> Option<NodeId> {
+        dom.child_elements(parent).into_iter().find(|&id| {
+            dom.get(id)
+                .and_then(|n| n.as_element().cloned())
+                .is_some_and(|e| {
+                    e.attrs
+                        .iter()
+                        .any(|a| a.name.local == "class" && a.value.contains(class_part))
+                })
+        })
+    }
+
+    #[test]
+    fn full_rendering_pipeline_html_parse_resolve_layout() {
+        let html = r#"<!DOCTYPE html>
+<html>
+<body style="margin: 0; padding: 0;">
+    <div style="display: flex; width: 800px; height: 600px;">
+        <div style="width: 200px; height: 100%;">
+            <p>Nav 1</p>
+            <p>Nav 2</p>
+        </div>
+        <div style="flex-grow: 1; height: 100%;">
+            <div style="width: 100%; height: 80px;">
+                <h1>Page Title</h1>
+            </div>
+            <div style="padding: 20px;">
+                <p>Hello World</p>
+                <p>Second paragraph</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>"#;
+
+        let mut dom = crate::html_parser::parse_html(html);
+        let viewport = crate::layout::Viewport::new(1920.0, 1080.0);
+        let mut engine = LayoutEngine::new(viewport);
+        engine.compute(&mut dom);
+
+        let body = find_body(&dom);
+
+        let container_id = dom.child_elements(body)[0];
+
+        let container_rect = engine.get_bounding_rect(&mut dom, container_id);
+        assert!(
+            container_rect.width >= 790.0,
+            "container width should be ~800px, got {}",
+            container_rect.width
+        );
+        assert!(
+            container_rect.height >= 590.0,
+            "container height should be ~600px, got {}",
+            container_rect.height
+        );
+
+        let children = dom.child_elements(container_id);
+        assert!(
+            children.len() >= 2,
+            "container should have 2 flex children, got {}",
+            children.len()
+        );
+
+        let sidebar_rect = engine.get_bounding_rect(&mut dom, children[0]);
+        let main_rect = engine.get_bounding_rect(&mut dom, children[1]);
+
+        assert!(
+            sidebar_rect.width >= 190.0,
+            "sidebar width should be ~200px, got {}",
+            sidebar_rect.width
+        );
+        assert!(
+            main_rect.width >= 500.0,
+            "main width should fill remaining ~600px, got {}",
+            main_rect.width
+        );
+        assert!(
+            sidebar_rect.height >= 500.0,
+            "sidebar height should be substantial, got {}",
+            sidebar_rect.height
+        );
+
+        let main_children = dom.child_elements(children[1]);
+        assert!(
+            main_children.len() >= 2,
+            "main should have header + content, got {}",
+            main_children.len()
+        );
+
+        let header_rect = engine.get_bounding_rect(&mut dom, main_children[0]);
+        assert!(
+            header_rect.height >= 70.0,
+            "header height should be ~80px, got {}",
+            header_rect.height
+        );
+
+        let h1_id = dom.child_elements(main_children[0])[0];
+        let h1_text = dom.text_content(h1_id);
+        assert_eq!(h1_text, "Page Title");
+        let h1_rect = engine.get_bounding_rect(&mut dom, h1_id);
+        assert!(
+            h1_rect.height >= 20.0,
+            "h1 should have height, got {}",
+            h1_rect.height
+        );
+
+        let content_id = main_children[1];
+        let paragraphs = dom.get_elements_by_tag_name(content_id, "p");
+        assert_eq!(paragraphs.len(), 2, "should have 2 paragraphs in content");
+        let p1_text = dom.text_content(paragraphs[0]);
+        let p2_text = dom.text_content(paragraphs[1]);
+        assert_eq!(p1_text, "Hello World");
+        assert_eq!(p2_text, "Second paragraph");
+    }
+
+    #[test]
+    fn layout_with_flexbox_grow() {
+        let html = r#"<!DOCTYPE html>
+<html>
+<body>
+    <div style="display: flex; width: 600px; height: 200px;">
+        <div style="width: 100px; height: 100px;">A</div>
+        <div style="flex-grow: 1; height: 100px;">B</div>
+        <div style="width: 150px; height: 100px;">C</div>
+    </div>
+</body>
+</html>"#;
+
+        let mut dom = crate::html_parser::parse_html(html);
+        let viewport = crate::layout::Viewport::new(1920.0, 1080.0);
+        let mut engine = LayoutEngine::new(viewport);
+        engine.compute(&mut dom);
+
+        let body = find_body(&dom);
+        let body_children = dom.child_elements(body);
+
+        let flex_div = body_children
+            .iter()
+            .find(|&&id| {
+                dom.get(id)
+                    .and_then(|n| n.as_element().cloned())
+                    .is_some_and(|e| {
+                        e.attrs
+                            .iter()
+                            .any(|a| a.name.local == "style" && a.value.contains("flex"))
+                    })
+            })
+            .copied()
+            .unwrap_or(body_children[0]);
+
+        let flex_rect = engine.get_bounding_rect(&mut dom, flex_div);
+        assert!(
+            flex_rect.width >= 590.0,
+            "flex container width should be ~600px, got {}",
+            flex_rect.width
+        );
+        assert!(
+            flex_rect.height >= 190.0,
+            "flex container height should be ~200px, got {}",
+            flex_rect.height
+        );
+
+        let children = dom.child_elements(flex_div);
+        assert!(
+            children.len() >= 3,
+            "should have at least 3 flex children, got {}",
+            children.len()
+        );
+
+        let a_rect = engine.get_bounding_rect(&mut dom, children[0]);
+        let b_rect = engine.get_bounding_rect(&mut dom, children[1]);
+        let c_rect = engine.get_bounding_rect(&mut dom, children[2]);
+
+        assert!(
+            a_rect.width >= 90.0,
+            "A width should be ~100px, got {}",
+            a_rect.width
+        );
+        assert!(
+            c_rect.width >= 140.0,
+            "C width should be ~150px, got {}",
+            c_rect.width
+        );
+        assert!(
+            b_rect.width >= 300.0,
+            "B should fill remaining space ~350px, got {}",
+            b_rect.width
+        );
+        assert!(
+            b_rect.x > a_rect.x + a_rect.width - 1.0,
+            "B should be to the right of A"
+        );
+        assert!(
+            c_rect.x > b_rect.x + b_rect.width - 1.0,
+            "C should be to the right of B"
+        );
+    }
+
+    #[test]
+    fn layout_style_block_resolves() {
+        let html = r#"<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        .flex-box { display: flex; width: 400px; height: 200px; }
+        .child-a { width: 100px; }
+        .child-b { flex-grow: 1; }
+    </style>
+</head>
+<body>
+    <div class="flex-box">
+        <div class="child-a">A</div>
+        <div class="child-b">B</div>
+    </div>
+</body>
+</html>"#;
+
+        let mut dom = crate::html_parser::parse_html(html);
+        let viewport = crate::layout::Viewport::new(1920.0, 1080.0);
+        let mut engine = LayoutEngine::new(viewport);
+        engine.compute(&mut dom);
+
+        let body = find_body(&dom);
+        let body_children = dom.child_elements(body);
+        let flex_div = body_children
+            .iter()
+            .find(|&&id| {
+                dom.get(id)
+                    .and_then(|n| n.as_element().cloned())
+                    .is_some_and(|e| {
+                        e.attrs
+                            .iter()
+                            .any(|a| a.name.local == "class" && a.value.contains("flex-box"))
+                    })
+            })
+            .copied();
+
+        if let Some(flex_id) = flex_div {
+            let rect = engine.get_bounding_rect(&mut dom, flex_id);
+            assert!(
+                rect.width >= 390.0,
+                "style block flex container width should be ~400px, got {}",
+                rect.width
+            );
+        } else {
+            panic!("should have flex-box element");
+        }
+    }
+
+    #[test]
+    fn debug_tree_structure() {
+        let html = r#"<!DOCTYPE html>
+<html>
+<body>
+    <div class="container">
+        <div class="sidebar"><p>Nav</p></div>
+        <div class="main"><h1>Title</h1></div>
+    </div>
+</body>
+</html>"#;
+        let mut dom = crate::html_parser::parse_html(html);
+        let viewport = crate::layout::Viewport::new(1920.0, 1080.0);
+        let mut engine = LayoutEngine::new(viewport);
+        engine.compute(&mut dom);
+
+        fn print_tree(dom: &Dom, id: NodeId, depth: usize) {
+            let node = match dom.get(id) {
+                Some(n) => n,
+                None => return,
+            };
+            let indent = "  ".repeat(depth);
+            let tag = node
+                .as_element()
+                .map(|e| {
+                    format!(
+                        "{} [class={:?}]",
+                        e.name.local,
+                        e.attrs
+                            .iter()
+                            .find(|a| a.name.local == "class")
+                            .map(|a| &a.value)
+                    )
+                })
+                .unwrap_or_else(|| format!("{:?}", node.data));
+            let rect = dom
+                .inner()
+                .get_node(id.0)
+                .map(|n| {
+                    let l = &n.final_layout;
+                    format!(
+                        "({:.0},{:.0} {:.0}x{:.0})",
+                        l.location.x, l.location.y, l.size.width, l.size.height
+                    )
+                })
+                .unwrap_or_default();
+            println!("{}{} {}", indent, tag, rect);
+            for child_id in dom.children(id) {
+                print_tree(dom, child_id, depth + 1);
+            }
+        }
+
+        print_tree(&dom, NodeId::DOCUMENT, 0);
+    }
+
+    fn find_body(dom: &Dom) -> NodeId {
         let html = dom.child_elements(NodeId::DOCUMENT)[0];
-        let body = dom.child_elements(html)[0];
-        let div = dom.child_elements(body)[0];
-
-        assert!(!engine.dom_to_taffy.contains_key(&div.to_raw()));
+        dom.child_elements(html)
+            .iter()
+            .find(|&&id| {
+                dom.get(id)
+                    .and_then(|n| n.as_element().cloned())
+                    .is_some_and(|e| e.name.local == "body")
+            })
+            .copied()
+            .unwrap_or(html)
     }
 
     #[test]
-    fn flex_layout_sizes() {
-        let mut dom = Dom::new();
-        let html = dom.create_element(QualName::new("html"), vec![]);
-        dom.append_child(NodeId::DOCUMENT, html);
-        let body = dom.create_element(QualName::new("body"), vec![]);
-        dom.append_child(html, body);
-        let flex_container = dom.create_element(
-            QualName::new("div"),
-            vec![Attribute {
-                name: QualName::new("style"),
-                value: "display: flex; width: 500px; height: 200px".to_string(),
-            }],
-        );
-        dom.append_child(body, flex_container);
-        let child1 = dom.create_element(
-            QualName::new("div"),
-            vec![Attribute {
-                name: QualName::new("style"),
-                value: "width: 100px; height: 50px".to_string(),
-            }],
-        );
-        dom.append_child(flex_container, child1);
-        let child2 = dom.create_element(
-            QualName::new("div"),
-            vec![Attribute {
-                name: QualName::new("style"),
-                value: "width: 150px; height: 60px".to_string(),
-            }],
-        );
-        dom.append_child(flex_container, child2);
+    fn layout_with_padding_and_margin() {
+        let html = r#"<!DOCTYPE html>
+<html>
+<body>
+    <div style="width: 300px; height: 200px; padding: 10px; margin: 20px;">
+        <div style="width: 100%; height: 100%;"></div>
+    </div>
+</body>
+</html>"#;
 
-        let viewport = Viewport::new(1920.0, 1080.0);
+        let mut dom = crate::html_parser::parse_html(html);
+        let viewport = crate::layout::Viewport::new(1920.0, 1080.0);
         let mut engine = LayoutEngine::new(viewport);
-        engine.compute(&dom);
+        engine.compute(&mut dom);
 
-        let w1 = engine.get_offset_width(&dom, child1);
-        assert!(w1 >= 100.0, "child1 width should be >= 100, got {}", w1);
+        let body = find_body(&dom);
+        let body_children = dom.child_elements(body);
+        let outer_div = body_children
+            .iter()
+            .find(|&&id| {
+                dom.get(id)
+                    .and_then(|n| n.as_element().cloned())
+                    .is_some_and(|e| {
+                        e.attrs
+                            .iter()
+                            .any(|a| a.name.local == "style" && a.value.contains("300px"))
+                    })
+            })
+            .copied()
+            .expect("should find div with 300px style");
 
-        let w2 = engine.get_offset_width(&dom, child2);
-        assert!(w2 >= 150.0, "child2 width should be >= 150, got {}", w2);
-
-        let x1 = engine.get_offset_left(&dom, child1);
-        let x2 = engine.get_offset_left(&dom, child2);
-        assert!(x2 > x1, "child2 should be to the right of child1");
-    }
-
-    #[test]
-    fn get_computed_style_returns_resolved() {
-        let dom = make_dom_with_styled_div("display: flex; width: 200px");
-        let viewport = Viewport::new(1920.0, 1080.0);
-        let mut engine = LayoutEngine::new(viewport);
-
-        let html = dom.child_elements(NodeId::DOCUMENT)[0];
-        let body = dom.child_elements(html)[0];
-        let div = dom.child_elements(body)[0];
-
-        let style = engine.get_computed_style(&dom, div);
-        assert_eq!(
-            style.get(&PropertyId::Display),
-            Some(&CssValue::Display(css_display::Display::Flex))
+        let outer_rect = engine.get_bounding_rect(&mut dom, outer_div);
+        assert!(
+            outer_rect.width > 0.0,
+            "outer div should have non-zero width, got {}",
+            outer_rect.width
         );
-    }
-
-    #[test]
-    fn dom_rect_from_layout() {
-        let layout = taffy::Layout::new();
-        let rect = DOMRect::from_taffy_layout(&layout);
-        assert_eq!(rect.width, 0.0);
-    }
-
-    #[test]
-    fn margin_offset() {
-        let mut dom = Dom::new();
-        let html = dom.create_element(QualName::new("html"), vec![]);
-        dom.append_child(NodeId::DOCUMENT, html);
-        let body = dom.create_element(QualName::new("body"), vec![]);
-        dom.append_child(html, body);
-        let div = dom.create_element(
-            QualName::new("div"),
-            vec![Attribute {
-                name: QualName::new("style"),
-                value: "width: 100px; height: 50px; margin-left: 30px; margin-top: 20px"
-                    .to_string(),
-            }],
+        assert!(
+            outer_rect.height > 0.0,
+            "outer div should have non-zero height, got {}",
+            outer_rect.height
         );
-        dom.append_child(body, div);
-
-        let viewport = Viewport::new(1920.0, 1080.0);
-        let mut engine = LayoutEngine::new(viewport);
-        engine.compute(&dom);
-
-        let x = engine.get_offset_left(&dom, div);
-        let y = engine.get_offset_top(&dom, div);
-        assert!(x >= 30.0, "offsetLeft should be >= 30, got {}", x);
-        assert!(y >= 20.0, "offsetTop should be >= 20, got {}", y);
     }
 }

@@ -282,6 +282,8 @@ use const_oid as _;
 use der as _;
 #[cfg(feature = "rustls-tls")]
 use hmac as _;
+#[cfg(feature = "openssl-tls")]
+use openssl as _;
 use parking_lot as _;
 #[cfg(feature = "rustls-tls")]
 use pkcs8 as _;
@@ -299,6 +301,8 @@ use sha1 as _;
 use sha2 as _;
 #[cfg(feature = "http1")]
 use smallvec as _;
+#[cfg(feature = "openssl-tls")]
+use tokio_openssl as _;
 #[cfg(feature = "webpki-roots")]
 use webpki_root_certs as _;
 #[cfg(feature = "rustls-tls")]

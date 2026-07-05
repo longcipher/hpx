@@ -170,21 +170,48 @@ windows-registry = { workspace = true, optional = true }
 ahash = { workspace = true }
 arc-swap = { workspace = true, optional = true }
 async-trait = { workspace = true, optional = true }
+
+## tracing
+base64 = { workspace = true }
 boring = { workspace = true, optional = true }
 brotli = { workspace = true, optional = true }
 bytes = { workspace = true }
 const-oid = { workspace = true, features = ["db"], optional = true }
+
+## cookies
+cookie = { workspace = true, optional = true }
 der = { workspace = true, features = ["alloc", "oid"], optional = true }
+
+## charset
+encoding_rs = { workspace = true, optional = true }
+
+## sse
+fastrand = { workspace = true, optional = true }
 flate2 = { workspace = true, optional = true }
 futures-channel = { workspace = true }
 futures-util = { workspace = true }
+
+## hickory-dns
+hickory-resolver = { workspace = true, optional = true }
 hmac = { workspace = true, optional = true }
+
+## hotpath
+hotpath = { workspace = true, optional = true }
+
+## websocket
+hpx-yawc = { workspace = true, optional = true }
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
 http2 = { workspace = true, features = ["unstable"], optional = true }
 httparse = { workspace = true, optional = true }
 ipnet = { workspace = true }
+memchr = { workspace = true, optional = true }
+mime = { workspace = true, optional = true }
+
+## multipart
+mime_guess = { workspace = true, optional = true }
+openssl = { workspace = true, optional = true }
 parking_lot = { workspace = true }
 percent-encoding = { workspace = true }
 pin-project-lite = { workspace = true }
@@ -203,11 +230,23 @@ rustls-pemfile = { workspace = true, optional = true }
 rustls-pki-types = { workspace = true, optional = true }
 scc = { workspace = true }
 schnellru = { workspace = true }
+# Optional deps...
+
+## serde
+serde = { workspace = true, features = ["derive"], optional = true }
+serde_json = { workspace = true, optional = true }
+serde_urlencoded = { workspace = true, optional = true }
+sha1 = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+simd-json = { workspace = true, optional = true }
 smallvec = { workspace = true, features = [
     "const_generics",
     "const_new",
 ], optional = true }
 socket2 = { workspace = true, features = ["all"] }
+
+## sync wrapper
+sync_wrapper = { workspace = true, features = ["futures"], optional = true }
 tokio = { workspace = true, features = [
     "net",
     "time",
@@ -216,64 +255,25 @@ tokio = { workspace = true, features = [
     "sync",
 ] }
 tokio-boring = { workspace = true, optional = true }
+tokio-openssl = { workspace = true, optional = true }
 tokio-rustls = { workspace = true, optional = true, features = ["ring"] }
-tower = { workspace = true, features = ["timeout", "util", "retry"] }
-url = { workspace = true }
-want = { workspace = true }
-webpki-roots = { workspace = true, optional = true }
-# Optional deps...
-
-## serde
-serde = { workspace = true, features = ["derive"], optional = true }
-serde_json = { workspace = true, optional = true }
-serde_urlencoded = { workspace = true, optional = true }
-simd-json = { workspace = true, optional = true }
-
-## multipart
-mime_guess = { workspace = true, optional = true }
-
-## charset
-encoding_rs = { workspace = true, optional = true }
-mime = { workspace = true, optional = true }
-
-## sync wrapper
-sync_wrapper = { workspace = true, features = ["futures"], optional = true }
-
-## webpki root certs
-webpki-root-certs = { workspace = true, optional = true }
-
-## cookies
-cookie = { workspace = true, optional = true }
-
-## tower http
-tower-http = { workspace = true, optional = true }
-
-## tokio util
-tokio-util = { workspace = true, features = ["io"], optional = true }
 
 ## socks
 tokio-socks = { workspace = true, optional = true }
 
-## websocket
-hpx-yawc = { workspace = true, optional = true }
+## tokio util
+tokio-util = { workspace = true, features = ["io"], optional = true }
+tower = { workspace = true, features = ["timeout", "util", "retry"] }
 
-## hickory-dns
-hickory-resolver = { workspace = true, optional = true }
-
-## sse
-fastrand = { workspace = true, optional = true }
-memchr = { workspace = true, optional = true }
-
-## hotpath
-hotpath = { workspace = true, optional = true }
-
-## tracing
-base64 = { workspace = true }
-openssl = { workspace = true, optional = true }
-sha1 = { workspace = true, optional = true }
-sha2 = { workspace = true, optional = true }
-tokio-openssl = { workspace = true, optional = true }
+## tower http
+tower-http = { workspace = true, optional = true }
 tracing = { workspace = true, features = ["std"], optional = true }
+url = { workspace = true }
+want = { workspace = true }
+
+## webpki root certs
+webpki-root-certs = { workspace = true, optional = true }
+webpki-roots = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion = { workspace = true }

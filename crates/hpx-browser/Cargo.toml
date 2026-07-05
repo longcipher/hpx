@@ -19,59 +19,51 @@ canvas = [
     "dep:rustfft",
 ]
 cdp = ["dep:hpx-yawc", "dep:hyper", "dep:hyper-util", "hpx-yawc/axum"]
-css_engine = ["dep:stylo", "dep:selectors"]
 proptest = ["dep:proptest"]
 v8 = ["dep:deno_core"]
 workers = ["v8"]
 
 [dependencies]
-# always-on
 async-trait = { workspace = true }
 base64 = { workspace = true }
+
+# Blitz browser engine crates
+blitz-dom = { workspace = true }
+blitz-html = { workspace = true }
+blitz-traits = { workspace = true }
 chrono = { workspace = true }
+
+deno_core = { workspace = true, optional = true }
+fontdb = { workspace = true, optional = true }
 futures-util = { workspace = true }
 hpx = { workspace = true }
-html5ever = { workspace = true }
-rand = { workspace = true }
-rand_chacha = { workspace = true }
-rand_distr = { workspace = true }
-scc = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
-sha2 = { workspace = true }
-taffy = { workspace = true }
-thiserror = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
-tracing = { workspace = true }
-url = { workspace = true }
-winnow = { workspace = true }
-
-# v8 feature
-deno_core = { workspace = true, optional = true }
-
-# canvas feature
-fontdb = { workspace = true, optional = true }
-image = { workspace = true, optional = true }
-png = { workspace = true, optional = true }
-rustfft = { workspace = true, optional = true }
-rustybuzz = { workspace = true, optional = true }
-skia-safe = { workspace = true, optional = true }
-swash = { workspace = true, optional = true }
-
-# cdp feature
 hpx-yawc = { workspace = true, optional = true }
 hyper = { workspace = true, features = ["server", "http1"], optional = true }
 hyper-util = { workspace = true, features = [
     "tokio",
     "server-auto",
 ], optional = true }
-
-# css_engine feature
-selectors = { workspace = true, optional = true }
-stylo = { workspace = true, optional = true }
-
-# property testing
+image = { workspace = true, optional = true }
+parley = { workspace = true }
+png = { workspace = true, optional = true }
 proptest = { workspace = true, optional = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+rand_distr = { workspace = true }
+rustfft = { workspace = true, optional = true }
+rustybuzz = { workspace = true, optional = true }
+scc = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+skia-safe = { workspace = true, optional = true }
+swash = { workspace = true, optional = true }
+taffy = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }
+url = { workspace = true }
+winnow = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["html_reports"] }

@@ -18,12 +18,11 @@ pub(crate) fn op_dom_document_node() -> i32 {
 pub(crate) fn op_dom_get_tag_name(state: &mut OpState, #[smi] node_id: i32) -> String {
     let state = state.borrow::<DomState>();
     let id = NodeId::from_raw(node_id as u32);
-    state
-        .dom
-        .get(id)
-        .and_then(|n| n.as_element())
-        .map(|e| e.name.local.clone())
-        .unwrap_or_default()
+    match state.dom.get(id) {
+        Some(n) => n.as_element().map(|e| e.name.local.clone()),
+        None => None,
+    }
+    .unwrap_or_default()
 }
 
 #[op2(fast)]
@@ -65,17 +64,16 @@ pub(crate) fn op_dom_get_attribute(
 ) -> String {
     let state = state.borrow::<DomState>();
     let id = NodeId::from_raw(node_id as u32);
-    state
-        .dom
-        .get(id)
-        .and_then(|n| n.as_element())
-        .and_then(|e| {
+    match state.dom.get(id) {
+        Some(n) => n.as_element().and_then(|e| {
             e.attrs
                 .iter()
                 .find(|a| a.name.local.eq_ignore_ascii_case(name))
                 .map(|a| a.value.clone())
-        })
-        .unwrap_or_default()
+        }),
+        None => None,
+    }
+    .unwrap_or_default()
 }
 
 #[op2(fast)]
@@ -86,15 +84,14 @@ pub(crate) fn op_dom_has_attribute(
 ) -> bool {
     let state = state.borrow::<DomState>();
     let id = NodeId::from_raw(node_id as u32);
-    state
-        .dom
-        .get(id)
-        .and_then(|n| n.as_element())
-        .is_some_and(|e| {
+    match state.dom.get(id) {
+        Some(n) => n.as_element().is_some_and(|e| {
             e.attrs
                 .iter()
                 .any(|a| a.name.local.eq_ignore_ascii_case(name))
-        })
+        }),
+        None => false,
+    }
 }
 
 #[op2]
@@ -102,12 +99,13 @@ pub(crate) fn op_dom_has_attribute(
 pub(crate) fn op_dom_get_attribute_names(state: &mut OpState, #[smi] node_id: i32) -> Vec<String> {
     let state = state.borrow::<DomState>();
     let id = NodeId::from_raw(node_id as u32);
-    state
-        .dom
-        .get(id)
-        .and_then(|n| n.as_element())
-        .map(|e| e.attrs.iter().map(|a| a.name.local.clone()).collect())
-        .unwrap_or_default()
+    match state.dom.get(id) {
+        Some(n) => n
+            .as_element()
+            .map(|e| e.attrs.iter().map(|a| a.name.local.clone()).collect()),
+        None => None,
+    }
+    .unwrap_or_default()
 }
 
 #[op2(fast)]

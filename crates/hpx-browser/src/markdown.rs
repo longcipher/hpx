@@ -238,9 +238,14 @@ mod tests {
 
     #[test]
     fn test_images() {
-        let html = r#"<html><body><img src="pic.png" alt="A picture"></body></html>"#;
+        let html =
+            r#"<html><body><img src="https://example.com/pic.png" alt="A picture"></body></html>"#;
         let md = html_to_markdown(html);
-        assert!(md.contains("![A picture](pic.png)"), "got: {}", md);
+        assert!(
+            md.contains("![A picture](https://example.com/pic.png)"),
+            "got: {}",
+            md
+        );
     }
 
     #[test]

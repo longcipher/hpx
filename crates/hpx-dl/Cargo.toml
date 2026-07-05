@@ -34,20 +34,29 @@ hotpath = ["dep:hotpath"]
 
 [dependencies]
 ahash = { workspace = true }
+
+# Optional dependencies
+arrayvec = "0.7.6"
 async-trait = { workspace = true }
 crossbeam-channel = { workspace = true }
 digest = { workspace = true }
 fastrand = { workspace = true }
 futures-util = { workspace = true }
 hex = { workspace = true }
+hotpath = { workspace = true, optional = true }
 hpx = { workspace = true, optional = true, features = ["stream"] }
 md-5 = { workspace = true }
+parking_lot.workspace = true
 quick-xml = { workspace = true }
 scc = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha1 = { workspace = true }
 sha2 = { workspace = true }
+sqlx = { workspace = true, optional = true, features = [
+    "runtime-tokio",
+    "sqlite",
+] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = [
     "sync",
@@ -60,15 +69,6 @@ tokio = { workspace = true, features = [
 tracing = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
-
-# Optional dependencies
-arrayvec = "0.7.6"
-hotpath = { workspace = true, optional = true }
-parking_lot.workspace = true
-sqlx = { workspace = true, optional = true, features = [
-    "runtime-tokio",
-    "sqlite",
-] }
 
 [dev-dependencies]
 cucumber = { workspace = true }

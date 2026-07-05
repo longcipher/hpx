@@ -75,7 +75,6 @@ hyper-util = { workspace = true, features = ["tokio"] }
 # Utilities
 percent-encoding = { workspace = true }
 pin-project = { workspace = true }
-serde = { workspace = true, optional = true }
 sha1 = { workspace = true }
 
 # Optional dependencies
