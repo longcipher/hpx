@@ -69,6 +69,9 @@ jobs:
           body: ${{ steps.git-cliff.outputs.content }}
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}
 
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
+
       - name: Publish to crates.io
         run: just publish
         env:
