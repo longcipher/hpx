@@ -10,7 +10,7 @@ license = "Apache-2.0"
 repository = "https://github.com/longcipher/hpx"
 
 [workspace.metadata.cargo-shear]
-ignored = ["futures-core", "selectors", "stylo"]
+ignored = ["futures-core", "selectors", "stylo", "hpx-cli"]
 
 # Enable pedantic lints for stricter code quality
 # Priority -1 so individual lint settings override
