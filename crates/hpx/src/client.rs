@@ -22,7 +22,7 @@ pub(crate) use self::conn::{Connected, Connection};
 pub use self::core::http1;
 #[cfg(feature = "http2")]
 pub use self::core::http2;
-#[cfg(feature = "boring")]
+#[cfg(any(feature = "boring", feature = "openssl-tls"))]
 pub(crate) use self::http::ConnectIdentity;
 #[allow(deprecated)]
 pub use self::http::{

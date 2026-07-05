@@ -4,6 +4,8 @@ mod store;
 
 #[cfg(feature = "boring")]
 use boring::x509::X509;
+#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+use openssl::x509::X509;
 #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
 use rustls_pki_types::CertificateDer;
 
@@ -51,12 +53,17 @@ impl<'c, T: AsRef<[u8]> + ?Sized + 'c> From<&'c T> for CertificateInput<'c> {
 #[derive(Clone)]
 pub struct Certificate(X509);
 
+#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+/// An X509 certificate.
+#[derive(Clone)]
+pub struct Certificate(X509);
+
 #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
 /// An X509 certificate.
 #[derive(Clone, Debug)]
 pub struct Certificate(pub(crate) CertificateDer<'static>);
 
-#[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+#[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
 /// An X509 certificate.
 #[derive(Clone, Debug)]
 pub struct Certificate;
@@ -69,11 +76,15 @@ impl Certificate {
         {
             X509::from_der(cert.as_ref()).map(Self).map_err(Error::tls)
         }
+        #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+        {
+            X509::from_der(cert.as_ref()).map(Self).map_err(Error::tls)
+        }
         #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
         {
             Ok(Self(CertificateDer::from(cert.as_ref().to_vec())))
         }
-        #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+        #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
         {
             let _ = cert;
             Err(Error::tls("TLS not supported"))
@@ -84,6 +95,10 @@ impl Certificate {
     #[inline]
     pub fn from_pem<C: AsRef<[u8]>>(cert: C) -> crate::Result<Self> {
         #[cfg(feature = "boring")]
+        {
+            X509::from_pem(cert.as_ref()).map(Self).map_err(Error::tls)
+        }
+        #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
         {
             X509::from_pem(cert.as_ref()).map(Self).map_err(Error::tls)
         }
@@ -101,7 +116,7 @@ impl Certificate {
                 .map(Self)
                 .ok_or_else(|| Error::tls("No certificate found in PEM"))
         }
-        #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+        #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
         {
             let _ = cert;
             Err(Error::tls("TLS not supported"))
@@ -116,6 +131,11 @@ impl Certificate {
             let certs = X509::stack_from_pem(cert.as_ref()).map_err(Error::tls)?;
             Ok(certs.into_iter().map(Self).collect())
         }
+        #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+        {
+            let certs = X509::stack_from_pem(cert.as_ref()).map_err(Error::tls)?;
+            Ok(certs.into_iter().map(Self).collect())
+        }
         #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
         {
             use std::io::Cursor;
@@ -126,7 +146,7 @@ impl Certificate {
 
             Ok(certs.into_iter().map(Self).collect())
         }
-        #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+        #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
         {
             let _ = cert;
             Err(Error::tls("TLS not supported"))

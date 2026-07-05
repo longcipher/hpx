@@ -148,6 +148,11 @@ stealth = [
     "ws-yawc",
     "zstd",
 ]
+# Enable OpenSSL support.
+openssl-tls = ["dep:openssl", "dep:tokio-openssl"]
+
+# Enable vendored OpenSSL (static linking).
+openssl-vendored = ["openssl-tls", "openssl/vendored"]
 
 ## macOS system proxy
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -264,8 +269,10 @@ hotpath = { workspace = true, optional = true }
 
 ## tracing
 base64 = { workspace = true }
+openssl = { workspace = true, optional = true }
 sha1 = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
+tokio-openssl = { workspace = true, optional = true }
 tracing = { workspace = true, features = ["std"], optional = true }
 
 [dev-dependencies]

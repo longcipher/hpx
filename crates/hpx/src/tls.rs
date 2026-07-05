@@ -11,11 +11,21 @@ mod x509;
 
 #[cfg(feature = "boring")]
 pub(crate) mod boring;
+#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+pub(crate) mod openssl;
 #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
 pub(crate) mod rustls;
 
 #[cfg(feature = "boring")]
 pub use ::boring::ssl::{CertificateCompressionAlgorithm, ExtensionType};
+
+/// Placeholder type when using the OpenSSL backend.
+///
+/// Certificate compression is a BoringSSL-specific feature.
+/// This type exists for API compatibility and has no effect.
+#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+#[derive(Debug, Clone, Copy)]
+pub struct CertificateCompressionAlgorithm;
 use bytes::Bytes;
 
 pub use self::{
@@ -53,7 +63,9 @@ use std::hash::{Hash, Hasher};
 
 #[cfg(feature = "boring")]
 use ::boring::ssl;
-#[cfg(feature = "boring")]
+#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+use ::openssl::ssl;
+#[cfg(any(feature = "boring", feature = "openssl-tls"))]
 use bytes::{BufMut, BytesMut};
 
 /// A TLS protocol version.
@@ -64,7 +76,49 @@ pub struct TlsVersion(ssl::SslVersion);
 #[cfg(feature = "boring")]
 impl Hash for TlsVersion {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        format!("{:?}", self.0).hash(state);
+        let discrim = if self.0 == ssl::SslVersion::SSL3 {
+            0
+        } else if self.0 == ssl::SslVersion::TLS1 {
+            1
+        } else if self.0 == ssl::SslVersion::TLS1_1 {
+            2
+        } else if self.0 == ssl::SslVersion::TLS1_2 {
+            3
+        } else if self.0 == ssl::SslVersion::TLS1_3 {
+            4
+        } else {
+            5
+        };
+        discrim.hash(state);
+    }
+}
+
+/// A TLS protocol version.
+#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TlsVersion(ssl::SslVersion);
+
+#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+impl Hash for TlsVersion {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let discrim = if self.0 == ssl::SslVersion::SSL3 {
+            0
+        } else if self.0 == ssl::SslVersion::TLS1 {
+            1
+        } else if self.0 == ssl::SslVersion::TLS1_1 {
+            2
+        } else if self.0 == ssl::SslVersion::TLS1_2 {
+            3
+        } else if self.0 == ssl::SslVersion::TLS1_3 {
+            4
+        } else if self.0 == ssl::SslVersion::DTLS1 {
+            5
+        } else if self.0 == ssl::SslVersion::DTLS1_2 {
+            6
+        } else {
+            7
+        };
+        discrim.hash(state);
     }
 }
 
@@ -73,7 +127,7 @@ impl Hash for TlsVersion {
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct TlsVersion(u16);
 
-#[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+#[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
 /// TLS protocol version.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct TlsVersion(u16);
@@ -83,40 +137,52 @@ impl TlsVersion {
     #[cfg(feature = "boring")]
     pub const TLS_1_0: TlsVersion = TlsVersion(ssl::SslVersion::TLS1);
     /// Version 1.0 of the TLS protocol.
+    #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+    pub const TLS_1_0: TlsVersion = TlsVersion(ssl::SslVersion::TLS1);
+    /// Version 1.0 of the TLS protocol.
     #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
     pub const TLS_1_0: TlsVersion = TlsVersion(0x0301);
     /// Version 1.0 of the TLS protocol.
-    #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+    #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
     pub const TLS_1_0: TlsVersion = TlsVersion(0x0301);
 
     /// Version 1.1 of the TLS protocol.
     #[cfg(feature = "boring")]
     pub const TLS_1_1: TlsVersion = TlsVersion(ssl::SslVersion::TLS1_1);
     /// Version 1.1 of the TLS protocol.
+    #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+    pub const TLS_1_1: TlsVersion = TlsVersion(ssl::SslVersion::TLS1_1);
+    /// Version 1.1 of the TLS protocol.
     #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
     pub const TLS_1_1: TlsVersion = TlsVersion(0x0302);
     /// Version 1.1 of the TLS protocol.
-    #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+    #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
     pub const TLS_1_1: TlsVersion = TlsVersion(0x0302);
 
     /// Version 1.2 of the TLS protocol.
     #[cfg(feature = "boring")]
     pub const TLS_1_2: TlsVersion = TlsVersion(ssl::SslVersion::TLS1_2);
     /// Version 1.2 of the TLS protocol.
+    #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+    pub const TLS_1_2: TlsVersion = TlsVersion(ssl::SslVersion::TLS1_2);
+    /// Version 1.2 of the TLS protocol.
     #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
     pub const TLS_1_2: TlsVersion = TlsVersion(0x0303);
     /// Version 1.2 of the TLS protocol.
-    #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+    #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
     pub const TLS_1_2: TlsVersion = TlsVersion(0x0303);
 
     /// Version 1.3 of the TLS protocol.
     #[cfg(feature = "boring")]
     pub const TLS_1_3: TlsVersion = TlsVersion(ssl::SslVersion::TLS1_3);
     /// Version 1.3 of the TLS protocol.
+    #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+    pub const TLS_1_3: TlsVersion = TlsVersion(ssl::SslVersion::TLS1_3);
+    /// Version 1.3 of the TLS protocol.
     #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
     pub const TLS_1_3: TlsVersion = TlsVersion(0x0304);
     /// Version 1.3 of the TLS protocol.
-    #[cfg(not(any(feature = "boring", feature = "rustls-tls")))]
+    #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
     pub const TLS_1_3: TlsVersion = TlsVersion(0x0304);
 }
 
@@ -150,8 +216,8 @@ impl AlpnProtocol {
 
     /// Encode a single protocol in TLS wire format (length-prefixed).
     ///
-    /// This is the format expected by BoringSSL's `set_alpn_protos()`.
-    #[cfg(feature = "boring")]
+    /// This is the format expected by BoringSSL's and OpenSSL's `set_alpn_protos()`.
+    #[cfg(any(feature = "boring", feature = "openssl-tls"))]
     #[inline]
     fn encode(self) -> Bytes {
         Self::encode_sequence(std::iter::once(&self))
@@ -159,8 +225,8 @@ impl AlpnProtocol {
 
     /// Encode a sequence of protocols in TLS wire format (each length-prefixed).
     ///
-    /// This is the format expected by BoringSSL's `set_alpn_protos()`.
-    #[cfg(feature = "boring")]
+    /// This is the format expected by BoringSSL's and OpenSSL's `set_alpn_protos()`.
+    #[cfg(any(feature = "boring", feature = "openssl-tls"))]
     fn encode_sequence<'a, I>(items: I) -> Bytes
     where
         I: IntoIterator<Item = &'a AlpnProtocol>,
@@ -193,7 +259,7 @@ impl AlpsProtocol {
 mod tests {
     use super::*;
 
-    #[cfg(feature = "boring")]
+    #[cfg(any(feature = "boring", feature = "openssl-tls"))]
     #[test]
     fn alpn_protocol_encode() {
         let alpn = AlpnProtocol::encode_sequence(&[AlpnProtocol::HTTP1, AlpnProtocol::HTTP2]);
@@ -216,7 +282,7 @@ mod tests {
         assert_eq!(alpn, Bytes::from_static(b"\x08http/1.1\x02h2\x02h3"));
     }
 
-    #[cfg(feature = "boring")]
+    #[cfg(any(feature = "boring", feature = "openssl-tls"))]
     #[test]
     fn alpn_protocol_encode_single() {
         let alpn = AlpnProtocol::HTTP1.encode();

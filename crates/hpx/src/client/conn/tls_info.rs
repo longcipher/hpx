@@ -1,10 +1,12 @@
-#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+#[cfg(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls"))]
 use bytes::Bytes;
 use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::UnixStream;
 #[cfg(feature = "boring")]
 use tokio_boring::SslStream;
+#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+use tokio_openssl::SslStream;
 #[cfg(feature = "rustls-tls")]
 use tokio_rustls::client::TlsStream;
 
@@ -36,6 +38,24 @@ fn extract_tls_info<S>(ssl_stream: &SslStream<S>) -> TlsInfo {
     }
 }
 
+#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+fn extract_tls_info<S>(ssl_stream: &SslStream<S>) -> TlsInfo {
+    let ssl = ssl_stream.ssl();
+    TlsInfo {
+        peer_certificate: ssl
+            .peer_certificate()
+            .and_then(|cert| cert.to_der().ok())
+            .map(Bytes::from),
+        peer_certificate_chain: ssl.peer_cert_chain().map(|chain| {
+            chain
+                .iter()
+                .filter_map(|cert| cert.to_der().ok())
+                .map(Bytes::from)
+                .collect()
+        }),
+    }
+}
+
 // ===== impl TcpStream =====
 
 impl TlsInfoFactory for TcpStream {
@@ -45,6 +65,14 @@ impl TlsInfoFactory for TcpStream {
 }
 
 #[cfg(feature = "boring")]
+impl TlsInfoFactory for SslStream<TcpStream> {
+    #[inline]
+    fn tls_info(&self) -> Option<TlsInfo> {
+        Some(extract_tls_info(self))
+    }
+}
+
+#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
 impl TlsInfoFactory for SslStream<TcpStream> {
     #[inline]
     fn tls_info(&self) -> Option<TlsInfo> {
@@ -80,6 +108,14 @@ impl TlsInfoFactory for SslStream<MaybeHttpsStream<TcpStream>> {
     }
 }
 
+#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+impl TlsInfoFactory for SslStream<MaybeHttpsStream<TcpStream>> {
+    #[inline]
+    fn tls_info(&self) -> Option<TlsInfo> {
+        Some(extract_tls_info(self))
+    }
+}
+
 #[cfg(feature = "rustls-tls")]
 impl TlsInfoFactory for TlsStream<MaybeHttpsStream<TcpStream>> {
     #[inline]
@@ -101,6 +137,14 @@ impl TlsInfoFactory for UnixStream {
 }
 
 #[cfg(all(unix, feature = "boring"))]
+impl TlsInfoFactory for SslStream<UnixStream> {
+    #[inline]
+    fn tls_info(&self) -> Option<TlsInfo> {
+        Some(extract_tls_info(self))
+    }
+}
+
+#[cfg(all(unix, feature = "openssl-tls", not(feature = "boring")))]
 impl TlsInfoFactory for SslStream<UnixStream> {
     #[inline]
     fn tls_info(&self) -> Option<TlsInfo> {
@@ -130,6 +174,14 @@ impl TlsInfoFactory for MaybeHttpsStream<UnixStream> {
 }
 
 #[cfg(all(unix, feature = "boring"))]
+impl TlsInfoFactory for SslStream<MaybeHttpsStream<UnixStream>> {
+    #[inline]
+    fn tls_info(&self) -> Option<TlsInfo> {
+        Some(extract_tls_info(self))
+    }
+}
+
+#[cfg(all(unix, feature = "openssl-tls", not(feature = "boring")))]
 impl TlsInfoFactory for SslStream<MaybeHttpsStream<UnixStream>> {
     #[inline]
     fn tls_info(&self) -> Option<TlsInfo> {
