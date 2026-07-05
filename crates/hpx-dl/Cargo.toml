@@ -34,9 +34,7 @@ hotpath = ["dep:hotpath"]
 
 [dependencies]
 ahash = { workspace = true }
-
-# Optional dependencies
-arrayvec = "0.7.6"
+arrayvec = { workspace = true }
 async-trait = { workspace = true }
 crossbeam-channel = { workspace = true }
 digest = { workspace = true }
