@@ -23,7 +23,7 @@ hpx = { workspace = true, features = [
     "json",
     "stream",
     "tracing",
-    "boring",
+    "boring-tls",
     "cookies",
     "form",
     "multipart",

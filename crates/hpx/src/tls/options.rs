@@ -4,7 +4,7 @@ use std::{
 };
 
 use super::{AlpnProtocol, AlpsProtocol, TlsVersion};
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 use super::{CertificateCompressionAlgorithm, ExtensionType};
 
 /// Builder for `[`TlsOptions`]`.
@@ -156,13 +156,13 @@ pub struct TlsOptions {
     /// Supported certificate compression algorithms ([RFC 8879](https://datatracker.ietf.org/doc/html/rfc8879)).
     ///
     /// **Default:** `None`
-    #[cfg(feature = "boring")]
+    #[cfg(feature = "boring-tls")]
     pub certificate_compression_algorithms: Option<Cow<'static, [CertificateCompressionAlgorithm]>>,
 
     /// Supported TLS extensions, used for extension ordering/permutation.
     ///
     /// **Default:** `None`
-    #[cfg(feature = "boring")]
+    #[cfg(feature = "boring-tls")]
     pub extension_permutation: Option<Cow<'static, [ExtensionType]>>,
 
     /// Overrides AES hardware acceleration.
@@ -394,7 +394,7 @@ impl TlsOptionsBuilder {
 
     /// Sets the certificate compression algorithms.
     #[inline]
-    #[cfg(feature = "boring")]
+    #[cfg(feature = "boring-tls")]
     pub fn certificate_compression_algorithms<T>(mut self, algs: T) -> Self
     where
         T: Into<Cow<'static, [CertificateCompressionAlgorithm]>>,
@@ -405,7 +405,7 @@ impl TlsOptionsBuilder {
 
     /// Sets the extension permutation.
     #[inline]
-    #[cfg(feature = "boring")]
+    #[cfg(feature = "boring-tls")]
     pub fn extension_permutation<T>(mut self, permutation: T) -> Self
     where
         T: Into<Cow<'static, [ExtensionType]>>,
@@ -492,9 +492,9 @@ impl Default for TlsOptions {
             curves_list: None,
             cipher_list: None,
             sigalgs_list: None,
-            #[cfg(feature = "boring")]
+            #[cfg(feature = "boring-tls")]
             certificate_compression_algorithms: None,
-            #[cfg(feature = "boring")]
+            #[cfg(feature = "boring-tls")]
             extension_permutation: None,
             aes_hw_override: None,
             preserve_tls13_cipher_list: None,

@@ -131,7 +131,7 @@ where
 
 impl Connection for TlsConn<TcpStream> {
     fn connected(&self) -> Connected {
-        #[cfg(feature = "boring")]
+        #[cfg(feature = "boring-tls")]
         {
             let connected = self.inner.get_ref().connected();
             if self.inner.ssl().selected_alpn_protocol() == Some(b"h2") {
@@ -140,7 +140,7 @@ impl Connection for TlsConn<TcpStream> {
                 connected
             }
         }
-        #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
         {
             let connected = self.inner.get_ref().connected();
             if self.inner.ssl().selected_alpn_protocol() == Some(b"h2") {
@@ -149,7 +149,7 @@ impl Connection for TlsConn<TcpStream> {
                 connected
             }
         }
-        #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
         {
             let (io, session) = self.inner.get_ref();
             let connected = io.connected();
@@ -159,7 +159,11 @@ impl Connection for TlsConn<TcpStream> {
                 connected
             }
         }
-        #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+        #[cfg(not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )))]
         {
             self.inner.get_ref().connected()
         }
@@ -168,7 +172,7 @@ impl Connection for TlsConn<TcpStream> {
 
 impl Connection for TlsConn<MaybeHttpsStream<TcpStream>> {
     fn connected(&self) -> Connected {
-        #[cfg(feature = "boring")]
+        #[cfg(feature = "boring-tls")]
         {
             let connected = self.inner.get_ref().connected();
             if self.inner.ssl().selected_alpn_protocol() == Some(b"h2") {
@@ -177,7 +181,7 @@ impl Connection for TlsConn<MaybeHttpsStream<TcpStream>> {
                 connected
             }
         }
-        #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
         {
             let connected = self.inner.get_ref().connected();
             if self.inner.ssl().selected_alpn_protocol() == Some(b"h2") {
@@ -186,7 +190,7 @@ impl Connection for TlsConn<MaybeHttpsStream<TcpStream>> {
                 connected
             }
         }
-        #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
         {
             let (io, session) = self.inner.get_ref();
             let connected = io.connected();
@@ -196,7 +200,11 @@ impl Connection for TlsConn<MaybeHttpsStream<TcpStream>> {
                 connected
             }
         }
-        #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+        #[cfg(not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )))]
         {
             self.inner.get_ref().connected()
         }
@@ -208,7 +216,7 @@ impl Connection for TlsConn<MaybeHttpsStream<TcpStream>> {
 #[cfg(unix)]
 impl Connection for TlsConn<UnixStream> {
     fn connected(&self) -> Connected {
-        #[cfg(feature = "boring")]
+        #[cfg(feature = "boring-tls")]
         {
             let connected = self.inner.get_ref().connected();
             if self.inner.ssl().selected_alpn_protocol() == Some(b"h2") {
@@ -217,7 +225,7 @@ impl Connection for TlsConn<UnixStream> {
                 connected
             }
         }
-        #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
         {
             let connected = self.inner.get_ref().connected();
             if self.inner.ssl().selected_alpn_protocol() == Some(b"h2") {
@@ -226,7 +234,7 @@ impl Connection for TlsConn<UnixStream> {
                 connected
             }
         }
-        #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
         {
             let (io, session) = self.inner.get_ref();
             let connected = io.connected();
@@ -236,7 +244,11 @@ impl Connection for TlsConn<UnixStream> {
                 connected
             }
         }
-        #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+        #[cfg(not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )))]
         {
             self.inner.get_ref().connected()
         }
@@ -246,7 +258,7 @@ impl Connection for TlsConn<UnixStream> {
 #[cfg(unix)]
 impl Connection for TlsConn<MaybeHttpsStream<UnixStream>> {
     fn connected(&self) -> Connected {
-        #[cfg(feature = "boring")]
+        #[cfg(feature = "boring-tls")]
         {
             let connected = self.inner.get_ref().connected();
             if self.inner.ssl().selected_alpn_protocol() == Some(b"h2") {
@@ -255,7 +267,7 @@ impl Connection for TlsConn<MaybeHttpsStream<UnixStream>> {
                 connected
             }
         }
-        #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
         {
             let connected = self.inner.get_ref().connected();
             if self.inner.ssl().selected_alpn_protocol() == Some(b"h2") {
@@ -264,7 +276,7 @@ impl Connection for TlsConn<MaybeHttpsStream<UnixStream>> {
                 connected
             }
         }
-        #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
         {
             let (io, session) = self.inner.get_ref();
             let connected = io.connected();
@@ -274,7 +286,11 @@ impl Connection for TlsConn<MaybeHttpsStream<UnixStream>> {
                 connected
             }
         }
-        #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+        #[cfg(not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )))]
         {
             self.inner.get_ref().connected()
         }

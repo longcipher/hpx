@@ -1,4 +1,4 @@
-#![cfg(feature = "boring")]
+#![cfg(feature = "boring-tls")]
 use std::time::Duration;
 
 use hpx::{

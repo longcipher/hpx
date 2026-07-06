@@ -22,7 +22,7 @@ use tower::{
     util::{BoxCloneSyncService, BoxCloneSyncServiceLayer, MapErr, Oneshot},
 };
 
-#[cfg(any(feature = "boring", feature = "openssl-tls"))]
+#[cfg(any(feature = "boring-tls", feature = "openssl-tls"))]
 pub(crate) use self::client::extra::ConnectIdentity;
 pub(crate) use self::client::{ConnectRequest, HttpClient, extra::ConnectExtra};
 #[allow(deprecated)]

@@ -1,19 +1,23 @@
 #![allow(unused_imports)]
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 pub use tokio_boring::SslStream as TlsStream;
-#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+#[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
 pub use tokio_openssl::SslStream as TlsStream;
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 pub use tokio_rustls::client::TlsStream;
 
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 pub use super::rustls::*;
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 pub use crate::tls::boring::*;
-#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+#[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
 pub use crate::tls::openssl::*;
 
-#[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+#[cfg(not(any(
+    feature = "boring-tls",
+    feature = "openssl-tls",
+    feature = "rustls-tls"
+)))]
 pub mod no_tls {
     use std::{
         future::Future,
@@ -292,5 +296,9 @@ pub mod no_tls {
     }
 }
 
-#[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+#[cfg(not(any(
+    feature = "boring-tls",
+    feature = "openssl-tls",
+    feature = "rustls-tls"
+)))]
 pub use self::no_tls::*;

@@ -1,41 +1,41 @@
 #![allow(unused)]
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 use boring::{
     pkcs12::Pkcs12,
     pkey::{PKey, Private},
     x509::X509,
 };
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 use const_oid::db::{
     rfc5911::{ID_DATA, ID_ENCRYPTED_DATA},
     rfc5912::{ID_SHA_1, ID_SHA_224, ID_SHA_256, ID_SHA_384, ID_SHA_512},
 };
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 use der::{
     Decode, Encode,
     asn1::{ContextSpecific, OctetString},
 };
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 use hmac::{Hmac, KeyInit, Mac};
-#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+#[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
 use openssl::{
     pkcs12::Pkcs12,
     pkey::{PKey, Private},
     x509::X509,
 };
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 use pkcs8::{EncryptedPrivateKeyInfoRef, pkcs5::EncryptionScheme};
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 use pkcs12::{
     AuthenticatedSafe, CertBag, PKCS_12_CERT_BAG_OID, PKCS_12_KEY_BAG_OID,
     PKCS_12_PKCS8_KEY_BAG_OID, PKCS_12_X509_CERT_OID, Pfx,
     safe_bag::{PrivateKeyInfo, SafeBag, SafeContents},
 };
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 use sha1::Sha1;
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 use sha2::{Sha224, Sha256, Sha384, Sha512};
 
 use crate::Error;
@@ -43,25 +43,29 @@ use crate::Error;
 /// Represents a private key and X509 cert as a client certificate.
 #[derive(Debug, Clone)]
 pub struct Identity {
-    #[cfg(feature = "boring")]
+    #[cfg(feature = "boring-tls")]
     pkey: PKey<Private>,
-    #[cfg(feature = "boring")]
+    #[cfg(feature = "boring-tls")]
     cert: X509,
-    #[cfg(feature = "boring")]
+    #[cfg(feature = "boring-tls")]
     chain: Vec<X509>,
 
-    #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+    #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
     pkey: PKey<Private>,
-    #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+    #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
     cert: X509,
-    #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+    #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
     chain: Vec<X509>,
 
-    #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+    #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
     pub(crate) cert: Vec<CertificateDer<'static>>,
-    #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+    #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
     pub(crate) key: std::sync::Arc<PrivateKeyDer<'static>>,
-    #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+    #[cfg(not(any(
+        feature = "boring-tls",
+        feature = "openssl-tls",
+        feature = "rustls-tls"
+    )))]
     _marker: std::marker::PhantomData<()>,
 }
 
@@ -72,7 +76,7 @@ impl Identity {
     /// This is useful for client certificate bundles where the certificate chain and private key
     /// are delivered in a single PEM file.
     pub fn from_pem(buf: &[u8]) -> crate::Result<Identity> {
-        #[cfg(feature = "boring")]
+        #[cfg(feature = "boring-tls")]
         {
             let key = extract_private_key_pem(buf)
                 .ok_or_else(|| Error::builder("no private key found"))?;
@@ -88,7 +92,7 @@ impl Identity {
             let chain = cert_chain.collect();
             Ok(Identity { pkey, cert, chain })
         }
-        #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
         {
             let key = extract_private_key_pem(buf)
                 .ok_or_else(|| Error::builder("no private key found"))?;
@@ -104,7 +108,7 @@ impl Identity {
             let chain = cert_chain.collect();
             Ok(Identity { pkey, cert, chain })
         }
-        #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
         {
             use std::io::Cursor;
 
@@ -129,7 +133,11 @@ impl Identity {
                 key: std::sync::Arc::new(key),
             })
         }
-        #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+        #[cfg(not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )))]
         {
             let _ = buf;
             Err(Error::tls("TLS not supported"))
@@ -163,7 +171,7 @@ impl Identity {
     /// # }
     /// ```
     pub fn from_pkcs12_der(buf: &[u8], pass: &str) -> crate::Result<Identity> {
-        #[cfg(feature = "boring")]
+        #[cfg(feature = "boring-tls")]
         {
             let pkcs12 = Pkcs12::from_der(buf).map_err(Error::tls)?;
             let parsed = pkcs12.parse(pass).map_err(Error::tls)?;
@@ -176,7 +184,7 @@ impl Identity {
                 chain: parsed.chain.into_iter().flatten().rev().collect(),
             })
         }
-        #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
         {
             let pkcs12 = Pkcs12::from_der(buf).map_err(Error::tls)?;
             let parsed = pkcs12.parse2(pass).map_err(Error::tls)?;
@@ -192,11 +200,15 @@ impl Identity {
                 chain: parsed.ca.into_iter().flatten().rev().collect(),
             })
         }
-        #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
         {
             identity_from_pkcs12_archive(buf, pass)
         }
-        #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+        #[cfg(not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )))]
         {
             Err(Error::tls("TLS not supported"))
         }
@@ -223,7 +235,7 @@ impl Identity {
     /// # }
     /// ```
     pub fn from_pkcs8_pem(buf: &[u8], key: &[u8]) -> crate::Result<Identity> {
-        #[cfg(feature = "boring")]
+        #[cfg(feature = "boring-tls")]
         {
             if !key.starts_with(b"-----BEGIN PRIVATE KEY-----") {
                 return Err(Error::builder("expected PKCS#8 PEM"));
@@ -237,7 +249,7 @@ impl Identity {
             let chain = cert_chain.collect();
             Ok(Identity { pkey, cert, chain })
         }
-        #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
         {
             if !key.starts_with(b"-----BEGIN PRIVATE KEY-----") {
                 return Err(Error::builder("expected PKCS#8 PEM"));
@@ -251,7 +263,7 @@ impl Identity {
             let chain = cert_chain.collect();
             Ok(Identity { pkey, cert, chain })
         }
-        #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
         {
             use std::io::Cursor;
             let mut cert_reader = Cursor::new(buf);
@@ -269,13 +281,17 @@ impl Identity {
                 key: std::sync::Arc::new(key),
             })
         }
-        #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+        #[cfg(not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )))]
         {
             Err(Error::tls("TLS not supported"))
         }
     }
 
-    #[cfg(feature = "boring")]
+    #[cfg(feature = "boring-tls")]
     pub(crate) fn add_to_tls(
         &self,
         connector: &mut boring::ssl::SslConnectorBuilder,
@@ -290,7 +306,7 @@ impl Identity {
         Ok(())
     }
 
-    #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+    #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
     pub(crate) fn add_to_tls(
         &self,
         connector: &mut openssl::ssl::SslConnectorBuilder,
@@ -306,7 +322,7 @@ impl Identity {
     }
 }
 
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 fn identity_from_pkcs12_archive(buf: &[u8], pass: &str) -> crate::Result<Identity> {
     let archive = Pfx::from_der(buf)
         .map_err(|error| pkcs12_tls_error("failed to parse PKCS12 archive", error))?;
@@ -340,7 +356,7 @@ fn identity_from_pkcs12_archive(buf: &[u8], pass: &str) -> crate::Result<Identit
     })
 }
 
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 fn verify_pkcs12_mac(archive: &Pfx, pass: &str) -> crate::Result<()> {
     let Some(mac_data) = archive.mac_data.as_ref() else {
         return Ok(());
@@ -367,7 +383,7 @@ fn verify_pkcs12_mac(archive: &Pfx, pass: &str) -> crate::Result<()> {
     Ok(())
 }
 
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 fn pkcs12_mac(
     algorithm: &const_oid::ObjectIdentifier,
     pass: &str,
@@ -411,7 +427,7 @@ fn pkcs12_mac(
     }
 }
 
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 fn pkcs12_safe_contents(archive: &Pfx, pass: &str) -> crate::Result<SafeContents> {
     if archive.auth_safe.content_type != ID_DATA {
         return Err(Error::tls(std::io::Error::new(
@@ -508,7 +524,7 @@ fn pkcs12_safe_contents(archive: &Pfx, pass: &str) -> crate::Result<SafeContents
     Ok(safe_bags)
 }
 
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 fn pkcs12_data_content(
     content_info: &pkcs12::cms::content_info::ContentInfo,
     context: &'static str,
@@ -521,7 +537,7 @@ fn pkcs12_data_content(
     Ok(octets.as_bytes().to_vec())
 }
 
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 fn pkcs12_certificate(safe_bag: &SafeBag) -> crate::Result<Option<CertificateDer<'static>>> {
     if safe_bag.bag_id != PKCS_12_CERT_BAG_OID {
         return Ok(None);
@@ -539,7 +555,7 @@ fn pkcs12_certificate(safe_bag: &SafeBag) -> crate::Result<Option<CertificateDer
     )))
 }
 
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 fn pkcs12_private_key(
     safe_bag: &SafeBag,
     pass: &str,
@@ -580,7 +596,7 @@ fn pkcs12_private_key(
     Ok(None)
 }
 
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 fn pkcs12_tls_error(context: &'static str, error: impl std::fmt::Display) -> Error {
     Error::tls(std::io::Error::new(
         std::io::ErrorKind::InvalidData,
@@ -588,7 +604,7 @@ fn pkcs12_tls_error(context: &'static str, error: impl std::fmt::Display) -> Err
     ))
 }
 
-#[cfg(any(feature = "boring", feature = "openssl-tls"))]
+#[cfg(any(feature = "boring-tls", feature = "openssl-tls"))]
 fn extract_private_key_pem(buf: &[u8]) -> Option<&[u8]> {
     const KEY_MARKERS: [(&[u8], &[u8]); 3] = [
         (b"-----BEGIN PRIVATE KEY-----", b"-----END PRIVATE KEY-----"),
@@ -607,7 +623,7 @@ fn extract_private_key_pem(buf: &[u8]) -> Option<&[u8]> {
         .find_map(|(begin, end)| extract_pem_block(buf, begin, end))
 }
 
-#[cfg(any(feature = "boring", feature = "openssl-tls"))]
+#[cfg(any(feature = "boring-tls", feature = "openssl-tls"))]
 fn extract_certificate_pems(buf: &[u8]) -> Vec<&[u8]> {
     extract_all_pem_blocks(
         buf,
@@ -616,7 +632,7 @@ fn extract_certificate_pems(buf: &[u8]) -> Vec<&[u8]> {
     )
 }
 
-#[cfg(any(feature = "boring", feature = "openssl-tls"))]
+#[cfg(any(feature = "boring-tls", feature = "openssl-tls"))]
 fn extract_pem_block<'a>(buf: &'a [u8], begin: &[u8], end: &[u8]) -> Option<&'a [u8]> {
     let start = find_subsequence(buf, begin)?;
     let end_start = start + find_subsequence(&buf[start..], end)?;
@@ -632,7 +648,7 @@ fn extract_pem_block<'a>(buf: &'a [u8], begin: &[u8], end: &[u8]) -> Option<&'a 
     Some(&buf[start..end_idx])
 }
 
-#[cfg(any(feature = "boring", feature = "openssl-tls"))]
+#[cfg(any(feature = "boring-tls", feature = "openssl-tls"))]
 fn extract_all_pem_blocks<'a>(mut buf: &'a [u8], begin: &[u8], end: &[u8]) -> Vec<&'a [u8]> {
     let mut blocks = Vec::new();
 
@@ -648,7 +664,7 @@ fn extract_all_pem_blocks<'a>(mut buf: &'a [u8], begin: &[u8], end: &[u8]) -> Ve
     blocks
 }
 
-#[cfg(any(feature = "boring", feature = "openssl-tls"))]
+#[cfg(any(feature = "boring-tls", feature = "openssl-tls"))]
 fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack
         .windows(needle.len())

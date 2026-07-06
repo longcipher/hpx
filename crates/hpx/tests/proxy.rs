@@ -1,27 +1,27 @@
 mod support;
-#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+#[cfg(any(feature = "boring-tls", feature = "rustls-tls"))]
 use std::sync::Arc;
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(feature = "rustls-tls")]
 use std::{convert::Infallible, io::Cursor};
 use std::{env, sync::LazyLock};
 
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 use boring::ssl::{SslAcceptor, SslFiletype, SslMethod, SslVerifyMode};
-#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+#[cfg(any(feature = "boring-tls", feature = "rustls-tls"))]
 use bytes::Bytes;
 use hpx::Client;
-#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+#[cfg(any(feature = "boring-tls", feature = "rustls-tls"))]
 use hpx::tls::{CertStore, Identity};
-#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+#[cfg(any(feature = "boring-tls", feature = "rustls-tls"))]
 use http_body_util::Full;
-#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+#[cfg(any(feature = "boring-tls", feature = "rustls-tls"))]
 use hyper::{Response, server::conn::http1, service::service_fn};
-#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+#[cfg(any(feature = "boring-tls", feature = "rustls-tls"))]
 use hyper_util::rt::TokioIo;
 use support::server;
-#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+#[cfg(any(feature = "boring-tls", feature = "rustls-tls"))]
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 #[cfg(feature = "rustls-tls")]
@@ -468,27 +468,27 @@ async fn proxy_tunnel_connect_error() {
     }
 }
 
-#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+#[cfg(any(feature = "boring-tls", feature = "rustls-tls"))]
 const CA_CERT_PEM: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/support/mtls/ca.crt"
 ));
-#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+#[cfg(any(feature = "boring-tls", feature = "rustls-tls"))]
 const CLIENT_CERT_PEM: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/support/mtls/client.crt"
 ));
-#[cfg(any(feature = "boring", feature = "rustls-tls"))]
+#[cfg(any(feature = "boring-tls", feature = "rustls-tls"))]
 const CLIENT_KEY_PEM: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/support/mtls/client.key"
 ));
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 const SERVER_CERT_PATH: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/mtls/server.crt");
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 const SERVER_KEY_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/mtls/server.key");
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 const CA_CERT_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/mtls/ca.crt");
 #[cfg(feature = "rustls-tls")]
 const SERVER_CERT_PEM: &[u8] = include_bytes!(concat!(
@@ -501,7 +501,7 @@ const SERVER_KEY_PEM: &[u8] = include_bytes!(concat!(
     "/tests/support/mtls/server.key"
 ));
 
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 fn mtls_tls_acceptor() -> SslAcceptor {
     let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
     acceptor
@@ -516,7 +516,7 @@ fn mtls_tls_acceptor() -> SslAcceptor {
     acceptor.build()
 }
 
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 fn proxy_tls_acceptor() -> SslAcceptor {
     let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
     acceptor
@@ -531,7 +531,7 @@ fn proxy_tls_acceptor() -> SslAcceptor {
     acceptor.build()
 }
 
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 async fn spawn_origin_mtls_server() -> (tokio::task::JoinHandle<()>, u16) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -558,7 +558,7 @@ async fn spawn_origin_mtls_server() -> (tokio::task::JoinHandle<()>, u16) {
     (server, port)
 }
 
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 async fn spawn_https_proxy(
     proxy_saw_client_cert: Arc<AtomicBool>,
 ) -> (tokio::task::JoinHandle<()>, u16) {
@@ -718,7 +718,7 @@ async fn spawn_rustls_https_proxy() -> (tokio::task::JoinHandle<()>, u16) {
     (server, port)
 }
 
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 #[tokio::test]
 async fn https_proxy_does_not_consume_origin_mtls_identity() {
     let (origin_server, origin_port) = spawn_origin_mtls_server().await;

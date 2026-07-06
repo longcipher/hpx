@@ -281,12 +281,13 @@ hpx-browser
 
 ### `hpx` Features
 
-Default: `boring`, `http1`, `http2`, `stream`, `tracing`.
+Default: `boring-tls`, `http1`, `http2`, `stream`, `tracing`.
 
 | Feature | Default | Description |
 |---------|---------|-------------|
 | **TLS** | | |
-| `boring` | **Yes** | BoringSSL TLS backend |
+| `boring-tls` | **Yes** | BoringSSL TLS backend |
+| `boring-vendored` | No | BoringSSL with vendored static linking (FIPS) |
 | `rustls-tls` | No | Rustls TLS backend (pure Rust) |
 | `openssl-tls` | No | OpenSSL TLS backend |
 | `openssl-vendored` | No | OpenSSL with vendored static linking |
@@ -323,8 +324,8 @@ Default: `boring`, `http1`, `http2`, `stream`, `tracing`.
 | **Streaming** | | |
 | `sse` | No | Server-Sent Events support |
 | **Presets** | | |
-| `hft` | No | Low-latency: auth, BoringSSL, HTTP/1+2, streaming, tracing, Hickory DNS, SIMD JSON, Zstd, yawc WS |
-| `stealth` | No | Browser-like: auth, BoringSSL, HTTP/1+2, decompression, cookies, charset, query, streaming, tracing, Hickory DNS, yawc WS |
+| `hft` | No | Low-latency: auth, boring-tls, HTTP/1+2, streaming, tracing, Hickory DNS, SIMD JSON, Zstd, yawc WS |
+| `stealth` | No | Browser-like: auth, boring-tls, HTTP/1+2, decompression, cookies, charset, query, streaming, tracing, Hickory DNS, yawc WS |
 
 ### Common Feature Combinations
 
@@ -349,6 +350,9 @@ hpx = { version = "2", default-features = false, features = ["rustls-tls", "http
 
 # OpenSSL backend
 hpx = { version = "2", default-features = false, features = ["openssl-tls", "http1", "http2"] }
+
+# BoringSSL vendored (static linking, FIPS)
+hpx = { version = "2", default-features = false, features = ["boring-vendored", "http1", "http2"] }
 
 # OpenSSL vendored (static linking, no system OpenSSL needed)
 hpx = { version = "2", default-features = false, features = ["openssl-vendored", "http1", "http2"] }

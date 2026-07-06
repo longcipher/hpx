@@ -2,11 +2,11 @@ mod identity;
 mod parser;
 mod store;
 
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 use boring::x509::X509;
-#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+#[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
 use openssl::x509::X509;
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 use rustls_pki_types::CertificateDer;
 
 pub use self::{
@@ -48,22 +48,26 @@ impl<'c, T: AsRef<[u8]> + ?Sized + 'c> From<&'c T> for CertificateInput<'c> {
 }
 
 /// A certificate.
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 /// An X509 certificate.
 #[derive(Clone)]
 pub struct Certificate(X509);
 
-#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+#[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
 /// An X509 certificate.
 #[derive(Clone)]
 pub struct Certificate(X509);
 
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 /// An X509 certificate.
 #[derive(Clone, Debug)]
 pub struct Certificate(pub(crate) CertificateDer<'static>);
 
-#[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+#[cfg(not(any(
+    feature = "boring-tls",
+    feature = "openssl-tls",
+    feature = "rustls-tls"
+)))]
 /// An X509 certificate.
 #[derive(Clone, Debug)]
 pub struct Certificate;
@@ -72,19 +76,23 @@ impl Certificate {
     /// Parse a certificate from DER data.
     #[inline]
     pub fn from_der<C: AsRef<[u8]>>(cert: C) -> crate::Result<Self> {
-        #[cfg(feature = "boring")]
+        #[cfg(feature = "boring-tls")]
         {
             X509::from_der(cert.as_ref()).map(Self).map_err(Error::tls)
         }
-        #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
         {
             X509::from_der(cert.as_ref()).map(Self).map_err(Error::tls)
         }
-        #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
         {
             Ok(Self(CertificateDer::from(cert.as_ref().to_vec())))
         }
-        #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+        #[cfg(not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )))]
         {
             let _ = cert;
             Err(Error::tls("TLS not supported"))
@@ -94,15 +102,15 @@ impl Certificate {
     /// Parse a certificate from PEM data.
     #[inline]
     pub fn from_pem<C: AsRef<[u8]>>(cert: C) -> crate::Result<Self> {
-        #[cfg(feature = "boring")]
+        #[cfg(feature = "boring-tls")]
         {
             X509::from_pem(cert.as_ref()).map(Self).map_err(Error::tls)
         }
-        #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
         {
             X509::from_pem(cert.as_ref()).map(Self).map_err(Error::tls)
         }
-        #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
         {
             use std::io::Cursor;
             let mut reader = Cursor::new(cert.as_ref());
@@ -116,7 +124,11 @@ impl Certificate {
                 .map(Self)
                 .ok_or_else(|| Error::tls("No certificate found in PEM"))
         }
-        #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+        #[cfg(not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )))]
         {
             let _ = cert;
             Err(Error::tls("TLS not supported"))
@@ -126,17 +138,17 @@ impl Certificate {
     /// Parse a stack of certificates from DER data.
     #[inline]
     pub fn stack_from_pem<C: AsRef<[u8]>>(cert: C) -> crate::Result<Vec<Self>> {
-        #[cfg(feature = "boring")]
+        #[cfg(feature = "boring-tls")]
         {
             let certs = X509::stack_from_pem(cert.as_ref()).map_err(Error::tls)?;
             Ok(certs.into_iter().map(Self).collect())
         }
-        #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
         {
             let certs = X509::stack_from_pem(cert.as_ref()).map_err(Error::tls)?;
             Ok(certs.into_iter().map(Self).collect())
         }
-        #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
         {
             use std::io::Cursor;
             let mut reader = Cursor::new(cert.as_ref());
@@ -146,7 +158,11 @@ impl Certificate {
 
             Ok(certs.into_iter().map(Self).collect())
         }
-        #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+        #[cfg(not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )))]
         {
             let _ = cert;
             Err(Error::tls("TLS not supported"))

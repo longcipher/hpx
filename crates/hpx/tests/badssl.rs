@@ -1,11 +1,11 @@
 use std::time::Duration;
 
 use hpx::Client;
-#[cfg(any(feature = "boring", feature = "openssl-tls"))]
+#[cfg(any(feature = "boring-tls", feature = "openssl-tls"))]
 #[allow(unused_imports)]
 use hpx::tls::{AlpsProtocol, CertStore, TlsInfo, TlsOptions, TlsVersion};
 
-#[cfg(any(feature = "boring", feature = "openssl-tls"))]
+#[cfg(any(feature = "boring-tls", feature = "openssl-tls"))]
 macro_rules! join {
     ($sep:expr, $first:expr $(, $rest:expr)*) => {
         concat!($first $(, $sep, $rest)*)
@@ -48,7 +48,7 @@ async fn test_badssl_self_signed() {
 
     assert!(!text.is_empty());
 }
-#[cfg(any(feature = "boring", feature = "openssl-tls"))]
+#[cfg(any(feature = "boring-tls", feature = "openssl-tls"))]
 #[allow(dead_code)]
 const CURVES_LIST: &str = join!(
     ":", "X25519", "P-256", "P-384", "P-521" /* "ffdhe2048",

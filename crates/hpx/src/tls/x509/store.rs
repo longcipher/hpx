@@ -1,22 +1,22 @@
 #![allow(unused)]
 use std::{fmt::Debug, sync::Arc};
 
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 use boring::{
     ssl::SslConnectorBuilder,
     x509::store::{X509Store, X509StoreBuilder},
 };
-#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+#[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
 use openssl::{
     ssl::SslConnectorBuilder,
     x509::store::{X509Store, X509StoreBuilder},
 };
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 use rustls::RootCertStore;
 
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 use super::parser::{parse_certs, parse_certs_with_stack};
-#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+#[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
 use super::parser::{parse_certs, parse_certs_with_stack};
 use super::{
     Certificate, CertificateInput,
@@ -26,13 +26,17 @@ use crate::{Error, Result};
 
 /// A builder for constructing a `CertStore`.
 pub struct CertStoreBuilder {
-    #[cfg(feature = "boring")]
+    #[cfg(feature = "boring-tls")]
     builder: Result<X509StoreBuilder>,
-    #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+    #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
     builder: Result<X509StoreBuilder>,
-    #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+    #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
     builder: Result<RootCertStore>,
-    #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+    #[cfg(not(any(
+        feature = "boring-tls",
+        feature = "openssl-tls",
+        feature = "rustls-tls"
+    )))]
     _marker: std::marker::PhantomData<()>,
 }
 
@@ -82,9 +86,13 @@ impl CertStoreBuilder {
     where
         C: AsRef<[u8]>,
     {
-        #[cfg(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls"))]
+        #[cfg(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        ))]
         if let Ok(ref mut builder) = self.builder {
-            #[cfg(feature = "boring")]
+            #[cfg(feature = "boring-tls")]
             {
                 let result = Certificate::stack_from_pem(certs.as_ref())
                     .and_then(|certs| process_certs(certs.into_iter(), builder));
@@ -93,7 +101,7 @@ impl CertStoreBuilder {
                     self.builder = Err(err);
                 }
             }
-            #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+            #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
             {
                 let result = Certificate::stack_from_pem(certs.as_ref())
                     .and_then(|certs| process_certs(certs.into_iter(), builder));
@@ -102,7 +110,7 @@ impl CertStoreBuilder {
                     self.builder = Err(err);
                 }
             }
-            #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+            #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
             {
                 let result = Certificate::stack_from_pem(certs.as_ref())
                     .and_then(|certs| process_certs(certs.into_iter(), builder));
@@ -121,17 +129,21 @@ impl CertStoreBuilder {
     /// environment variables if present, or defaults specified at OpenSSL
     /// build time otherwise.
     pub fn set_default_paths(mut self) -> Self {
-        #[cfg(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls"))]
+        #[cfg(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        ))]
         if let Ok(ref mut builder) = self.builder {
-            #[cfg(feature = "boring")]
+            #[cfg(feature = "boring-tls")]
             if let Err(err) = builder.set_default_paths() {
                 self.builder = Err(Error::tls(err));
             }
-            #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+            #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
             if let Err(err) = builder.set_default_paths() {
                 self.builder = Err(Error::tls(err));
             }
-            #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+            #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
             {
                 // Rustls doesn't have a direct equivalent to set_default_paths that loads from env vars automatically
                 // in the same way OpenSSL does, but we can use rustls-native-certs or webpki-roots.
@@ -149,24 +161,28 @@ impl CertStoreBuilder {
     /// containing all the added certificates.
     #[inline]
     pub fn build(self) -> Result<CertStore> {
-        #[cfg(feature = "boring")]
+        #[cfg(feature = "boring-tls")]
         return self
             .builder
             .map(X509StoreBuilder::build)
             .map(Arc::new)
             .map(CertStore);
 
-        #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
         return self
             .builder
             .map(X509StoreBuilder::build)
             .map(Arc::new)
             .map(CertStore);
 
-        #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
         return self.builder.map(Arc::new).map(CertStore);
 
-        #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+        #[cfg(not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )))]
         return Ok(CertStore(std::marker::PhantomData));
     }
 
@@ -175,7 +191,11 @@ impl CertStoreBuilder {
         C: Into<CertificateInput<'c>>,
         F: Fn(&'c [u8]) -> Result<Certificate>,
     {
-        #[cfg(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls"))]
+        #[cfg(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        ))]
         if let Ok(ref mut builder) = self.builder {
             let cert = cert.into().with_parser(parser);
             let result = cert.and_then(|cert| process_certs(std::iter::once(cert), builder));
@@ -193,7 +213,11 @@ impl CertStoreBuilder {
         I::Item: Into<CertificateInput<'c>>,
         F: Fn(&'c [u8]) -> Result<Certificate>,
     {
-        #[cfg(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls"))]
+        #[cfg(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        ))]
         if let Ok(ref mut builder) = self.builder {
             let certs = certs
                 .into_iter()
@@ -212,17 +236,25 @@ impl CertStoreBuilder {
 impl CertStore {
     /// Creates a new `CertStoreBuilder`.
     pub fn builder() -> CertStoreBuilder {
-        #[cfg(feature = "boring")]
+        #[cfg(feature = "boring-tls")]
         let builder = X509StoreBuilder::new().map_err(Error::tls);
-        #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
         let builder = X509StoreBuilder::new().map_err(Error::tls);
-        #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
         let builder = Ok(RootCertStore::empty());
 
-        #[cfg(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls"))]
+        #[cfg(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        ))]
         return CertStoreBuilder { builder };
 
-        #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+        #[cfg(not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )))]
         return CertStoreBuilder {
             _marker: std::marker::PhantomData,
         };
@@ -247,10 +279,14 @@ impl Default for CertStore {
 /// A certificate store.
 #[derive(Clone)]
 pub struct CertStore(
-    #[cfg(feature = "boring")] pub(crate) Arc<X509Store>,
-    #[cfg(all(feature = "openssl-tls", not(feature = "boring")))] pub(crate) Arc<X509Store>,
-    #[cfg(all(feature = "rustls-tls", not(feature = "boring")))] pub(crate) Arc<RootCertStore>,
-    #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+    #[cfg(feature = "boring-tls")] pub(crate) Arc<X509Store>,
+    #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))] pub(crate) Arc<X509Store>,
+    #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))] pub(crate) Arc<RootCertStore>,
+    #[cfg(not(any(
+        feature = "boring-tls",
+        feature = "openssl-tls",
+        feature = "rustls-tls"
+    )))]
     pub(crate) std::marker::PhantomData<()>,
 );
 

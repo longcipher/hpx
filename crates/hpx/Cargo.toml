@@ -16,7 +16,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 targets = ["x86_64-unknown-linux-gnu"]
 
 [features]
-default = ["boring", "http1", "http2", "stream", "tracing"]
+default = ["boring-tls", "http1", "http2", "stream", "tracing"]
 
 # Enable support for decoding text.
 charset = ["dep:encoding_rs", "dep:mime"]
@@ -85,7 +85,10 @@ hotpath = ["dep:hotpath"]
 sse = ["dep:memchr", "dep:fastrand", "stream"]
 
 # Enable BoringSSL support.
-boring = ["dep:boring", "dep:tokio-boring", "dep:brotli", "dep:flate2"]
+boring-tls = ["dep:boring", "dep:tokio-boring", "dep:brotli", "dep:flate2"]
+
+# Enable vendored BoringSSL (static linking).
+boring-vendored = ["boring-tls", "boring/fips"]
 
 # Enable Rustls support.
 rustls-tls = [
@@ -117,7 +120,7 @@ macros = ["tokio/macros"]
 # remember every feature flag.
 hft = [
     "auth",
-    "boring",
+    "boring-tls",
     "hickory-dns",
     "http1",
     "http2",
@@ -133,7 +136,7 @@ hft = [
 # feature enables the compile-time support usually paired with that profile.
 stealth = [
     "auth",
-    "boring",
+    "boring-tls",
     "brotli",
     "charset",
     "cookies",

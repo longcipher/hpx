@@ -1,30 +1,38 @@
 #![allow(unused)]
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 use boring::x509::store::{X509Store, X509StoreBuilder};
-#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+#[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
 use openssl::x509::store::{X509Store, X509StoreBuilder};
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 use rustls::RootCertStore;
 
 use super::{Certificate, CertificateInput};
 use crate::{Error, Result};
 
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 type StoreBuilder = X509StoreBuilder;
-#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+#[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
 type StoreBuilder = X509StoreBuilder;
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 type StoreBuilder = RootCertStore;
-#[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+#[cfg(not(any(
+    feature = "boring-tls",
+    feature = "openssl-tls",
+    feature = "rustls-tls"
+)))]
 type StoreBuilder = ();
 
-#[cfg(feature = "boring")]
+#[cfg(feature = "boring-tls")]
 type StoreType = X509Store;
-#[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+#[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
 type StoreType = X509Store;
-#[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 type StoreType = RootCertStore;
-#[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+#[cfg(not(any(
+    feature = "boring-tls",
+    feature = "openssl-tls",
+    feature = "rustls-tls"
+)))]
 type StoreType = ();
 
 pub fn parse_certs<'c, I>(
@@ -35,25 +43,33 @@ where
     I: IntoIterator,
     I::Item: Into<CertificateInput<'c>>,
 {
-    #[cfg(feature = "boring")]
+    #[cfg(feature = "boring-tls")]
     let mut store = X509StoreBuilder::new().map_err(Error::tls)?;
-    #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+    #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
     let mut store = X509StoreBuilder::new().map_err(Error::tls)?;
-    #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+    #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
     let mut store = RootCertStore::empty();
-    #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+    #[cfg(not(any(
+        feature = "boring-tls",
+        feature = "openssl-tls",
+        feature = "rustls-tls"
+    )))]
     let mut store = ();
 
     let certs = filter_map_certs(certs.into_iter().map(|c| c.into().with_parser(parser)));
     process_certs(certs, &mut store)?;
 
-    #[cfg(feature = "boring")]
+    #[cfg(feature = "boring-tls")]
     return Ok(store.build());
-    #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+    #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
     return Ok(store.build());
-    #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+    #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
     return Ok(store);
-    #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+    #[cfg(not(any(
+        feature = "boring-tls",
+        feature = "openssl-tls",
+        feature = "rustls-tls"
+    )))]
     return Ok(());
 }
 
@@ -62,25 +78,33 @@ where
     C: AsRef<[u8]>,
     F: Fn(C) -> Result<Vec<Certificate>>,
 {
-    #[cfg(feature = "boring")]
+    #[cfg(feature = "boring-tls")]
     let mut store = X509StoreBuilder::new().map_err(Error::tls)?;
-    #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+    #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
     let mut store = X509StoreBuilder::new().map_err(Error::tls)?;
-    #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+    #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
     let mut store = RootCertStore::empty();
-    #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+    #[cfg(not(any(
+        feature = "boring-tls",
+        feature = "openssl-tls",
+        feature = "rustls-tls"
+    )))]
     let mut store = ();
 
     let certs = parse(certs)?;
     process_certs(certs.into_iter(), &mut store)?;
 
-    #[cfg(feature = "boring")]
+    #[cfg(feature = "boring-tls")]
     return Ok(store.build());
-    #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+    #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
     return Ok(store.build());
-    #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+    #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
     return Ok(store);
-    #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+    #[cfg(not(any(
+        feature = "boring-tls",
+        feature = "openssl-tls",
+        feature = "rustls-tls"
+    )))]
     return Ok(());
 }
 
@@ -91,15 +115,19 @@ where
     let mut valid_count = 0;
     let mut invalid_count = 0;
     for cert in iter {
-        #[cfg(feature = "boring")]
+        #[cfg(feature = "boring-tls")]
         let res = store.add_cert(cert.0).map_err(Error::tls);
-        #[cfg(all(feature = "openssl-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
         let res = store.add_cert(cert.0).map_err(Error::tls);
-        #[cfg(all(feature = "rustls-tls", not(feature = "boring")))]
+        #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
         let res = store
             .add(cert.0.clone())
             .map_err(|e| Error::tls(Box::new(e)));
-        #[cfg(not(any(feature = "boring", feature = "openssl-tls", feature = "rustls-tls")))]
+        #[cfg(not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )))]
         let res: Result<()> = Err(Error::tls("TLS not supported"));
 
         if let Err(_err) = res {

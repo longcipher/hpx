@@ -295,7 +295,7 @@ use rustls as _;
 use rustls_pemfile as _;
 #[cfg(feature = "rustls-tls")]
 use rustls_pki_types as _;
-#[cfg(all(feature = "rustls-tls", feature = "boring"))]
+#[cfg(all(feature = "rustls-tls", feature = "boring-tls"))]
 use sha1 as _;
 #[cfg(feature = "rustls-tls")]
 use sha2 as _;
