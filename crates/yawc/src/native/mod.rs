@@ -796,6 +796,7 @@ impl WebSocket<MaybeTlsStream<TcpStream>> {
             return WebSocket::handshake_with_request(url, stream, options, builder).await;
         }
 
+        #[cfg(feature = "proxy")]
         let tcp_stream: proxy::ProxyStream = {
             let s = if let Some(tcp_address) = tcp_address {
                 TcpStream::connect(tcp_address).await?
@@ -804,6 +805,16 @@ impl WebSocket<MaybeTlsStream<TcpStream>> {
             };
             let _ = s.set_nodelay(options.no_delay);
             Box::new(s)
+        };
+        #[cfg(not(feature = "proxy"))]
+        let tcp_stream = {
+            let s = if let Some(tcp_address) = tcp_address {
+                TcpStream::connect(tcp_address).await?
+            } else {
+                TcpStream::connect(format!("{host}:{port}")).await?
+            };
+            let _ = s.set_nodelay(options.no_delay);
+            s
         };
 
         let stream = match url.scheme() {
