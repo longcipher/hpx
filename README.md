@@ -31,7 +31,7 @@ hpx/
 
 The foundation crate. Everything else builds on top of this.
 
-**Provides:** `Client`, `ClientBuilder`, `RequestBuilder`, `Response`, `Body`, WebSocket upgrade, cookie store, redirect policy, Tower middleware stack, TLS backends (BoringSSL / Rustls).
+**Provides:** `Client`, `ClientBuilder`, `RequestBuilder`, `Response`, `Body`, WebSocket upgrade, cookie store, redirect policy, Tower middleware stack, TLS backends (BoringSSL / OpenSSL / Rustls).
 
 **Use when:** You need to make HTTP requests — GET, POST, JSON APIs, file uploads, WebSocket connections, or reverse proxy traffic.
 
@@ -47,7 +47,7 @@ let client = hpx::Client::builder()
     .build()?;
 ```
 
-**Key feature flags:** `json`, `ws`, `cookies`, `gzip`/`brotli`/`zstd`, `socks`, `hickory-dns`, `hft` (preset), `stealth` (preset).
+**Key feature flags:** `json`, `ws`, `cookies`, `gzip`/`brotli`/`zstd`, `socks`, `hickory-dns`, `openssl-tls`/`openssl-vendored`, `hft` (preset), `stealth` (preset).
 
 ---
 
@@ -76,7 +76,7 @@ let resp = hpx::get("https://tls.peet.ws/api/all")
 
 A lightweight headless browser built on `hpx`. Parses HTML/CSS, builds a DOM, runs JavaScript (via V8/Deno), detects anti-bot challenges, and renders pages to text/markdown/screenshots.
 
-**Provides:** HTML parser, CSS parser + cascade, DOM tree, layout engine, JS runtime (Deno_core), challenge detection (Cloudflare, AWS-WAF, Kasada, PerimeterX, DataDome, hCaptcha, reCAPTCHA), CDP protocol support, parallel scraping, stealth mode, canvas rendering.
+**Provides:** HTML parser, DOM tree, CSS layout engine (Stylo + Taffy via Blitz), JS runtime (Deno_core), challenge detection (Cloudflare, AWS-WAF, Kasada, PerimeterX, DataDome, hCaptcha, reCAPTCHA), CDP protocol support, parallel scraping, stealth mode, canvas rendering.
 
 **Use when:** You need to render JavaScript-heavy pages, bypass anti-bot protections, scrape SPAs, or run a headless browser programmatically.
 
@@ -85,14 +85,14 @@ A lightweight headless browser built on `hpx`. Parses HTML/CSS, builds a DOM, ru
 | Module | Purpose |
 |--------|---------|
 | `challenge` | Anti-bot challenge classifier (CF, AWS-WAF, Kasada, etc.) |
-| `html_parser` / `css_parser` | DOM + CSSOM construction |
-| `dom` / `layout` | DOM tree + box model layout |
+| `html_parser` | DOM construction (Blitz/html5ever) |
+| `dom` / `layout` | DOM tree + CSS layout (Stylo + Taffy via Blitz) |
 | `js_runtime` | V8-based JavaScript execution (feature `v8`) |
 | `parallel` | Multi-URL concurrent scraping |
 | `stealth` | Anti-fingerprinting patches |
 | `protocol` | CDP (Chrome DevTools Protocol) server |
 
-**Depends on:** `hpx` (network), `deno_core` (JS), `html5ever` (HTML), `image`/`skia-safe` (canvas, optional).
+**Depends on:** `hpx` (network), `deno_core` (JS), `blitz-html`/`blitz-dom` (HTML/CSS), `parley` (text), `image`/`skia-safe` (canvas, optional).
 
 ---
 
@@ -112,7 +112,7 @@ let id = engine.add("https://example.com/large-file.bin").await?;
 engine.start(id).await?;
 ```
 
-**Key features:** `http` (enable HTTP client integration), `sqlite` (persistent storage), `test` (in-memory storage for tests).
+**Key features:** `http` (enable HTTP client integration), `sqlite` (persistent storage), `test` (in-memory storage for tests), `metalink` (metalink parsing), `hotpath` (profiling instrumentation).
 
 **Depends on:** `hpx` (HTTP client for segments), `sqlx` (persistence), `ahash` (concurrent data structures).
 
@@ -138,6 +138,8 @@ let mut stream = client
 
 **Depends on:** `hpx` (the `Response` type), `serde_json`/`csv`/`prost`/`arrow-ipc` (per feature).
 
+**Key features:** `json` (JSON array streaming), `csv` (CSV streaming), `protobuf` (Protobuf streaming), `arrow` (Arrow IPC streaming).
+
 ---
 
 ### [`hpx-yawc`](https://crates.io/crates/hpx-yawc) (yawc) — WebSocket
@@ -157,12 +159,6 @@ ws.send(hpx_yawc::Frame::text("hello")).await?;
 ```
 
 **Depends on:** `tokio`, `rustls` (TLS), optional `axum` integration.
-
----
-
-### [`hpx-fastwebsockets`](https://crates.io/crates/hpx-fastwebsockets) — WebSocket (Alternative)
-
-Alternative WebSocket backend for `hpx`. Activated via `ws-fastwebsockets` feature flag. Takes priority over `yawc` when both are enabled.
 
 ---
 
@@ -292,6 +288,8 @@ Default: `boring`, `http1`, `http2`, `stream`, `tracing`.
 | **TLS** | | |
 | `boring` | **Yes** | BoringSSL TLS backend |
 | `rustls-tls` | No | Rustls TLS backend (pure Rust) |
+| `openssl-tls` | No | OpenSSL TLS backend |
+| `openssl-vendored` | No | OpenSSL with vendored static linking |
 | `webpki-roots` | No | WebPKI root certificates |
 | **HTTP** | | |
 | `http1` | **Yes** | HTTP/1.1 support |
@@ -312,17 +310,21 @@ Default: `boring`, `http1`, `http2`, `stream`, `tracing`.
 | **WebSocket** | | |
 | `ws` | No | WebSocket support (alias for `ws-yawc`) |
 | `ws-yawc` | No | WebSocket via hpx-yawc backend |
-| `ws-fastwebsockets` | No | WebSocket via fastwebsockets backend |
 | **Networking** | | |
 | `cookies` | No | Cookie store support |
 | `socks` | No | SOCKS proxy support |
 | `hickory-dns` | No | Async DNS resolver (Hickory) |
 | `system-proxy` | No | System proxy configuration |
+| **Auth** | | |
+| `auth` | No | Authentication middleware (bearer, API key, OAuth2) |
 | **Observability** | | |
 | `tracing` | No | Tracing/logging support |
+| `hotpath` | No | Hotpath profiling instrumentation |
+| **Streaming** | | |
+| `sse` | No | Server-Sent Events support |
 | **Presets** | | |
-| `hft` | No | Low-latency: BoringSSL, HTTP/1+2, streaming, Hickory DNS, SIMD JSON, Zstd, fast WS |
-| `stealth` | No | Browser-like: BoringSSL, HTTP/1+2, decompression, cookies, charset, Hickory DNS, fast WS |
+| `hft` | No | Low-latency: auth, BoringSSL, HTTP/1+2, streaming, tracing, Hickory DNS, SIMD JSON, Zstd, yawc WS |
+| `stealth` | No | Browser-like: auth, BoringSSL, HTTP/1+2, decompression, cookies, charset, query, streaming, tracing, Hickory DNS, yawc WS |
 
 ### Common Feature Combinations
 
@@ -344,6 +346,12 @@ hpx = { version = "2", default-features = false, features = ["stealth"] }
 
 # Pure Rust (no C dependencies)
 hpx = { version = "2", default-features = false, features = ["rustls-tls", "http1", "http2"] }
+
+# OpenSSL backend
+hpx = { version = "2", default-features = false, features = ["openssl-tls", "http1", "http2"] }
+
+# OpenSSL vendored (static linking, no system OpenSSL needed)
+hpx = { version = "2", default-features = false, features = ["openssl-vendored", "http1", "http2"] }
 ```
 
 ### `hpx-emulation` Features
@@ -366,11 +374,16 @@ Default: `rustls-ring`.
 | `rustls-ring` | **Yes** | TLS via rustls with ring crypto |
 | `rustls-aws-lc-rs` | No | TLS via rustls with AWS LC crypto |
 | `axum` | No | Axum WebSocket extractor |
+| `proxy` | No | Proxy support |
+| `socks` | No | SOCKS proxy support (enables `proxy`) |
 | `simd` | No | SIMD-accelerated UTF-8 validation |
+| `hotpath` | No | Hotpath profiling instrumentation |
 | `smol` | No | smol async runtime support |
 | `zlib` | No | Native zlib compression backend |
 
 ## TLS Backend Configuration
+
+hpx supports three TLS backends — BoringSSL (default), OpenSSL, and Rustls. Each can be selected via feature flags.
 
 ### BoringSSL (Default)
 
@@ -379,6 +392,18 @@ BoringSSL is the default TLS backend, providing robust support for modern TLS fe
 ```toml
 [dependencies]
 hpx = "2"
+```
+
+### OpenSSL
+
+A widely-used C library TLS backend. Useful when you need OpenSSL-specific features like hardware acceleration (QAT, AES-NI), PKCS#11 engine support, or when BoringSSL is not available on your platform.
+
+```toml
+[dependencies]
+hpx = { version = "2", default-features = false, features = ["openssl-tls", "http1", "http2"] }
+
+# Vendored (statically linked) OpenSSL — no system dependency needed
+hpx = { version = "2", default-features = false, features = ["openssl-vendored", "http1", "http2"] }
 ```
 
 ### Rustls

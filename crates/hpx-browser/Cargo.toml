@@ -55,7 +55,7 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 skia-safe = { workspace = true, optional = true }
 swash = { workspace = true, optional = true }
-taffy = { workspace = true }
+taffy = { workspace = true, features = ["std", "flexbox", "grid", "block_layout", "content_size", "calc", "detailed_layout_info", "float_layout", "taffy_tree"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
