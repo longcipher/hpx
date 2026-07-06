@@ -184,11 +184,11 @@ all = "warn"
 
 [workspace.dependencies]
 # local crates
-hpx = { path = "crates/hpx", version = "2.5.1" }
-hpx-browser = { path = "crates/hpx-browser", version = "2.5.1" }
-hpx-cli = { path = "crates/hpx-cli", version = "2.5.1" }
-hpx-dl = { path = "crates/hpx-dl", version = "2.5.1" }
-hpx-yawc = { path = "crates/yawc", version = "2.5.1" }
+hpx = { path = "crates/hpx", version = "2.5.2" }
+hpx-browser = { path = "crates/hpx-browser", version = "2.5.2" }
+hpx-cli = { path = "crates/hpx-cli", version = "2.5.2" }
+hpx-dl = { path = "crates/hpx-dl", version = "2.5.2" }
+hpx-yawc = { path = "crates/yawc", version = "2.5.2" }
 
 # external crates
 ahash = "0.8.12"
