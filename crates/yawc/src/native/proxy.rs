@@ -6,7 +6,7 @@
 use std::io;
 
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
 };
 use url::Url;
@@ -21,6 +21,19 @@ pub enum ProxyConfig {
     Socks5(Url),
 }
 
+/// Combined read+write trait for proxy tunnel streams.
+pub trait ProxyIo:
+    tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + std::fmt::Debug
+{
+}
+impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + std::fmt::Debug> ProxyIo
+    for T
+{
+}
+
+/// A TCP stream, possibly wrapped in a BufReader for proxy tunnels.
+pub type ProxyStream = Box<dyn ProxyIo>;
+
 /// Establishes a TCP connection to the target through the given proxy.
 ///
 /// For HTTP proxies, performs an HTTP CONNECT tunnel.
@@ -29,7 +42,7 @@ pub async fn connect_through_proxy(
     proxy: &ProxyConfig,
     target_host: &str,
     target_port: u16,
-) -> io::Result<TcpStream> {
+) -> io::Result<ProxyStream> {
     match proxy {
         ProxyConfig::Http(proxy_url) => {
             let proxy_addr = format!(
@@ -75,7 +88,7 @@ pub async fn connect_through_proxy(
                     .into_inner()
             };
 
-            Ok(stream)
+            Ok(Box::new(stream))
         }
     }
 }
@@ -116,11 +129,11 @@ fn validate_host(host: &str) -> io::Result<()> {
 /// responds with a 2xx status code, the connection is established and the
 /// proxy stream is returned.
 async fn http_connect_tunnel(
-    mut proxy_stream: TcpStream,
+    proxy_stream: TcpStream,
     target_host: &str,
     target_port: u16,
     auth_header: Option<&str>,
-) -> io::Result<TcpStream> {
+) -> io::Result<ProxyStream> {
     validate_host(target_host)?;
 
     let authority = if target_host.contains(':') {
@@ -140,67 +153,48 @@ async fn http_connect_tunnel(
 
     connect_req.push_str("\r\n");
 
-    proxy_stream.write_all(connect_req.as_bytes()).await?;
+    tracing::debug!(target = %authority, "CONNECT tunnel request");
+    let mut stream = BufReader::new(proxy_stream);
+    stream.write_all(connect_req.as_bytes()).await?;
 
-    let mut buf = Vec::with_capacity(1024);
-    let mut temp = [0u8; 1024];
-
+    // Read the CONNECT response line by line until we hit the empty line.
+    let mut line_num = 0;
     loop {
-        let n = proxy_stream.read(&mut temp).await?;
+        let mut line = String::new();
+        let n = stream.read_line(&mut line).await?;
+        line_num += 1;
+        tracing::debug!(line_num, n, line = %line.trim_end(), "CONNECT tunnel response line");
+
         if n == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 "connection closed before receiving CONNECT response",
             ));
         }
-        buf.extend_from_slice(&temp[..n]);
 
-        if let Some(end_pos) = find_header_end(&buf) {
-            let status_line = parse_status_line(&buf[..end_pos])?;
-
-            if !status_line.starts_with("HTTP/") {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("invalid HTTP response: {status_line}"),
-                ));
-            }
-
-            let status_code = parse_status_code(&status_line)?;
+        // Status line is the first line.
+        if line.starts_with("HTTP/") {
+            let status_code = parse_status_code(line.trim())?;
             if !(200..300).contains(&status_code) {
                 return Err(io::Error::new(
                     io::ErrorKind::ConnectionRefused,
                     format!("proxy tunnel failed with status {status_code}"),
                 ));
             }
-
-            return Ok(proxy_stream);
+            continue;
         }
 
-        if buf.len() > 8192 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "CONNECT response too long",
-            ));
+        // Empty line signals end of headers — tunnel established.
+        if line.trim().is_empty() {
+            break;
         }
+
+        // Other header lines — skip.
     }
-}
 
-/// Find the end of HTTP headers (`\r\n\r\n`) in a buffer.
-fn find_header_end(buf: &[u8]) -> Option<usize> {
-    buf.windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .map(|pos| pos + 4)
-}
-
-/// Parse the status line from an HTTP response (e.g., "HTTP/1.1 200 OK").
-fn parse_status_line(headers: &[u8]) -> io::Result<String> {
-    let line_end = headers
-        .windows(2)
-        .position(|w| w == b"\r\n")
-        .unwrap_or(headers.len());
-
-    let line = &headers[..line_end];
-    String::from_utf8(line.to_vec()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    // Return the BufReader to preserve any buffered bytes from the proxy response.
+    // BufReader implements AsyncRead + AsyncWrite, so it works for TLS and WS.
+    Ok(Box::new(stream))
 }
 
 /// Parse the status code from an HTTP status line.
@@ -239,6 +233,8 @@ fn extract_proxy_auth(url: &Url) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use tokio::io::AsyncReadExt;
+
     use super::*;
 
     #[tokio::test]

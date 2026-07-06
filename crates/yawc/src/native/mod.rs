@@ -170,6 +170,10 @@ use crate::{Result, WebSocketError, codec, compression, frame, streaming::Stream
 ///
 /// This is the default WebSocket type returned by [`WebSocket::connect`],
 /// which handles both plain TCP and TLS connections over TCP streams.
+/// Uses a boxed stream type to support both direct and proxied connections.
+#[cfg(feature = "proxy")]
+pub type TcpWebSocket = WebSocket<MaybeTlsStream<proxy::ProxyStream>>;
+#[cfg(not(feature = "proxy"))]
 pub type TcpWebSocket = WebSocket<MaybeTlsStream<TcpStream>>;
 
 /// Type alias for server-side WebSocket connections from HTTP upgrades.
@@ -771,23 +775,36 @@ impl WebSocket<MaybeTlsStream<TcpStream>> {
             .port_or_known_default()
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "URL has no port"))?;
 
+        let _ = options.no_delay; // ponytail: no_delay set after connection
+
         #[cfg(feature = "proxy")]
-        let tcp_stream = if let Some(proxy_config) = &proxy {
-            proxy::connect_through_proxy(proxy_config, &host, port).await?
-        } else if let Some(tcp_address) = tcp_address {
-            TcpStream::connect(tcp_address).await?
-        } else {
-            TcpStream::connect(format!("{host}:{port}")).await?
-        };
+        if let Some(proxy_config) = &proxy {
+            let tcp_stream = proxy::connect_through_proxy(proxy_config, &host, port).await?;
 
-        #[cfg(not(feature = "proxy"))]
-        let tcp_stream = if let Some(tcp_address) = tcp_address {
-            TcpStream::connect(tcp_address).await?
-        } else {
-            TcpStream::connect(format!("{host}:{port}")).await?
-        };
+            let stream = match url.scheme() {
+                "ws" => MaybeTlsStream::Plain(tcp_stream),
+                "wss" => {
+                    let connector = connector.unwrap_or_else(|| tls_connector().clone());
+                    let domain = ServerName::try_from(host).map_err(|_| {
+                        io::Error::new(io::ErrorKind::InvalidInput, "invalid dnsname")
+                    })?;
+                    MaybeTlsStream::Tls(connector.connect(domain, tcp_stream).await?)
+                }
+                _ => return Err(WebSocketError::InvalidHttpScheme),
+            };
 
-        let _ = tcp_stream.set_nodelay(options.no_delay);
+            return WebSocket::handshake_with_request(url, stream, options, builder).await;
+        }
+
+        let tcp_stream: proxy::ProxyStream = {
+            let s = if let Some(tcp_address) = tcp_address {
+                TcpStream::connect(tcp_address).await?
+            } else {
+                TcpStream::connect(format!("{host}:{port}")).await?
+            };
+            let _ = s.set_nodelay(options.no_delay);
+            Box::new(s)
+        };
 
         let stream = match url.scheme() {
             "ws" => MaybeTlsStream::Plain(tcp_stream),

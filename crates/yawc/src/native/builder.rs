@@ -8,14 +8,13 @@ use std::{
 };
 
 use futures::{FutureExt, future::BoxFuture};
-use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use url::Url;
 
 #[cfg(feature = "proxy")]
 use super::proxy::ProxyConfig;
-use super::{Options, WebSocket};
-use crate::{Result, stream::MaybeTlsStream};
+use super::{Options, TcpWebSocket, WebSocket};
+use crate::Result;
 
 /// Type alias for HTTP requests used in WebSocket connection handling.
 ///
@@ -68,7 +67,7 @@ pub type HttpRequestBuilder = hyper::http::request::Builder;
 /// ```
 pub struct WebSocketBuilder {
     pub(super) opts: Option<WsBuilderOpts>,
-    pub(super) future: Option<BoxFuture<'static, Result<WebSocket<MaybeTlsStream<TcpStream>>>>>,
+    pub(super) future: Option<BoxFuture<'static, Result<TcpWebSocket>>>,
 }
 
 /// Internal options structure for WebSocketBuilder.
@@ -218,7 +217,7 @@ impl WebSocketBuilder {
 }
 
 impl Future for WebSocketBuilder {
-    type Output = Result<WebSocket<MaybeTlsStream<TcpStream>>>;
+    type Output = Result<TcpWebSocket>;
 
     /// Polls the future to establish the WebSocket connection.
     ///
