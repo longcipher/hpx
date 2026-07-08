@@ -7,6 +7,8 @@ pub struct CdpRequest {
     pub method: String,
     #[serde(default)]
     pub params: serde_json::Value,
+    #[serde(default, rename = "sessionId")]
+    pub session_id: Option<String>,
 }
 
 /// A CDP JSON-RPC response to the client.
@@ -132,5 +134,21 @@ mod tests {
         let req: CdpRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.method, "Page.enable");
         assert!(req.params.is_null());
+    }
+
+    #[test]
+    fn parse_request_with_session_id() {
+        let json = r#"{"id": 1, "method": "Page.navigate", "params": {"url": "https://example.com"}, "sessionId": "target-1"}"#;
+        let req: CdpRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.id, 1);
+        assert_eq!(req.method, "Page.navigate");
+        assert_eq!(req.session_id.as_deref(), Some("target-1"));
+    }
+
+    #[test]
+    fn parse_request_without_session_id() {
+        let json = r#"{"id": 2, "method": "Page.enable"}"#;
+        let req: CdpRequest = serde_json::from_str(json).unwrap();
+        assert!(req.session_id.is_none());
     }
 }

@@ -40,3 +40,18 @@ pub mod workers;
 
 #[cfg(feature = "cdp")]
 pub mod protocol;
+
+#[cfg(feature = "cdp-client")]
+pub mod cdp_client;
+
+#[cfg(feature = "cdp-client")]
+pub mod chrome;
+
+#[cfg(feature = "cdp-client")]
+pub mod cdp_page;
+
+#[cfg(feature = "cdp-client")]
+pub mod locator;
+
+#[cfg(feature = "cdp-client")]
+pub mod har;

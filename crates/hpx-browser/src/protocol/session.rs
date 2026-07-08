@@ -403,6 +403,7 @@ mod tests {
             id: 1,
             method: "Page.enable".to_string(),
             params: serde_json::Value::Null,
+            session_id: None,
         };
         let (resp, _events) = session.handle_request(&mut page, &req).await;
         assert!(resp.contains("\"id\":1"));
@@ -419,6 +420,7 @@ mod tests {
             id: 2,
             method: "Runtime.evaluate".to_string(),
             params: serde_json::json!({"expression": "1 + 2"}),
+            session_id: None,
         };
         let (resp, _) = session.handle_request(&mut page, &req).await;
         // Page.evaluate is a stub returning "undefined" — that's fine for structure test
@@ -435,6 +437,7 @@ mod tests {
             id: 3,
             method: "Runtime.enable".to_string(),
             params: serde_json::Value::Null,
+            session_id: None,
         };
         let (_, events) = session.handle_request(&mut page, &req).await;
         assert_eq!(events.len(), 1);
@@ -452,6 +455,7 @@ mod tests {
             id: 4,
             method: "Page.navigate".to_string(),
             params: serde_json::json!({"url": "about:blank"}),
+            session_id: None,
         };
         let (resp, events) = session.handle_request(&mut page, &req).await;
         assert!(resp.contains("frameId"));
@@ -472,6 +476,7 @@ mod tests {
             id: 5,
             method: "DOM.getDocument".to_string(),
             params: serde_json::json!({}),
+            session_id: None,
         };
         let (resp, _) = session.handle_request(&mut page, &req).await;
         assert!(resp.contains("\"nodeType\":9"));
@@ -488,6 +493,7 @@ mod tests {
             id: 99,
             method: "Unknown.method".to_string(),
             params: serde_json::Value::Null,
+            session_id: None,
         };
         let (resp, _) = session.handle_request(&mut page, &req).await;
         assert!(resp.contains("-32601"), "response: {}", resp);
@@ -504,6 +510,7 @@ mod tests {
             id: 7,
             method: "Browser.getVersion".to_string(),
             params: serde_json::Value::Null,
+            session_id: None,
         };
         let (resp, _) = session.handle_request(&mut page, &req).await;
         assert!(resp.contains("hpx-browser"));
@@ -519,6 +526,7 @@ mod tests {
             id: 8,
             method: "Page.addScriptToEvaluateOnNewDocument".to_string(),
             params: serde_json::json!({"source": "window.__test = true;"}),
+            session_id: None,
         };
         let (resp, _) = session.handle_request(&mut page, &req).await;
         assert!(resp.contains("identifier"));

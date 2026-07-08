@@ -3,7 +3,7 @@ members = ["bin/*", "crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "2.5.2"
+version = "2.5.3"
 edition = "2024"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license = "Apache-2.0"
@@ -184,24 +184,24 @@ all = "warn"
 
 [workspace.dependencies]
 # local crates
-hpx = { path = "crates/hpx", version = "2.5.2" }
-hpx-browser = { path = "crates/hpx-browser", version = "2.5.2" }
-hpx-cli = { path = "crates/hpx-cli", version = "2.5.2" }
-hpx-dl = { path = "crates/hpx-dl", version = "2.5.2" }
-hpx-yawc = { path = "crates/yawc", version = "2.5.2" }
+hpx = { path = "crates/hpx", version = "2.5.3" }
+hpx-browser = { path = "crates/hpx-browser", version = "2.5.3" }
+hpx-cli = { path = "crates/hpx-cli", version = "2.5.3" }
+hpx-dl = { path = "crates/hpx-dl", version = "2.5.3" }
+hpx-yawc = { path = "crates/yawc", version = "2.5.3" }
 
 # external crates
 ahash = "0.8.12"
 arc-swap = "1.9.2"
 arrayvec = "0.7.8"
-arrow = "59.0.0"
+arrow = "59.1.0"
 async-trait = "0.1.80"
 axum = "0.8.9"
 axum-core = "0.5.6"
 base64 = "0.22.1"
-blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "aab8be6a10eeb2c360c64e7d5897ac7e083153f8", version = "=0.3.0-alpha.6", features = ["floats"] }
-blitz-html = { git = "https://github.com/DioxusLabs/blitz.git", rev = "aab8be6a10eeb2c360c64e7d5897ac7e083153f8", version = "=0.3.0-alpha.6" }
-blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "aab8be6a10eeb2c360c64e7d5897ac7e083153f8", version = "=0.3.0-alpha.6" }
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "77435aadb92c6bf47e50d74810c52120f3aa3f37", version = "=0.3.0-alpha.6", features = ["floats"] }
+blitz-html = { git = "https://github.com/DioxusLabs/blitz.git", rev = "77435aadb92c6bf47e50d74810c52120f3aa3f37", version = "=0.3.0-alpha.6" }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "77435aadb92c6bf47e50d74810c52120f3aa3f37", version = "=0.3.0-alpha.6" }
 boring = "5.1.0"
 brotli = "8.0.4"
 bytes = "1.12.0"
@@ -210,7 +210,7 @@ clap = "4.6.1"
 const-oid = "0.10"
 cookie = "0.18.1"
 criterion = "0.8.2"
-crossbeam-channel = "0.5.15"
+crossbeam-channel = "0.5.16"
 csv = "1.4.0"
 cucumber = "0.23.0"
 deno_core = "0.406.0"
@@ -229,7 +229,7 @@ futures-util = "0.3.32"
 hex = "0.4.3"
 hickory-resolver = "0.26.0"
 hmac = "0.13.0"
-hotpath = "0.20.0"
+hotpath = "0.21.1"
 http = "1.4.2"
 http-body = "1.0.1"
 http-body-util = "0.1.3"
@@ -267,7 +267,7 @@ rustls-native-certs = "0.8.4"
 rustls-pemfile = "2.2.0"
 rustls-pki-types = "1.15.0"
 rustybuzz = "0.20.1"
-scc = "3.8.3"
+scc = "3.8.4"
 schnellru = "0.2.4"
 selectors = "0.39.0"
 serde = "1.0.228"
@@ -275,7 +275,7 @@ serde_json = "1.0.150"
 serde_urlencoded = "0.7.1"
 sha1 = "0.11.0"
 sha2 = "0.11.0"
-simd-json = "0.17.0"
+simd-json = "0.17.1"
 simdutf8 = "0.1.5"
 skia-safe = "0.99.0"
 smallvec = "1.15.2"
@@ -311,6 +311,7 @@ wasm-bindgen-test = "0.3.76"
 web-sys = { version = "0.3.103", default-features = false }
 webpki-root-certs = "1.0.8"
 webpki-roots = "1.0.8"
+which = "8.0.4"
 windows-registry = "0.6.1"
 winnow = "1.0.3"
 zstd = "0.13.3"

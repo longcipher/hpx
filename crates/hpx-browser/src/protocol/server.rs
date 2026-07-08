@@ -293,6 +293,11 @@ async fn handle_http(
     let ws_url = format!("ws://127.0.0.1:{}", addr.port());
 
     let body = match path {
+        "/hello" => {
+            let resp = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\nConnection: close\r\n\r\nHello";
+            stream.write_all(resp.as_bytes()).await?;
+            return Ok(());
+        }
         "/json/version" => serde_json::json!({
             "Browser": "hpx-browser/0.1.0",
             "Protocol-Version": "1.3",

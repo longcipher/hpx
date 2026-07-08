@@ -19,6 +19,7 @@ canvas = [
     "dep:rustfft",
 ]
 cdp = ["dep:hpx-yawc", "dep:hyper", "dep:hyper-util", "hpx-yawc/axum"]
+cdp-client = ["dep:which"]
 proptest = ["dep:proptest"]
 v8 = ["dep:deno_core"]
 workers = ["v8"]
@@ -41,6 +42,7 @@ hyper-util = { workspace = true, features = [
     "server-auto",
 ], optional = true }
 image = { workspace = true, optional = true }
+parking_lot.workspace = true
 parley = { workspace = true }
 png = { workspace = true, optional = true }
 proptest = { workspace = true, optional = true }
@@ -60,10 +62,13 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
 url = { workspace = true }
+which = { workspace = true, optional = true }
 winnow = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["html_reports"] }
+proptest = { workspace = true }
+sha1 = { workspace = true }
 
 [[bench]]
 name = "page_throughput"
@@ -75,6 +80,10 @@ harness = false
 
 [[bench]]
 name = "tls_handshake"
+harness = false
+
+[[bench]]
+name = "cdp_bench"
 harness = false
 
 [lints]

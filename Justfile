@@ -11,18 +11,54 @@ lint:
     cargo +nightly clippy --all -- -D warnings
     cargo shear
 test:
-    cargo nextest run --workspace --all-features
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "$(uname)" = "Darwin" ]; then
+        cargo nextest run --workspace
+    else
+        cargo nextest run --workspace --all-features
+    fi
 test-full:
-    cargo nextest run --workspace --all-features
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "$(uname)" = "Darwin" ]; then
+        cargo nextest run --workspace
+    else
+        cargo nextest run --workspace --all-features
+    fi
 bdd:
-    cargo test -p hpx-dl --test cucumber --all-features
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "$(uname)" = "Darwin" ]; then
+        cargo test -p hpx-dl --test cucumber
+    else
+        cargo test -p hpx-dl --test cucumber --all-features
+    fi
 test-all: test-full bdd
 build-docs:
-    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items --all-features
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "$(uname)" = "Darwin" ]; then
+        RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
+    else
+        RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items --all-features
+    fi
 test-coverage:
-    cargo tarpaulin --all-features --workspace --timeout 300
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "$(uname)" = "Darwin" ]; then
+        cargo tarpaulin --workspace --timeout 300
+    else
+        cargo tarpaulin --all-features --workspace --timeout 300
+    fi
 check-feature:
-    cargo check --workspace --all-features
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "$(uname)" = "Darwin" ]; then
+        cargo check --workspace
+    else
+        cargo check --workspace --all-features
+    fi
 check-cn:
     rg --line-number --column "\p{Han}"
 # Full CI check
