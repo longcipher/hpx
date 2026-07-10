@@ -10,6 +10,7 @@ lint:
     cargo +nightly fmt --all -- --check
     cargo +nightly clippy --all -- -D warnings
     cargo shear
+    just check-agents-md
 test:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -51,6 +52,30 @@ test-coverage:
     else
         cargo tarpaulin --all-features --workspace --timeout 300
     fi
+# Check that AGENTS.md dependency versions match Cargo.toml
+check-agents-md:
+    #!/usr/bin/env bash
+    errors=0
+    while IFS= read -r line; do
+        crate=$(echo "$line" | sed -n 's/.*`\([^ ]*\) = ".*/\1/p')
+        agents_ver=$(echo "$line" | sed -n 's/.*"\([^"]*\)".*/\1/p')
+        if [ -z "$crate" ] || [ -z "$agents_ver" ]; then
+            continue
+        fi
+        cargo_ver=$(grep -E "^${crate} = " Cargo.toml 2>/dev/null | sed -n 's/.*"\([^"]*\)".*/\1/p' | head -1)
+        if [ -z "$cargo_ver" ]; then
+            continue
+        fi
+        if [ "$agents_ver" != "$cargo_ver" ]; then
+            echo "MISMATCH: ${crate}: AGENTS.md=${agents_ver} Cargo.toml=${cargo_ver}"
+            errors=$((errors + 1))
+        fi
+    done < <(sed -n '/^## Preferred Dependencies/,/^##/p' AGENTS.md | grep '^\-.*\`.*=.*"')
+    if [ $errors -gt 0 ]; then
+        echo "FAIL: ${errors} version mismatch(es) between AGENTS.md and Cargo.toml"
+        exit 1
+    fi
+    echo "OK: AGENTS.md versions match Cargo.toml"
 check-feature:
     #!/usr/bin/env bash
     set -euo pipefail

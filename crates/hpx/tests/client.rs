@@ -825,34 +825,50 @@ async fn connection_pool_cache() {
 
 #[tokio::test]
 async fn http1_send_case_sensitive_headers() {
-    // Create a request with a case-sensitive header
+    use std::sync::{Arc, Mutex};
+
+    // Use a low-level server to inspect raw HTTP/1.1 bytes for case-sensitive header preservation
+    let captured: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    let captured_clone = captured.clone();
+
+    let _server = support::server::low_level_with_response(move |raw_request, client_socket| {
+        captured_clone
+            .lock()
+            .unwrap()
+            .extend_from_slice(raw_request);
+        Box::new(async move {
+            let _ = tokio::io::AsyncWriteExt::write_all(
+                client_socket,
+                b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n",
+            )
+            .await;
+        })
+    });
+
     let mut orig_headers = OrigHeaderMap::new();
     orig_headers.insert("X-custom-header");
     orig_headers.insert("Host");
 
+    let url = format!("http://{}/", _server.addr());
+
     let client = Client::builder().no_proxy().build().unwrap();
 
-    // Use httpbin.org which echoes headers
-    let resp = client
-        .get("https://httpbin.org/headers")
+    let _ = client
+        .get(&url)
         .header("X-Custom-Header", "value")
         .orig_headers(orig_headers)
         .version(Version::HTTP_11)
         .send()
-        .await
-        .unwrap()
-        .text()
-        .await
-        .unwrap();
+        .await;
 
-    // httpbin might lowercase headers, so we might fail here if we strictly expect case preservation.
-    // But the test is about *sending* case sensitive headers.
-    // If the server receives them and echoes them back, we can check.
-    // If the server normalizes them, we can't verify easily.
-    // But at least we shouldn't crash.
-    // Let's see if it passes.
-    assert!(resp.contains("X-custom-header") || resp.contains("X-Custom-Header"));
-    assert!(resp.contains("Host") || resp.contains("host"));
+    // Verify the raw request bytes contain the case-sensitive header
+    let guard = captured.lock().unwrap();
+    let raw = String::from_utf8_lossy(&guard);
+    assert!(
+        raw.contains("X-Custom-Header") || raw.contains("X-custom-header"),
+        "Expected raw request to contain case-sensitive header but got: {raw}",
+    );
+    drop(guard);
 }
 
 #[tokio::test]

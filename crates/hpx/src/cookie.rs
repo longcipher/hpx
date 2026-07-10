@@ -494,9 +494,9 @@ impl Jar {
     /// use hpx::cookie::Jar;
     /// let jar = Jar::default();
     /// jar.add_cookie_str("foo=bar; Domain=example.com", "http://example.com");
-    /// assert_eq!(jar.get_all().count(), 1);
+    /// assert_eq!(jar.get_all().len(), 1);
     /// jar.clear();
-    /// assert_eq!(jar.get_all().count(), 0);
+    /// assert_eq!(jar.get_all().len(), 0);
     /// ```
     pub fn clear(&self) {
         self.store.clear_sync();
@@ -679,4 +679,170 @@ fn normalize_path(uri: &Uri) -> &str {
         return &path[..pos];
     }
     DEFAULT_PATH
+}
+
+#[cfg(test)]
+#[cfg(feature = "cookies")]
+mod tests {
+    use std::sync::Arc;
+
+    use http::Uri;
+
+    use crate::{
+        cookie::{CookieStore, Cookies, Jar},
+        header::HeaderValue,
+    };
+
+    fn header_values<'a>(
+        values: &'a [HeaderValue],
+    ) -> Box<dyn Iterator<Item = &'a HeaderValue> + 'a> {
+        Box::new(values.iter())
+    }
+
+    #[test]
+    fn set_cookies_and_retrieve() {
+        let jar = Jar::default();
+        let uri: Uri = "http://example.com/".parse().unwrap();
+
+        let set_cookie: HeaderValue = HeaderValue::from_static("session=abc123; Path=/");
+
+        jar.set_cookies(&mut header_values(&[set_cookie]), &uri);
+
+        match jar.cookies(&uri) {
+            Cookies::Compressed(val) => {
+                let s = val.to_str().unwrap();
+                assert!(s.contains("session=abc123"));
+            }
+            other => panic!("expected Cookies::Compressed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn domain_scoping() {
+        let jar = Jar::default();
+        let example_uri: Uri = "http://example.com/".parse().unwrap();
+        let other_uri: Uri = "http://other.com/".parse().unwrap();
+
+        let set_cookie: HeaderValue = HeaderValue::from_static("token=xyz; Domain=example.com");
+
+        jar.set_cookies(&mut header_values(&[set_cookie]), &example_uri);
+
+        assert!(
+            !matches!(jar.cookies(&example_uri), Cookies::Empty),
+            "cookie should be returned for example.com"
+        );
+
+        assert!(
+            matches!(jar.cookies(&other_uri), Cookies::Empty),
+            "cookie should NOT be returned for other.com"
+        );
+    }
+
+    #[test]
+    fn path_scoping() {
+        let jar = Jar::default();
+        let base_uri: Uri = "http://example.com/".parse().unwrap();
+        let app_uri: Uri = "http://example.com/app/page".parse().unwrap();
+        let other_uri: Uri = "http://example.com/other".parse().unwrap();
+
+        let set_cookie: HeaderValue = HeaderValue::from_static("nav=open; Path=/app");
+
+        jar.set_cookies(&mut header_values(&[set_cookie]), &base_uri);
+
+        assert!(
+            !matches!(jar.cookies(&app_uri), Cookies::Empty),
+            "cookie should be returned for /app/page"
+        );
+
+        assert!(
+            matches!(jar.cookies(&other_uri), Cookies::Empty),
+            "cookie should NOT be returned for /other"
+        );
+    }
+
+    #[test]
+    fn expired_cookie_not_returned() {
+        let jar = Jar::default();
+        let uri: Uri = "http://example.com/".parse().unwrap();
+
+        let set_cookie: HeaderValue =
+            HeaderValue::from_static("stale=old; Expires=Wed, 21 Oct 2015 07:28:00 GMT");
+
+        jar.set_cookies(&mut header_values(&[set_cookie]), &uri);
+
+        assert!(
+            matches!(jar.cookies(&uri), Cookies::Empty),
+            "expired cookie should not be returned"
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_insert_read_no_panic() {
+        let jar = Arc::new(Jar::default());
+
+        let mut handles = Vec::new();
+
+        for i in 0..20u32 {
+            let jar = Arc::clone(&jar);
+            handles.push(tokio::task::spawn(async move {
+                let uri: Uri = format!("http://host{i}.example/").parse().unwrap();
+                let cookie_val = format!("key{i}=val{i}; Path=/");
+                let hv = HeaderValue::from_str(&cookie_val).unwrap();
+
+                jar.set_cookies(&mut header_values(&[hv]), &uri);
+
+                let _ = jar.cookies(&uri);
+            }));
+        }
+
+        for handle in handles {
+            handle.await.unwrap();
+        }
+    }
+
+    #[test]
+    fn empty_set_cookie_adds_no_cookies() {
+        let jar = Jar::default();
+        let uri: Uri = "http://example.com/".parse().unwrap();
+
+        let empty: HeaderValue = HeaderValue::from_static("");
+        jar.set_cookies(&mut header_values(&[empty]), &uri);
+
+        assert!(matches!(jar.cookies(&uri), Cookies::Empty));
+    }
+
+    #[test]
+    fn multiple_set_cookie_headers_all_parsed() {
+        let jar = Jar::default();
+        let uri: Uri = "http://example.com/".parse().unwrap();
+
+        let cookie1: HeaderValue = HeaderValue::from_static("a=1; Path=/");
+        let cookie2: HeaderValue = HeaderValue::from_static("b=2; Path=/");
+
+        jar.set_cookies(&mut header_values(&[cookie1, cookie2]), &uri);
+
+        match jar.cookies(&uri) {
+            Cookies::Compressed(val) => {
+                let s = val.to_str().unwrap();
+                assert!(s.contains("a=1"));
+                assert!(s.contains("b=2"));
+            }
+            other => panic!("expected Cookies::Compressed with two cookies, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn secure_httponly_samesite_attributes_parsed() {
+        use crate::cookie::Cookie;
+
+        let hv: HeaderValue =
+            HeaderValue::from_static("securecookie=val; Secure; HttpOnly; SameSite=Strict");
+
+        let cookie = Cookie::parse(&hv).expect("cookie should parse successfully");
+
+        assert!(cookie.secure(), "Secure attribute should be set");
+        assert!(cookie.http_only(), "HttpOnly attribute should be set");
+        assert!(cookie.same_site_strict(), "SameSite should be Strict");
+        assert!(!cookie.same_site_lax(), "SameSite should not be Lax");
+    }
 }

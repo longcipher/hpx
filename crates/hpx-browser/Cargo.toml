@@ -66,7 +66,9 @@ which = { workspace = true, optional = true }
 winnow = { workspace = true }
 
 [dev-dependencies]
+axum = { workspace = true }
 criterion = { workspace = true, features = ["html_reports"] }
+hpx = { workspace = true }
 proptest = { workspace = true }
 sha1 = { workspace = true }
 

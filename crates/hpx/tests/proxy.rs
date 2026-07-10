@@ -246,6 +246,40 @@ async fn test_using_system_proxy() {
 }
 
 #[tokio::test]
+async fn all_proxy_with_custom_auth() {
+    let url = "http://hyper.rs.local/prox";
+    let server = server::http(move |req| {
+        assert_eq!(req.method(), "GET");
+        assert_eq!(req.uri(), url);
+        assert_eq!(req.headers()["host"], "hyper.rs.local");
+        assert_eq!(
+            req.headers()["proxy-authorization"],
+            "Bearer custom-proxy-token"
+        );
+
+        async { http::Response::default() }
+    });
+
+    let proxy = format!("http://{}", server.addr());
+
+    let res = Client::builder()
+        .proxy(
+            hpx::Proxy::all(&proxy)
+                .unwrap()
+                .custom_http_auth(http::HeaderValue::from_static("Bearer custom-proxy-token")),
+        )
+        .build()
+        .unwrap()
+        .get(url)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.uri(), url);
+    assert_eq!(res.status(), hpx::StatusCode::OK);
+}
+
+#[tokio::test]
 async fn http_over_http() {
     let url = "http://hyper.rs.local/prox";
 

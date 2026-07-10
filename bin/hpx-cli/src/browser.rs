@@ -23,7 +23,7 @@ pub(crate) async fn handle_fetch(
     output: Option<PathBuf>,
     quiet: bool,
     _obey_robots: bool,
-    _allow_private_network: bool,
+    allow_private_network: bool,
     _v8_flags: Option<String>,
     _storage_dir: Option<PathBuf>,
 ) -> eyre::Result<()> {
@@ -42,6 +42,18 @@ pub(crate) async fn handle_fetch(
 
     // Original format: short-circuit browser, use raw HTTP client.
     if dump == DumpFormat::Original {
+        // SSRF check — reject private/special-use IPs unless explicitly allowed.
+        // Uses DNS resolution to prevent DNS rebinding attacks.
+        let parsed = url::Url::parse(&url)?;
+        if !allow_private_network
+            && let Some(host) = parsed.host_str()
+            && hpx_browser::net::ssrf::is_forbidden_resolved(host).await
+        {
+            eyre::bail!(
+                "SSRF protection: request to {host} is forbidden (use --allow-private-network to bypass)"
+            );
+        }
+
         let client = hpx::Client::new();
         let resp = client.get(&url).send().await.wrap_err("fetch failed")?;
         let bytes = resp.bytes().await.wrap_err("reading response body")?;
@@ -260,10 +272,6 @@ pub(crate) async fn handle_scrape(
         }
     }
 
-    let _ = (obey_robots, allow_private_network, v8_flags, storage_dir);
-    // ponytail: obey_robots / allow_private_network / v8_flags / storage_dir
-    // not yet wired to in-process worker. Ignored for now.
-
     let sem = std::sync::Arc::new(Semaphore::new(concurrency));
     let eval = std::sync::Arc::new(eval);
 
@@ -396,10 +404,11 @@ pub(crate) async fn handle_serve(
     _storage_dir: Option<PathBuf>,
     quiet: bool,
     _obey_robots: bool,
-    _allow_private_network: bool,
+    allow_private_network: bool,
     _v8_flags: Option<String>,
 ) -> eyre::Result<()> {
-    // ponytail: allow_file_access, storage_dir, obey_robots, allow_private_network, v8_flags not wired yet.
+    // ponytail: allow_file_access, storage_dir, obey_robots, v8_flags not wired yet.
+    let _ = allow_private_network; // CDP server uses Page which has SSRF via HttpClient
 
     let html = "<html><body></body></html>";
 

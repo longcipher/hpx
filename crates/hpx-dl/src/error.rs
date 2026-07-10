@@ -78,4 +78,8 @@ pub enum DownloadError {
     /// No segments to download.
     #[error("No segments provided")]
     NoSegments,
+
+    /// Path traversal detected in download destination.
+    #[error("Path traversal rejected: {0}")]
+    PathTraversal(String),
 }

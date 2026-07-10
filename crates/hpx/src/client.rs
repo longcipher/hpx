@@ -24,11 +24,6 @@ pub use self::core::http1;
 pub use self::core::http2;
 #[cfg(any(feature = "boring-tls", feature = "openssl-tls"))]
 pub(crate) use self::http::ConnectIdentity;
-#[allow(deprecated)]
-pub use self::http::{
-    HttpVersionPreference, PoolConfigOptions, ProtocolConfigOptions, ProxyConfigOptions,
-    TlsConfigOptions, TransportConfigOptions,
-};
 pub use self::{
     body::{AsSendBody, Body, ClientResponseBody},
     conn::HttpInfo,

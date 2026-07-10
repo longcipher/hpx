@@ -81,6 +81,10 @@ tracing = ["http2/tracing", "dep:tracing"]
 # Enable hotpath profiling instrumentation.
 hotpath = ["dep:hotpath"]
 
+# Enable TLS key logging for debugging (writes session keys to SSLKEYLOGFILE).
+# NOT for production — disabled by default for security.
+keylog = []
+
 # Enable Server-Sent Events (SSE) support.
 sse = ["dep:memchr", "dep:fastrand", "stream"]
 
@@ -261,6 +265,7 @@ hyper-util = { workspace = true, features = [
     "tokio",
 ] }
 pretty_env_logger = { workspace = true }
+proptest.workspace = true
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tokio-test = { workspace = true }
@@ -377,6 +382,7 @@ required-features = ["ws", "futures-util/std"]
 [[example]]
 name = "keylog"
 path = "examples/keylog.rs"
+required-features = ["keylog"]
 
 [[example]]
 name = "unix_socket"

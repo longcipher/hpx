@@ -193,3 +193,148 @@ impl Default for Policy {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Policy;
+    use crate::client::layer::retry::{Classifier, Scoped};
+
+    #[test]
+    fn default_policy_is_protocol_nacks_unscoped() {
+        let policy = Policy::default();
+        assert!(
+            matches!(policy.classifier, Classifier::ProtocolNacks),
+            "default classifier should be ProtocolNacks"
+        );
+        assert!(
+            matches!(policy.scope, Scoped::Unscoped),
+            "default scope should be Unscoped"
+        );
+        assert!(policy.budget.is_none(), "default budget should be None");
+        assert_eq!(policy.max_retries_per_request, 2);
+    }
+
+    #[test]
+    fn never_policy_has_never_classifier_no_budget() {
+        let policy = Policy::never();
+        assert!(
+            matches!(policy.classifier, Classifier::Never),
+            "never() classifier should be Never"
+        );
+        assert!(policy.budget.is_none(), "never() budget should be None");
+    }
+
+    #[test]
+    fn for_host_creates_scoped_policy() {
+        let policy = Policy::for_host("example.com");
+        assert!(
+            matches!(policy.scope, Scoped::Dyn(_)),
+            "for_host should create a scoped policy"
+        );
+        assert!(
+            matches!(policy.classifier, Classifier::Never),
+            "for_host classifier should be Never by default"
+        );
+    }
+
+    #[test]
+    fn classify_fn_sets_custom_classifier() {
+        let policy = Policy::never().classify_fn(|req_rep| {
+            if req_rep.method() == &http::Method::POST {
+                req_rep.retryable()
+            } else {
+                req_rep.success()
+            }
+        });
+
+        assert!(
+            matches!(policy.classifier, Classifier::Dyn(_)),
+            "classify_fn should set a Dyn classifier"
+        );
+    }
+
+    #[test]
+    fn max_retries_per_request_configuration() {
+        let policy = Policy::never().max_retries_per_request(5);
+        assert_eq!(policy.max_retries_per_request, 5);
+    }
+
+    #[test]
+    fn budget_configuration() {
+        let base = Policy::for_host("example.com");
+
+        let no_budget = base.clone().no_budget();
+        assert!(no_budget.budget.is_none());
+
+        let with_budget = base.max_extra_load(0.5);
+        assert_eq!(with_budget.budget, Some(0.5));
+    }
+
+    #[test]
+    fn combined_configuration() {
+        let policy = Policy::for_host("api.example.com")
+            .classify_fn(|req_rep| match req_rep.status() {
+                Some(s) if s.is_server_error() => req_rep.retryable(),
+                _ => req_rep.success(),
+            })
+            .max_retries_per_request(3)
+            .max_extra_load(0.3);
+
+        assert!(matches!(policy.classifier, Classifier::Dyn(_)));
+        assert!(matches!(policy.scope, Scoped::Dyn(_)));
+        assert_eq!(policy.max_retries_per_request, 3);
+        assert_eq!(policy.budget, Some(0.3));
+    }
+
+    // -----------------------------------------------------------------------
+    // Proptest: retry budget invariants
+    // -----------------------------------------------------------------------
+    mod proptests {
+        use proptest::prelude::*;
+
+        use super::Policy;
+
+        proptest! {
+            /// Budget value set via max_extra_load must round-trip correctly
+            /// for all values in the valid range [0.0, 1000.0].
+            #[test]
+            fn max_extra_load_round_trip(budget in 0.0f32..=1000.0) {
+                let policy = Policy::for_host("example.com").max_extra_load(budget);
+                prop_assert_eq!(policy.budget, Some(budget));
+            }
+
+            /// no_budget always clears a previously set budget.
+            #[test]
+            fn no_budget_clears_any_budget(budget in 0.0f32..=1000.0) {
+                let policy = Policy::for_host("example.com")
+                    .max_extra_load(budget)
+                    .no_budget();
+                prop_assert!(policy.budget.is_none());
+            }
+        }
+
+        #[test]
+        #[should_panic(expected = "assertion failed")]
+        fn max_extra_load_panics_on_negative() {
+            Policy::for_host("example.com").max_extra_load(-0.1);
+        }
+
+        #[test]
+        #[should_panic(expected = "assertion failed")]
+        fn max_extra_load_panics_on_over_limit() {
+            Policy::for_host("example.com").max_extra_load(1000.1);
+        }
+
+        #[test]
+        fn max_retries_never_negative() {
+            // max_retries_per_request takes u32, so it's compile-time safe.
+            // Verify the default is reasonable.
+            let policy = Policy::default();
+            assert!(policy.max_retries_per_request > 0);
+
+            // Verify a high value is preserved.
+            let policy = Policy::never().max_retries_per_request(100);
+            assert_eq!(policy.max_retries_per_request, 100);
+        }
+    }
+}

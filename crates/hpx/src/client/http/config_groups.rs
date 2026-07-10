@@ -23,13 +23,10 @@ pub enum HttpVersionPreference {
 }
 
 /// Reusable transport-layer settings for a [`crate::ClientBuilder`].
-///
 /// Applying a grouped config replaces the current transport group on the builder.
-///
-/// **Deprecated:** Use [`ClientBuilder`](crate::client::ClientBuilder) methods directly.
 #[must_use]
 #[derive(Clone)]
-#[deprecated(since = "2.5.0", note = "Use ClientBuilder methods directly")]
+
 pub struct TransportConfigOptions {
     pub(crate) connect_timeout: Option<Duration>,
     pub(crate) connection_verbose: bool,
@@ -46,7 +43,6 @@ pub struct TransportConfigOptions {
     pub(crate) tcp_connect_options: TcpConnectOptions,
 }
 
-#[allow(deprecated)]
 impl Default for TransportConfigOptions {
     fn default() -> Self {
         Self {
@@ -67,7 +63,6 @@ impl Default for TransportConfigOptions {
     }
 }
 
-#[allow(deprecated)]
 impl TransportConfigOptions {
     /// Create a transport config with the client defaults.
     pub fn new() -> Self {
@@ -177,18 +172,15 @@ impl TransportConfigOptions {
 }
 
 /// Reusable connection-pool settings for a [`crate::ClientBuilder`].
-///
-/// **Deprecated:** Use [`ClientBuilder`](crate::client::ClientBuilder) methods directly.
 #[must_use]
 #[derive(Clone)]
-#[deprecated(since = "2.5.0", note = "Use ClientBuilder methods directly")]
+
 pub struct PoolConfigOptions {
     pub(crate) idle_timeout: Option<Duration>,
     pub(crate) max_idle_per_host: usize,
     pub(crate) max_size: Option<NonZeroU32>,
 }
 
-#[allow(deprecated)]
 impl Default for PoolConfigOptions {
     fn default() -> Self {
         Self {
@@ -199,7 +191,6 @@ impl Default for PoolConfigOptions {
     }
 }
 
-#[allow(deprecated)]
 impl PoolConfigOptions {
     /// Create a pool config with the client defaults.
     pub fn new() -> Self {
@@ -229,11 +220,9 @@ impl PoolConfigOptions {
 }
 
 /// Reusable TLS settings for a [`crate::ClientBuilder`].
-///
-/// **Deprecated:** Use [`ClientBuilder`](crate::client::ClientBuilder) methods directly.
 #[must_use]
 #[derive(Clone)]
-#[deprecated(since = "2.5.0", note = "Use ClientBuilder methods directly")]
+
 pub struct TlsConfigOptions {
     pub(crate) keylog: Option<KeyLog>,
     pub(crate) tls_info: bool,
@@ -246,7 +235,6 @@ pub struct TlsConfigOptions {
     pub(crate) max_version: Option<TlsVersion>,
 }
 
-#[allow(deprecated)]
 impl Default for TlsConfigOptions {
     fn default() -> Self {
         Self {
@@ -263,7 +251,6 @@ impl Default for TlsConfigOptions {
     }
 }
 
-#[allow(deprecated)]
 impl TlsConfigOptions {
     /// Create a TLS config with the client defaults.
     pub fn new() -> Self {
@@ -326,11 +313,9 @@ impl TlsConfigOptions {
 }
 
 /// Reusable HTTP protocol settings for a [`crate::ClientBuilder`].
-///
-/// **Deprecated:** Use [`ClientBuilder`](crate::client::ClientBuilder) methods directly.
 #[must_use]
 #[derive(Clone)]
-#[deprecated(since = "2.5.0", note = "Use ClientBuilder methods directly")]
+
 pub struct ProtocolConfigOptions {
     pub(crate) http_version_preference: HttpVersionPreference,
     pub(crate) https_only: bool,
@@ -341,7 +326,6 @@ pub struct ProtocolConfigOptions {
     pub(crate) recoveries: Recoveries,
 }
 
-#[allow(deprecated)]
 impl Default for ProtocolConfigOptions {
     fn default() -> Self {
         Self {
@@ -356,7 +340,6 @@ impl Default for ProtocolConfigOptions {
     }
 }
 
-#[allow(deprecated)]
 impl ProtocolConfigOptions {
     /// Create a protocol config with the client defaults.
     pub fn new() -> Self {
@@ -407,24 +390,20 @@ impl ProtocolConfigOptions {
 }
 
 /// Reusable proxy settings for a [`crate::ClientBuilder`].
-///
-/// **Deprecated:** Use [`ClientBuilder`](crate::client::ClientBuilder) methods directly.
 #[must_use]
 #[derive(Clone)]
-#[deprecated(since = "2.5.0", note = "Use ClientBuilder methods directly")]
+
 pub struct ProxyConfigOptions {
     pub(crate) proxies: Vec<Proxy>,
     pub(crate) auto_system_proxy: bool,
 }
 
-#[allow(deprecated)]
 impl Default for ProxyConfigOptions {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[allow(deprecated)]
 impl ProxyConfigOptions {
     /// Create a proxy config with the client defaults.
     pub fn new() -> Self {

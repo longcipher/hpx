@@ -697,6 +697,7 @@ impl EngineInner {
         self.update_after_probe(id, &remote, segment_states, bytes_completed)
             .await?;
 
+        validate_download_path(&request.destination)?;
         ensure_destination_parent(&request.destination).await?;
 
         if total_bytes == 0 {
@@ -1159,6 +1160,31 @@ fn build_client(
     }
 }
 
+/// Validate a download destination path for path traversal attacks.
+///
+/// Rejects paths containing `..` (parent directory) components and absolute
+/// paths (root directory components) to prevent arbitrary file writes.
+fn validate_download_path(path: &Path) -> Result<(), DownloadError> {
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                return Err(DownloadError::PathTraversal(format!(
+                    "path contains '..' component: {}",
+                    path.display()
+                )));
+            }
+            std::path::Component::RootDir => {
+                return Err(DownloadError::PathTraversal(format!(
+                    "absolute paths are not allowed: {}",
+                    path.display()
+                )));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 async fn ensure_destination_parent(path: &Path) -> Result<(), DownloadError> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
@@ -1537,5 +1563,47 @@ mod tests {
         assert_eq!(built[0].state, SegmentStatus::Completed);
         assert_eq!(built[0].bytes_downloaded, 10);
         assert_eq!(built[1].state, SegmentStatus::Pending);
+    }
+
+    // --- Path traversal validation tests ---
+
+    #[test]
+    fn validate_path_rejects_parent_dir_traversal() {
+        let result = validate_download_path(Path::new("../../etc/passwd"));
+        assert!(result.is_err(), "should reject path with '..' components");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("'..'"),
+            "error should mention '..' component, got: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_path_rejects_absolute_path() {
+        let result = validate_download_path(Path::new("/etc/passwd"));
+        assert!(result.is_err(), "should reject absolute path");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("absolute"),
+            "error should mention absolute paths, got: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_path_accepts_relative_safe_path() {
+        let result = validate_download_path(Path::new("./downloads/file.bin"));
+        assert!(result.is_ok(), "should accept safe relative path");
+    }
+
+    #[test]
+    fn validate_path_accepts_simple_filename() {
+        let result = validate_download_path(Path::new("file.bin"));
+        assert!(result.is_ok(), "should accept simple filename");
+    }
+
+    #[test]
+    fn validate_path_rejects_root_only() {
+        let result = validate_download_path(Path::new("/"));
+        assert!(result.is_err(), "should reject root path");
     }
 }

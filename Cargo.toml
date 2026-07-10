@@ -3,7 +3,7 @@ members = ["bin/*", "crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "2.5.3"
+version = "2.5.4"
 edition = "2024"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license = "Apache-2.0"
@@ -184,11 +184,11 @@ all = "warn"
 
 [workspace.dependencies]
 # local crates
-hpx = { path = "crates/hpx", version = "2.5.3" }
-hpx-browser = { path = "crates/hpx-browser", version = "2.5.3" }
-hpx-cli = { path = "crates/hpx-cli", version = "2.5.3" }
-hpx-dl = { path = "crates/hpx-dl", version = "2.5.3" }
-hpx-yawc = { path = "crates/yawc", version = "2.5.3" }
+hpx = { path = "crates/hpx", version = "2.5.4" }
+hpx-browser = { path = "crates/hpx-browser", version = "2.5.4" }
+hpx-cli = { path = "crates/hpx-cli", version = "2.5.4" }
+hpx-dl = { path = "crates/hpx-dl", version = "2.5.4" }
+hpx-yawc = { path = "crates/yawc", version = "2.5.4" }
 
 # external crates
 ahash = "0.8.12"
@@ -199,9 +199,9 @@ async-trait = "0.1.80"
 axum = "0.8.9"
 axum-core = "0.5.6"
 base64 = "0.22.1"
-blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "77435aadb92c6bf47e50d74810c52120f3aa3f37", version = "=0.3.0-alpha.6", features = ["floats"] }
-blitz-html = { git = "https://github.com/DioxusLabs/blitz.git", rev = "77435aadb92c6bf47e50d74810c52120f3aa3f37", version = "=0.3.0-alpha.6" }
-blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "77435aadb92c6bf47e50d74810c52120f3aa3f37", version = "=0.3.0-alpha.6" }
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "406a571491523d69d52c396f240b14edd1a1974f", version = "=0.3.0-alpha.6", features = ["floats"] }
+blitz-html = { git = "https://github.com/DioxusLabs/blitz.git", rev = "406a571491523d69d52c396f240b14edd1a1974f", version = "=0.3.0-alpha.6" }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "406a571491523d69d52c396f240b14edd1a1974f", version = "=0.3.0-alpha.6" }
 boring = "5.1.0"
 brotli = "8.0.4"
 bytes = "1.12.0"
@@ -213,7 +213,7 @@ criterion = "0.8.2"
 crossbeam-channel = "0.5.16"
 csv = "1.4.0"
 cucumber = "0.23.0"
-deno_core = "0.406.0"
+deno_core = "0.407.0"
 der = "0.8.0"
 digest = "0.11.3"
 encoding_rs = "0.8.35"

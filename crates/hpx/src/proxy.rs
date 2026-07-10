@@ -562,4 +562,82 @@ mod tests {
         test_socks_proxy_default_port("socks5://example.com", "socks5://example.com:1234", 1234);
         test_socks_proxy_default_port("socks5h://example.com", "socks5h://example.com:1234", 1234);
     }
+
+    #[test]
+    fn test_no_proxy_excludes_matching_url() {
+        let target = "http://proxy.example/";
+        let no_proxy = NoProxy::from_string("excluded.local, .example.org").unwrap();
+
+        let p = Proxy::all(target)
+            .unwrap()
+            .no_proxy(Some(no_proxy))
+            .into_matcher();
+
+        // Should intercept: non-excluded URL
+        assert!(p.intercept(&uri("http://allowed.com")).is_some());
+
+        // Should NOT intercept: excluded URL
+        assert!(p.intercept(&uri("http://excluded.local")).is_none());
+
+        // Should NOT intercept: excluded domain (.example.org matches subdomains)
+        assert!(p.intercept(&uri("http://sub.example.org")).is_none());
+    }
+
+    #[test]
+    fn test_basic_auth_sets_proxy_url_userinfo() {
+        let m = Proxy::all("http://proxy.local:8080")
+            .unwrap()
+            .basic_auth("user", "pass")
+            .into_matcher();
+
+        let got = intercept(&m, &uri("http://hyper.rs"));
+        assert!(got.basic_auth().is_some(), "basic auth should be set");
+    }
+
+    #[test]
+    fn test_custom_auth_header_value() {
+        let auth_val = http::HeaderValue::from_static("Bearer proxy-token-123");
+
+        let m = Proxy::http("http://proxy.local")
+            .unwrap()
+            .custom_http_auth(auth_val.clone())
+            .into_matcher();
+
+        let got = intercept(&m, &uri("http://hyper.rs"));
+        let got_auth = got.basic_auth().unwrap();
+        assert_eq!(got_auth, "Bearer proxy-token-123");
+    }
+
+    #[test]
+    fn test_http_scheme_only_intercepts_http() {
+        let target = "http://http-proxy.local/";
+        let p = Proxy::http(target).unwrap().into_matcher();
+
+        // HTTP URL should be intercepted
+        assert!(p.intercept(&uri("http://api.example.com")).is_some());
+
+        // HTTPS URL should NOT be intercepted by HTTP proxy
+        assert!(p.intercept(&uri("https://api.example.com")).is_none());
+    }
+
+    #[test]
+    fn test_https_scheme_only_intercepts_https() {
+        let target = "http://https-proxy.local/";
+        let p = Proxy::https(target).unwrap().into_matcher();
+
+        // HTTP URL should NOT be intercepted by HTTPS proxy
+        assert!(p.intercept(&uri("http://api.example.com")).is_none());
+
+        // HTTPS URL should be intercepted
+        assert!(p.intercept(&uri("https://api.example.com")).is_some());
+    }
+
+    #[test]
+    fn test_all_scheme_intercepts_both_http_and_https() {
+        let target = "http://universal-proxy.local/";
+        let p = Proxy::all(target).unwrap().into_matcher();
+
+        assert!(p.intercept(&uri("http://api.example.com")).is_some());
+        assert!(p.intercept(&uri("https://api.example.com")).is_some());
+    }
 }

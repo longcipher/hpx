@@ -597,4 +597,151 @@ mod tests {
             "missing policy should return error, not panic"
         );
     }
+
+    #[test]
+    fn remove_sensitive_headers_strips_proxy_authorization_cross_origin() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::PROXY_AUTHORIZATION,
+            HeaderValue::from_static("Basic dXNlcjpwYXNz"),
+        );
+        headers.insert(http::header::ACCEPT, HeaderValue::from_static("*/*"));
+
+        let next = Uri::try_from("http://origin-a.com/path").unwrap();
+        // Cross-origin: previous host differs from next
+        let previous = vec![Uri::try_from("http://origin-b.com/path").unwrap()];
+
+        remove_sensitive_headers(&mut headers, &next, &previous);
+
+        assert!(
+            !headers.contains_key(http::header::PROXY_AUTHORIZATION),
+            "Proxy-Authorization should be stripped on cross-origin"
+        );
+        assert!(
+            headers.contains_key(http::header::ACCEPT),
+            "ACCEPT should be preserved on cross-origin"
+        );
+    }
+
+    #[test]
+    fn remove_sensitive_headers_preserves_auth_same_origin() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer token123"),
+        );
+        headers.insert(
+            http::header::COOKIE,
+            HeaderValue::from_static("session=abc"),
+        );
+
+        let next = Uri::try_from("http://example.com/new-path").unwrap();
+        // Same origin: same host, port, scheme
+        let previous = vec![Uri::try_from("http://example.com/old-path").unwrap()];
+
+        remove_sensitive_headers(&mut headers, &next, &previous);
+
+        assert!(
+            headers.contains_key(http::header::AUTHORIZATION),
+            "Authorization should be preserved on same-origin"
+        );
+        assert!(
+            headers.contains_key(http::header::COOKIE),
+            "Cookie should be preserved on same-origin"
+        );
+    }
+
+    #[test]
+    fn make_referer_drops_on_https_to_http() {
+        let next = Uri::try_from("http://example.com/target").unwrap();
+        let previous = Uri::try_from("https://secure.example.com/source").unwrap();
+
+        let referer = make_referer(next.clone(), &previous);
+        assert!(
+            referer.is_none(),
+            "Referer should be dropped when redirecting from HTTPS to HTTP"
+        );
+    }
+
+    #[test]
+    fn make_referer_preserves_on_same_scheme() {
+        let next = Uri::try_from("https://example.com/target").unwrap();
+        let previous = Uri::try_from("https://example.com/source").unwrap();
+
+        let referer = make_referer(next, &previous);
+        assert!(referer.is_some(), "Referer should be set on same scheme");
+    }
+
+    #[test]
+    fn redirect_loop_detection_stops_at_max_redirects() {
+        let policy = Policy::limited(3);
+        let next = Uri::try_from("http://loop.example/4").unwrap();
+        let previous: Vec<Uri> = vec![
+            Uri::try_from("http://loop.example/1").unwrap(),
+            Uri::try_from("http://loop.example/2").unwrap(),
+            Uri::try_from("http://loop.example/3").unwrap(),
+        ];
+
+        // With 3 previous URIs, this should be within limit (previous.len() == max)
+        match policy.check(StatusCode::FOUND, &HeaderMap::new(), &next, &previous) {
+            redirect::Action::Follow => (),
+            other => panic!("should follow when within limit, got {other:?}"),
+        }
+
+        // Add one more — now exceeds max of 3
+        let previous_exceeded: Vec<Uri> = vec![
+            Uri::try_from("http://loop.example/1").unwrap(),
+            Uri::try_from("http://loop.example/2").unwrap(),
+            Uri::try_from("http://loop.example/3").unwrap(),
+            Uri::try_from("http://loop.example/4").unwrap(),
+        ];
+        match policy.check(
+            StatusCode::FOUND,
+            &HeaderMap::new(),
+            &next,
+            &previous_exceeded,
+        ) {
+            redirect::Action::Error(err) if err.is::<TooManyRedirects>() => (),
+            other => panic!("should error on too many redirects, got {other:?}"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Proptest: redirect attempt invariants
+    // -----------------------------------------------------------------------
+    mod proptests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            /// For any max limit and any chain length within that limit,
+            /// the limited policy should always follow.
+            #[test]
+            fn limited_policy_follows_within_bounds(
+                max in 1usize..=50,
+                num_previous in 0usize..=50,
+            ) {
+                let policy = Policy::limited(max);
+                let next = Uri::try_from("http://x.y/z").unwrap();
+                let previous: Vec<Uri> = (0..num_previous)
+                    .map(|i| Uri::try_from(&format!("http://a.b/c/{i}")).unwrap())
+                    .collect();
+
+                let action = policy.check(StatusCode::FOUND, &HeaderMap::new(), &next, &previous);
+
+                if num_previous <= max {
+                    prop_assert!(
+                        matches!(action, redirect::Action::Follow),
+                        "should follow when {num_previous} <= max={max}"
+                    );
+                } else {
+                    prop_assert!(
+                        matches!(&action, redirect::Action::Error(err) if err.is::<TooManyRedirects>()),
+                        "should error when {num_previous} > max={max}"
+                    );
+                }
+            }
+        }
+    }
 }

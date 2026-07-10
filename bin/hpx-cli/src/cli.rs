@@ -357,7 +357,7 @@ pub(crate) struct Cli {
     #[arg(long, global = true, env = "HPX_OBEY_ROBOTS")]
     pub obey_robots: bool,
 
-    /// Allow fetching from private/local network IPs.
+    /// Allow requests to private/internal IP addresses (disabled by default for security).
     #[arg(long, global = true, env = "HPX_ALLOW_PRIVATE_NETWORK")]
     pub allow_private_network: bool,
 

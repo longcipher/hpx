@@ -59,6 +59,9 @@ pub enum NetError {
 
     #[error("hpx client error: {0}")]
     Client(#[from] hpx::Error),
+
+    #[error("SSRF protection: request to {0} is forbidden (use --allow-private-network to bypass)")]
+    Ssrf(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -145,6 +148,7 @@ pub struct HttpClient {
     accept_ch_origins: scc::HashSet<String>,
     h1_only_hosts: scc::HashSet<String>,
     browser_profile: hpx::BrowserProfile,
+    allow_private_network: bool,
 }
 
 impl HttpClient {
@@ -169,6 +173,7 @@ impl HttpClient {
             accept_ch_origins: session.accept_ch.clone(),
             h1_only_hosts: session.h1_only_hosts.clone(),
             browser_profile,
+            allow_private_network: false,
         })
     }
 
@@ -178,6 +183,12 @@ impl HttpClient {
 
     pub fn browser_profile(&self) -> &hpx::BrowserProfile {
         &self.browser_profile
+    }
+
+    /// Allow requests to private/internal IP addresses (disabled by default).
+    pub fn allow_private_network(mut self, allow: bool) -> Self {
+        self.allow_private_network = allow;
+        self
     }
 
     /// Whether `host` has previously sent `Accept-CH`.
@@ -476,6 +487,17 @@ impl HttpClient {
         extra_headers: &[(String, String)],
     ) -> Result<hpx::Response, NetError> {
         let parsed = Url::parse(url)?;
+
+        // SSRF check — reject private/special-use IPs unless explicitly allowed.
+        // Uses DNS resolution to prevent DNS rebinding attacks.
+        if !self.allow_private_network {
+            if let Some(host) = parsed.host_str() {
+                if crate::net::ssrf::is_forbidden_resolved(host).await {
+                    return Err(NetError::Ssrf(host.to_string()));
+                }
+            }
+        }
+
         let builder = match method {
             "GET" | "HEAD" => self.inner.get(url),
             "POST" => self.inner.post(url),
@@ -822,5 +844,66 @@ mod tests {
         let p = RedirectPolicy::Follow(3);
         let q = p;
         assert_eq!(p, q); // Copy semantics — both still usable
+    }
+
+    // --- SSRF integration tests ---
+
+    #[tokio::test]
+    async fn ssrf_blocks_loopback_by_default() {
+        let client = HttpClient::new(hpx::BrowserProfile::Chrome).unwrap();
+        let result = client
+            .execute_single_request("GET", "http://127.0.0.1", None, &[])
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("127.0.0.1"),
+            "error should mention the blocked host, got: {err}"
+        );
+        assert!(
+            err.contains("--allow-private-network"),
+            "error should mention --allow-private-network bypass, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn ssrf_allows_private_network_when_enabled() {
+        let client = HttpClient::new(hpx::BrowserProfile::Chrome)
+            .unwrap()
+            .allow_private_network(true);
+        // This will fail with a connection error (no server listening), NOT an SSRF error
+        let result = client
+            .execute_single_request("GET", "http://127.0.0.1", None, &[])
+            .await;
+        match result {
+            Ok(_) => {}
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(
+                    !msg.contains("SSRF"),
+                    "should not be SSRF rejection, got: {msg}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn ssrf_allows_public_ip() {
+        let client = HttpClient::new(hpx::BrowserProfile::Chrome).unwrap();
+        // 93.184.216.34 is example.com — real public IP; may fail with
+        // connection error in CI but must NOT be SSRF rejection.
+        let result = client
+            .execute_single_request("GET", "http://93.184.216.34", None, &[])
+            .await;
+        match result {
+            Ok(_) => {}
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(
+                    !msg.contains("SSRF"),
+                    "public IP should not trigger SSRF, got: {msg}"
+                );
+            }
+        }
     }
 }

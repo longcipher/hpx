@@ -29,19 +29,35 @@ async fn hash_file<H: Digest>(
 /// Compute the checksum of a file using the given algorithm.
 ///
 /// Reads the file in 64 KiB chunks and feeds each chunk to the appropriate hasher.
+/// Uses a thread-local buffer to avoid per-call heap allocation on the hot path.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub async fn compute_checksum(
     file: &Path,
     algorithm: HashAlgorithm,
 ) -> Result<String, DownloadError> {
     let mut file = tokio::fs::File::open(file).await?;
-    let mut buf = vec![0u8; 65536];
 
-    match algorithm {
+    // Thread-local buffer avoids per-call 64 KiB heap allocation in compute_checksum hot path.
+    // The buffer is taken from the thread-local and returned after use, so no RefCell
+    // borrow spans an .await point.
+    thread_local! {
+        static BUF: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    let mut buf = BUF.with(|cell| cell.take());
+    buf.resize(65536, 0);
+
+    let result = match algorithm {
         HashAlgorithm::Md5 => hash_file::<md5::Md5>(&mut file, &mut buf).await,
         HashAlgorithm::Sha1 => hash_file::<sha1::Sha1>(&mut file, &mut buf).await,
         HashAlgorithm::Sha256 => hash_file::<sha2::Sha256>(&mut file, &mut buf).await,
-    }
+    };
+
+    BUF.with(|cell| {
+        let _ = cell.replace(buf);
+    });
+
+    result
 }
 
 /// Verify the checksum of a file against the expected value in a [`ChecksumSpec`].
@@ -253,6 +269,23 @@ mod tests {
         verify_checksum(&spec, &path)
             .await
             .expect("roundtrip should match");
+    }
+
+    // ── Thread-local buffer consistency ────────────────────────────────
+
+    #[tokio::test]
+    async fn compute_checksum_produces_identical_hash_on_repeat_calls() {
+        // Verify thread-local buffer reuse doesn't affect hash correctness.
+        let content = vec![0x42_u8; 32768]; // 32 KiB, exercises multiple reads
+        let path = write_temp(&content);
+
+        let hash1 = compute_checksum(&path, HashAlgorithm::Sha256)
+            .await
+            .expect("first call");
+        let hash2 = compute_checksum(&path, HashAlgorithm::Sha256)
+            .await
+            .expect("second call");
+        assert_eq!(hash1, hash2, "hash must be identical across calls");
     }
 
     // ── Error on missing file ──────────────────────────────────────────

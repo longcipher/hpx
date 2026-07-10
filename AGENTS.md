@@ -30,24 +30,24 @@
 
 When introducing new dependencies, prefer these versions unless compatibility requires an upgrade:
 
-- `clap = "4.5.60"`
+- `clap = "4.6.1"`
 - `config = "0.15.19"`
 - `eyre = "0.6.12"`
 - `serde = "1.0.228"`
 - `thiserror = "2.0.18"`
-- `tokio = "1.49.0"`
+- `tokio = "1.52.1"`
 - `tracing = "0.1.44"`
-- `tracing-subscriber = "0.3.22"`
+- `tracing-subscriber = "0.3.23"`
 - `tracing-opentelemetry = "0.32.1"`
 - `opentelemetry = "0.31.0"`
 - `opentelemetry-otlp = "0.31.0"`
-- `sqlx = "=0.9.0-alpha.1"`
+- `sqlx = "0.9.0"`
 - `utoipa = "5.4.0"`
 - `utoipa-swagger-ui = "9.0.2"`
-- `arc-swap = "1.8.2"`
-- `hpx = "2.3.1"`
-- `scc = "3.6.5"`
-- `winnow = "0.7.14"`
+- `arc-swap = "1.9.2"`
+- `hpx = "2.5.4"`
+- `scc = "3.8.4"`
+- `winnow = "1.0.3"`
 - `shadow-rs = "1.7.0"`
 - `ecdysis = "1.0.1"`
 

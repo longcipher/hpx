@@ -291,6 +291,7 @@ Default: `boring-tls`, `http1`, `http2`, `stream`, `tracing`.
 | `rustls-tls` | No | Rustls TLS backend (pure Rust) |
 | `openssl-tls` | No | OpenSSL TLS backend |
 | `openssl-vendored` | No | OpenSSL with vendored static linking |
+| `keylog` | No | TLS key logging to file (for debugging) — NOT for production |
 | `webpki-roots` | No | WebPKI root certificates |
 | **HTTP** | | |
 | `http1` | **Yes** | HTTP/1.1 support |

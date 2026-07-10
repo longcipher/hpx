@@ -372,11 +372,6 @@ pub use self::client::multipart;
 pub use self::client::sse;
 #[cfg(feature = "ws-yawc")]
 pub use self::client::ws;
-#[allow(deprecated)]
-pub use self::client::{
-    HttpVersionPreference, PoolConfigOptions, ProtocolConfigOptions, ProxyConfigOptions,
-    TlsConfigOptions, TransportConfigOptions,
-};
 pub use self::{
     client::{
         AsSendBody, Body, BrowserProfile, Client, ClientBuilder, ClientResponseBody, Emulation,

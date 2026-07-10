@@ -9,7 +9,14 @@
 //! globally to avoid duplicate file access.
 //!
 //! Use [`KeyLog::handle`] to obtain a [`Handle`] for writing keys.
+//!
+//! ## Feature Gate
+//!
+//! The keylog module is gated behind the `keylog` Cargo feature (opt-in).
+//! Without the feature, `KeyLog::from_env()` returns a no-op and no file I/O occurs.
+//! This prevents accidental TLS session key leakage in production.
 
+#[cfg(feature = "keylog")]
 mod handle;
 
 use std::{
@@ -19,13 +26,17 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
+#[cfg(feature = "keylog")]
 pub(crate) use handle::Handle;
+#[cfg(feature = "keylog")]
 use scc::HashMap as SccHashMap;
 
 /// Specifies the intent for a (TLS) keylogger.
+#[cfg(feature = "keylog")]
 #[derive(Debug, Clone)]
 pub struct KeyLog(Option<Arc<Path>>);
 
+#[cfg(feature = "keylog")]
 impl KeyLog {
     /// Creates a [`KeyLog`] based on the `SSLKEYLOGFILE` environment variable.
     pub fn from_env() -> KeyLog {
@@ -69,6 +80,46 @@ impl KeyLog {
     }
 }
 
+/// No-op [`KeyLog`] when the `keylog` Cargo feature is not enabled.
+///
+/// All methods return no-op values — `SSLKEYLOGFILE` is never read and
+/// no file I/O occurs.
+#[cfg(not(feature = "keylog"))]
+#[derive(Debug, Clone)]
+pub struct KeyLog;
+
+#[cfg(not(feature = "keylog"))]
+impl KeyLog {
+    /// Returns a no-op [`KeyLog`]. Does not read `SSLKEYLOGFILE`.
+    pub fn from_env() -> KeyLog {
+        KeyLog
+    }
+
+    /// Returns a no-op [`KeyLog`]. The path is ignored.
+    pub fn from_file<P: AsRef<Path>>(_path: P) -> KeyLog {
+        KeyLog
+    }
+
+    /// Returns a no-op [`Handle`].
+    pub(crate) fn handle(self) -> Result<Handle> {
+        Ok(Handle)
+    }
+}
+
+/// No-op key log handle when the `keylog` Cargo feature is not enabled.
+///
+/// All writes are silently discarded.
+#[cfg(not(feature = "keylog"))]
+#[derive(Debug, Clone)]
+pub(crate) struct Handle;
+
+#[cfg(not(feature = "keylog"))]
+impl Handle {
+    /// No-op: discards the line.
+    pub(crate) fn write(&self, _line: &str) {}
+}
+
+#[cfg(feature = "keylog")]
 fn normalize_path<'a, P>(path: P) -> PathBuf
 where
     P: Into<Cow<'a, Path>>,

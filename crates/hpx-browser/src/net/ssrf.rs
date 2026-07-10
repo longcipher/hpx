@@ -7,14 +7,40 @@ pub fn is_forbidden_ip(ip: &IpAddr) -> bool {
     }
 }
 
-pub fn is_forbidden_host(host: &str) -> bool {
+/// Check if a host (IP literal or hostname) resolves to a forbidden address.
+///
+/// For IP literals, checks directly. For hostnames, resolves via DNS first
+/// and checks all resolved addresses — this prevents DNS rebinding attacks
+/// where a hostname resolves to a private/special-use IP.
+///
+/// Returns `true` if any resolved address is forbidden, `false` otherwise.
+/// DNS resolution failures are treated as forbidden (fail-closed) since we
+/// cannot verify the IP is safe.
+pub async fn is_forbidden_resolved(host: &str) -> bool {
     // Strip brackets for IPv6 literals: "[::1]" → "::1"
     let stripped = host.trim_start_matches('[').trim_end_matches(']');
     if let Ok(ip) = stripped.parse::<IpAddr>() {
         return is_forbidden_ip(&ip);
     }
-    // ponytail: hostname-based SSRF (DNS rebinding) needs resolver-level
-    // checks; raw string check only covers IP literals.
+
+    // Hostname — resolve via DNS and check all resulting IPs.
+    let mut addrs = match tokio::net::lookup_host((stripped, 0)).await {
+        Ok(addrs) => addrs,
+        Err(_) => return true, // fail-closed: can't verify IP safety
+    };
+
+    addrs.any(|addr| is_forbidden_ip(&addr.ip()))
+}
+
+/// Check if an IP-literal host is forbidden.
+///
+/// Only checks direct IP address literals (e.g. `127.0.0.1`, `::1`).
+/// For hostnames, use [`is_forbidden_resolved`] which resolves DNS first.
+pub fn is_forbidden_host(host: &str) -> bool {
+    let stripped = host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = stripped.parse::<IpAddr>() {
+        return is_forbidden_ip(&ip);
+    }
     false
 }
 
@@ -164,5 +190,39 @@ mod tests {
     fn multicast_forbidden() {
         assert!(is_forbidden_host("224.0.0.1"));
         assert!(is_forbidden_host("ff02::1"));
+    }
+
+    // --- Async DNS resolution tests ---
+
+    #[tokio::test]
+    async fn resolved_blocks_loopback_ip_literal() {
+        assert!(is_forbidden_resolved("127.0.0.1").await);
+        assert!(is_forbidden_resolved("::1").await);
+    }
+
+    #[tokio::test]
+    async fn resolved_blocks_localhost_hostname() {
+        // "localhost" resolves to 127.0.0.1 / ::1 on most systems.
+        assert!(is_forbidden_resolved("localhost").await);
+    }
+
+    #[tokio::test]
+    async fn resolved_blocks_private_hostname() {
+        // "localtest" with /etc/hosts entry pointing to 10.0.0.1 would be blocked.
+        // For portability, test with an IP literal that's already forbidden.
+        assert!(is_forbidden_resolved("10.0.0.1").await);
+        assert!(is_forbidden_resolved("192.168.1.1").await);
+    }
+
+    #[tokio::test]
+    async fn resolved_allows_public_hostname() {
+        // example.com resolves to public IPs — must NOT be forbidden.
+        assert!(!is_forbidden_resolved("example.com").await);
+    }
+
+    #[tokio::test]
+    async fn resolved_fail_closed_on_unresolvable() {
+        // A non-existent domain should fail DNS resolution → fail-closed → forbidden.
+        assert!(is_forbidden_resolved("this-domain-does-not-exist-abc123.test").await);
     }
 }
