@@ -187,9 +187,9 @@ all = "warn"
 hpx = { path = "crates/hpx", version = "2.5.5" }
 hpx-browser = { path = "crates/hpx-browser", version = "2.5.5" }
 hpx-cli = { path = "crates/hpx-cli", version = "2.5.5" }
-hpxless = { path = "crates/hpxless", version = "2.5.5" }
 hpx-dl = { path = "crates/hpx-dl", version = "2.5.5" }
 hpx-yawc = { path = "crates/yawc", version = "2.5.5" }
+hpxless = { path = "crates/hpxless", version = "2.5.5" }
 
 # external crates
 ahash = "0.8.12"
