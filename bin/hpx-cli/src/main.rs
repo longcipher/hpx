@@ -63,6 +63,7 @@ fn main() -> eyre::Result<()> {
             eval,
             output,
             quiet,
+            block: _,
         }) => {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()

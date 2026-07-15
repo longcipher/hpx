@@ -827,6 +827,14 @@ impl<'a> DomElement<'a> {
             .any(|a| a.name.local.eq_ignore_ascii_case(name))
     }
 
+    pub fn attr(&self, name: &str) -> Option<&str> {
+        self.data
+            .attrs
+            .iter()
+            .find(|a| a.name.local.eq_ignore_ascii_case(name))
+            .map(|a| a.value.as_str())
+    }
+
     fn node(&self) -> Node {
         self.dom
             .get(self.id)

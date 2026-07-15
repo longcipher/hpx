@@ -9,8 +9,6 @@ pub struct CdpSession {
     pub frame_id: String,
     loader_counter: u64,
     request_counter: u64,
-    /// Set by Page.navigate — the server handles the actual page replacement.
-    pub pending_navigate: Option<String>,
 }
 
 impl Default for CdpSession {
@@ -27,7 +25,6 @@ impl CdpSession {
             frame_id: "main".to_string(),
             loader_counter: 0,
             request_counter: 0,
-            pending_navigate: None,
         }
     }
 
@@ -141,10 +138,7 @@ impl CdpSession {
                     .unwrap_or("about:blank");
                 let loader_id = self.next_loader_id();
 
-                if url != "about:blank" {
-                    self.pending_navigate = Some(url.to_string());
-                }
-
+                // 1. Page.frameNavigated — emitted before navigation starts.
                 if self.is_domain_enabled("Page") {
                     events.push(CdpEvent::new(
                         "Page.frameNavigated",
@@ -158,6 +152,70 @@ impl CdpSession {
                             }
                         }),
                     ));
+                }
+
+                // 2. Network.requestWillBeSent — main document request.
+                if self.is_domain_enabled("Network") {
+                    let request_id = self.next_request_id();
+                    events.push(CdpEvent::new(
+                        "Network.requestWillBeSent",
+                        serde_json::json!({
+                            "requestId": request_id,
+                            "loaderId": loader_id,
+                            "documentURL": url,
+                            "request": {
+                                "url": url,
+                                "method": "GET",
+                                "headers": {},
+                            },
+                            "timestamp": timestamp(),
+                            "wallTime": timestamp(),
+                            "type": "Document",
+                        }),
+                    ));
+
+                    // 3. Network.responseReceived — main document response.
+                    events.push(CdpEvent::new(
+                        "Network.responseReceived",
+                        serde_json::json!({
+                            "requestId": request_id,
+                            "loaderId": loader_id,
+                            "timestamp": timestamp(),
+                            "type": "Document",
+                            "response": {
+                                "url": url,
+                                "status": 200,
+                                "statusText": "OK",
+                                "headers": {},
+                                "mimeType": "text/html",
+                            },
+                        }),
+                    ));
+
+                    // Network loading finished for main document.
+                    events.push(CdpEvent::new(
+                        "Network.loadingFinished",
+                        serde_json::json!({
+                            "requestId": request_id,
+                            "timestamp": timestamp(),
+                        }),
+                    ));
+                }
+
+                // 4. Actually perform the navigation (fetch + parse + sub-resources).
+                // ponytail: about:blank skips network fetch — just emits lifecycle events.
+                // data: URLs are parsed directly without network fetch.
+                let nav_result = if url == "about:blank" {
+                    Ok(())
+                } else if let Some(html_payload) = url.strip_prefix("data:text/html,") {
+                    page.reload_html(html_payload, url);
+                    Ok(())
+                } else {
+                    page.navigate(url).await
+                };
+
+                // 5. Post-navigation lifecycle events.
+                if self.is_domain_enabled("Page") {
                     events.push(CdpEvent::new(
                         "Page.domContentEventFired",
                         serde_json::json!({ "timestamp": timestamp() }),
@@ -168,10 +226,13 @@ impl CdpSession {
                     ));
                 }
 
-                Ok(serde_json::json!({
-                    "frameId": self.frame_id,
-                    "loaderId": loader_id,
-                }))
+                match nav_result {
+                    Ok(()) => Ok(serde_json::json!({
+                        "frameId": self.frame_id,
+                        "loaderId": loader_id,
+                    })),
+                    Err(e) => Err(e.to_string()),
+                }
             }
             "Page.getFrameTree" => Ok(serde_json::json!({
                 "frameTree": {
@@ -531,5 +592,117 @@ mod tests {
         let (resp, _) = session.handle_request(&mut page, &req).await;
         assert!(resp.contains("identifier"));
         assert_eq!(session.scripts_on_new_document.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn cdp_navigate() {
+        let mut session = CdpSession::new();
+        session.enable_domain("Page");
+        session.enable_domain("Network");
+        let mut page = Page::from_html("<html><head></head><body></body></html>", false)
+            .await
+            .unwrap();
+        let req = CdpRequest {
+            id: 10,
+            method: "Page.navigate".to_string(),
+            params: serde_json::json!({"url": "about:blank"}),
+            session_id: None,
+        };
+        let (resp, events) = session.handle_request(&mut page, &req).await;
+
+        // Response contains frameId and loaderId.
+        assert!(resp.contains("frameId"), "response: {resp}");
+        assert!(resp.contains("loaderId"), "response: {resp}");
+
+        // 6 events total: frameNavigated, requestWillBeSent, responseReceived,
+        // loadingFinished, domContentEventFired, loadEventFired.
+        assert_eq!(
+            events.len(),
+            6,
+            "event methods: {:?}",
+            events.iter().map(|e| &e.method).collect::<Vec<_>>()
+        );
+
+        // Verify event order.
+        assert_eq!(events[0].method, "Page.frameNavigated");
+        assert_eq!(events[1].method, "Network.requestWillBeSent");
+        assert_eq!(events[2].method, "Network.responseReceived");
+        assert_eq!(events[3].method, "Network.loadingFinished");
+        assert_eq!(events[4].method, "Page.domContentEventFired");
+        assert_eq!(events[5].method, "Page.loadEventFired");
+
+        // Verify Page.frameNavigated contains correct frame info.
+        let frame = &events[0].params["frame"];
+        assert_eq!(frame["id"], "main");
+        assert_eq!(frame["url"], "about:blank");
+
+        // Verify Network.requestWillBeSent contains the URL.
+        assert_eq!(events[1].params["request"]["url"], "about:blank");
+        assert_eq!(events[1].params["type"], "Document");
+
+        // Verify Network.responseReceived.
+        assert_eq!(events[2].params["response"]["url"], "about:blank");
+        assert_eq!(events[2].params["response"]["status"], 200);
+    }
+
+    #[tokio::test]
+    async fn cdp_navigate_no_network_events_without_network_domain() {
+        let mut session = CdpSession::new();
+        session.enable_domain("Page");
+        // Network domain NOT enabled.
+        let mut page = Page::from_html("<html><head></head><body></body></html>", false)
+            .await
+            .unwrap();
+        let req = CdpRequest {
+            id: 11,
+            method: "Page.navigate".to_string(),
+            params: serde_json::json!({"url": "about:blank"}),
+            session_id: None,
+        };
+        let (resp, events) = session.handle_request(&mut page, &req).await;
+        assert!(resp.contains("frameId"));
+
+        // Only 3 events: frameNavigated, domContentEventFired, loadEventFired.
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].method, "Page.frameNavigated");
+        assert_eq!(events[1].method, "Page.domContentEventFired");
+        assert_eq!(events[2].method, "Page.loadEventFired");
+    }
+
+    #[cfg(feature = "v8")]
+    #[tokio::test]
+    async fn cdp_evaluate_after_navigate_js_global() {
+        let mut session = CdpSession::new();
+        session.enable_domain("Page");
+        let html = r#"<!DOCTYPE html><html><head></head><body><script>window.x = 42;</script></body></html>"#;
+        let mut page = Page::from_html(html, false).await.unwrap();
+        page.execute_inline_scripts().unwrap();
+
+        let eval_req = CdpRequest {
+            id: 1,
+            method: "Runtime.evaluate".to_string(),
+            params: serde_json::json!({"expression": "window.x", "returnByValue": true}),
+            session_id: None,
+        };
+        let (resp, _) = session.handle_request(&mut page, &eval_req).await;
+        assert!(resp.contains("\"value\":42"), "response: {}", resp);
+    }
+
+    #[cfg(feature = "v8")]
+    #[tokio::test]
+    async fn cdp_evaluate_after_navigate_computed_style() {
+        let mut session = CdpSession::new();
+        session.enable_domain("Page");
+        let html = r#"<!DOCTYPE html><html><head><style>body{color:red}</style></head><body></body></html>"#;
+        let mut page = Page::from_html(html, false).await.unwrap();
+
+        let eval_req = CdpRequest {
+            id: 2,
+            method: "Runtime.evaluate".to_string(),
+            params: serde_json::json!({"expression": "getComputedStyle(document.body).color", "returnByValue": true}),
+            session_id: None,
+        };
+        let (resp, _) = session.handle_request(&mut page, &eval_req).await;
+        assert!(resp.contains("\"value\":\"red\""), "response: {}", resp);
     }
 }

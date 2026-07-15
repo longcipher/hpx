@@ -14,7 +14,8 @@ A high-performance HTTP client workspace for crypto exchange HFT applications. F
 ```text
 hpx/
 ├── bin/
-│   └── hpx-cli/          # CLI binary — HTTP client, scraper, download manager, CDP server
+│   ├── hpx-cli/          # CLI binary — HTTP client, scraper, download manager, CDP server
+│   └── hpxless/          # Standalone CDP-compatible headless browser server
 ├── crates/
 │   ├── hpx/              # Core HTTP client library (TLS, HTTP/1+2, pooling, middleware)
 │   ├── hpx-emulation/    # Browser fingerprint profiles (JA3/JA4, HTTP/2 settings)
@@ -251,6 +252,23 @@ hpx dl status <id>
 hpx proxy-test --proxy http://127.0.0.1:7890
 ```
 
+## CLI: `hpxless`
+
+The `hpxless` binary (`bin/hpxless/`) is a standalone CDP-compatible headless browser server. Point Puppeteer or Playwright at it — no Chrome required.
+
+```bash
+# Start CDP server on default port
+hpxless
+
+# With stealth mode and custom port
+hpxless --port 9222 --stealth --profile firefox
+
+# Connect from Puppeteer/Playwright
+# browserWSEndpoint: ws://127.0.0.1:9222
+```
+
+See [`bin/hpxless/README.md`](bin/hpxless/README.md) for full documentation.
+
 ## Crate Dependency Graph
 
 ```text
@@ -260,6 +278,11 @@ hpx-cli (binary)
   ├── hpx-browser    (headless browser, challenge detection)
   ├── hpx-dl         (download engine)
   └── hpx-streams    (streaming codecs)
+
+hpxless (binary)
+  ├── hpx            (HTTP client)
+  ├── hpx-browser    (headless browser, CDP, V8, stealth)
+  └── ecdysis        (graceful shutdown)
 
 hpx (core)
   ├── hpx-emulation  (optional, via emulation feature)

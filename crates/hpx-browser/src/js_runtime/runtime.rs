@@ -23,6 +23,7 @@ impl BrowserJsRuntime {
         Self::with_base_url(dom, None)
     }
 
+    #[allow(clippy::expect_used, clippy::panic)]
     pub fn with_base_url(dom: Dom, base_url: Option<url::Url>) -> Self {
         let mut state = DomState::new(dom);
         if let Some(url) = base_url {
@@ -88,6 +89,15 @@ impl BrowserJsRuntime {
             .expect("stealth bootstrap failed");
 
         Self { inner: runtime }
+    }
+
+    /// Update the DOM reference in the runtime's state without re-creating the V8 isolate.
+    /// This allows reusing the existing V8 context (bootstrap scripts, globals) across navigations.
+    pub fn update_dom(&mut self, dom: Dom) {
+        let state = self.inner.op_state();
+        let mut state = state.borrow_mut();
+        let dom_state = state.borrow_mut::<DomState>();
+        dom_state.dom = dom;
     }
 
     /// Execute a JavaScript script and return the result as a string.

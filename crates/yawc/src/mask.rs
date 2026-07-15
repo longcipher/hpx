@@ -88,7 +88,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[wasm_bindgen_test::wasm_bindgen_test]
+
     fn test_apply_mask() {
         let mask = [0x6d, 0xb6, 0xb2, 0x80];
         let unmasked = [
@@ -119,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    #[wasm_bindgen_test::wasm_bindgen_test]
+
     fn test_mask_unmask_identity() {
         // Test that applying mask twice returns original data
         let mask = [0xAA, 0xBB, 0xCC, 0xDD];
@@ -139,7 +139,7 @@ mod tests {
     }
 
     #[test]
-    #[wasm_bindgen_test::wasm_bindgen_test]
+
     fn test_mask_all_zeros() {
         let mask = [0x00, 0x00, 0x00, 0x00];
         let original = b"Test data";
@@ -152,7 +152,7 @@ mod tests {
     }
 
     #[test]
-    #[wasm_bindgen_test::wasm_bindgen_test]
+
     fn test_mask_all_ones() {
         let mask = [0xFF, 0xFF, 0xFF, 0xFF];
         let original = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77];
@@ -165,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    #[wasm_bindgen_test::wasm_bindgen_test]
+
     fn test_mask_edge_cases() {
         let mask = [0x12, 0x34, 0x56, 0x78];
 
@@ -191,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    #[wasm_bindgen_test::wasm_bindgen_test]
+
     fn test_mask_large_buffer() {
         // Test with a large buffer to exercise the word-aligned path
         let mask = [0x01, 0x02, 0x03, 0x04];
@@ -209,7 +209,7 @@ mod tests {
     }
 
     #[test]
-    #[wasm_bindgen_test::wasm_bindgen_test]
+
     fn test_mask_alignment() {
         // Test that masking works correctly with different alignments
         let mask = [0xAA, 0xBB, 0xCC, 0xDD];
@@ -241,7 +241,7 @@ mod tests {
     }
 
     #[test]
-    #[wasm_bindgen_test::wasm_bindgen_test]
+
     fn test_mask_fast_matches_fallback() {
         // Comprehensive test that fast and fallback produce identical results
         let masks = [
@@ -281,7 +281,7 @@ mod tests {
     }
 
     #[test]
-    #[wasm_bindgen_test::wasm_bindgen_test]
+
     fn test_mask_endianness() {
         // Test that demonstrates endianness handling in fast path
         let mask = [0x11, 0x22, 0x33, 0x44];

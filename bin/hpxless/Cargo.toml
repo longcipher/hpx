@@ -1,0 +1,58 @@
+[package]
+name = "hpxless"
+version.workspace = true
+description = "CDP-compatible browser server for Puppeteer/Playwright — powered by hpx"
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "hpxless"
+path = "src/main.rs"
+doc = false
+
+[dependencies]
+clap = { workspace = true, features = ["derive", "env"] }
+ecdysis = { workspace = true }
+eyre = { workspace = true }
+hpx = { workspace = true, features = [
+    "http1",
+    "http2",
+    "ws",
+    "json",
+    "tracing",
+    "boring-tls",
+    "cookies",
+    "stealth",
+    "socks",
+] }
+hpx-browser = { workspace = true, features = ["v8", "cdp"] }
+tokio = { workspace = true, features = [
+    "rt-multi-thread",
+    "macros",
+    "signal",
+] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+cucumber = { workspace = true }
+futures-util = { workspace = true }
+hpx-yawc = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = [
+    "rt",
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "time",
+] }
+url = { workspace = true }
+
+[[test]]
+name = "cucumber"
+harness = false
+
+[lints]
+workspace = true

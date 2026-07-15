@@ -791,7 +791,6 @@ impl Frame {
 #[cfg(test)]
 mod tests {
     use bytes::{Bytes, BytesMut};
-    use wasm_bindgen_test::wasm_bindgen_test;
 
     use super::*;
     use crate::close::CloseCode;
@@ -801,7 +800,7 @@ mod tests {
         use super::*;
 
         #[test]
-        #[wasm_bindgen_test]
+
         fn test_is_control() {
             // Control frames
             assert!(OpCode::Close.is_control());
@@ -815,7 +814,7 @@ mod tests {
         }
 
         #[test]
-        #[wasm_bindgen_test]
+
         fn test_try_from_u8_valid() {
             assert_eq!(OpCode::try_from(0x0).unwrap(), OpCode::Continuation);
             assert_eq!(OpCode::try_from(0x1).unwrap(), OpCode::Text);
@@ -826,7 +825,7 @@ mod tests {
         }
 
         #[test]
-        #[wasm_bindgen_test]
+
         fn test_try_from_u8_invalid() {
             // Invalid opcodes should return an error
             for &code in &[0x3, 0x4, 0x5, 0x6, 0x7, 0xB, 0xC, 0xD, 0xE, 0xF] {
@@ -835,7 +834,7 @@ mod tests {
         }
 
         #[test]
-        #[wasm_bindgen_test]
+
         fn test_from_opcode_to_u8() {
             assert_eq!(u8::from(OpCode::Continuation), 0x0);
             assert_eq!(u8::from(OpCode::Text), 0x1);
@@ -851,7 +850,7 @@ mod tests {
         use super::*;
 
         #[test]
-        #[wasm_bindgen_test]
+
         fn test_frame_text() {
             let text = "Hello, WebSocket!";
             let frame = Frame::text(text);
@@ -862,7 +861,7 @@ mod tests {
         }
 
         #[test]
-        #[wasm_bindgen_test]
+
         fn test_frame_binary() {
             let data = vec![0x01, 0x02, 0x03];
             let frame = Frame::binary(data.clone());
@@ -873,7 +872,7 @@ mod tests {
         }
 
         #[test]
-        #[wasm_bindgen_test]
+
         fn test_frame_close() {
             let reason = "Normal closure";
             let frame = Frame::close(CloseCode::Normal, reason);
@@ -892,7 +891,7 @@ mod tests {
         }
 
         #[test]
-        #[wasm_bindgen_test]
+
         fn test_frame_close_raw() {
             let payload = vec![0x03, 0xE8]; // Close code 1000 without reason
             let frame = Frame::close_raw(payload.clone());
@@ -907,7 +906,7 @@ mod tests {
         }
 
         #[test]
-        #[wasm_bindgen_test]
+
         fn test_frame_empty_close() {
             let frame = Frame::close_raw(vec![]);
 
@@ -918,7 +917,7 @@ mod tests {
         }
 
         #[test]
-        #[wasm_bindgen_test]
+
         fn test_frame_ping() {
             let payload = b"Ping payload";
             let frame = Frame::ping(&payload[..]);
@@ -928,7 +927,7 @@ mod tests {
         }
 
         #[test]
-        #[wasm_bindgen_test]
+
         fn test_frame_pong() {
             let payload = b"Pong payload";
             let frame = Frame::pong(&payload[..]);
@@ -938,7 +937,7 @@ mod tests {
         }
 
         #[test]
-        #[wasm_bindgen_test]
+
         fn test_frame_continuation() {
             let payload = b"continuation data";
             let frame = Frame::continuation(&payload[..]);
@@ -949,7 +948,7 @@ mod tests {
         }
 
         #[test]
-        #[wasm_bindgen_test]
+
         fn test_frame_with_fin() {
             let frame = Frame::text("fragment").with_fin(false);
 
@@ -958,7 +957,7 @@ mod tests {
         }
 
         #[test]
-        #[wasm_bindgen_test]
+
         fn test_frame_fragmentation() {
             // Test creating a fragmented message
             let first = Frame::text("Hello, ").with_fin(false);
@@ -976,7 +975,7 @@ mod tests {
         }
 
         #[test]
-        #[wasm_bindgen_test]
+
         fn test_frame_from_tuple() {
             let frame = Frame::from((OpCode::Text, Bytes::from("Test")));
             let (opcode, payload): (OpCode, Bytes) = frame.into();
@@ -986,7 +985,7 @@ mod tests {
         }
 
         #[test]
-        #[wasm_bindgen_test]
+
         fn test_frame_from_tuple_bytes() {
             let opcode = OpCode::Binary;
             let payload = Bytes::from_static(b"\xDE\xAD\xBE\xEF");
@@ -998,7 +997,7 @@ mod tests {
         }
 
         #[test]
-        #[wasm_bindgen_test]
+
         fn test_frame_new() {
             let payload = BytesMut::from("Test payload");
             let frame = Frame::new(true, OpCode::Text, None, payload.clone());
@@ -1009,14 +1008,14 @@ mod tests {
         }
 
         #[test]
-        #[wasm_bindgen_test]
+
         fn test_frame_as_str() {
             let frame = Frame::text("Hello, World!");
             assert_eq!(frame.as_str(), "Hello, World!");
         }
 
         #[test]
-        #[wasm_bindgen_test]
+
         fn test_frame_is_utf8() {
             let valid_utf8 = Frame::text("Hello, 世界");
             assert!(valid_utf8.is_utf8());

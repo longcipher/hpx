@@ -419,7 +419,7 @@ pub(crate) async fn handle_serve(
     }
 
     if workers <= 1 {
-        let server = hpx_browser::protocol::server::CdpServer::start(html, port, stealth)
+        let server = hpx_browser::protocol::server::CdpServer::start(html, port, stealth, None)
             .map_err(|e| eyre::eyre!("failed to start CDP server: {}", e))?;
 
         if !quiet {
@@ -434,7 +434,7 @@ pub(crate) async fn handle_serve(
         let mut servers = Vec::with_capacity(workers as usize);
         for i in 0..workers {
             let p = port + i;
-            let server = hpx_browser::protocol::server::CdpServer::start(html, p, stealth)
+            let server = hpx_browser::protocol::server::CdpServer::start(html, p, stealth, None)
                 .map_err(|e| eyre::eyre!("failed to start CDP server on port {}: {}", p, e))?;
             if !quiet {
                 println!(

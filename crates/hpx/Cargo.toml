@@ -25,7 +25,7 @@ charset = ["dep:encoding_rs", "dep:mime"]
 auth = ["dep:async-trait"]
 
 # Enable cookies store support.
-cookies = ["dep:cookie", "dep:arc-swap"]
+cookies = ["dep:cookie", "dep:arc-swap", "dep:scc"]
 
 # Enable gzip compression support.
 gzip = ["tower-http/decompression-gzip"]
@@ -83,7 +83,7 @@ hotpath = ["dep:hotpath"]
 
 # Enable TLS key logging for debugging (writes session keys to SSLKEYLOGFILE).
 # NOT for production — disabled by default for security.
-keylog = []
+keylog = ["dep:scc"]
 
 # Enable Server-Sent Events (SSE) support.
 sse = ["dep:memchr", "dep:fastrand", "stream"]
@@ -219,7 +219,7 @@ rustls = { workspace = true, optional = true, features = [
 ] }
 rustls-pemfile = { workspace = true, optional = true }
 rustls-pki-types = { workspace = true, optional = true }
-scc = { workspace = true }
+scc = { workspace = true, optional = true }
 schnellru = { workspace = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }

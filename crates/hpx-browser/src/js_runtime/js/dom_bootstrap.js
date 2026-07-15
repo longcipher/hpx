@@ -1,6 +1,9 @@
 // DOM bootstrap — wires document.* and Element.prototype.* to Rust ops.
 (() => {
   const core = Deno.core;
+
+  // window === globalThis in browsers
+  globalThis.window = globalThis;
   const DOCUMENT_NODE = core.ops.op_dom_document_node();
 
   // Node type constants
@@ -156,7 +159,12 @@
       return null;
     }
     get body() {
-      return this.querySelector("body");
+      const html = this.documentElement;
+      if (!html) return null;
+      for (const c of html.childNodes) {
+        if (c instanceof Element && c.tagName.toLowerCase() === 'body') return c;
+      }
+      return null;
     }
     get head() {
       return this.querySelector("head");
@@ -220,4 +228,32 @@
   globalThis.Document = Document;
   globalThis.Text = TextNode;
   globalThis.document = new Document();
+
+  // Minimal getComputedStyle — reads CSS from inline <style> elements.
+  globalThis.getComputedStyle = function(element) {
+    if (!element || !element.tagName) return {};
+    const tag = element.tagName.toLowerCase();
+    const styles = {};
+    const styleEls = document.getElementsByTagName('style');
+    for (const styleEl of styleEls) {
+      const css = styleEl.textContent || '';
+      const regex = /([^{]+)\{([^}]+)\}/g;
+      let match;
+      while ((match = regex.exec(css)) !== null) {
+        const selector = match[1].trim().toLowerCase();
+        if (selector === tag) {
+          const decls = match[2].split(';');
+          for (const decl of decls) {
+            const idx = decl.indexOf(':');
+            if (idx > 0) {
+              const prop = decl.substring(0, idx).trim();
+              const val = decl.substring(idx + 1).trim();
+              if (prop && val) styles[prop] = val;
+            }
+          }
+        }
+      }
+    }
+    return styles;
+  };
 })();

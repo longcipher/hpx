@@ -23,6 +23,7 @@ pub mod net;
 pub mod page;
 pub mod parallel;
 pub mod pool;
+pub mod resource_loader;
 pub mod stealth;
 pub mod tls;
 

@@ -94,6 +94,9 @@ pub(crate) enum Commands {
         /// Suppress progress messages.
         #[arg(long, short)]
         quiet: bool,
+        /// Block resource types during rendering (image, script, stylesheet, font, media).
+        #[arg(long = "block", action = ArgAction::Append)]
+        block: Vec<String>,
     },
     /// Scrape multiple URLs in parallel via worker processes.
     Scrape {
@@ -448,6 +451,40 @@ impl Cli {
             .into_iter()
             .map(|(k, v)| (k.trim().to_owned(), v.trim().to_owned()))
             .collect()
+    }
+
+    /// Parse --block strings into `HashSet<ResourceType>`.
+    #[cfg(test)]
+    pub(crate) fn block_types(
+        &self,
+    ) -> std::collections::HashSet<hpx_browser::resource_loader::ResourceType> {
+        use hpx_browser::resource_loader::ResourceType;
+        let mut set = std::collections::HashSet::new();
+        let block = match &self.command {
+            Some(Commands::Fetch { block, .. }) => block,
+            _ => return set,
+        };
+        for raw in block {
+            match raw.to_ascii_lowercase().as_str() {
+                "image" => {
+                    set.insert(ResourceType::Image);
+                }
+                "script" => {
+                    set.insert(ResourceType::Script);
+                }
+                "stylesheet" | "css" => {
+                    set.insert(ResourceType::Stylesheet);
+                }
+                "font" => {
+                    set.insert(ResourceType::Font);
+                }
+                "media" => {
+                    set.insert(ResourceType::Media);
+                }
+                _ => {}
+            }
+        }
+        set
     }
 }
 
@@ -2232,5 +2269,91 @@ mod tests {
         unsafe { std::env::remove_var("HPX_TIMEZONE") };
         let cli = Cli::try_parse_from(["hpx", "httpbin.org/get"]).unwrap();
         assert!(cli.timezone.is_none());
+    }
+
+    #[test]
+    fn block_types_single_image() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from(["hpx", "fetch", "https://example.com", "--block", "image"])
+            .unwrap();
+        let types = cli.block_types();
+        assert_eq!(types.len(), 1);
+        assert!(types.contains(&hpx_browser::resource_loader::ResourceType::Image));
+    }
+
+    #[test]
+    fn block_types_multiple() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "hpx",
+            "fetch",
+            "https://example.com",
+            "--block",
+            "image",
+            "--block",
+            "script",
+            "--block",
+            "stylesheet",
+        ])
+        .unwrap();
+        let types = cli.block_types();
+        assert_eq!(types.len(), 3);
+        assert!(types.contains(&hpx_browser::resource_loader::ResourceType::Image));
+        assert!(types.contains(&hpx_browser::resource_loader::ResourceType::Script));
+        assert!(types.contains(&hpx_browser::resource_loader::ResourceType::Stylesheet));
+    }
+
+    #[test]
+    fn block_types_css_alias() {
+        use clap::Parser;
+        let cli =
+            Cli::try_parse_from(["hpx", "fetch", "https://example.com", "--block", "css"]).unwrap();
+        let types = cli.block_types();
+        assert!(types.contains(&hpx_browser::resource_loader::ResourceType::Stylesheet));
+    }
+
+    #[test]
+    fn block_types_case_insensitive() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "hpx",
+            "fetch",
+            "https://example.com",
+            "--block",
+            "IMAGE",
+            "--block",
+            "Font",
+        ])
+        .unwrap();
+        let types = cli.block_types();
+        assert_eq!(types.len(), 2);
+        assert!(types.contains(&hpx_browser::resource_loader::ResourceType::Image));
+        assert!(types.contains(&hpx_browser::resource_loader::ResourceType::Font));
+    }
+
+    #[test]
+    fn block_types_empty_when_no_flag() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from(["hpx", "fetch", "https://example.com"]).unwrap();
+        let types = cli.block_types();
+        assert!(types.is_empty());
+    }
+
+    #[test]
+    fn block_types_unknown_ignored() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "hpx",
+            "fetch",
+            "https://example.com",
+            "--block",
+            "foobar",
+            "--block",
+            "image",
+        ])
+        .unwrap();
+        let types = cli.block_types();
+        assert_eq!(types.len(), 1);
+        assert!(types.contains(&hpx_browser::resource_loader::ResourceType::Image));
     }
 }

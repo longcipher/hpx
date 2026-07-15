@@ -4,9 +4,18 @@ use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
 use hpx_yawc::{Frame, frame::OpCode};
-use tokio::{net::TcpListener, sync::Mutex};
+use tokio::net::TcpListener;
 
-use crate::protocol::{session::CdpSession, types::*};
+use crate::{
+    protocol::{session::CdpSession, types::*},
+    stealth::StealthProfile,
+};
+
+/// Serializes V8-critical page operations across all connections on the same thread.
+/// Multiple V8 isolates on a single thread corrupt the HandleScope stack; this mutex
+/// ensures only one isolate is active at a time.
+static V8_SERIALIZE: std::sync::LazyLock<tokio::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
 
 /// A running CDP server. Stops when dropped.
 pub struct CdpServer {
@@ -17,10 +26,12 @@ pub struct CdpServer {
 
 impl CdpServer {
     /// Start a CDP WebSocket server on `127.0.0.1:{port}`.
+    /// Each WebSocket connection gets its own isolated [`Page`](crate::page::Page).
     pub fn start(
         html: &str,
         port: u16,
         stealth: bool,
+        profile: Option<StealthProfile>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let html = html.to_string();
         let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -41,17 +52,6 @@ impl CdpServer {
 
             let local = tokio::task::LocalSet::new();
             rt.block_on(local.run_until(async move {
-                let page = match crate::page::Page::from_html(&html, stealth).await {
-                    Ok(p) => p,
-                    Err(e) => {
-                        tracing::error!("CdpServer: failed to create page: {}", e);
-                        port_tx.send(0).ok();
-                        return;
-                    }
-                };
-                #[allow(clippy::arc_with_non_send_sync)]
-                let page = Arc::new(Mutex::new(page));
-
                 let listener = match TcpListener::bind(format!("127.0.0.1:{}", port)).await {
                     Ok(l) => l,
                     Err(e) => {
@@ -66,7 +66,7 @@ impl CdpServer {
                     .port();
                 port_tx.send(actual_port).ok();
 
-                accept_loop(listener, page, shutdown_clone).await;
+                accept_loop(listener, html, stealth, profile, shutdown_clone).await;
             }));
         });
 
@@ -92,7 +92,7 @@ impl CdpServer {
 
     /// Start on port 0 (OS-assigned) — useful for tests.
     pub fn start_ephemeral(html: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        Self::start(html, 0, false)
+        Self::start(html, 0, false, None)
     }
 
     /// The port the server is listening on.
@@ -118,9 +118,12 @@ impl Drop for CdpServer {
 
 async fn accept_loop(
     listener: TcpListener,
-    page: Arc<Mutex<crate::page::Page>>,
+    html: String,
+    stealth: bool,
+    profile: Option<StealthProfile>,
     shutdown: Arc<std::sync::atomic::AtomicBool>,
 ) {
+    let html = Arc::new(html);
     loop {
         if shutdown.load(std::sync::atomic::Ordering::Relaxed) {
             break;
@@ -131,9 +134,10 @@ async fn accept_loop(
 
         match accept {
             Ok(Ok((stream, addr))) => {
-                let page = page.clone();
+                let html = html.clone();
+                let profile = profile.clone();
                 tokio::task::spawn_local(async move {
-                    if let Err(e) = handle_connection(stream, page).await {
+                    if let Err(e) = handle_connection(stream, &html, stealth, profile).await {
                         tracing::warn!("CDP connection from {} error: {}", addr, e);
                     }
                 });
@@ -155,7 +159,9 @@ fn bad_request(msg: &str) -> hyper::Response<String> {
 
 async fn handle_connection(
     stream: tokio::net::TcpStream,
-    page: Arc<Mutex<crate::page::Page>>,
+    html: &str,
+    stealth: bool,
+    profile: Option<StealthProfile>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use hyper_util::rt::TokioIo;
 
@@ -165,16 +171,17 @@ async fn handle_connection(
     let peek = String::from_utf8_lossy(&buf[..n]);
 
     if peek.starts_with("GET ") && !peek.contains("Upgrade:") && !peek.contains("upgrade:") {
-        return handle_http(stream, &page).await;
+        return handle_http(stream).await;
     }
 
     // Use hyper to handle the upgrade to WebSocket (HTTP/1 + HTTP/2)
     let io = TokioIo::new(stream);
-    let page_clone = page.clone();
+    let html = html.to_string();
 
     let service =
         hyper::service::service_fn(move |mut req: hyper::Request<hyper::body::Incoming>| {
-            let page = page_clone.clone();
+            let html = html.clone();
+            let profile = profile.clone();
             async move {
                 if req
                     .headers()
@@ -205,7 +212,8 @@ async fn handle_connection(
                 tokio::task::spawn_local(async move {
                     match upgrade_fut.await {
                         Ok(ws) => {
-                            if let Err(e) = handle_ws_connection(ws, page).await {
+                            if let Err(e) = handle_ws_connection(ws, &html, stealth, profile).await
+                            {
                                 tracing::warn!("CDP websocket error: {}", e);
                             }
                         }
@@ -228,8 +236,19 @@ async fn handle_connection(
 
 async fn handle_ws_connection(
     mut ws: hpx_yawc::WebSocket<hpx_yawc::HttpStream>,
-    page: Arc<Mutex<crate::page::Page>>,
+    html: &str,
+    stealth: bool,
+    profile: Option<StealthProfile>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let mut page = crate::page::Page::from_html(html, stealth)
+        .await
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    if let Some(prof) = profile {
+        #[cfg(feature = "v8")]
+        page.set_profile(prof);
+        #[cfg(not(feature = "v8"))]
+        let _ = prof;
+    }
     let mut session = CdpSession::new();
 
     while let Some(frame) = ws.next().await {
@@ -248,15 +267,12 @@ async fn handle_ws_connection(
                     }
                 };
 
+                // Serialize V8-critical CDP request handling.
+                // Multiple V8 isolates on a single thread corrupt the HandleScope stack.
                 let (response, events) = {
-                    let mut page_ref = page.lock().await;
-                    session.handle_request(&mut page_ref, &req).await
+                    let _v8_lock = V8_SERIALIZE.lock().await;
+                    session.handle_request(&mut page, &req).await
                 };
-
-                // Handle pending navigation
-                if let Some(_url) = session.pending_navigate.take() {
-                    // ponytail: navigation stub — real impl fetches and reloads
-                }
 
                 for event in events {
                     ws.send(Frame::text(to_json(&event))).await?;
@@ -271,10 +287,7 @@ async fn handle_ws_connection(
     Ok(())
 }
 
-async fn handle_http(
-    stream: tokio::net::TcpStream,
-    page: &Arc<Mutex<crate::page::Page>>,
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn handle_http(stream: tokio::net::TcpStream) -> Result<(), Box<dyn std::error::Error>> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let mut stream = stream;
@@ -308,17 +321,14 @@ async fn handle_http(
         })
         .to_string(),
         "/json" | "/json/list" => {
-            let (title, url) = {
-                let page_ref = page.lock().await;
-                (page_ref.title(), page_ref.url().to_string())
-            };
+            // ponytail: per-connection pages, no shared state to list
             serde_json::json!([{
                 "description": "",
                 "devtoolsFrontendUrl": "",
                 "id": "page-1",
-                "title": title,
+                "title": "",
                 "type": "page",
-                "url": url,
+                "url": "about:blank",
                 "webSocketDebuggerUrl": ws_url,
             }])
             .to_string()
@@ -341,6 +351,8 @@ async fn handle_http(
 
 #[cfg(test)]
 mod tests {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
     use super::*;
 
     #[test]
@@ -353,8 +365,167 @@ mod tests {
 
     #[test]
     fn cdp_server_accepts_stealth_param() {
-        let server = CdpServer::start("<html></html>", 0, true).expect("should start");
+        let server = CdpServer::start("<html></html>", 0, true, None).expect("should start");
         assert!(server.port() > 0);
         drop(server);
+    }
+
+    async fn ws_handshake(
+        stream: &mut tokio::net::TcpStream,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let key_bytes: [u8; 16] = rand::random();
+        let key = base64_encode(&key_bytes);
+
+        let request = format!(
+            "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {}\r\nSec-WebSocket-Version: 13\r\n\r\n",
+            key
+        );
+        stream.write_all(request.as_bytes()).await?;
+
+        let mut buf = vec![0u8; 4096];
+        let n = stream.read(&mut buf).await?;
+        let response = String::from_utf8_lossy(&buf[..n]);
+        assert!(
+            response.contains("101"),
+            "WebSocket upgrade failed: {response}"
+        );
+
+        Ok(())
+    }
+
+    fn base64_encode(bytes: &[u8]) -> String {
+        const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::new();
+        for chunk in bytes.chunks(3) {
+            let b0 = chunk[0] as u32;
+            let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+            let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+            let triple = (b0 << 16) | (b1 << 8) | b2;
+            out.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
+            out.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
+            if chunk.len() > 1 {
+                out.push(CHARS[((triple >> 6) & 0x3F) as usize] as char);
+            } else {
+                out.push('=');
+            }
+            if chunk.len() > 2 {
+                out.push(CHARS[(triple & 0x3F) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+        out
+    }
+
+    fn ws_encode_text(payload: &str) -> Vec<u8> {
+        let payload_bytes = payload.as_bytes();
+        let len = payload_bytes.len();
+        let mut frame = Vec::new();
+        frame.push(0x81); // FIN + text opcode
+        if len < 126 {
+            frame.push(len as u8 | 0x80); // masked
+        } else if len < 65536 {
+            frame.push(126 | 0x80);
+            frame.extend_from_slice(&(len as u16).to_be_bytes());
+        } else {
+            frame.push(127 | 0x80);
+            frame.extend_from_slice(&(len as u64).to_be_bytes());
+        }
+        let mask: [u8; 4] = rand::random();
+        frame.extend_from_slice(&mask);
+        for (i, &b) in payload_bytes.iter().enumerate() {
+            frame.push(b ^ mask[i % 4]);
+        }
+        frame
+    }
+
+    async fn ws_read_text(
+        stream: &mut tokio::net::TcpStream,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let mut header = [0u8; 2];
+        stream.read_exact(&mut header).await?;
+        let opcode = header[0] & 0x0F;
+        let masked = header[1] & 0x80 != 0;
+        let mut len = (header[1] & 0x7F) as u64;
+        if len == 126 {
+            let mut b = [0u8; 2];
+            stream.read_exact(&mut b).await?;
+            len = u16::from_be_bytes(b) as u64;
+        } else if len == 127 {
+            let mut b = [0u8; 8];
+            stream.read_exact(&mut b).await?;
+            len = u64::from_be_bytes(b);
+        }
+        let mut mask = [0u8; 4];
+        if masked {
+            stream.read_exact(&mut mask).await?;
+        }
+        let mut payload = vec![0u8; len as usize];
+        stream.read_exact(&mut payload).await?;
+        if masked {
+            for (i, b) in payload.iter_mut().enumerate() {
+                *b ^= mask[i % 4];
+            }
+        }
+        if opcode == 0x8 {
+            return Err("connection closed".into());
+        }
+        Ok(String::from_utf8(payload)?)
+    }
+
+    #[test]
+    fn multi_page_concurrent_navigations() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let local = tokio::task::LocalSet::new();
+
+        rt.block_on(local.run_until(async {
+            let server = CdpServer::start_ephemeral("<html><body>init</body></html>").unwrap();
+            let port = server.port();
+
+            let mut handles = Vec::new();
+            for i in 0..10 {
+                let addr = format!("127.0.0.1:{}", port);
+                handles.push(tokio::task::spawn_local(async move {
+                    let mut stream = tokio::net::TcpStream::connect(&addr).await.unwrap();
+                    ws_handshake(&mut stream).await.unwrap();
+
+                    let navigate_msg = serde_json::json!({
+                        "id": 1,
+                        "method": "Page.navigate",
+                        "params": { "url": format!("https://example.com/page{}", i) }
+                    })
+                    .to_string();
+
+                    stream
+                        .write_all(&ws_encode_text(&navigate_msg))
+                        .await
+                        .unwrap();
+
+                    let response = ws_read_text(&mut stream).await.unwrap();
+                    let parsed: serde_json::Value = serde_json::from_str(&response).unwrap();
+                    assert!(
+                        parsed.get("result").is_some(),
+                        "Expected result in response for page {i}: {response}"
+                    );
+                    assert!(
+                        parsed["result"].get("frameId").is_some(),
+                        "Missing frameId for page {i}: {response}"
+                    );
+                    i
+                }));
+            }
+
+            let mut results = Vec::new();
+            for h in handles {
+                results.push(h.await.unwrap());
+            }
+            results.sort();
+            assert_eq!(results, (0..10).collect::<Vec<_>>());
+
+            drop(server);
+        }));
     }
 }

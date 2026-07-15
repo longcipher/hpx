@@ -45,9 +45,9 @@ When introducing new dependencies, prefer these versions unless compatibility re
 - `utoipa = "5.4.0"`
 - `utoipa-swagger-ui = "9.0.2"`
 - `arc-swap = "1.9.2"`
-- `hpx = "2.5.4"`
+- `hpx = "2.5.5"`
 - `scc = "3.8.4"`
-- `winnow = "1.0.3"`
+- `winnow = "1.0.4"`
 - `shadow-rs = "1.7.0"`
 - `ecdysis = "1.0.1"`
 
