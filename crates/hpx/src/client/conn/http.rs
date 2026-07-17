@@ -790,7 +790,7 @@ impl ConnectingTcpRemote {
         let mut err = None;
         for addr in &mut self.addrs {
             eprintln!(
-                "HTX HTTP: trying addr {addr} timeout={:?}",
+                "HTTP Connect: trying addr {addr} timeout={:?}",
                 self.connect_timeout
             );
             debug!("connecting to {}", addr);
