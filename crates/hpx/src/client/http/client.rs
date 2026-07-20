@@ -32,6 +32,10 @@ use self::{
     extra::{ConnectExtra, ConnectIdentity},
     lazy::{Started as Lazy, lazy},
 };
+#[cfg(feature = "http3")]
+use crate::client::conn::alt_svc::{AltSvcCache, H3FailureTracker, parse_alt_svc};
+#[cfg(feature = "http3")]
+use crate::client::conn::quic::H3Connection;
 #[allow(unused_imports)]
 use crate::client::core::conn::{self, TrySendError as ConnTrySendError};
 #[cfg(feature = "http1")]
@@ -71,8 +75,12 @@ pub struct ConnectRequest {
 
 impl ConnectRequest {
     /// Create a new [`ConnectRequest`] with the given URI and identifier.
+    ///
+    /// `pub(crate)` so that connector-level tests (e.g. `QuicConnector` under
+    /// `client/conn/quic.rs`) can synthesize a request without going through
+    /// the full `HttpClient` pipeline.
     #[inline]
-    fn new<T>(uri: Uri, identifier: T) -> ConnectRequest
+    pub(crate) fn new<T>(uri: Uri, identifier: T) -> ConnectRequest
     where
         T: Into<Option<RequestOptions>>,
     {
@@ -123,6 +131,24 @@ pub struct HttpClient<C, B> {
     h1_builder: conn::http1::Builder,
     #[cfg(feature = "http2")]
     h2_builder: conn::http2::Builder<Exec>,
+    /// HTTP/3 (QUIC) connector. `Some` when the `http3` Cargo feature is
+    /// enabled AND the caller (typically `Client::build` or a test escape
+    /// hatch) supplied a `QuicConnector`. When `Some` and the request's
+    /// version resolves to `Ver::Http3`, `connect_to` routes through this
+    /// connector instead of the TCP connector (`C`). When `None`, h3
+    /// requests fail with `ErrorKind::UserUnsupportedVersion`.
+    #[cfg(feature = "http3")]
+    h3_connector: Option<crate::client::conn::quic::QuicConnector>,
+    /// RFC 7838 Alt-Svc cache. Populated from `alt-svc` response headers
+    /// on h2 (and later h1) responses. Used by the HTTP/3 upgrade path
+    /// to discover QUIC endpoints for origins that advertise h3 support.
+    #[cfg(feature = "http3")]
+    alt_svc_cache: Arc<AltSvcCache>,
+    /// Circuit breaker for HTTP/3 connection failures. Tracks per-authority
+    /// QUIC handshake failures and blocks h3 retries for a cooldown period
+    /// (default 60s). Shared across `HttpClient` clones via `Arc`.
+    #[cfg(feature = "http3")]
+    h3_failure_tracker: Arc<H3FailureTracker>,
     pool: pool::Pool<PoolClient<B>, ConnectIdentity>,
 }
 
@@ -152,7 +178,7 @@ where
     C::Error: Into<BoxError>,
     C::Future: Unpin + Send + 'static,
     B: Body + Send + 'static + Unpin,
-    B::Data: Send,
+    B::Data: Send + Into<Bytes>,
     B::Error: Into<BoxError>,
 {
     /// Send a constructed `Request` using this `HttpClient`.
@@ -168,6 +194,13 @@ where
                 )));
             }
             Version::HTTP_10 | Version::HTTP_11 | Version::HTTP_2 => {}
+            // HTTP/3 is allowed when the `http3` Cargo feature is enabled.
+            // The actual routing to the QUIC connector happens in
+            // `connect_to` (Ver::Http3 branch); if no `QuicConnector` is
+            // wired in, `try_send_request` returns
+            // `ErrorKind::UserUnsupportedVersion`.
+            #[cfg(feature = "http3")]
+            Version::HTTP_3 => {}
             // completely unsupported HTTP version (like HTTP/0.9)!
             _unsupported => {
                 warn!("Request has unsupported version: {:?}", _unsupported);
@@ -216,9 +249,177 @@ where
     ) -> Result<Response<Incoming>, Error> {
         let uri = req.uri().clone();
 
+        // Track whether we've already attempted the h3 alt-svc upgrade
+        // so we don't retry it on every loop iteration.
+        #[cfg(feature = "http3")]
+        let mut h3_attempted = false;
+
         loop {
+            // Check Alt-Svc cache for HTTP/3 upgrade opportunity on the
+            // first iteration of the loop. When the cache has a fresh h3
+            // entry for the authority, try h3 first. If the h3 attempt
+            // fails, fall through to the h2/h1 path below.
+            #[cfg(feature = "http3")]
+            {
+                if !h3_attempted && self.config.ver == Ver::Auto && self.h3_connector.is_some() {
+                    h3_attempted = true;
+                    if let Some(host) = connect_req.uri().host() {
+                        let port = connect_req.uri().port_u16().unwrap_or(443);
+                        let authority = (host.to_string(), port);
+
+                        // Circuit breaker: skip h3 if this authority had a
+                        // recent QUIC failure (still in cooldown).
+                        if self.h3_failure_tracker.is_blocked(&authority).await {
+                            trace!(
+                                "h3 circuit breaker: skipping h3 for {:?} (in cooldown)",
+                                authority
+                            );
+                            // Fall through to h2/h1 below.
+                        } else if let Some(entries) = self.alt_svc_cache.get(&authority).await {
+                            let h3_entry = entries.iter().find(|e| e.protocol == "h3");
+                            if let Some(h3_entry) = h3_entry {
+                                let mut h3_connect_req = connect_req.clone();
+                                let alt_svc_host = if h3_entry.host.is_empty() {
+                                    host.to_string()
+                                } else {
+                                    h3_entry.host.clone()
+                                };
+                                let alt_svc_port = h3_entry.port;
+                                let alt_svc_uri =
+                                    format!("https://{}:{}", alt_svc_host, alt_svc_port);
+                                if let Ok(new_uri) = alt_svc_uri.parse::<Uri>() {
+                                    *h3_connect_req.uri_mut() = new_uri;
+                                }
+
+                                // Bypass the connection pool: call
+                                // connect_h3 directly to create a fresh
+                                // h3 connection instead of going through
+                                // try_send_request which could return a
+                                // cached h2 connection.
+                                if let Some(h3_connector) = self.h3_connector.clone() {
+                                    let pool = self.pool.clone();
+                                    let lazy_conn =
+                                        Self::connect_h3(Some(h3_connector), pool, h3_connect_req);
+                                    match lazy_conn.await {
+                                        Ok(mut pool_client) => {
+                                            match pool_client.try_send_request(req).await {
+                                                Ok(resp) => {
+                                                    // Capture
+                                                    // Alt-Svc
+                                                    // headers
+                                                    // from the
+                                                    // h3
+                                                    // response.
+                                                    if let Some(host) = connect_req.uri().host() {
+                                                        let port = connect_req
+                                                            .uri()
+                                                            .port_u16()
+                                                            .unwrap_or(443);
+                                                        if let Some(alt_svc_value) = resp
+                                                            .headers()
+                                                            .get(
+                                                            http::header::HeaderName::from_static(
+                                                                "alt-svc",
+                                                            ),
+                                                        ) && let Some(entries) =
+                                                            parse_alt_svc(alt_svc_value)
+                                                        {
+                                                            self.alt_svc_cache
+                                                                .insert(
+                                                                    (host.to_string(), port),
+                                                                    entries,
+                                                                )
+                                                                .await;
+                                                        }
+                                                    }
+                                                    // Clear the circuit breaker
+                                                    // on successful h3
+                                                    // connection.
+                                                    self.h3_failure_tracker.clear(&authority).await;
+                                                    return Ok(resp);
+                                                }
+                                                Err(mut err) => {
+                                                    if let Some(retry_req) = err.take_message() {
+                                                        trace!(
+                                                            "h3 alt-svc upgrade retryable, falling back to h2/h1"
+                                                        );
+                                                        // Record the
+                                                        // failure so
+                                                        // subsequent
+                                                        // requests skip
+                                                        // h3 for this
+                                                        // authority.
+                                                        self.h3_failure_tracker
+                                                            .record_failure(authority.clone())
+                                                            .await;
+                                                        req = retry_req;
+                                                        *req.uri_mut() = uri.clone();
+                                                        // Fall
+                                                        // through
+                                                        // to
+                                                        // h2/h1
+                                                        // below.
+                                                    } else {
+                                                        let err = err.into_error();
+                                                        trace!(
+                                                            "h3 alt-svc upgrade failed irrecoverably (reason={:?})",
+                                                            err
+                                                        );
+                                                        // Record the
+                                                        // failure so
+                                                        // subsequent
+                                                        // requests skip
+                                                        // h3 for this
+                                                        // authority.
+                                                        self.h3_failure_tracker
+                                                            .record_failure(authority.clone())
+                                                            .await;
+                                                        return Err(Error::new(
+                                                            ErrorKind::SendRequest,
+                                                            err,
+                                                        ));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Err(_err) => {
+                                            trace!("h3 alt-svc upgrade failed (reason={:?})", _err);
+                                            // Record the failure so
+                                            // subsequent requests skip
+                                            // h3 for this authority.
+                                            self.h3_failure_tracker
+                                                .record_failure(authority.clone())
+                                                .await;
+                                            // Fall through to h2/h1.
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             req = match self.try_send_request(req, connect_req.clone()).await {
-                Ok(resp) => return Ok(resp),
+                Ok(resp) => {
+                    // Capture Alt-Svc headers for HTTP/3 upgrade discovery.
+                    #[cfg(feature = "http3")]
+                    {
+                        if let Some(host) = connect_req.uri().host() {
+                            let port = connect_req.uri().port_u16().unwrap_or(443);
+                            if let Some(alt_svc_value) = resp
+                                .headers()
+                                .get(http::header::HeaderName::from_static("alt-svc"))
+                                && let Some(entries) = parse_alt_svc(alt_svc_value)
+                            {
+                                self.alt_svc_cache
+                                    .insert((host.to_string(), port), entries)
+                                    .await;
+                            }
+                        }
+                    }
+                    return Ok(resp);
+                }
                 Err(TrySendError::Nope(err)) => return Err(err),
                 Err(TrySendError::Retryable {
                     mut req,
@@ -477,7 +678,36 @@ where
         };
         let is_ver_h2 = ver == Ver::Http2;
         let connector = self.connector.clone();
+        // Capture the optional `QuicConnector` for the Ver::Http3 branch.
+        // When `None` (no connector wired in) and `ver == Ver::Http3`, the
+        // request fails with `ErrorKind::UserUnsupportedVersion` from the
+        // h3 branch below.
+        #[cfg(feature = "http3")]
+        let h3_connector = self.h3_connector.clone();
         lazy(move || {
+            // ===== HTTP/3 (QUIC) branch =====
+            //
+            // When `Ver::Http3` is selected, route through the QUIC
+            // connector instead of the TCP connector. The QUIC handshake
+            // produces an `H3Connection` carrier that is stored in the
+            // pool as `PoolTx::Http3`. Subsequent `try_send_request` calls
+            // on the pooled connection drive the h3 request lifecycle via
+            // `proto::h3::drive_request`.
+            //
+            // The h3 routing decision (including the
+            // `UserUnsupportedVersion` fallback when no `QuicConnector` is
+            // wired in) is encapsulated in [`Self::connect_h3`], which
+            // returns a type-erased boxed future matching the closure's
+            // return type. The TCP branch below produces the same boxed
+            // future type, so the closure has a single concrete return
+            // type without needing a per-branch cast at the call site.
+            #[cfg(feature = "http3")]
+            if ver == Ver::Http3 {
+                return Self::connect_h3(h3_connector, pool, req);
+            }
+
+            // ===== TCP (HTTP/1 + HTTP/2) branch =====
+            //
             // Try to take a "connecting lock".
             //
             // If the pool_key is for HTTP/2, and there is already a
@@ -488,10 +718,21 @@ where
                 None => {
                     let canceled = Error::new_kind(ErrorKind::Canceled);
                     // HTTP/2 connection in progress.
-                    return Either::Right(futures_util::future::err(canceled));
+                    return Box::pin(futures_util::future::err(canceled))
+                        as Pin<
+                            Box<
+                                dyn Future<
+                                        Output = Result<
+                                            pool::Pooled<PoolClient<B>, ConnectIdentity>,
+                                            Error,
+                                        >,
+                                    > + Send
+                                    + 'static,
+                            >,
+                        >;
                 }
             };
-            Either::Left(
+            Box::pin(
                 Oneshot::new(connector, req)
                     .map_err(|src| Error::new(ErrorKind::Connect, src))
                     .and_then(move |io| {
@@ -651,7 +892,126 @@ where
                         }))
                     }),
             )
+                as Pin<
+                    Box<
+                        dyn Future<
+                            Output = Result<
+                                pool::Pooled<PoolClient<B>, ConnectIdentity>,
+                                Error,
+                            >,
+                        > + Send
+                        + 'static,
+                    >,
+                >
         })
+    }
+
+    /// Drive the HTTP/3 (QUIC) connect path and return a pooled connection.
+    ///
+    /// This is the h3 routing helper extracted from [`Self::connect_to`].
+    /// It is invoked when the request's resolved version is `Ver::Http3`.
+    ///
+    /// Behavior:
+    /// - If `h3_connector` is `Some`, acquire the pool's "connecting" lock
+    ///   for `Ver::Http3` (dedups concurrent connect attempts per C-05),
+    ///   drive the [`QuicConnector`] via [`Oneshot`] to obtain an
+    ///   [`H3Connection`], wrap it as `PoolTx::Http3`, and insert into the
+    ///   pool.
+    /// - If `h3_connector` is `None`, fail fast with
+    ///   `ErrorKind::UserUnsupportedVersion`. This is the same error
+    ///   returned by the request-validation match in [`Self::request`] when
+    ///   the `http3` feature is disabled, so callers see a consistent error
+    ///   regardless of which guard fires first.
+    ///
+    /// The returned boxed future's type matches the TCP branch's boxed
+    /// future type in [`Self::connect_to`], so the `lazy` closure has a
+    /// single concrete return type without a per-branch cast at the call
+    /// site.
+    #[cfg(feature = "http3")]
+    #[allow(clippy::type_complexity)]
+    fn connect_h3(
+        h3_connector: Option<crate::client::conn::quic::QuicConnector>,
+        pool: pool::Pool<PoolClient<B>, ConnectIdentity>,
+        req: ConnectRequest,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<pool::Pooled<PoolClient<B>, ConnectIdentity>, Error>>
+                + Send
+                + 'static,
+        >,
+    > {
+        match h3_connector {
+            Some(h3_connector) => Box::pin(async move {
+                // Acquire the pool's "connecting" lock for Ver::Http3.
+                // The pool's `connecting` method dedups concurrent connect
+                // attempts for HTTP/2 and HTTP/3 (C-05).
+                let connecting = match pool.connecting(req.identify(), Ver::Http3) {
+                    Some(lock) => lock,
+                    None => {
+                        return Err(Error::new_kind(ErrorKind::Canceled));
+                    }
+                };
+                // Drive the QuicConnector to obtain an H3Connection.
+                // `Oneshot::new` consumes the connector and request and
+                // resolves to `Result<H3Connection, H3Error>`.
+                let h3_conn = Oneshot::new(h3_connector, req)
+                    .await
+                    .map_err(|src| Error::new(ErrorKind::Connect, src))?;
+                // Wrap in a PoolClient and insert into the pool.
+                // `Connected::new()` is sufficient for h3 — the response
+                // version is set by h3 itself (HTTP_3), not derived from
+                // `Connected::alpn` (which has no H3 variant).
+                Ok(pool.pooled(
+                    connecting,
+                    PoolClient {
+                        conn_info: Connected::new(),
+                        tx: PoolTx::Http3(h3_conn),
+                        _marker: std::marker::PhantomData,
+                    },
+                ))
+            }),
+            None => Box::pin(futures_util::future::err(Error::new(
+                ErrorKind::UserUnsupportedVersion,
+                "HTTP/3 requested but no QuicConnector wired in",
+            ))),
+        }
+    }
+}
+
+// ===== Alt-Svc cache accessors =====
+
+impl<C, B> HttpClient<C, B> {
+    /// Returns a reference to the [`AltSvcCache`].
+    #[cfg(feature = "http3")]
+    pub(crate) fn alt_svc_cache(&self) -> &Arc<AltSvcCache> {
+        &self.alt_svc_cache
+    }
+
+    /// Test helper: checks whether the Alt-Svc cache has a non-expired
+    /// entry for the given authority `(host, port)`.
+    ///
+    /// `#[doc(hidden)]` — exposed for integration tests only
+    /// (`crates/hpx/tests/http3.rs`). Not part of the stable public API.
+    #[cfg(feature = "http3")]
+    #[doc(hidden)]
+    pub async fn __test_alt_svc_cache_has_entry(&self, host: &str, port: u16) -> bool {
+        self.alt_svc_cache
+            .get(&(host.to_string(), port))
+            .await
+            .is_some()
+    }
+
+    /// Test helper: checks whether the H3 failure tracker has blocked
+    /// the given authority `(host, port)`.
+    ///
+    /// `#[doc(hidden)]` — exposed for integration tests only
+    /// (`crates/hpx/tests/http3.rs`). Not part of the stable public API.
+    #[cfg(feature = "http3")]
+    #[doc(hidden)]
+    pub async fn __test_h3_failure_tracker_is_blocked(&self, host: &str, port: u16) -> bool {
+        self.h3_failure_tracker
+            .is_blocked(&(host.to_string(), port))
+            .await
     }
 }
 
@@ -662,7 +1022,7 @@ where
     C::Error: Into<BoxError>,
     C::Future: Unpin + Send + 'static,
     B: Body + Send + 'static + Unpin,
-    B::Data: Send,
+    B::Data: Send + Into<Bytes>,
     B::Error: Into<BoxError>,
 {
     type Response = Response<Incoming>;
@@ -685,7 +1045,7 @@ where
     C::Error: Into<BoxError>,
     C::Future: Unpin + Send + 'static,
     B: Body + Send + 'static + Unpin,
-    B::Data: Send,
+    B::Data: Send + Into<Bytes>,
     B::Error: Into<BoxError>,
 {
     type Response = Response<Incoming>;
@@ -711,6 +1071,12 @@ impl<C: Clone, B> Clone for HttpClient<C, B> {
             #[cfg(feature = "http2")]
             h2_builder: self.h2_builder.clone(),
             connector: self.connector.clone(),
+            #[cfg(feature = "http3")]
+            h3_connector: self.h3_connector.clone(),
+            #[cfg(feature = "http3")]
+            alt_svc_cache: self.alt_svc_cache.clone(),
+            #[cfg(feature = "http3")]
+            h3_failure_tracker: self.h3_failure_tracker.clone(),
             pool: self.pool.clone(),
         }
     }
@@ -728,6 +1094,15 @@ enum PoolTx<B> {
     Http1(conn::http1::SendRequest<B>),
     #[cfg(feature = "http2")]
     Http2(conn::http2::SendRequest<B>),
+    /// HTTP/3 connection carrier. Gated on the `http3` Cargo feature per [C-01].
+    /// Uses `Shared` reservation semantics (one connection per authority serves
+    /// many streams), mirroring `Http2` (C-05). `H3Connection` does not carry
+    /// the `B` type parameter (it uses `Bytes` internally via
+    /// `h3::client::SendRequest<h3_quinn::OpenStreams, Bytes>`); the `B` on
+    /// `PoolTx<B>` is preserved for the `Http1`/`Http2` variants and the
+    /// `None` fallback.
+    #[cfg(feature = "http3")]
+    Http3(H3Connection),
     #[cfg(not(any(feature = "http1", feature = "http2")))]
     None(std::marker::PhantomData<B>),
 }
@@ -742,13 +1117,19 @@ impl<B> PoolClient<B> {
             PoolTx::Http1(ref mut tx) => tx.poll_ready(cx).map_err(Error::closed),
             #[cfg(feature = "http2")]
             PoolTx::Http2(_) => Poll::Ready(Ok(())),
+            // HTTP/3 connections are always ready: `H3Connection::send_request`
+            // is `Clone` and multiplexes streams over a single QUIC connection
+            // (no per-stream readiness gate). Pool validity is checked via
+            // `is_open` -> `H3Connection::is_valid`.
+            #[cfg(feature = "http3")]
+            PoolTx::Http3(_) => Poll::Ready(Ok(())),
             #[cfg(not(any(feature = "http1", feature = "http2")))]
             PoolTx::None(_) => Poll::Ready(Ok(())),
         }
     }
 
     fn is_http1(&self) -> bool {
-        !self.is_http2()
+        !self.is_http2() && !self.is_http3()
     }
 
     fn is_http2(&self) -> bool {
@@ -757,6 +1138,24 @@ impl<B> PoolClient<B> {
             PoolTx::Http1(_) => false,
             #[cfg(feature = "http2")]
             PoolTx::Http2(_) => true,
+            #[cfg(feature = "http3")]
+            PoolTx::Http3(_) => false,
+            #[cfg(not(any(feature = "http1", feature = "http2")))]
+            PoolTx::None(_) => false,
+        }
+    }
+
+    /// Returns `true` if this pooled connection is an HTTP/3 (QUIC) connection.
+    /// Mirrors `is_http2()`; used by `can_share()` to apply `Shared` reservation
+    /// semantics for both HTTP/2 and HTTP/3 (C-05).
+    fn is_http3(&self) -> bool {
+        match self.tx {
+            #[cfg(feature = "http1")]
+            PoolTx::Http1(_) => false,
+            #[cfg(feature = "http2")]
+            PoolTx::Http2(_) => false,
+            #[cfg(feature = "http3")]
+            PoolTx::Http3(_) => true,
             #[cfg(not(any(feature = "http1", feature = "http2")))]
             PoolTx::None(_) => false,
         }
@@ -772,6 +1171,11 @@ impl<B> PoolClient<B> {
             PoolTx::Http1(ref tx) => tx.is_ready(),
             #[cfg(feature = "http2")]
             PoolTx::Http2(ref tx) => tx.is_ready(),
+            // `H3Connection` is always "ready" in the h2 sense: stream
+            // multiplexing means there's no per-connection readiness gate.
+            // Pool validity is checked separately via `is_open`.
+            #[cfg(feature = "http3")]
+            PoolTx::Http3(_) => true,
             #[cfg(not(any(feature = "http1", feature = "http2")))]
             PoolTx::None(_) => true,
         }
@@ -785,39 +1189,157 @@ impl<B: Body + 'static> PoolClient<B> {
         req: Request<B>,
     ) -> impl Future<Output = Result<Response<Incoming>, ConnTrySendError<Request<B>>>>
     where
-        B: Send,
+        B: Send + Unpin,
+        B::Data: Into<Bytes> + Send,
+        B::Error: Into<crate::client::core::BoxError>,
     {
-        match self.tx {
-            #[cfg(feature = "http1")]
-            PoolTx::Http1(ref mut tx) => {
-                #[cfg(feature = "http2")]
-                {
-                    Either::Left(tx.try_send_request(req))
-                }
-                #[cfg(not(feature = "http2"))]
-                {
-                    tx.try_send_request(req)
-                }
-            }
-            #[cfg(feature = "http2")]
-            PoolTx::Http2(ref mut tx) => {
+        // When `http3` is enabled, all match arms must agree on a single
+        // future type. The h1/h2 arms are wrapped in an outer `Either::Left`
+        // (which itself may contain an inner `Either` for the h1/h2 split),
+        // and the h3 arm returns `Either::Right(std::future::ready(Err(...)))`
+        // with a typed error indicating h3 request driving is T1.9 scope.
+        //
+        // When `http3` is disabled, the original h1/h2/`None` matching is
+        // preserved unchanged (no extra `Either` wrapping, no h3 arm).
+        #[cfg(feature = "http3")]
+        {
+            match self.tx {
                 #[cfg(feature = "http1")]
-                {
-                    Either::Right(tx.try_send_request(req))
+                PoolTx::Http1(ref mut tx) => {
+                    #[cfg(feature = "http2")]
+                    {
+                        Either::Left(Either::Left(tx.try_send_request(req)))
+                    }
+                    #[cfg(not(feature = "http2"))]
+                    {
+                        Either::Left(tx.try_send_request(req))
+                    }
                 }
-                #[cfg(not(feature = "http1"))]
-                {
-                    tx.try_send_request(req)
+                #[cfg(feature = "http2")]
+                PoolTx::Http2(ref mut tx) => {
+                    #[cfg(feature = "http1")]
+                    {
+                        Either::Left(Either::Right(tx.try_send_request(req)))
+                    }
+                    #[cfg(not(feature = "http1"))]
+                    {
+                        Either::Left(tx.try_send_request(req))
+                    }
+                }
+                PoolTx::Http3(ref conn) => {
+                    // Clone the `SendRequest` (h3-quinn's `OpenStreams: Clone`)
+                    // and drive the request lifecycle in a boxed future. The
+                    // cast to `Pin<Box<dyn Future<...> + Send>>` unifies the
+                    // h3 branch's future type with the h1/h2 branches' future
+                    // type (`Either::Left(...)`) so the match has a single
+                    // concrete return type.
+                    let mut send_request = conn.send_request.clone();
+                    #[cfg(any(feature = "http1", feature = "http2"))]
+                    {
+                        Either::Right(Box::pin(async move {
+                            crate::client::core::http3::drive_request(&mut send_request, req)
+                                .await
+                                .map_err(|(error, message)| ConnTrySendError { error, message })
+                        })
+                            as Pin<
+                                Box<
+                                    dyn Future<
+                                            Output = Result<
+                                                Response<Incoming>,
+                                                ConnTrySendError<Request<B>>,
+                                            >,
+                                        > + Send,
+                                >,
+                            >)
+                    }
+                    #[cfg(not(any(feature = "http1", feature = "http2")))]
+                    {
+                        Box::pin(async move {
+                            crate::client::core::http3::drive_request(&mut send_request, req)
+                                .await
+                                .map_err(|(error, message)| ConnTrySendError { error, message })
+                        })
+                            as Pin<
+                                Box<
+                                    dyn Future<
+                                            Output = Result<
+                                                Response<Incoming>,
+                                                ConnTrySendError<Request<B>>,
+                                            >,
+                                        > + Send,
+                                >,
+                            >
+                    }
+                }
+                #[cfg(not(any(feature = "http1", feature = "http2")))]
+                PoolTx::None(_) => {
+                    #[cfg(any(feature = "http1", feature = "http2"))]
+                    {
+                        Either::Right(std::future::ready(Err(ConnTrySendError {
+                            error: crate::client::core::Error::new_user_service(Error::new(
+                                ErrorKind::UserUnsupportedVersion,
+                                "No HTTP version enabled",
+                            )),
+                            message: Some(req),
+                        })))
+                    }
+                    #[cfg(not(any(feature = "http1", feature = "http2")))]
+                    {
+                        Box::pin(std::future::ready(Err(ConnTrySendError {
+                            error: crate::client::core::Error::new_user_service(Error::new(
+                                ErrorKind::UserUnsupportedVersion,
+                                "No HTTP version enabled",
+                            )),
+                            message: Some(req),
+                        })))
+                            as Pin<
+                                Box<
+                                    dyn Future<
+                                            Output = Result<
+                                                Response<Incoming>,
+                                                ConnTrySendError<Request<B>>,
+                                            >,
+                                        > + Send,
+                                >,
+                            >
+                    }
                 }
             }
-            #[cfg(not(any(feature = "http1", feature = "http2")))]
-            PoolTx::None(_) => std::future::ready(Err(ConnTrySendError {
-                error: crate::client::core::Error::new_user_service(Error::new(
-                    ErrorKind::UserUnsupportedVersion,
-                    "No HTTP version enabled",
-                )),
-                message: Some(req),
-            })),
+        }
+        #[cfg(not(feature = "http3"))]
+        {
+            match self.tx {
+                #[cfg(feature = "http1")]
+                PoolTx::Http1(ref mut tx) => {
+                    #[cfg(feature = "http2")]
+                    {
+                        Either::Left(tx.try_send_request(req))
+                    }
+                    #[cfg(not(feature = "http2"))]
+                    {
+                        tx.try_send_request(req)
+                    }
+                }
+                #[cfg(feature = "http2")]
+                PoolTx::Http2(ref mut tx) => {
+                    #[cfg(feature = "http1")]
+                    {
+                        Either::Right(tx.try_send_request(req))
+                    }
+                    #[cfg(not(feature = "http1"))]
+                    {
+                        tx.try_send_request(req)
+                    }
+                }
+                #[cfg(not(any(feature = "http1", feature = "http2")))]
+                PoolTx::None(_) => std::future::ready(Err(ConnTrySendError {
+                    error: crate::client::core::Error::new_user_service(Error::new(
+                        ErrorKind::UserUnsupportedVersion,
+                        "No HTTP version enabled",
+                    )),
+                    message: Some(req),
+                })),
+            }
         }
     }
 }
@@ -827,7 +1349,21 @@ where
     B: Send + 'static + Unpin,
 {
     fn is_open(&self) -> bool {
-        !self.is_poisoned() && self.is_ready()
+        if self.is_poisoned() {
+            return false;
+        }
+        // For HTTP/3, delegate to `H3Connection::is_valid` which checks the
+        // `is_broken` flag (set by the driver task when `poll_close` resolves)
+        // and the idle timeout. `Duration::MAX` skips the idle check because
+        // the pool's `Expiration` handles idle eviction separately. For other
+        // variants, fall back to `is_ready()` (existing behavior).
+        #[cfg(feature = "http3")]
+        {
+            if let PoolTx::Http3(ref conn) = self.tx {
+                return conn.is_valid(Duration::MAX);
+            }
+        }
+        self.is_ready()
     }
 
     fn reserve(self) -> pool::Reservation<Self> {
@@ -852,6 +1388,40 @@ where
                 };
                 pool::Reservation::Shared(a, b)
             }
+            // HTTP/3 uses `Shared` reservation semantics (C-05): one QUIC
+            // connection per authority serves many concurrent streams. We
+            // clone the `send_request` (h3-quinn's `OpenStreams: Clone`),
+            // `is_broken` (Arc<AtomicBool>), and `idle_at` (Copy) into a
+            // second `H3Connection`. The original `close_rx` stays with
+            // copy `a` (the pool's retained copy); copy `b` (returned to
+            // the caller) gets a closed dummy channel (sender dropped
+            // immediately). This is correct for T1.7 because `is_valid`
+            // only reads `is_broken`, not `close_rx`; the terminal error
+            // retrieval via `close_rx` is T1.9 scope.
+            #[cfg(feature = "http3")]
+            PoolTx::Http3(conn) => {
+                let b = PoolClient {
+                    conn_info: self.conn_info.clone(),
+                    tx: PoolTx::Http3(H3Connection {
+                        send_request: conn.send_request.clone(),
+                        close_rx: {
+                            let (close_tx, close_rx) = tokio::sync::mpsc::channel(1);
+                            drop(close_tx);
+                            close_rx
+                        },
+                        idle_at: conn.idle_at,
+                        is_broken: conn.is_broken.clone(),
+                        used_0rtt: conn.used_0rtt.clone(),
+                    }),
+                    _marker: std::marker::PhantomData,
+                };
+                let a = PoolClient {
+                    conn_info: self.conn_info,
+                    tx: PoolTx::Http3(conn),
+                    _marker: std::marker::PhantomData,
+                };
+                pool::Reservation::Shared(a, b)
+            }
             #[cfg(not(any(feature = "http1", feature = "http2")))]
             PoolTx::None(_) => pool::Reservation::Unique(PoolClient {
                 conn_info: self.conn_info,
@@ -862,7 +1432,9 @@ where
     }
 
     fn can_share(&self) -> bool {
-        self.is_http2()
+        // HTTP/2 and HTTP/3 both support stream multiplexing over a single
+        // connection, so both use `Shared` reservation semantics (C-05).
+        self.is_http2() || self.is_http3()
     }
 }
 
@@ -905,6 +1477,20 @@ pub struct Builder {
     h1_builder: conn::http1::Builder,
     #[cfg(feature = "http2")]
     h2_builder: conn::http2::Builder<Exec>,
+    /// HTTP/3 (QUIC) connector. `Some` when the caller (typically
+    /// `Client::build` or a test escape hatch) supplied a `QuicConnector`.
+    /// Passed through to `HttpClient` verbatim by `Builder::build`.
+    #[cfg(feature = "http3")]
+    h3_connector: Option<crate::client::conn::quic::QuicConnector>,
+    /// Pre-built Alt-Svc cache. When `Some`, used directly instead of
+    /// creating a new one. Set via `Builder::alt_svc_cache` by
+    /// `ClientBuilder::build` so the cache can be shared with `Client`.
+    #[cfg(feature = "http3")]
+    alt_svc_cache: Option<Arc<AltSvcCache>>,
+    /// Pre-built H3 failure tracker. When `Some`, used directly instead
+    /// of creating a new one with the default 60s cooldown.
+    #[cfg(feature = "http3")]
+    h3_failure_tracker: Option<Arc<H3FailureTracker>>,
     pool_config: pool::Config,
     pool_timer: Option<ArcTimer>,
 }
@@ -930,6 +1516,12 @@ impl Builder {
             h1_builder: conn::http1::Builder::new(),
             #[cfg(feature = "http2")]
             h2_builder: conn::http2::Builder::new(exec),
+            #[cfg(feature = "http3")]
+            h3_connector: None,
+            #[cfg(feature = "http3")]
+            alt_svc_cache: None,
+            #[cfg(feature = "http3")]
+            h3_failure_tracker: None,
             pool_config: pool::Config {
                 idle_timeout: Some(Duration::from_secs(90)),
                 max_idle_per_host: usize::MAX,
@@ -984,6 +1576,27 @@ impl Builder {
     #[inline]
     pub fn http2_only(mut self, val: bool) -> Self {
         self.config.ver = if val { Ver::Http2 } else { Ver::Auto };
+        self
+    }
+
+    /// Set whether the connection **must** use HTTP/3 over QUIC.
+    ///
+    /// When `true`, requests are routed through the configured `QuicConnector`
+    /// (set via [`Builder::h3_connector`]) instead of the TCP connector, and
+    /// `connect_to` takes the `Ver::Http3` branch. When `false`, the version
+    /// falls back to `Ver::Auto` (TCP ALPN-based selection between HTTP/1 and
+    /// HTTP/2).
+    ///
+    /// When `true` but no `QuicConnector` is wired in, h3 requests fail at
+    /// runtime with `ErrorKind::UserUnsupportedVersion` ("HTTP/3 requested
+    /// but no QuicConnector wired in") from the `Ver::Http3` branch of
+    /// `connect_to`.
+    ///
+    /// Default is false.
+    #[cfg(feature = "http3")]
+    #[inline]
+    pub fn http3_only(mut self, val: bool) -> Self {
+        self.config.ver = if val { Ver::Http3 } else { Ver::Auto };
         self
     }
 
@@ -1069,6 +1682,46 @@ impl Builder {
         self
     }
 
+    /// Inject a pre-constructed `QuicConnector` for HTTP/3 (QUIC) requests.
+    ///
+    /// When `Some` and `Ver::Http3` is selected (via `http3_only()` or
+    /// `http3_prior_knowledge()`), `connect_to` routes through this
+    /// connector instead of the TCP connector. When `None`, h3 requests
+    /// fail with `ErrorKind::UserUnsupportedVersion` at the
+    /// `try_send_request` layer.
+    ///
+    /// This is the integration point used by `Client::build` (which
+    /// constructs a `QuicConnector` from `Config::http3_options` /
+    /// `Config::quic_config` when `http_version_pref == Http3`) and by
+    /// the `__test_with_quic_connector` escape hatch on `ClientBuilder`.
+    #[cfg(feature = "http3")]
+    #[inline]
+    pub(crate) fn h3_connector(
+        mut self,
+        connector: crate::client::conn::quic::QuicConnector,
+    ) -> Self {
+        self.h3_connector = Some(connector);
+        self
+    }
+
+    /// Inject a pre-built `Arc<AltSvcCache>` for sharing between
+    /// `HttpClient` and `Client`.
+    #[cfg(feature = "http3")]
+    #[inline]
+    pub(crate) fn alt_svc_cache(mut self, cache: Arc<AltSvcCache>) -> Self {
+        self.alt_svc_cache = Some(cache);
+        self
+    }
+
+    /// Inject a pre-built `Arc<H3FailureTracker>` for sharing between
+    /// `HttpClient` and `Client`.
+    #[cfg(feature = "http3")]
+    #[inline]
+    pub(crate) fn h3_failure_tracker(mut self, tracker: Arc<H3FailureTracker>) -> Self {
+        self.h3_failure_tracker = Some(tracker);
+        self
+    }
+
     /// Combine the configuration of this builder with a connector to create a `HttpClient`.
     pub fn build<C, B>(self, connector: C) -> HttpClient<C, B>
     where
@@ -1089,6 +1742,16 @@ impl Builder {
             h1_builder: self.h1_builder,
             #[cfg(feature = "http2")]
             h2_builder: self.h2_builder,
+            #[cfg(feature = "http3")]
+            h3_connector: self.h3_connector,
+            #[cfg(feature = "http3")]
+            alt_svc_cache: self
+                .alt_svc_cache
+                .unwrap_or_else(|| Arc::new(AltSvcCache::new())),
+            #[cfg(feature = "http3")]
+            h3_failure_tracker: self
+                .h3_failure_tracker
+                .unwrap_or_else(|| Arc::new(H3FailureTracker::new(Duration::from_secs(60)))),
             connector,
             pool: pool::Pool::new(self.pool_config, exec, timer),
         }

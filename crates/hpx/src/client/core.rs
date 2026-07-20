@@ -3,6 +3,7 @@
 mod common;
 mod dispatch;
 mod error;
+pub(crate) use self::error::BoxError;
 mod proto;
 
 pub mod body;
@@ -12,6 +13,8 @@ pub mod ext;
 pub mod http1;
 #[cfg(feature = "http2")]
 pub mod http2;
+#[cfg(feature = "http3")]
+pub mod http3;
 pub mod rt;
 pub mod upgrade;
 

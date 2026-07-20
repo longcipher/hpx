@@ -79,6 +79,10 @@ pub(crate) enum Header {
     Token,
     ContentLengthInvalid,
     TransferEncodingUnexpected,
+    /// Transfer-Encoding and Content-Length both present (RFC 9112 §3.3.3 smuggling rejection)
+    TransferEncodingAndContentLength,
+    /// Duplicate "chunked" in Transfer-Encoding (RFC 9112 §3.3)
+    DuplicateChunkedInTransferEncoding,
 }
 
 #[derive(Debug)]
@@ -138,6 +142,11 @@ impl Error {
     /// Returns true if the connection closed before a message could complete.
     pub fn is_incomplete_message(&self) -> bool {
         matches!(self.inner.kind, Kind::IncompleteMessage)
+    }
+
+    /// Returns true if the error is from reading a body.
+    pub fn is_body(&self) -> bool {
+        matches!(self.inner.kind, Kind::Body)
     }
 
     /// Returns true if the body write was aborted.
@@ -277,6 +286,12 @@ impl Error {
             Kind::Parse(Parse::Header(Header::TransferEncodingUnexpected)) => {
                 "unexpected transfer-encoding parsed"
             }
+            Kind::Parse(Parse::Header(Header::TransferEncodingAndContentLength)) => {
+                "transfer-encoding and content-length both present (request smuggling rejected)"
+            }
+            Kind::Parse(Parse::Header(Header::DuplicateChunkedInTransferEncoding)) => {
+                "duplicate chunked in transfer-encoding"
+            }
             Kind::Parse(Parse::TooLarge) => "message head is too large",
             Kind::Parse(Parse::Status) => "invalid HTTP status-code parsed",
             Kind::Parse(Parse::Internal) => {
@@ -346,6 +361,14 @@ impl Parse {
 
     pub(crate) fn transfer_encoding_unexpected() -> Self {
         Parse::Header(Header::TransferEncodingUnexpected)
+    }
+
+    pub(crate) fn transfer_encoding_and_content_length() -> Self {
+        Parse::Header(Header::TransferEncodingAndContentLength)
+    }
+
+    pub(crate) fn duplicate_chunked_in_transfer_encoding() -> Self {
+        Parse::Header(Header::DuplicateChunkedInTransferEncoding)
     }
 }
 

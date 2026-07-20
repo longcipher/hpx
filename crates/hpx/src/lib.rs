@@ -365,6 +365,8 @@ use libc as _;
 pub use self::client::http1;
 #[cfg(feature = "http2")]
 pub use self::client::http2;
+#[cfg(feature = "http3")]
+pub use self::client::http3;
 #[cfg(feature = "multipart")]
 pub use self::client::multipart;
 #[cfg(feature = "sse")]
@@ -389,6 +391,11 @@ pub mod tower_compat {
     //! See [`TowerServiceExt`] and [`HpxRequestExt`] for details.
     pub use crate::client::tower_compat::{HpxAdapter, HpxRequestExt, HpxService, TowerServiceExt};
 }
+// Re-export `H3Error` at the crate root for direct access (e.g.
+// `hpx::H3Error`). The canonical definition lives in `crate::error`. The
+// `http3` feature gates both the definition and this re-export.
+#[cfg(feature = "http3")]
+pub use crate::error::H3Error;
 
 fn _assert_impls() {
     fn assert_send<T: Send>() {}

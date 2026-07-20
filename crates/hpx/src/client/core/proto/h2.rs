@@ -9,10 +9,6 @@ use std::{
 };
 
 use bytes::{Buf, Bytes};
-use http::{
-    HeaderMap,
-    header::{CONNECTION, HeaderName, TE, TRANSFER_ENCODING, UPGRADE},
-};
 use http_body::Body;
 use http2::{Reason, RecvStream, SendStream};
 use pin_project_lite::pin_project;
@@ -23,56 +19,6 @@ use crate::client::core::{self, Error, error::BoxError, proto::h2::ping::Recorde
 
 /// Default initial stream window size defined in HTTP2 spec.
 pub(crate) const SPEC_WINDOW_SIZE: u32 = 65_535;
-
-// List of connection headers from RFC 9110 Section 7.6.1
-//
-// TE headers are allowed in HTTP/2 requests as long as the value is "trailers", so they're
-// tested separately.
-static CONNECTION_HEADERS: [HeaderName; 4] = [
-    HeaderName::from_static("keep-alive"),
-    HeaderName::from_static("proxy-connection"),
-    TRANSFER_ENCODING,
-    UPGRADE,
-];
-
-fn strip_connection_headers(headers: &mut HeaderMap, is_request: bool) {
-    for header in &CONNECTION_HEADERS {
-        if headers.remove(header).is_some() {
-            warn!("Connection header illegal in HTTP/2: {}", header.as_str());
-        }
-    }
-
-    if is_request {
-        if headers
-            .get(TE)
-            .is_some_and(|te_header| te_header != "trailers")
-        {
-            warn!("TE headers not set to \"trailers\" are illegal in HTTP/2 requests");
-            headers.remove(TE);
-        }
-    } else if headers.remove(TE).is_some() {
-        warn!("TE headers illegal in HTTP/2 responses");
-    }
-
-    if let Some(header) = headers.remove(CONNECTION) {
-        warn!(
-            "Connection header illegal in HTTP/2: {}",
-            CONNECTION.as_str()
-        );
-        let header_contents = header.to_str().unwrap();
-
-        // A `Connection` header may have a comma-separated list of names of other headers that
-        // are meant for only this specific connection.
-        //
-        // Iterate these names and remove them as headers. Connection-specific headers are
-        // forbidden in HTTP2, as that information has been moved into frame types of the h2
-        // protocol.
-        for name in header_contents.split(',') {
-            let name = name.trim();
-            headers.remove(name);
-        }
-    }
-}
 
 // body adapters used by both Client and Server
 

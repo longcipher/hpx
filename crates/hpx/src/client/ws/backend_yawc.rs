@@ -11,7 +11,10 @@ use std::{
 use futures_util::{SinkExt, Stream, StreamExt};
 use http::{HeaderMap, HeaderName, HeaderValue, Uri, Version};
 
-use super::message::{CloseCode, CloseFrame, Message, Utf8Bytes};
+use super::{
+    deflate::{DeflateCodec, WebSocketExtensions},
+    message::{CloseCode, CloseFrame, Message, Utf8Bytes},
+};
 use crate::{EmulationFactory, Error, RequestBuilder, header::OrigHeaderMap, proxy::Proxy};
 
 /// Default maximum WebSocket message size for the yawc backend.
@@ -45,6 +48,9 @@ pub struct WebSocketRequestBuilder {
     proxy: Option<Proxy>,
     unsupported: UnsupportedSettings,
     config: WebSocketConfig,
+    custom_headers: Vec<(String, String)>,
+    /// Whether to request permessage-deflate extension.
+    deflate_request: bool,
 }
 
 impl WebSocketRequestBuilder {
@@ -55,6 +61,8 @@ impl WebSocketRequestBuilder {
             proxy: None,
             unsupported: UnsupportedSettings::default(),
             config: WebSocketConfig::default(),
+            custom_headers: Vec::new(),
+            deflate_request: true,
         }
     }
 
@@ -112,6 +120,15 @@ impl WebSocketRequestBuilder {
     #[inline]
     pub fn auto_pong(mut self, auto_pong: bool) -> Self {
         self.config.auto_pong = auto_pong;
+        self
+    }
+
+    /// Sets whether to request the permessage-deflate (RFC 7692) extension.
+    ///
+    /// Defaults to `true`. Set to `false` to disable compression negotiation.
+    #[inline]
+    pub fn deflate_request(mut self, deflate_request: bool) -> Self {
+        self.deflate_request = deflate_request;
         self
     }
 
@@ -392,6 +409,15 @@ impl WebSocketRequestBuilder {
             http_builder = http_builder.header(name.as_str(), value);
         }
 
+// Add permessage-deflate extension request
+        if self.deflate_request {
+            http_builder = http_builder.header(
+                "Sec-WebSocket-Extensions",
+                "permessage-deflate; client_max_window_bits",
+            );
+        }
+
+        // Configure yawc options
         let mut options = hpx_yawc::Options::default();
         if let Some(max_size) = self.config.max_message_size {
             options = options.with_max_payload_read(max_size);
@@ -435,7 +461,11 @@ impl WebSocketRequestBuilder {
             .await
             .map_err(|e| Error::upgrade(e.to_string()))?;
 
-        Ok(WebSocketResponse { ws: Some(ws) })
+Ok(WebSocketResponse {
+            ws: Some(ws),
+            config: self.config,
+            deflate_request: self.deflate_request,
+        })
     }
 }
 
@@ -445,6 +475,8 @@ impl WebSocketRequestBuilder {
 /// HTTP status, version, or response headers.
 pub struct WebSocketResponse {
     ws: Option<hpx_yawc::TcpWebSocket>,
+    config: WebSocketConfig,
+    deflate_request: bool,
 }
 
 impl fmt::Debug for WebSocketResponse {
@@ -456,19 +488,63 @@ impl fmt::Debug for WebSocketResponse {
 }
 
 impl WebSocketResponse {
+    /// Returns the HTTP version (always HTTP/1.1 for yawc).
+    pub fn version(&self) -> Version {
+        Version::HTTP_11
+    }
+
+    /// Returns the HTTP status (always 101 for a successful connection).
+    pub fn status(&self) -> http::StatusCode {
+        http::StatusCode::SWITCHING_PROTOCOLS
+    }
+
+    /// Returns empty headers (yawc manages response headers internally).
+    pub fn headers(&self) -> &HeaderMap {
+        static EMPTY: LazyLock<HeaderMap> = LazyLock::new(HeaderMap::new);
+        &EMPTY
+    }
+
+    /// Returns the negotiated WebSocket extensions, if any.
+    ///
+    /// Note: The yawc backend manages the handshake internally and does not
+    /// expose response headers. This method returns `None` because we cannot
+    /// inspect the `Sec-WebSocket-Extensions` response header.
+    pub fn extensions(&self) -> Option<WebSocketExtensions> {
+        // yawc manages the handshake internally; we cannot extract the
+        // Sec-WebSocket-Extensions response header. If deflate was requested
+        // and the connection succeeded, assume the server accepted it.
+        if self.deflate_request {
+            Some(WebSocketExtensions::default())
+        } else {
+            None
+        }
+    }
+
     /// Turns the response into a websocket.
     pub async fn into_websocket(mut self) -> Result<WebSocket, Error> {
         let ws = self
             .ws
             .take()
             .ok_or_else(|| Error::upgrade("WebSocket already consumed"))?;
-        Ok(WebSocket { inner: ws })
+
+        let extensions = if self.deflate_request {
+            Some(WebSocketExtensions::default())
+        } else {
+            None
+        };
+
+        Ok(WebSocket {
+            inner: ws,
+            protocol: None,
+            extensions: extensions.clone(),
+            deflate: extensions.as_ref().map(|ext| DeflateCodec::new(ext)),
+        })
     }
 }
 
 /// Convert a yawc Frame to our Message type.
 fn frame_to_message(frame: hpx_yawc::Frame) -> Message {
-    let (opcode, _is_fin, payload) = frame.into_parts();
+    let (opcode, _is_fin, payload) = frame.clone().into_parts();
     match opcode {
         hpx_yawc::OpCode::Text => {
             let s = String::from_utf8_lossy(&payload).to_string();
@@ -511,6 +587,11 @@ fn message_to_frame(msg: Message) -> hpx_yawc::Frame {
 /// A websocket connection using the yawc backend.
 pub struct WebSocket {
     inner: hpx_yawc::TcpWebSocket,
+    protocol: Option<HeaderValue>,
+    /// Negotiated WebSocket extensions (permessage-deflate parameters).
+    pub extensions: Option<WebSocketExtensions>,
+    /// Deflate codec for compressing/decompressing messages.
+    deflate: Option<DeflateCodec>,
 }
 
 impl WebSocket {
@@ -519,16 +600,77 @@ impl WebSocket {
     /// Returns `None` if the stream has closed.
     #[inline]
     pub async fn recv(&mut self) -> Option<Result<Message, Error>> {
-        self.inner
-            .next()
-            .await
-            .map(|frame| Ok(frame_to_message(frame)))
+        match self.inner.next().await {
+            Some(frame) => {
+                let (opcode, _is_fin, payload) = frame.clone().into_parts();
+                // yawc doesn't expose RSV bits, so we assume frames with
+                // deflate extension are compressed. We decompress text and
+                // binary frames.
+                let msg = if let Some(ref mut deflate) = self.deflate {
+                    match opcode {
+                        hpx_yawc::OpCode::Text | hpx_yawc::OpCode::Binary => {
+                            if !payload.is_empty() {
+                                match deflate.decompress(&payload) {
+                                    Ok(decompressed) => match opcode {
+                                        hpx_yawc::OpCode::Text => {
+                                            let s =
+                                                String::from_utf8_lossy(&decompressed).to_string();
+                                            Message::Text(Utf8Bytes::from(s))
+                                        }
+                                        _ => Message::Binary(decompressed.into()),
+                                    },
+                                    Err(_) => frame_to_message(frame),
+                                }
+                            } else {
+                                frame_to_message(frame)
+                            }
+                        }
+                        _ => frame_to_message(frame),
+                    }
+                } else {
+                    frame_to_message(frame)
+                };
+                Some(Ok(msg))
+            }
+            None => None,
+        }
     }
 
     /// Send a message.
     #[inline]
     pub async fn send(&mut self, msg: Message) -> Result<(), Error> {
-        let frame = message_to_frame(msg);
+        let frame = if let Some(ref mut deflate) = self.deflate {
+            match &msg {
+                Message::Text(text) => {
+                    let payload = text.as_str().as_bytes();
+                    if !payload.is_empty() {
+                        match deflate.compress(payload) {
+                            Ok(compressed) if !compressed.is_empty() => {
+                                hpx_yawc::Frame::binary(bytes::Bytes::from(compressed))
+                            }
+                            _ => message_to_frame(msg),
+                        }
+                    } else {
+                        message_to_frame(msg)
+                    }
+                }
+                Message::Binary(data) => {
+                    if !data.is_empty() {
+                        match deflate.compress(data) {
+                            Ok(compressed) if !compressed.is_empty() => {
+                                hpx_yawc::Frame::binary(bytes::Bytes::from(compressed))
+                            }
+                            _ => message_to_frame(msg),
+                        }
+                    } else {
+                        message_to_frame(msg)
+                    }
+                }
+                _ => message_to_frame(msg),
+            }
+        } else {
+            message_to_frame(msg)
+        };
         self.inner
             .send(frame)
             .await
@@ -554,9 +696,16 @@ impl WebSocket {
     /// Split the WebSocket into a reader and a writer.
     pub fn split(self) -> (WebSocketWrite, WebSocketRead) {
         let (sink, stream) = self.inner.split();
+        let extensions = self.extensions.clone();
         (
-            WebSocketWrite { inner: sink },
-            WebSocketRead { inner: stream },
+            WebSocketWrite {
+                inner: sink,
+                deflate: extensions.as_ref().map(|ext| DeflateCodec::new(ext)),
+            },
+            WebSocketRead {
+                inner: stream,
+                deflate: extensions.as_ref().map(|ext| DeflateCodec::new(ext)),
+            },
         )
     }
 }
@@ -564,6 +713,7 @@ impl WebSocket {
 /// A WebSocket reader using the yawc backend.
 pub struct WebSocketRead {
     inner: futures_util::stream::SplitStream<hpx_yawc::TcpWebSocket>,
+    deflate: Option<DeflateCodec>,
 }
 
 impl Stream for WebSocketRead {
@@ -571,7 +721,7 @@ impl Stream for WebSocketRead {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match Pin::new(&mut self.inner).poll_next(cx) {
-            Poll::Ready(Some(frame)) => Poll::Ready(Some(Ok(frame_to_message(frame)))),
+            Poll::Ready(Some(frame)) => Poll::Ready(Some(Ok(self.decompress_frame(frame)))),
             Poll::Ready(None) => Poll::Ready(None),
             Poll::Pending => Poll::Pending,
         }
@@ -581,22 +731,80 @@ impl Stream for WebSocketRead {
 impl WebSocketRead {
     /// Receive another message.
     pub async fn recv(&mut self) -> Option<Result<Message, Error>> {
-        self.inner
-            .next()
-            .await
-            .map(|frame| Ok(frame_to_message(frame)))
+        match self.inner.next().await {
+            Some(frame) => Some(Ok(self.decompress_frame(frame))),
+            None => None,
+        }
+    }
+
+    fn decompress_frame(&mut self, frame: hpx_yawc::Frame) -> Message {
+        if let Some(ref mut deflate) = self.deflate {
+            let (opcode, _is_fin, payload) = frame.clone().into_parts();
+            match opcode {
+                hpx_yawc::OpCode::Text | hpx_yawc::OpCode::Binary => {
+                    if !payload.is_empty() {
+                        if let Ok(decompressed) = deflate.decompress(&payload) {
+                            return match opcode {
+                                hpx_yawc::OpCode::Text => {
+                                    let s = String::from_utf8_lossy(&decompressed).to_string();
+                                    Message::Text(Utf8Bytes::from(s))
+                                }
+                                _ => Message::Binary(decompressed.into()),
+                            };
+                        }
+                    }
+                    // Fall through to frame_to_message if decompression fails
+                    frame_to_message(frame)
+                }
+                _ => frame_to_message(frame),
+            }
+        } else {
+            frame_to_message(frame)
+        }
     }
 }
 
 /// A WebSocket writer using the yawc backend.
 pub struct WebSocketWrite {
     inner: futures_util::stream::SplitSink<hpx_yawc::TcpWebSocket, hpx_yawc::Frame>,
+    deflate: Option<DeflateCodec>,
 }
 
 impl WebSocketWrite {
     /// Send a message.
     pub async fn send(&mut self, msg: Message) -> Result<(), Error> {
-        let frame = message_to_frame(msg);
+        let frame = if let Some(ref mut deflate) = self.deflate {
+            match &msg {
+                Message::Text(text) => {
+                    let payload = text.as_str().as_bytes();
+                    if !payload.is_empty() {
+                        match deflate.compress(payload) {
+                            Ok(compressed) if !compressed.is_empty() => {
+                                hpx_yawc::Frame::binary(bytes::Bytes::from(compressed))
+                            }
+                            _ => message_to_frame(msg),
+                        }
+                    } else {
+                        message_to_frame(msg)
+                    }
+                }
+                Message::Binary(data) => {
+                    if !data.is_empty() {
+                        match deflate.compress(data) {
+                            Ok(compressed) if !compressed.is_empty() => {
+                                hpx_yawc::Frame::binary(bytes::Bytes::from(compressed))
+                            }
+                            _ => message_to_frame(msg),
+                        }
+                    } else {
+                        message_to_frame(msg)
+                    }
+                }
+                _ => message_to_frame(msg),
+            }
+        } else {
+            message_to_frame(msg)
+        };
         self.inner
             .send(frame)
             .await

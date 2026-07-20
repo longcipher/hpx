@@ -146,9 +146,7 @@ where
     B: Body,
     B::Error: Into<BoxError>,
 {
-    Poll::Ready(
-        ready!(body.poll_frame(cx)).map(|opt| opt.map_err(Error::decode).map_err(Into::into)),
-    )
+    Poll::Ready(ready!(body.poll_frame(cx)).map(|opt| opt.map_err(Error::body).map_err(Into::into)))
 }
 
 // ==== impl TotalTimeoutBody ====

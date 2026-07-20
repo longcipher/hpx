@@ -8,7 +8,7 @@ use std::{
 use bytes::{Buf, Bytes};
 use http::{
     HeaderMap, Method, Version,
-    header::{CONNECTION, HeaderValue, TE},
+    header::{CONNECTION, EXPECT, HeaderValue, TE},
 };
 use http_body::Frame;
 use httparse::ParserConfig;
@@ -151,6 +151,8 @@ where
         debug_assert!(self.can_read_head());
         trace!("Conn::read_head");
 
+        let mut received_continue = false;
+
         let msg = match self.io.parse::<T>(
             cx,
             ParseContext {
@@ -159,14 +161,32 @@ where
                 h1_parser_config: self.state.h1_parser_config.clone(),
                 h1_max_headers: self.state.h1_max_headers,
                 h09_responses: self.state.h09_responses,
+                received_continue: &mut received_continue,
             },
         ) {
             Poll::Ready(Ok(msg)) => msg,
             Poll::Ready(Err(e)) => return self.on_read_head_error(e),
             Poll::Pending => {
+                // If we received a 100 Continue while waiting for one,
+                // transition from WaitingContinue to Body so the body can be sent.
+                if received_continue {
+                    if let Writing::WaitingContinue(encoder) =
+                        std::mem::replace(&mut self.state.writing, Writing::Init)
+                    {
+                        trace!("received 100 Continue, proceeding to send body");
+                        self.state.writing = Writing::Body(encoder);
+                    }
+                }
                 return Poll::Pending;
             }
         };
+
+        // If we're waiting for 100 Continue and got a final response,
+        // don't send the body (per RFC 9110 §10.1.1).
+        if let Writing::WaitingContinue(_) = self.state.writing {
+            debug!("received final response while waiting for 100 Continue, not sending body");
+            self.state.writing = Writing::Closed;
+        }
 
         // Note: don't deconstruct `msg` into local variables, it appears
         // the optimizer doesn't remove the extra copies.
@@ -419,7 +439,9 @@ where
 
         match self.state.writing {
             Writing::Body(..) => return,
-            Writing::Init | Writing::KeepAlive | Writing::Closed => (),
+            Writing::Init | Writing::KeepAlive | Writing::Closed | Writing::WaitingContinue(..) => {
+                ()
+            }
         }
 
         if !self.io.is_read_blocked() {
@@ -463,6 +485,7 @@ where
 
         match self.state.writing {
             Writing::Init => self.io.can_headers_buf(),
+            Writing::WaitingContinue(..) => false,
             _ => false,
         }
     }
@@ -470,8 +493,14 @@ where
     pub(crate) fn can_write_body(&self) -> bool {
         match self.state.writing {
             Writing::Body(..) => true,
-            Writing::Init | Writing::KeepAlive | Writing::Closed => false,
+            Writing::Init | Writing::WaitingContinue(..) | Writing::KeepAlive | Writing::Closed => {
+                false
+            }
         }
+    }
+
+    pub(crate) fn is_waiting_for_continue(&self) -> bool {
+        matches!(self.state.writing, Writing::WaitingContinue(..))
     }
 
     pub(crate) fn can_buffer_body(&self) -> bool {
@@ -480,7 +509,16 @@ where
 
     pub(crate) fn write_head(&mut self, head: MessageHead<T::Outgoing>, body: Option<BodyLength>) {
         if let Some(encoder) = self.encode_head(head, body) {
-            self.state.writing = if !encoder.is_eof() {
+            let has_expect_continue = self.state.cached_headers.as_ref().is_some_and(|headers| {
+                headers
+                    .get(EXPECT)
+                    .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"100-continue"))
+            });
+
+            self.state.writing = if has_expect_continue && !encoder.is_eof() {
+                trace!("Expect: 100-continue, waiting for 100 Continue");
+                Writing::WaitingContinue(encoder)
+            } else if !encoder.is_eof() {
                 Writing::Body(encoder)
             } else if encoder.is_last() {
                 Writing::Closed
@@ -593,6 +631,9 @@ where
                     Writing::KeepAlive
                 }
             }
+            Writing::WaitingContinue(_) => {
+                unreachable!("write_body called while waiting for 100 Continue");
+            }
             _ => unreachable!("write_body invalid state: {:?}", self.state.writing),
         };
 
@@ -618,6 +659,10 @@ where
                     };
                 }
             }
+            Writing::WaitingContinue(_) => {
+                debug!("write_trailers called while waiting for 100 Continue, ignoring");
+                return;
+            }
             _ => unreachable!("write_trailers invalid state: {:?}", self.state.writing),
         }
     }
@@ -636,6 +681,9 @@ where
                     Writing::Closed
                 }
             }
+            Writing::WaitingContinue(_) => {
+                unreachable!("write_body_and_end called while waiting for 100 Continue");
+            }
             _ => unreachable!("write_body invalid state: {:?}", self.state.writing),
         };
 
@@ -647,6 +695,10 @@ where
 
         let encoder = match self.state.writing {
             Writing::Body(ref mut enc) => enc,
+            Writing::WaitingContinue(_) => {
+                debug!("end_body called while waiting for 100 Continue, ignoring");
+                return Ok(());
+            }
             _ => return Ok(()),
         };
 
@@ -812,7 +864,10 @@ enum Reading {
 
 enum Writing {
     Init,
+    /// Actively writing the request body.
     Body(Encoder),
+    /// Waiting for a 100 Continue response before sending the body.
+    WaitingContinue(Encoder),
     KeepAlive,
     Closed,
 }
@@ -845,6 +900,9 @@ impl fmt::Debug for Writing {
         match *self {
             Writing::Init => f.write_str("Init"),
             Writing::Body(ref enc) => f.debug_tuple("Body").field(enc).finish(),
+            Writing::WaitingContinue(ref enc) => {
+                f.debug_tuple("WaitingContinue").field(enc).finish()
+            }
             Writing::KeepAlive => f.write_str("KeepAlive"),
             Writing::Closed => f.write_str("Closed"),
         }

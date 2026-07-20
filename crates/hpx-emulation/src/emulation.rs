@@ -93,7 +93,8 @@ define_enum!(
     with_dispatch,
     Emulation, Chrome143,
 
-    // Chrome versions
+    // Chrome versions (chronological)
+    Chrome96 => ("chrome_96", v96::emulation),
     Chrome100 => ("chrome_100", v100::emulation),
     Chrome101 => ("chrome_101", v101::emulation),
     Chrome104 => ("chrome_104", v104::emulation),
@@ -137,6 +138,7 @@ define_enum!(
     Chrome149 => ("chrome_149", v149::emulation),
 
     // Edge versions
+    Edge96 => ("edge_96", edge96::emulation),
     Edge101 => ("edge_101", edge101::emulation),
     Edge122 => ("edge_122", edge122::emulation),
     Edge127 => ("edge_127", edge127::emulation),
@@ -176,6 +178,7 @@ define_enum!(
     Opera131 => ("opera_131", opera131::emulation),
 
     // Safari versions
+    Safari14 => ("safari_14", safari14::emulation),
     SafariIos17_2 => ("safari_ios_17.2", safari_ios_17_2::emulation),
     SafariIos17_4_1 => ("safari_ios_17.4.1", safari_ios_17_4_1::emulation),
     SafariIos16_5 => ("safari_ios_16.5", safari_ios_16_5::emulation),
@@ -232,6 +235,7 @@ define_enum!(
     SafariIPad26_4 => ("safari_ipad_26.4", safari_ipad_26_4::emulation),
 
     // Firefox versions
+    Firefox88 => ("firefox_88", ff88::emulation),
     Firefox109 => ("firefox_109", ff109::emulation),
     Firefox117 => ("firefox_117", ff117::emulation),
     Firefox128 => ("firefox_128", ff128::emulation),

@@ -42,6 +42,44 @@ macro_rules! mod_generator {
             }
         }
     };
+    // Variant with http3_options
+    ($mod_name:ident, $tls_options:expr, $http2_options:expr, $http3_options:expr, $header_initializer:ident, $ua:expr) => {
+        pub(crate) mod $mod_name {
+            use super::*;
+
+            pub fn emulation(option: EmulationOption) -> Emulation {
+                let default_headers = if !option.skip_headers {
+                    Some($header_initializer($ua))
+                } else {
+                    None
+                };
+
+                build_emulation(option, default_headers)
+            }
+
+            pub fn build_emulation(
+                option: EmulationOption,
+                default_headers: Option<HeaderMap>,
+            ) -> Emulation {
+                let mut builder = Emulation::builder()
+                    .tls_options($tls_options);
+                #[cfg(feature = "http3")]
+                {
+                    builder = builder.http3_options($http3_options);
+                }
+
+                if !option.skip_http2 {
+                    builder = builder.http2_options($http2_options);
+                }
+
+                if let Some(headers) = default_headers {
+                    builder = builder.headers(headers);
+                }
+
+                builder.build()
+            }
+        }
+    };
 
     ($mod_name:ident, $build_emulation:expr, $header_initializer:ident, $ua:expr) => {
         pub(crate) mod $mod_name {
@@ -59,6 +97,22 @@ macro_rules! mod_generator {
         }
     };
 }
+
+mod_generator!(
+    safari14,
+    tls_options!(1, CIPHER_LIST_1),
+    http2_options!(1),
+    hpx::http3::Http3Options {
+        max_idle_timeout: Some(std::time::Duration::from_secs(30)),
+        max_concurrent_bidi_streams: Some(1000),
+        stream_receive_window: Some(4 * 1024 * 1024),
+        qpack_max_table_capacity: Some(0),
+        enable_0rtt: false,
+        ..hpx::http3::Http3Options::default()
+    },
+    header_initializer_for_14,
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Safari/605.1.15"
+);
 
 mod_generator!(
     safari15_3,

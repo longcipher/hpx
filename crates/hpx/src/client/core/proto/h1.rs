@@ -75,6 +75,10 @@ pub(crate) struct ParseContext<'a> {
     h1_parser_config: ParserConfig,
     h1_max_headers: Option<usize>,
     h09_responses: bool,
+    /// Set to true when a 1xx informational response is consumed by the parser.
+    /// Used by the Expect: 100-continue flow to signal that the client should
+    /// proceed with sending the request body.
+    pub(crate) received_continue: &'a mut bool,
 }
 
 /// Passed to Http1Transaction::encode

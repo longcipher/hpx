@@ -10,6 +10,50 @@ use tls::*;
 use super::*;
 
 mod_generator!(
+    v96,
+    tls_options!(1),
+    http2_options!(1),
+    hpx::http3::Http3Options {
+        max_idle_timeout: Some(std::time::Duration::from_secs(30)),
+        max_concurrent_bidi_streams: Some(100),
+        stream_receive_window: Some(8 * 1024 * 1024),
+        qpack_max_table_capacity: Some(4096),
+        qpack_blocked_streams: Some(100),
+        enable_0rtt: false,
+        initial_packet_padding: Some(1200),
+        ..hpx::http3::Http3Options::default()
+    },
+    header_initializer,
+    [
+        (
+            MacOS,
+            r#""Not A;Brand";v="99", "Chromium";v="96", "Google Chrome";v="96""#,
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
+        ),
+        (
+            Linux,
+            r#""Not A;Brand";v="99", "Chromium";v="96", "Google Chrome";v="96""#,
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
+        ),
+        (
+            Android,
+            r#""Not A;Brand";v="99", "Chromium";v="96", "Google Chrome";v="96""#,
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Mobile Safari/537.36"
+        ),
+        (
+            Windows,
+            r#""Not A;Brand";v="99", "Chromium";v="96", "Google Chrome";v="96""#,
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
+        ),
+        (
+            IOS,
+            r#""Not A;Brand";v="99", "Chromium";v="96", "Google Chrome";v="96""#,
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 15_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/96.0.4664.53 Mobile/15E148 Safari/604.1"
+        )
+    ]
+);
+
+mod_generator!(
     v100,
     tls_options!(1),
     http2_options!(1),
@@ -72,6 +116,39 @@ mod_generator!(
             IOS,
             r#""Not A;Brand";v="99", "Chromium";v="101", "Google Chrome";v="101""#,
             "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/101.0.4951.58 Mobile/15E148 Safari/604.1"
+        )
+    ]
+);
+
+mod_generator!(
+    edge96,
+    v96::build_emulation,
+    header_initializer,
+    [
+        (
+            MacOS,
+            r#""Not A;Brand";v="99", "Chromium";v="96", "Microsoft Edge";v="96""#,
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36 Edg/96.0.1054.62"
+        ),
+        (
+            Android,
+            r#""Not A;Brand";v="99", "Chromium";v="96", "Microsoft Edge";v="96""#,
+            "Mozilla/5.0 (Linux; Android 10; ONEPLUS A6003) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36 Edg/96.0.1054.62"
+        ),
+        (
+            Windows,
+            r#""Not A;Brand";v="99", "Chromium";v="96", "Microsoft Edge";v="96""#,
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36 Edg/96.0.1054.62"
+        ),
+        (
+            Linux,
+            r#""Not A;Brand";v="99", "Chromium";v="96", "Microsoft Edge";v="96""#,
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36 Edg/96.0.1054.62"
+        ),
+        (
+            IOS,
+            r#""Not A;Brand";v="99", "Chromium";v="96", "Microsoft Edge";v="96""#,
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 15_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Chrome/96.0.4664.110 Mobile Safari/537.36 Edg/96.0.1054.62"
         )
     ]
 );
@@ -1764,7 +1841,12 @@ mod_generator!(
 
 mod_generator!(
     v143,
-    v132::build_emulation,
+    tls_options!(7, CURVES_3),
+    http2_options!(3),
+    hpx::http3::Http3Options {
+        initial_packet_padding: Some(1200),
+        ..hpx::http3::Http3Options::default()
+    },
     header_initializer_with_zstd_priority,
     [
         (

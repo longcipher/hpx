@@ -8,6 +8,27 @@ mod tls_info;
 mod uds;
 mod verbose;
 
+// HTTP/3 (QUIC) connector. Gated on the `http3` Cargo feature per [C-01].
+//
+// `pub` (not `pub(crate)`) so that integration tests in `crates/hpx/tests/http3.rs`
+// can construct `QuicConnector` and `H3Connection` directly via the
+// `hpx::http3::{QuicConnector, H3Connection}` re-export in `client/core/http3.rs`.
+// The parent `client::conn` module is `#[doc(hidden)] pub mod conn;` so this
+// submodule does not pollute the public API surface.
+#[cfg(feature = "http3")]
+pub mod quic;
+
+// HTTP/3 connection adapter. Re-exports `H3Connection` and ensures it
+// implements the `Connection` trait so the dispatcher can treat it as a
+// first-class connection type alongside Http1 and Http2.
+#[cfg(feature = "http3")]
+pub(crate) mod http3;
+
+// RFC 7838 Alt-Svc header parser. Used by the HTTP/3 connection layer to
+// discover alternative service endpoints.
+#[cfg(feature = "http3")]
+pub(crate) mod alt_svc;
+
 use std::{
     fmt::{self, Debug, Formatter},
     sync::{

@@ -54,6 +54,12 @@ impl<T> Key for T where T: Eq + Hash + Clone + Debug + Unpin + Send + 'static {}
 pub enum Ver {
     Auto,
     Http2,
+    /// HTTP/3 over QUIC. Uses `Shared` reservation semantics (one connection
+    /// per authority serves many streams), mirroring `Ver::Http2` (C-05).
+    /// The actual h3 pool shard (`PoolTx::Http3` + `try_pool` validity check)
+    /// is wired in T1.7; until then, this variant exists so downstream code
+    /// can route on it.
+    Http3,
 }
 
 /// When checking out a pooled connection, it might be that the connection
@@ -196,8 +202,12 @@ impl<T: Poolable, K: Key> Pool<T, K> {
 
     /// Ensure that there is only ever 1 connecting task for HTTP/2
     /// connections. This does nothing for HTTP/1.
+    ///
+    /// For HTTP/3, the same dedup logic applies (C-05): one QUIC connection
+    /// per authority serves many concurrent streams, so we collapse concurrent
+    /// connect attempts into a single in-flight task, mirroring HTTP/2.
     pub fn connecting(&self, key: K, ver: Ver) -> Option<Connecting<T, K>> {
-        if ver == Ver::Http2
+        if (ver == Ver::Http2 || ver == Ver::Http3)
             && let Some(ref enabled) = self.inner
         {
             let (shard, _shard_index) = enabled.shard_for(&key);
@@ -1193,5 +1203,18 @@ mod tests {
         assert!(pool.locked(&key1).idle.get(&key1).is_none());
         assert!(pool.locked(&key2).idle.get(&key2).is_some());
         assert!(pool.locked(&key3).idle.get(&key3).is_some());
+    }
+
+    /// Phase 1 Task 1.2: the `Http3` variant exists on `Ver` and is distinct
+    /// from `Auto` and `Http2`. `Ver::Http3` uses `Shared` reservation
+    /// semantics mirroring `Ver::Http2` (constraint C-05); the actual h3
+    /// pool shard is wired in T1.7. This test only locks in the variant and
+    /// its distinctness from the other `Ver` values.
+    #[test]
+    fn ver_http3_variant_exists() {
+        use super::Ver;
+        let h3 = Ver::Http3;
+        assert_ne!(h3, Ver::Auto);
+        assert_ne!(h3, Ver::Http2);
     }
 }

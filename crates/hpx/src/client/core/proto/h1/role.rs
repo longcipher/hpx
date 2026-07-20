@@ -257,6 +257,9 @@ impl Http1Transaction for Client {
                 }));
             }
 
+            // We consumed a 1xx response, signal that a 100 Continue was received
+            *ctx.received_continue = true;
+
             // Parsing a 1xx response could have consumed the buffer, check if
             // it is empty now...
             if buf.is_empty() {
@@ -360,6 +363,23 @@ impl Client {
         }
 
         if inc.headers.contains_key(header::TRANSFER_ENCODING) {
+            // RFC 9112 §3.3.3: If a message is received with both a
+            // Transfer-Encoding and a Content-Length header field, the
+            // Transfer-Encoding overrides the Content-Length. Such a message
+            // might indicate an attempt to perform request smuggling or
+            // response splitting and ought to be handled as an error.
+            if inc.headers.contains_key(header::CONTENT_LENGTH) {
+                debug!("Transfer-Encoding and Content-Length both present (smuggling rejection)");
+                return Err(Parse::transfer_encoding_and_content_length());
+            }
+
+            // RFC 9112 §3.3: A sender MUST NOT apply the chunked transfer
+            // coding more than once to a message body.
+            if headers::has_duplicate_chunked_transfer_encoding(&inc.headers) {
+                debug!("duplicate chunked in Transfer-Encoding");
+                return Err(Parse::duplicate_chunked_in_transfer_encoding());
+            }
+
             // https://tools.ietf.org/html/rfc7230#section-3.3.3
             // If Transfer-Encoding header is present, and 'chunked' is
             // not the final encoding, and this is a Request, then it is

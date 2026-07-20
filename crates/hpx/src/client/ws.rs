@@ -2,6 +2,7 @@
 //!
 //! This module provides WebSocket support using the hpx-yawc backend.
 
+pub mod deflate;
 #[cfg(feature = "json")]
 mod json;
 pub mod message;

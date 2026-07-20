@@ -4,6 +4,8 @@ use http::{HeaderMap, HeaderValue};
 use super::core::http1::Http1Options;
 #[cfg(feature = "http2")]
 use super::core::http2::Http2Options;
+#[cfg(feature = "http3")]
+use super::core::http3::Http3Options;
 use super::layer::config::TransportOptions;
 use crate::{
     header::{self, OrigHeaderMap},
@@ -84,16 +86,32 @@ pub struct EmulationBuilder {
 
 /// HTTP emulation configuration for mimicking different HTTP clients.
 ///
-/// This struct combines transport-layer options (HTTP/1, HTTP/2, TLS) with
+/// This struct combines transport-layer options (HTTP/1, HTTP/2, HTTP/3, TLS) with
 /// request-level settings (headers, header case preservation) to provide
 /// a complete emulation profile for web browsers, mobile applications,
 /// API clients, and other HTTP implementations.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Emulation {
     headers: HeaderMap,
     orig_headers: OrigHeaderMap,
     transport: TransportOptions,
+    /// HTTP/3 (QUIC) options for browser fingerprint emulation.
+    #[cfg(feature = "http3")]
+    http3_options: Option<Http3Options>,
+}
+
+impl Default for Emulation {
+    #[inline]
+    fn default() -> Self {
+        Emulation {
+            headers: HeaderMap::default(),
+            orig_headers: OrigHeaderMap::default(),
+            transport: TransportOptions::default(),
+            #[cfg(feature = "http3")]
+            http3_options: None,
+        }
+    }
 }
 
 // ==== impl EmulationBuilder ====
@@ -119,6 +137,14 @@ impl EmulationBuilder {
     #[inline]
     pub fn tls_options(mut self, opts: TlsOptions) -> Self {
         *self.emulation.tls_options_mut() = Some(opts);
+        self
+    }
+
+    /// Sets the HTTP/3 options configuration.
+    #[cfg(feature = "http3")]
+    #[inline]
+    pub fn http3_options(mut self, opts: Http3Options) -> Self {
+        self.emulation.http3_options = Some(opts);
         self
     }
 
@@ -184,6 +210,13 @@ impl Emulation {
     #[inline]
     pub fn orig_headers_mut(&mut self) -> &mut OrigHeaderMap {
         &mut self.orig_headers
+    }
+
+    /// Returns a reference to the HTTP/3 options, if set.
+    #[cfg(feature = "http3")]
+    #[inline]
+    pub(crate) fn http3_options(&self) -> Option<&Http3Options> {
+        self.http3_options.as_ref()
     }
 
     /// Decomposes the [`Emulation`] into its components.

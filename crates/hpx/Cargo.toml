@@ -64,10 +64,13 @@ stream = ["tokio/fs", "dep:tokio-util", "dep:sync_wrapper"]
 socks = ["dep:tokio-socks", "hpx-yawc/socks"]
 
 # Enable WebSocket support (defaults to yawc backend).
-ws = ["ws-yawc"]
+ws = ["ws-yawc", "dep:flate2"]
 
 # Enable WebSocket support via yawc backend.
 ws-yawc = ["dep:hpx-yawc", "hpx-yawc/proxy"]
+
+# Enable WebSocket support via fastwebsockets backend.
+ws-fastwebsockets = ["dep:sha1", "dep:fastwebsockets", "dep:flate2"]
 
 # Enable webpki-roots for TLS certificate validation.
 webpki-roots = ["dep:webpki-root-certs"]
@@ -110,11 +113,20 @@ rustls-tls = [
     "dep:sha2",
 ]
 
+# Enable Rustls QUIC support (internal; used by http3).
+# Note: rustls 0.23 exposes the `quic` module behind `std` (no `quic` Cargo feature),
+# and `rustls-tls` already enables `rustls/std`. tokio-rustls 0.26 has no `quic` feature.
+# quinn 0.11 uses rustls's quic module directly. So enabling `rustls-tls` is sufficient.
+rustls-tls-quic = ["rustls-tls"]
+
 # Enable HTTP/1 support.
 http1 = ["dep:httparse", "dep:smallvec", "tracing", "stream"]
 
 # Enable HTTP/2 support.
 http2 = ["dep:http2"]
+
+# Enable HTTP/3 support (opt-in; pulls in quinn + h3 + h3-quinn).
+http3 = ["dep:quinn", "dep:h3", "dep:h3-quinn", "rustls-tls-quic"]
 
 # Enable macros.
 macros = ["tokio/macros"]
@@ -160,6 +172,11 @@ openssl-tls = ["dep:openssl", "dep:tokio-openssl"]
 
 # Enable vendored OpenSSL (static linking).
 openssl-vendored = ["openssl-tls", "openssl/vendored"]
+
+## http3
+quinn = { workspace = true, optional = true, default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+h3 = { workspace = true, optional = true }
+h3-quinn = { workspace = true, optional = true }
 
 ## macOS system proxy
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -273,6 +290,19 @@ tower = { workspace = true, features = ["limit"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 zstd = { workspace = true }
+
+# HTTP/3 test-only dependency (self-signed cert generation for QUIC integration tests).
+rcgen = { workspace = true }
+
+[[test]]
+name = "http3"
+path = "tests/http3.rs"
+required-features = ["http3"]
+
+[[test]]
+name = "http3_integration"
+path = "tests/http3_integration.rs"
+required-features = ["http3"]
 
 [[test]]
 name = "cookie"
@@ -396,6 +426,13 @@ path = "examples/tower_delay.rs"
 name = "tower_jitter_delay"
 path = "examples/tower_jitter_delay.rs"
 
+[[example]]
+name = "h3_simple"
+required-features = ["http3"]
+
+[[example]]
+name = "http3_websocket"
+required-features = ["http3"]
 # Benchmarks
 [[bench]]
 name = "json_parsing"
@@ -413,3 +450,8 @@ harness = false
 [[bench]]
 name = "contention"
 harness = false
+
+[[bench]]
+name = "http3_throughput"
+harness = false
+required-features = ["http3"]

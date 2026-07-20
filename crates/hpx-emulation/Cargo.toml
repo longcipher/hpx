@@ -18,12 +18,15 @@ targets = ["x86_64-unknown-linux-gnu"]
 doctest = false
 
 [features]
-default = ["emulation"]
+default = ["emulation", "http1", "http2"]
 
 emulation = ["dep:typed-builder"]
 emulation-compression = []
 emulation-rand = ["emulation", "dep:strum_macros", "dep:strum", "dep:rand"]
 emulation-serde = ["dep:serde"]
+http1 = ["hpx/http1"]
+http2 = ["hpx/http2"]
+http3 = ["hpx/http3"]
 
 [dependencies]
 hpx = { workspace = true }

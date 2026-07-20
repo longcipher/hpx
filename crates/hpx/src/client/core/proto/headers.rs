@@ -1,7 +1,10 @@
 use bytes::BytesMut;
 use http::{
     HeaderMap, Method,
-    header::{CONTENT_LENGTH, HeaderValue, ValueIter},
+    header::{
+        CONNECTION, CONTENT_LENGTH, HeaderName, HeaderValue, TE, TRANSFER_ENCODING, UPGRADE,
+        ValueIter,
+    },
 };
 
 pub(super) fn connection_keep_alive(value: &HeaderValue) -> bool {
@@ -21,6 +24,56 @@ fn connection_has(value: &HeaderValue, needle: &str) -> bool {
         }
     }
     false
+}
+
+// List of connection headers from RFC 9110 Section 7.6.1
+//
+// TE headers are allowed in HTTP/2 requests as long as the value is "trailers", so they're
+// tested separately.
+static CONNECTION_HEADERS: [HeaderName; 4] = [
+    HeaderName::from_static("keep-alive"),
+    HeaderName::from_static("proxy-connection"),
+    TRANSFER_ENCODING,
+    UPGRADE,
+];
+
+pub(crate) fn strip_connection_headers(headers: &mut HeaderMap, is_request: bool) {
+    for header in &CONNECTION_HEADERS {
+        if headers.remove(header).is_some() {
+            warn!("Connection header illegal in HTTP/2: {}", header.as_str());
+        }
+    }
+
+    if is_request {
+        if headers
+            .get(TE)
+            .is_some_and(|te_header| te_header != "trailers")
+        {
+            warn!("TE headers not set to \"trailers\" are illegal in HTTP/2 requests");
+            headers.remove(TE);
+        }
+    } else if headers.remove(TE).is_some() {
+        warn!("TE headers illegal in HTTP/2 responses");
+    }
+
+    if let Some(header) = headers.remove(CONNECTION) {
+        warn!(
+            "Connection header illegal in HTTP/2: {}",
+            CONNECTION.as_str()
+        );
+        let header_contents = header.to_str().unwrap();
+
+        // A `Connection` header may have a comma-separated list of names of other headers that
+        // are meant for only this specific connection.
+        //
+        // Iterate these names and remove them as headers. Connection-specific headers are
+        // forbidden in HTTP2, as that information has been moved into frame types of the h2
+        // protocol.
+        for name in header_contents.split(',') {
+            let name = name.trim();
+            headers.remove(name);
+        }
+    }
 }
 
 pub(super) fn content_length_parse_all(headers: &HeaderMap) -> Option<u64> {
@@ -78,14 +131,14 @@ fn from_digits(bytes: &[u8]) -> Option<u64> {
     Some(result)
 }
 
-pub(super) fn method_has_defined_payload_semantics(method: &Method) -> bool {
+pub(crate) fn method_has_defined_payload_semantics(method: &Method) -> bool {
     !matches!(
         *method,
         Method::GET | Method::HEAD | Method::DELETE | Method::CONNECT | Method::OPTIONS
     )
 }
 
-pub(super) fn set_content_length_if_missing(headers: &mut HeaderMap, len: u64) {
+pub(crate) fn set_content_length_if_missing(headers: &mut HeaderMap, len: u64) {
     headers
         .entry(CONTENT_LENGTH)
         .or_insert_with(|| HeaderValue::from(len));
@@ -93,6 +146,27 @@ pub(super) fn set_content_length_if_missing(headers: &mut HeaderMap, len: u64) {
 
 pub(super) fn transfer_encoding_is_chunked(headers: &HeaderMap) -> bool {
     is_chunked(headers.get_all(http::header::TRANSFER_ENCODING).into_iter())
+}
+
+/// Check if "chunked" appears more than once in Transfer-Encoding values.
+///
+/// RFC 9112 §3.3: A sender MUST NOT apply the chunked transfer coding more
+/// than once to a message body.
+pub(super) fn has_duplicate_chunked_transfer_encoding(headers: &HeaderMap) -> bool {
+    let mut seen_chunked = false;
+    for value in headers.get_all(http::header::TRANSFER_ENCODING) {
+        if let Ok(s) = value.to_str() {
+            for encoding in s.split(',') {
+                if encoding.trim().eq_ignore_ascii_case("chunked") {
+                    if seen_chunked {
+                        return true;
+                    }
+                    seen_chunked = true;
+                }
+            }
+        }
+    }
+    false
 }
 
 pub(super) fn is_chunked(mut encodings: ValueIter<'_, HeaderValue>) -> bool {

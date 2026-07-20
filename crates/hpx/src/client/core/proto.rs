@@ -6,6 +6,8 @@ mod headers;
 pub(crate) mod h1;
 #[cfg(feature = "http2")]
 pub(crate) mod h2;
+#[cfg(feature = "http3")]
+pub(crate) mod h3;
 
 #[cfg(feature = "http1")]
 pub(crate) use self::h1::{Conn, dispatch};

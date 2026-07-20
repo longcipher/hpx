@@ -2,6 +2,10 @@
 members = ["bin/*", "crates/*"]
 resolver = "3"
 
+# Patch h3 crate to add WebSocket protocol support for RFC 9220
+[patch.crates-io]
+h3 = { path = "crates/h3-local" }
+
 [workspace.package]
 version = "2.5.5"
 edition = "2024"
@@ -196,6 +200,7 @@ ahash = "0.8.12"
 arc-swap = "1.9.2"
 arrayvec = "0.7.8"
 arrow = "59.1.0"
+clap = { version = "4.5.20", features = ["derive"] }
 async-trait = "0.1.80"
 axum = "0.8.9"
 axum-core = "0.5.6"
@@ -317,6 +322,29 @@ windows-registry = "0.6.1"
 winnow = "1.0.4"
 zstd = "0.13.3"
 
+# WASM dependencies
+getrandom = "=0.2"
+js-sys = "0.3.85"
+wasm-bindgen = "0.2.108"
+wasm-bindgen-futures = "0.4.58"
+wasm-bindgen-test = "0.3.58"
+web-sys = { version = "0.3.85", default-features = false }
+
+# Additional async/runtime dependencies
+smol = "2.0.2"
+tokio-stream = { version = "0.1.18", features = ["sync"] }
+
+# TLS dependencies
+futures-rustls = "0.26"
+rustls-native-certs = "0.8"
+
+# HTTP/3 dependencies
+quinn = { version = "0.11", default-features = false }
+h3 = "0.0.8"
+h3-quinn = "0.0.10"
+
+# Test-only dependencies
+rcgen = "0.13"
 [profile.dev]
 opt-level = 1
 debug = 1

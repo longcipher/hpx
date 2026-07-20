@@ -60,6 +60,63 @@ macro_rules! mod_generator {
             }
         }
     };
+    // Variant with http3_options
+    (
+        $mod_name:ident,
+        $tls_options:expr,
+        $http2_options:expr,
+        $http3_options:expr,
+        $header_initializer:ident,
+        [($default_os:ident, $default_ua:tt) $(, ($other_os:ident, $other_ua:tt))*]
+    ) => {
+        pub(crate) mod $mod_name {
+            use super::*;
+
+            pub fn emulation(option: EmulationOption) -> Emulation {
+                let default_headers = if !option.skip_headers {
+                    #[allow(unreachable_patterns)]
+                    let default_headers = match option.emulation_os {
+                        $(
+                            EmulationOS::$other_os => {
+                                $header_initializer($other_ua)
+                            }
+                        ),*
+                        _ => {
+                            $header_initializer($default_ua)
+                        }
+                    };
+
+                    Some(default_headers)
+                } else {
+                    None
+                };
+
+                build_emulation(option, default_headers)
+            }
+
+            pub fn build_emulation(
+                option: EmulationOption,
+                default_headers: Option<HeaderMap>
+            ) -> Emulation {
+                let mut builder = Emulation::builder()
+                    .tls_options($tls_options);
+                #[cfg(feature = "http3")]
+                {
+                    builder = builder.http3_options($http3_options);
+                }
+
+                if !option.skip_http2 {
+                    builder = builder.http2_options($http2_options);
+                }
+
+                if let Some(headers) = default_headers {
+                    builder = builder.headers(headers);
+                }
+
+                builder.build()
+            }
+        }
+    };
     (
         $mod_name:ident,
         $build_emulation:expr,
@@ -93,6 +150,44 @@ macro_rules! mod_generator {
         }
     };
 }
+
+mod_generator!(
+    ff88,
+    tls_options!(2, CIPHER_LIST_1, CURVES_1),
+    http2_options!(1),
+    hpx::http3::Http3Options {
+        max_idle_timeout: Some(std::time::Duration::from_secs(30)),
+        max_concurrent_bidi_streams: Some(100),
+        stream_receive_window: Some(16 * 1024 * 1024),
+        qpack_max_table_capacity: Some(0),
+        enable_0rtt: false,
+        initial_packet_padding: Some(1232),
+        ..hpx::http3::Http3Options::default()
+    },
+    header_initializer,
+    [
+        (
+            Windows,
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:88.0) Gecko/20100101 Firefox/88.0"
+        ),
+        (
+            MacOS,
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:88.0) Gecko/20100101 Firefox/88.0"
+        ),
+        (
+            Android,
+            "Mozilla/5.0 (Android 11; Mobile; rv:88.0) Gecko/88.0 Firefox/88.0"
+        ),
+        (
+            Linux,
+            "Mozilla/5.0 (X11; Linux x86_64; rv:88.0) Gecko/20100101 Firefox/88.0"
+        ),
+        (
+            IOS,
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 14_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/88.0 Mobile/15E148 Safari/605.1.15"
+        )
+    ]
+);
 
 mod_generator!(
     ff109,

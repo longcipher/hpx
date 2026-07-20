@@ -362,6 +362,13 @@ where
                 {
                     debug_assert!(!*clear_body, "opt guard defaults to keeping body");
                     if !self.conn.can_write_body() {
+                        if self.conn.is_waiting_for_continue() {
+                            // Waiting for 100 Continue response before sending body.
+                            // Don't clear the body, just yield and wait for poll_read
+                            // to receive the 100 Continue.
+                            trace!("waiting for 100 Continue before sending body");
+                            return Poll::Pending;
+                        }
                         trace!(
                             "no more write body allowed, user body is_end_stream = {}",
                             body.is_end_stream(),
