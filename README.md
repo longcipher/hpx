@@ -17,8 +17,10 @@ hpx/
 │   ├── hpx-cli/          # CLI binary — HTTP client, scraper, download manager, CDP server
 │   └── hpxless/          # Standalone CDP-compatible headless browser server
 ├── crates/
-│   ├── hpx/              # Core HTTP client library (TLS, HTTP/1+2, pooling, middleware)
-│   ├── hpx-emulation/    # Browser fingerprint profiles (JA3/JA4, HTTP/2 settings)
+│   ├── hpx/              # Core HTTP client library (TLS, HTTP/1+2+3, pooling, middleware)
+│   ├── hpx-h3/           # Vendored hyperium/h3 — HTTP/3 framing (RFC 9114, RFC 9220 WebSocket)
+│   ├── hpx-h3-quinn/     # Vendored hyperium/h3-quinn — QUIC transport for HTTP/3
+│   ├── hpx-emulation/    # Browser fingerprint profiles (JA3/JA4, HTTP/2+3 settings)
 │   ├── hpx-browser/      # Headless browser engine (DOM, CSS, layout, JS, challenge detection)
 │   ├── hpx-dl/           # Segmented download engine (resume, queue, persistence)
 │   ├── hpx-streams/      # Streaming response codecs (JSON/CSV/Protobuf/Arrow)
@@ -32,9 +34,9 @@ hpx/
 
 The foundation crate. Everything else builds on top of this.
 
-**Provides:** `Client`, `ClientBuilder`, `RequestBuilder`, `Response`, `Body`, WebSocket upgrade, cookie store, redirect policy, Tower middleware stack, TLS backends (BoringSSL / OpenSSL / Rustls).
+**Provides:** `Client`, `ClientBuilder`, `RequestBuilder`, `Response`, `Body`, WebSocket upgrade, cookie store, redirect policy, Tower middleware stack, TLS backends (BoringSSL / OpenSSL / Rustls), HTTP/3 via Quinn (optional).
 
-**Use when:** You need to make HTTP requests — GET, POST, JSON APIs, file uploads, WebSocket connections, or reverse proxy traffic.
+**Use when:** You need to make HTTP requests — GET, POST, JSON APIs, file uploads, WebSocket connections, HTTP/3, or reverse proxy traffic.
 
 ```rust
 // Minimal
@@ -48,7 +50,31 @@ let client = hpx::Client::builder()
     .build()?;
 ```
 
-**Key feature flags:** `json`, `ws`, `cookies`, `gzip`/`brotli`/`zstd`, `socks`, `hickory-dns`, `openssl-tls`/`openssl-vendored`, `hft` (preset), `stealth` (preset).
+**Key feature flags:** `json`, `ws`, `cookies`, `gzip`/`brotli`/`zstd`, `socks`, `hickory-dns`, `http3`, `openssl-tls`/`openssl-vendored`, `hft` (preset), `stealth` (preset).
+
+---
+
+### [`hpx-h3`](https://crates.io/crates/hpx-h3) — HTTP/3 Protocol
+
+Vendored fork of [hyperium/h3](https://github.com/hyperium/h3) with RFC 9220 WebSocket-over-HTTP/3 support. Provides the HTTP/3 framing layer (SETTINGS, HEADERS, DATA frames) on top of QUIC.
+
+**Provides:** `h3::client`, `h3::server`, QPACK encoder/decoder, Extended CONNECT (RFC 9220), WebTransport session support.
+
+**Use when:** You need HTTP/3 protocol handling. This is an internal dependency of `hpx` — you typically don't need to depend on it directly.
+
+**Depends on:** `bytes`, `futures-util`, `http`, `tokio`.
+
+---
+
+### [`hpx-h3-quinn`](https://crates.io/crates/hpx-h3-quinn) — QUIC Transport for HTTP/3
+
+Vendored fork of [hyperium/h3-quinn](https://github.com/hyperium/h3-quinn). Bridges the `h3` protocol layer to Quinn's QUIC implementation.
+
+**Provides:** `h3_quinn::Connection`, `h3_quinn::SendRequest` — QUIC transport adapter for HTTP/3.
+
+**Use when:** You need QUIC transport for HTTP/3. This is an internal dependency of `hpx` — you typically don't need to depend on it directly.
+
+**Depends on:** `hpx-h3`, `quinn`, `futures-util`, `bytes`.
 
 ---
 
@@ -191,6 +217,12 @@ hpx -L -T https://httpbin.org/redirect/3
 # WebSocket
 hpx wss://echo.websocket.org
 
+# HTTP/3 (QUIC)
+hpx --http3 https://cloudflare.com
+
+# Prefer HTTP/3 with fallback to HTTP/2
+hpx --prefer-http3 https://cloudflare.com
+
 # Proxy
 hpx --proxy socks5://127.0.0.1:1080 https://api.example.com
 ```
@@ -285,8 +317,13 @@ hpxless (binary)
   └── ecdysis        (graceful shutdown)
 
 hpx (core)
-  ├── hpx-emulation  (optional, via emulation feature)
-  └── hpx-yawc       (optional, via ws feature)
+  ├── hpx-h3          (HTTP/3 framing, optional via http3 feature)
+  ├── hpx-h3-quinn    (QUIC transport, optional via http3 feature)
+  ├── hpx-emulation   (optional, via emulation feature)
+  └── hpx-yawc        (optional, via ws feature)
+
+hpx-h3-quinn
+  └── hpx-h3          (HTTP/3 protocol)
 
 hpx-dl
   └── hpx            (HTTP client for segments)
@@ -298,7 +335,7 @@ hpx-browser
   └── hpx            (network layer)
 ```
 
-**Standalone usage:** Each crate can be used independently. `hpx-yawc` works without `hpx` for raw WebSocket connections. `hpx-dl` can be used with its own `EngineBuilder` without the CLI.
+**Standalone usage:** Each crate can be used independently. `hpx-yawc` works without `hpx` for raw WebSocket connections. `hpx-dl` can be used with its own `EngineBuilder` without the CLI. `hpx-h3` and `hpx-h3-quinn` can be used for custom HTTP/3 server/client implementations.
 
 ## Feature Flags
 
@@ -319,6 +356,7 @@ Default: `boring-tls`, `http1`, `http2`, `stream`, `tracing`.
 | **HTTP** | | |
 | `http1` | **Yes** | HTTP/1.1 support |
 | `http2` | **Yes** | HTTP/2 support |
+| `http3` | No | HTTP/3 support via Quinn + hpx-h3 (QUIC, RFC 9114) |
 | **Content** | | |
 | `json` | No | JSON request/response support |
 | `simd-json` | No | SIMD-accelerated JSON (enables `json`) |
@@ -363,6 +401,9 @@ hpx = { version = "2", features = ["json", "cookies", "gzip"] }
 # WebSocket client
 hpx = { version = "2", features = ["ws"] }
 
+# HTTP/3 client
+hpx = { version = "2", features = ["http3"] }
+
 # High-performance trading
 hpx = { version = "2", default-features = false, features = ["hft"] }
 
@@ -384,7 +425,7 @@ hpx = { version = "2", default-features = false, features = ["openssl-vendored",
 
 ### `hpx-emulation` Features
 
-Default: `emulation`.
+Default: `emulation`, `http1`, `http2`.
 
 | Feature | Default | Description |
 |---------|---------|-------------|
@@ -392,6 +433,9 @@ Default: `emulation`.
 | `emulation-compression` | No | Compression settings for emulation profiles |
 | `emulation-rand` | No | Random emulation profile selection |
 | `emulation-serde` | No | Serde serialization for emulation types |
+| `http1` | **Yes** | Enable HTTP/1.1 for emulation |
+| `http2` | **Yes** | Enable HTTP/2 for emulation |
+| `http3` | No | Enable HTTP/3 for emulation (requires `hpx/http3`) |
 
 ### `hpx-yawc` Features
 
@@ -608,8 +652,28 @@ async fn main() -> hpx::Result<()> {
 }
 ```
 
+### HTTP/3
+
+Requires the `http3` feature. Uses Quinn for QUIC transport with Rustls TLS.
+
+```rust
+#[tokio::main]
+async fn main() -> hpx::Result<()> {
+    let body = hpx::get("https://cloudflare.com")
+        .http3_only()
+        .send()
+        .await?
+        .text()
+        .await?;
+
+    println!("body = {body:?}");
+    Ok(())
+}
+```
+
 ## Performance Optimization Tips
 
+- **`http3`**: HTTP/3 over QUIC — eliminates head-of-line blocking, faster connection establishment (0-RTT), built-in encryption
 - **`simd-json`**: Replaces `serde_json` with SIMD-accelerated JSON parsing
 - **`hickory-dns`**: High-performance async DNS resolver, avoids blocking system calls
 - **`zstd`**: Fastest compression/decompression ratio for most workloads
