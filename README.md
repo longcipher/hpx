@@ -23,7 +23,7 @@ hpx/
 │   ├── hpx-browser/      # Headless browser engine (DOM, CSS, layout, JS, challenge detection)
 │   ├── hpx-dl/           # Segmented download engine (resume, queue, persistence)
 │   ├── hpx-streams/      # Streaming response codecs (JSON/CSV/Protobuf/Arrow)
-│   └── yawc/             # WebSocket client/server (RFC 6455, compression)
+│   └── yawc/             # WebSocket client/server (RFC 6455, compression, WASM)
 └── Justfile              # Task runner (fmt, lint, test, ci)
 ```
 
@@ -33,7 +33,7 @@ hpx/
 
 The foundation crate. Everything else builds on top of this.
 
-**Provides:** `Client`, `ClientBuilder`, `RequestBuilder`, `Response`, `Body`, WebSocket upgrade, cookie store, redirect policy, Tower middleware stack, TLS backends (BoringSSL / OpenSSL / Rustls), HTTP/3 via Quinn (optional).
+**Provides:** `Client`, `ClientBuilder`, `RequestBuilder`, `Response`, `Body`, WebSocket upgrade, cookie store, redirect policy, TLS backends (BoringSSL / OpenSSL / Rustls), HTTP/3 via Quinn (optional), Tower middleware (`delay`, `circuit_breaker`, `hooks`, `recovery`, `typestate`, `auto_header`, `tower_compat`), `ProxyPool` with load-balancing strategies.
 
 **Use when:** You need to make HTTP requests — GET, POST, JSON APIs, file uploads, WebSocket connections, HTTP/3, or reverse proxy traffic.
 
@@ -60,6 +60,8 @@ Vendored fork of [hyperium/h3](https://github.com/hyperium/h3) with RFC 9220 Web
 **Provides:** `h3::client`, `h3::server`, QPACK encoder/decoder, Extended CONNECT (RFC 9220), WebTransport session support.
 
 **Use when:** You need HTTP/3 protocol handling. This is an internal dependency of `hpx` — you typically don't need to depend on it directly.
+
+**Key features:** `quinn` (Quinn QUIC transport backend), `tracing` (tracing support).
 
 **Depends on:** `bytes`, `futures-util`, `http`, `tokio`.
 
@@ -90,7 +92,7 @@ let resp = hpx::get("https://tls.peet.ws/api/all")
 
 A lightweight headless browser built on `hpx`. Parses HTML/CSS, builds a DOM, runs JavaScript (via V8/Deno), detects anti-bot challenges, and renders pages to text/markdown/screenshots.
 
-**Provides:** HTML parser, DOM tree, CSS layout engine (Stylo + Taffy via Blitz), JS runtime (Deno_core), challenge detection (Cloudflare, AWS-WAF, Kasada, PerimeterX, DataDome, hCaptcha, reCAPTCHA), CDP protocol support, parallel scraping, stealth mode, canvas rendering.
+**Provides:** HTML parser, DOM tree, CSS layout engine (Stylo + Taffy via Blitz), JS runtime (Deno_core), challenge detection (Cloudflare, AWS-WAF, Kasada, PerimeterX, DataDome, hCaptcha, reCAPTCHA), CDP protocol support, parallel scraping, stealth mode, canvas rendering, audio fingerprinting.
 
 **Use when:** You need to render JavaScript-heavy pages, bypass anti-bot protections, scrape SPAs, or run a headless browser programmatically.
 
@@ -102,11 +104,29 @@ A lightweight headless browser built on `hpx`. Parses HTML/CSS, builds a DOM, ru
 | `html_parser` | DOM construction (Blitz/html5ever) |
 | `dom` / `layout` | DOM tree + CSS layout (Stylo + Taffy via Blitz) |
 | `js_runtime` | V8-based JavaScript execution (feature `v8`) |
+| `canvas` | Canvas 2D, WebGL, audio fingerprinting (feature `canvas`) |
+| `workers` | Web Workers runtime (feature `workers`, requires `v8`) |
 | `parallel` | Multi-URL concurrent scraping |
-| `stealth` | Anti-fingerprinting patches |
-| `protocol` | CDP (Chrome DevTools Protocol) server |
+| `stealth` | Anti-fingerprinting patches and presets |
+| `protocol` | CDP (Chrome DevTools Protocol) server (feature `cdp`) |
+| `cdp_client` | CDP client for programmatic browser control (feature `cdp-client`) |
+| `chrome` | Chrome browser detection and management (feature `cdp-client`) |
+| `cdp_page` | CDP page interaction API (feature `cdp-client`) |
+| `locator` | Element location strategies (feature `cdp-client`) |
+| `har` | HAR (HTTP Archive) recording (feature `cdp-client`) |
+| `event_loop` | JavaScript event loop management (feature `v8`) |
+| `page` | Page lifecycle management |
+| `host` | Host-side resource management |
+| `iframe` | iframe handling |
+| `markdown` | Page-to-markdown conversion |
+| `net` | Network layer (blocklist, cookies, CSP, headers, robots.txt, SSRF protection) |
+| `pool` | Browser instance pooling |
+| `resource_loader` | Resource loading pipeline |
+| `tls` | TLS fingerprint management |
 
-**Depends on:** `hpx` (network), `deno_core` (JS), `blitz-html`/`blitz-dom` (HTML/CSS), `parley` (text), `image`/`skia-safe` (canvas, optional).
+**Key features:** `v8` (V8/JS runtime), `canvas` (Canvas 2D + WebGL + audio fingerprinting), `workers` (Web Workers), `cdp` (CDP server), `cdp-client` (CDP client), `blocker` (resource blocking).
+
+**Depends on:** `hpx` (network), `deno_core` (JS), `blitz-html`/`blitz-dom` (HTML/CSS), `parley` (text), `image`/`skia-safe` (canvas, optional), `jiff` (time), `winnow` (parsing).
 
 ---
 
@@ -158,9 +178,9 @@ let mut stream = client
 
 ### [`hpx-yawc`](https://crates.io/crates/hpx-yawc) (yawc) — WebSocket
 
-RFC 6455 WebSocket implementation with permessage-deflate compression. Can be used standalone or as the WebSocket backend for `hpx`.
+RFC 6455 WebSocket implementation with permessage-deflate compression. Can be used standalone or as the WebSocket backend for `hpx`. Supports native and WASM targets.
 
-**Provides:** `WebSocket` client/server, frame codec, masking, compression (zlib/deflate), Axum integration, SIMD UTF-8 validation.
+**Provides:** `WebSocket` client/server, frame codec, masking, compression (zlib/deflate), Axum integration, SIMD UTF-8 validation, WASM WebSocket support.
 
 **Use when:** You need a standalone WebSocket client or server, or when you want the `ws` feature in `hpx` (this is the default backend).
 
@@ -171,6 +191,8 @@ use hpx_yawc::WebSocket;
 let mut ws = WebSocket::connect("wss://echo.websocket.org".parse()?).await?;
 ws.send(hpx_yawc::Frame::text("hello")).await?;
 ```
+
+**Key features:** `rustls-ring` (default TLS), `axum` (Axum integration), `proxy` (proxy support), `socks` (SOCKS proxy), `simd` (SIMD UTF-8 validation), `zlib` (native zlib compression backend), `hotpath` (profiling), `smol` (smol async runtime).
 
 **Depends on:** `tokio`, `rustls` (TLS), optional `axum` integration.
 
@@ -204,12 +226,6 @@ hpx -L -T https://httpbin.org/redirect/3
 # WebSocket
 hpx wss://echo.websocket.org
 
-# HTTP/3 (QUIC)
-hpx --http3 https://cloudflare.com
-
-# Prefer HTTP/3 with fallback to HTTP/2
-hpx --prefer-http3 https://cloudflare.com
-
 # Proxy
 hpx --proxy socks5://127.0.0.1:1080 https://api.example.com
 ```
@@ -226,17 +242,29 @@ hpx fetch https://example.com --dump text
 # Dump all links
 hpx fetch https://example.com --dump links
 
+# Dump markdown
+hpx fetch https://example.com --dump markdown
+
+# Dump cookies
+hpx fetch https://example.com --dump cookies
+
 # Wait for a CSS selector
 hpx fetch https://example.com --selector '#content' --wait 10
 
 # Evaluate JS on the page
 hpx fetch https://example.com -e 'document.title'
 
+# Block resource types
+hpx fetch https://example.com --block image --block script
+
 # Scrape multiple URLs in parallel
 hpx scrape https://a.com https://b.com --concurrency 20
 
 # Start a CDP (Chrome DevTools Protocol) server
 hpx serve --port 9222
+
+# CDP server with stealth mode and workers
+hpx serve --port 9222 --stealth --workers 4
 ```
 
 ### Download Manager
@@ -282,6 +310,12 @@ hpxless
 # With stealth mode and custom port
 hpxless --port 9222 --stealth --profile firefox
 
+# With proxy
+hpxless --port 9222 --stealth --proxy socks5://127.0.0.1:1080
+
+# Block URL patterns
+hpxless --port 9222 --block '*.ads.com,tracker.example.com'
+
 # Connect from Puppeteer/Playwright
 # browserWSEndpoint: ws://127.0.0.1:9222
 ```
@@ -293,13 +327,12 @@ See [`bin/hpxless/README.md`](bin/hpxless/README.md) for full documentation.
 ```text
 hpx-cli (binary)
   ├── hpx            (HTTP client)
-  ├── hpx-emulation  (browser profiles)
   ├── hpx-browser    (headless browser, challenge detection)
   ├── hpx-dl         (download engine)
-  └── hpx-streams    (streaming codecs)
+  └── hpx-yawc       (WebSocket, proxy)
 
 hpxless (binary)
-  ├── hpx            (HTTP client)
+  ├── hpx            (HTTP client, stealth, cookies, socks)
   ├── hpx-browser    (headless browser, CDP, V8, stealth)
   └── ecdysis        (graceful shutdown)
 
@@ -318,7 +351,7 @@ hpx-browser
   └── hpx            (network layer)
 ```
 
-**Standalone usage:** Each crate can be used independently. `hpx-yawc` works without `hpx` for raw WebSocket connections. `hpx-dl` can be used with its own `EngineBuilder` without the CLI. `hpx-h3` (with the `quinn` feature) can be used for custom HTTP/3 server/client implementations.
+**Standalone usage:** Each crate can be used independently. `hpx-yawc` works without `hpx` for raw WebSocket connections and supports WASM targets. `hpx-dl` can be used with its own `EngineBuilder` without the CLI. `hpx-h3` (with the `quinn` feature) can be used for custom HTTP/3 server/client implementations.
 
 ## Feature Flags
 
@@ -368,6 +401,8 @@ Default: `boring-tls`, `http1`, `http2`, `stream`, `tracing`.
 | `hotpath` | No | Hotpath profiling instrumentation |
 | **Streaming** | | |
 | `sse` | No | Server-Sent Events support |
+| **Macros** | | |
+| `macros` | No | Tokio macro re-exports |
 | **Presets** | | |
 | `hft` | No | Low-latency: auth, boring-tls, HTTP/1+2, streaming, tracing, Hickory DNS, SIMD JSON, Zstd, yawc WS |
 | `stealth` | No | Browser-like: auth, boring-tls, HTTP/1+2, decompression, cookies, charset, query, streaming, tracing, Hickory DNS, yawc WS |
@@ -652,6 +687,28 @@ async fn main() -> hpx::Result<()> {
     println!("body = {body:?}");
     Ok(())
 }
+```
+
+## Development
+
+```bash
+# Format code
+just format
+
+# Lint (clippy, fmt check, cargo-shear, AGENTS.md version check)
+just lint
+
+# Run tests
+just test
+
+# Run BDD tests
+just bdd
+
+# Run all tests + BDD
+just test-all
+
+# Full CI check (lint + test-all + build-docs)
+just ci
 ```
 
 ## Performance Optimization Tips

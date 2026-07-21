@@ -3,7 +3,7 @@ members = ["bin/*", "crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "2.5.7"
+version = "2.5.8"
 edition = "2024"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license = "Apache-2.0"
@@ -192,15 +192,15 @@ all = "warn"
 
 [workspace.dependencies]
 # local crates
-hpx = { path = "crates/hpx", version = "2.5.7" }
-hpx-browser = { path = "crates/hpx-browser", version = "2.5.7" }
-hpx-cli = { path = "bin/hpx-cli", version = "2.5.7" }
-hpx-dl = { path = "crates/hpx-dl", version = "2.5.7" }
-hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.7" }
-hpx-h3 = { path = "crates/hpx-h3", version = "2.5.7" }
-hpx-streams = { path = "crates/hpx-streams", version = "2.5.7" }
-hpx-yawc = { path = "crates/yawc", version = "2.5.7" }
-hpxless = { path = "bin/hpxless", version = "2.5.7" }
+hpx = { path = "crates/hpx", version = "2.5.8" }
+hpx-browser = { path = "crates/hpx-browser", version = "2.5.8" }
+hpx-cli = { path = "bin/hpx-cli", version = "2.5.8" }
+hpx-dl = { path = "crates/hpx-dl", version = "2.5.8" }
+hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.8" }
+hpx-h3 = { path = "crates/hpx-h3", version = "2.5.8" }
+hpx-streams = { path = "crates/hpx-streams", version = "2.5.8" }
+hpx-yawc = { path = "crates/yawc", version = "2.5.8" }
+hpxless = { path = "bin/hpxless", version = "2.5.8" }
 
 # external crates
 ahash = "0.8.12"
@@ -252,11 +252,11 @@ http2 = "0.5.19"
 httparse = "1.10.1"
 hyper = "1.11.0"
 hyper-util = "0.1.20"
-image = "0.25"
+image = "=0.25.6"
 ipnet = "2.12.0"
 jiff = "0.2.34"
 js-sys = "0.3.103"
-libc = "0.2.187"
+libc = "0.2.188"
 md-5 = "0.11.0"
 memchr = "2.8.3"
 mime = "0.3.17"
