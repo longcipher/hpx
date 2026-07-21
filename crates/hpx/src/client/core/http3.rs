@@ -240,6 +240,169 @@ pub struct Http3Options {
     pub enable_connect_protocol: bool,
 }
 
+impl Http3Options {
+    /// Returns the default options, then applies `f` to mutate them before returning.
+    pub fn customize(f: impl FnOnce(&mut Self)) -> Self {
+        let mut opts = Self::default();
+        f(&mut opts);
+        opts
+    }
+
+    /// Setter for `max_idle_timeout`.
+    #[inline]
+    pub fn with_max_idle_timeout(mut self, v: Option<Duration>) -> Self {
+        self.max_idle_timeout = v;
+        self
+    }
+
+    /// Setter for `stream_receive_window`.
+    #[inline]
+    pub fn with_stream_receive_window(mut self, v: Option<u64>) -> Self {
+        self.stream_receive_window = v;
+        self
+    }
+
+    /// Setter for `conn_receive_window`.
+    #[inline]
+    pub fn with_conn_receive_window(mut self, v: Option<u64>) -> Self {
+        self.conn_receive_window = v;
+        self
+    }
+
+    /// Setter for `send_window`.
+    #[inline]
+    pub fn with_send_window(mut self, v: Option<u64>) -> Self {
+        self.send_window = v;
+        self
+    }
+
+    /// Setter for `congestion_bbr`.
+    #[inline]
+    pub fn with_congestion_bbr(mut self, v: bool) -> Self {
+        self.congestion_bbr = v;
+        self
+    }
+
+    /// Setter for `max_concurrent_bidi_streams`.
+    #[inline]
+    pub fn with_max_concurrent_bidi_streams(mut self, v: Option<u64>) -> Self {
+        self.max_concurrent_bidi_streams = v;
+        self
+    }
+
+    /// Setter for `max_concurrent_uni_streams`.
+    #[inline]
+    pub fn with_max_concurrent_uni_streams(mut self, v: Option<u64>) -> Self {
+        self.max_concurrent_uni_streams = v;
+        self
+    }
+
+    /// Setter for `initial_max_data`.
+    #[inline]
+    pub fn with_initial_max_data(mut self, v: Option<u64>) -> Self {
+        self.initial_max_data = v;
+        self
+    }
+
+    /// Setter for `initial_max_stream_data_bidi_local`.
+    #[inline]
+    pub fn with_initial_max_stream_data_bidi_local(mut self, v: Option<u64>) -> Self {
+        self.initial_max_stream_data_bidi_local = v;
+        self
+    }
+
+    /// Setter for `initial_max_stream_data_bidi_remote`.
+    #[inline]
+    pub fn with_initial_max_stream_data_bidi_remote(mut self, v: Option<u64>) -> Self {
+        self.initial_max_stream_data_bidi_remote = v;
+        self
+    }
+
+    /// Setter for `initial_max_stream_data_uni`.
+    #[inline]
+    pub fn with_initial_max_stream_data_uni(mut self, v: Option<u64>) -> Self {
+        self.initial_max_stream_data_uni = v;
+        self
+    }
+
+    /// Setter for `max_udp_payload_size`.
+    #[inline]
+    pub fn with_max_udp_payload_size(mut self, v: Option<u32>) -> Self {
+        self.max_udp_payload_size = v;
+        self
+    }
+
+    /// Setter for `active_connection_id_limit`.
+    #[inline]
+    pub fn with_active_connection_id_limit(mut self, v: Option<u32>) -> Self {
+        self.active_connection_id_limit = v;
+        self
+    }
+
+    /// Setter for `initial_packet_padding`.
+    #[inline]
+    pub fn with_initial_packet_padding(mut self, v: Option<u16>) -> Self {
+        self.initial_packet_padding = v;
+        self
+    }
+
+    /// Setter for `enable_0rtt`.
+    #[inline]
+    pub fn with_enable_0rtt(mut self, v: bool) -> Self {
+        self.enable_0rtt = v;
+        self
+    }
+
+    /// Setter for `max_field_section_size`.
+    #[inline]
+    pub fn with_max_field_section_size(mut self, v: Option<u64>) -> Self {
+        self.max_field_section_size = v;
+        self
+    }
+
+    /// Setter for `send_grease`.
+    #[inline]
+    pub fn with_send_grease(mut self, v: bool) -> Self {
+        self.send_grease = v;
+        self
+    }
+
+    /// Setter for `qpack_max_table_capacity`.
+    #[inline]
+    pub fn with_qpack_max_table_capacity(mut self, v: Option<u64>) -> Self {
+        self.qpack_max_table_capacity = v;
+        self
+    }
+
+    /// Setter for `qpack_blocked_streams`.
+    #[inline]
+    pub fn with_qpack_blocked_streams(mut self, v: Option<u64>) -> Self {
+        self.qpack_blocked_streams = v;
+        self
+    }
+
+    /// Setter for `experimental_settings`.
+    #[inline]
+    pub fn with_experimental_settings(mut self, v: Vec<(u64, u64)>) -> Self {
+        self.experimental_settings = v;
+        self
+    }
+
+    /// Setter for `settings_order`.
+    #[inline]
+    pub fn with_settings_order(mut self, v: Vec<H3SettingId>) -> Self {
+        self.settings_order = v;
+        self
+    }
+
+    /// Setter for `enable_connect_protocol`.
+    #[inline]
+    pub fn with_enable_connect_protocol(mut self, v: bool) -> Self {
+        self.enable_connect_protocol = v;
+        self
+    }
+}
+
 impl Default for Http3Options {
     /// Returns the Chrome 143 baseline for QUIC transport parameters and h3
     /// SETTINGS. These defaults are chosen to match a modern Chromium client

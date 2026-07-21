@@ -101,14 +101,13 @@ mod_generator!(
     safari14,
     tls_options!(1, CIPHER_LIST_1),
     http2_options!(1),
-    hpx::http3::Http3Options {
-        max_idle_timeout: Some(std::time::Duration::from_secs(30)),
-        max_concurrent_bidi_streams: Some(1000),
-        stream_receive_window: Some(4 * 1024 * 1024),
-        qpack_max_table_capacity: Some(0),
-        enable_0rtt: false,
-        ..hpx::http3::Http3Options::default()
-    },
+    hpx::http3::Http3Options::customize(|opts| {
+        opts.max_idle_timeout = Some(std::time::Duration::from_secs(30));
+        opts.max_concurrent_bidi_streams = Some(1000);
+        opts.stream_receive_window = Some(4 * 1024 * 1024);
+        opts.qpack_max_table_capacity = Some(0);
+        opts.enable_0rtt = false;
+    }),
     header_initializer_for_14,
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Safari/605.1.15"
 );

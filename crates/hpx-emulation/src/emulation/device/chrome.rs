@@ -13,16 +13,15 @@ mod_generator!(
     v96,
     tls_options!(1),
     http2_options!(1),
-    hpx::http3::Http3Options {
-        max_idle_timeout: Some(std::time::Duration::from_secs(30)),
-        max_concurrent_bidi_streams: Some(100),
-        stream_receive_window: Some(8 * 1024 * 1024),
-        qpack_max_table_capacity: Some(4096),
-        qpack_blocked_streams: Some(100),
-        enable_0rtt: false,
-        initial_packet_padding: Some(1200),
-        ..hpx::http3::Http3Options::default()
-    },
+    hpx::http3::Http3Options::customize(|opts| {
+        opts.max_idle_timeout = Some(std::time::Duration::from_secs(30));
+        opts.max_concurrent_bidi_streams = Some(100);
+        opts.stream_receive_window = Some(8 * 1024 * 1024);
+        opts.qpack_max_table_capacity = Some(4096);
+        opts.qpack_blocked_streams = Some(100);
+        opts.enable_0rtt = false;
+        opts.initial_packet_padding = Some(1200);
+    }),
     header_initializer,
     [
         (
@@ -1843,10 +1842,9 @@ mod_generator!(
     v143,
     tls_options!(7, CURVES_3),
     http2_options!(3),
-    hpx::http3::Http3Options {
-        initial_packet_padding: Some(1200),
-        ..hpx::http3::Http3Options::default()
-    },
+    hpx::http3::Http3Options::customize(|opts| {
+        opts.initial_packet_padding = Some(1200);
+    }),
     header_initializer_with_zstd_priority,
     [
         (

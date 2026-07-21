@@ -8,7 +8,14 @@ repository = "https://github.com/longcipher/hpx"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license.workspace = true
 edition.workspace = true
-include = ["README.md", "LICENSE", "src/**/*.rs", "examples/**/*.rs", "tests/**/*.rs"]
+include = [
+    "README.md",
+    "LICENSE",
+    "src/**/*.rs",
+    "src/**/*.dat",
+    "examples/**/*.rs",
+    "tests/**/*.rs",
+]
 
 [package.metadata.docs.rs]
 all-features = true

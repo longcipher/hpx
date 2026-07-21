@@ -155,15 +155,14 @@ mod_generator!(
     ff88,
     tls_options!(2, CIPHER_LIST_1, CURVES_1),
     http2_options!(1),
-    hpx::http3::Http3Options {
-        max_idle_timeout: Some(std::time::Duration::from_secs(30)),
-        max_concurrent_bidi_streams: Some(100),
-        stream_receive_window: Some(16 * 1024 * 1024),
-        qpack_max_table_capacity: Some(0),
-        enable_0rtt: false,
-        initial_packet_padding: Some(1232),
-        ..hpx::http3::Http3Options::default()
-    },
+    hpx::http3::Http3Options::customize(|opts| {
+        opts.max_idle_timeout = Some(std::time::Duration::from_secs(30));
+        opts.max_concurrent_bidi_streams = Some(100);
+        opts.stream_receive_window = Some(16 * 1024 * 1024);
+        opts.qpack_max_table_capacity = Some(0);
+        opts.enable_0rtt = false;
+        opts.initial_packet_padding = Some(1232);
+    }),
     header_initializer,
     [
         (
