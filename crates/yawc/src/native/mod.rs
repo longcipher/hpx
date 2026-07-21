@@ -728,6 +728,9 @@ pub struct WebSocket<S> {
     check_utf8: bool,
     /// Handles fragmentation and defragmentation of frames
     fragment_layer: FragmentLayer,
+    /// Negotiated permessage-deflate extensions from the handshake response.
+    /// `Some` if the server accepted compression, `None` otherwise.
+    negotiated_extensions: Option<WebSocketExtensions>,
 }
 
 impl WebSocket<MaybeTlsStream<TcpStream>> {
@@ -1201,7 +1204,22 @@ where
                 opts.max_read_buffer,
                 opts.fragmentation.as_ref().and_then(|f| f.timeout),
             ),
+            negotiated_extensions: opts.extensions,
         }
+    }
+
+    /// Returns `true` if the server accepted the permessage-deflate compression
+    /// extension during the WebSocket handshake.
+    ///
+    /// When compression is requested via [`Options::compression`], the client sends
+    /// `Sec-WebSocket-Extensions: permessage-deflate` in the handshake request.
+    /// If the server supports and accepts compression, it echoes the header back.
+    /// This method reports the negotiated result.
+    ///
+    /// Returns `false` if compression was not requested or the server did not accept it.
+    #[inline]
+    pub fn compression_accepted(&self) -> bool {
+        self.negotiated_extensions.is_some()
     }
 
     fn on_frame(&mut self, frame: Frame) -> Result<Option<Frame>> {

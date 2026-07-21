@@ -13,7 +13,7 @@ use futures_util::{SinkExt, Stream, StreamExt};
 use http::{HeaderMap, HeaderName, HeaderValue, Uri, Version};
 
 use super::{
-    deflate::{DeflateCodec, WebSocketExtensions},
+    deflate::WebSocketExtensions,
     message::{CloseCode, CloseFrame, Message, Utf8Bytes},
 };
 use crate::{EmulationFactory, Error, RequestBuilder, header::OrigHeaderMap, proxy::Proxy};
@@ -127,10 +127,12 @@ impl WebSocketRequestBuilder {
 
     /// Sets whether to request the permessage-deflate (RFC 7692) extension.
     ///
-    /// Defaults to `false` because the yawc backend cannot verify server acceptance
-    /// of the extension (response headers are not exposed). Set to `true` to opt in,
-    /// but note that deflate I/O will be applied unconditionally after the handshake
-    /// regardless of whether the server actually negotiated it.
+    /// Defaults to `false`. When set to `true`, the client requests compression
+    /// via `Sec-WebSocket-Extensions: permessage-deflate` in the handshake.
+    /// The underlying yawc layer verifies the server's response: if the server
+    /// accepts, compression is applied transparently; if not, the connection
+    /// proceeds uncompressed. Use [`WebSocket::compression_accepted`] or
+    /// [`WebSocketResponse::extensions`] to inspect the negotiated result.
     #[inline]
     pub fn deflate_request(mut self, deflate_request: bool) -> Self {
         self.deflate_request = deflate_request;
@@ -414,18 +416,18 @@ impl WebSocketRequestBuilder {
             http_builder = http_builder.header(name.as_str(), value);
         }
 
-        // Add permessage-deflate extension request
-        if self.deflate_request {
-            http_builder = http_builder.header(
-                "Sec-WebSocket-Extensions",
-                "permessage-deflate; client_max_window_bits",
-            );
-        }
-
         // Configure yawc options
         let mut options = hpx_yawc::Options::default();
         if let Some(max_size) = self.config.max_message_size {
             options = options.with_max_payload_read(max_size);
+        }
+
+        // Configure compression through yawc's native negotiation.
+        // yawc will add the Sec-WebSocket-Extensions header and verify the
+        // server's response. If the server doesn't accept compression, yawc
+        // silently disables it — safe, no connection breakage.
+        if self.deflate_request {
+            options = options.with_balanced_compression();
         }
 
         let mut ws_builder = hpx_yawc::WebSocket::connect(url)
@@ -463,10 +465,12 @@ impl WebSocketRequestBuilder {
             .await
             .map_err(|e| Error::upgrade(e.to_string()))?;
 
+        let compression_accepted = ws.compression_accepted();
+
         Ok(WebSocketResponse {
             ws: Some(ws),
             config: self.config,
-            deflate_request: self.deflate_request,
+            compression_accepted,
         })
     }
 }
@@ -475,11 +479,17 @@ impl WebSocketRequestBuilder {
 ///
 /// The yawc backend does not expose handshake metadata such as the negotiated
 /// HTTP status, version, or response headers.
+///
+/// Compression (permessage-deflate) is handled internally by yawc when
+/// [`WebSocketRequestBuilder::deflate_request`] is enabled. If the server
+/// accepts the extension, yawc applies compression transparently; if not,
+/// the connection proceeds uncompressed.
 pub struct WebSocketResponse {
     ws: Option<hpx_yawc::TcpWebSocket>,
     #[allow(dead_code)]
     config: WebSocketConfig,
-    deflate_request: bool,
+    /// Whether the server accepted permessage-deflate compression.
+    compression_accepted: bool,
 }
 
 impl fmt::Debug for WebSocketResponse {
@@ -507,16 +517,21 @@ impl WebSocketResponse {
         &EMPTY
     }
 
+    /// Returns `true` if the server accepted permessage-deflate compression.
+    #[inline]
+    pub fn compression_accepted(&self) -> bool {
+        self.compression_accepted
+    }
+
     /// Returns the negotiated WebSocket extensions, if any.
     ///
-    /// Note: The yawc backend manages the handshake internally and does not
-    /// expose response headers. This method returns `None` because we cannot
-    /// inspect the `Sec-WebSocket-Extensions` response header.
+    /// Returns `Some` if the server accepted the permessage-deflate extension
+    /// during the handshake. The yawc backend handles compression internally,
+    /// so the returned extensions contain default parameters indicating
+    /// compression is active. Use [`Self::compression_accepted`] for a
+    /// simple boolean check.
     pub fn extensions(&self) -> Option<WebSocketExtensions> {
-        // yawc manages the handshake internally; we cannot extract the
-        // Sec-WebSocket-Extensions response header. If deflate was requested
-        // and the connection succeeded, assume the server accepted it.
-        if self.deflate_request {
+        if self.compression_accepted {
             Some(WebSocketExtensions::default())
         } else {
             None
@@ -530,17 +545,10 @@ impl WebSocketResponse {
             .take()
             .ok_or_else(|| Error::upgrade("WebSocket already consumed"))?;
 
-        let extensions = if self.deflate_request {
-            Some(WebSocketExtensions::default())
-        } else {
-            None
-        };
-
         Ok(WebSocket {
             inner: ws,
             protocol: None,
-            extensions: extensions.clone(),
-            deflate: extensions.as_ref().map(DeflateCodec::new),
+            compression_accepted: self.compression_accepted,
         })
     }
 }
@@ -588,93 +596,45 @@ fn message_to_frame(msg: Message) -> hpx_yawc::Frame {
 }
 
 /// A websocket connection using the yawc backend.
+///
+/// Compression (permessage-deflate) is handled transparently by the underlying
+/// yawc layer when negotiated with the server.
 pub struct WebSocket {
     inner: hpx_yawc::TcpWebSocket,
     #[allow(dead_code)]
     protocol: Option<HeaderValue>,
-    /// Negotiated WebSocket extensions (permessage-deflate parameters).
-    pub extensions: Option<WebSocketExtensions>,
-    /// Deflate codec for compressing/decompressing messages.
-    deflate: Option<DeflateCodec>,
+    /// Whether the server accepted permessage-deflate compression.
+    compression_accepted: bool,
 }
 
 impl WebSocket {
+    /// Returns `true` if the server accepted permessage-deflate compression
+    /// during the WebSocket handshake.
+    ///
+    /// When [`WebSocketRequestBuilder::deflate_request`] is enabled, the client
+    /// requests compression. This method reports whether the server actually
+    /// agreed to it. Compression is then handled transparently by the underlying
+    /// yawc layer.
+    #[inline]
+    pub fn compression_accepted(&self) -> bool {
+        self.compression_accepted
+    }
+
     /// Receive another message.
     ///
     /// Returns `None` if the stream has closed.
     #[inline]
     pub async fn recv(&mut self) -> Option<Result<Message, Error>> {
-        match self.inner.next().await {
-            Some(frame) => {
-                let (opcode, _is_fin, payload) = frame.clone().into_parts();
-                // yawc doesn't expose RSV bits, so we assume frames with
-                // deflate extension are compressed. We decompress text and
-                // binary frames.
-                let msg = if let Some(ref mut deflate) = self.deflate {
-                    match opcode {
-                        hpx_yawc::OpCode::Text | hpx_yawc::OpCode::Binary => {
-                            if !payload.is_empty() {
-                                match deflate.decompress(&payload) {
-                                    Ok(decompressed) => match opcode {
-                                        hpx_yawc::OpCode::Text => {
-                                            let s =
-                                                String::from_utf8_lossy(&decompressed).to_string();
-                                            Message::Text(Utf8Bytes::from(s))
-                                        }
-                                        _ => Message::Binary(decompressed.into()),
-                                    },
-                                    Err(_) => frame_to_message(frame),
-                                }
-                            } else {
-                                frame_to_message(frame)
-                            }
-                        }
-                        _ => frame_to_message(frame),
-                    }
-                } else {
-                    frame_to_message(frame)
-                };
-                Some(Ok(msg))
-            }
-            None => None,
-        }
+        self.inner
+            .next()
+            .await
+            .map(|frame| Ok(frame_to_message(frame)))
     }
 
     /// Send a message.
     #[inline]
     pub async fn send(&mut self, msg: Message) -> Result<(), Error> {
-        let frame = if let Some(ref mut deflate) = self.deflate {
-            match &msg {
-                Message::Text(text) => {
-                    let payload = text.as_str().as_bytes();
-                    if !payload.is_empty() {
-                        match deflate.compress(payload) {
-                            Ok(compressed) if !compressed.is_empty() => {
-                                hpx_yawc::Frame::binary(bytes::Bytes::from(compressed))
-                            }
-                            _ => message_to_frame(msg),
-                        }
-                    } else {
-                        message_to_frame(msg)
-                    }
-                }
-                Message::Binary(data) => {
-                    if !data.is_empty() {
-                        match deflate.compress(data) {
-                            Ok(compressed) if !compressed.is_empty() => {
-                                hpx_yawc::Frame::binary(bytes::Bytes::from(compressed))
-                            }
-                            _ => message_to_frame(msg),
-                        }
-                    } else {
-                        message_to_frame(msg)
-                    }
-                }
-                _ => message_to_frame(msg),
-            }
-        } else {
-            message_to_frame(msg)
-        };
+        let frame = message_to_frame(msg);
         self.inner
             .send(frame)
             .await
@@ -700,15 +660,14 @@ impl WebSocket {
     /// Split the WebSocket into a reader and a writer.
     pub fn split(self) -> (WebSocketWrite, WebSocketRead) {
         let (sink, stream) = self.inner.split();
-        let extensions = self.extensions.clone();
         (
             WebSocketWrite {
                 inner: sink,
-                deflate: extensions.as_ref().map(DeflateCodec::new),
+                compression_accepted: self.compression_accepted,
             },
             WebSocketRead {
                 inner: stream,
-                deflate: extensions.as_ref().map(DeflateCodec::new),
+                compression_accepted: self.compression_accepted,
             },
         )
     }
@@ -717,7 +676,8 @@ impl WebSocket {
 /// A WebSocket reader using the yawc backend.
 pub struct WebSocketRead {
     inner: futures_util::stream::SplitStream<hpx_yawc::TcpWebSocket>,
-    deflate: Option<DeflateCodec>,
+    /// Whether the server accepted permessage-deflate compression.
+    compression_accepted: bool,
 }
 
 impl Stream for WebSocketRead {
@@ -725,7 +685,7 @@ impl Stream for WebSocketRead {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match Pin::new(&mut self.inner).poll_next(cx) {
-            Poll::Ready(Some(frame)) => Poll::Ready(Some(Ok(self.decompress_frame(frame)))),
+            Poll::Ready(Some(frame)) => Poll::Ready(Some(Ok(frame_to_message(frame)))),
             Poll::Ready(None) => Poll::Ready(None),
             Poll::Pending => Poll::Pending,
         }
@@ -733,82 +693,38 @@ impl Stream for WebSocketRead {
 }
 
 impl WebSocketRead {
+    /// Returns `true` if the server accepted permessage-deflate compression.
+    #[inline]
+    pub fn compression_accepted(&self) -> bool {
+        self.compression_accepted
+    }
+
     /// Receive another message.
     pub async fn recv(&mut self) -> Option<Result<Message, Error>> {
         self.inner
             .next()
             .await
-            .map(|frame| Ok(self.decompress_frame(frame)))
-    }
-
-    fn decompress_frame(&mut self, frame: hpx_yawc::Frame) -> Message {
-        if let Some(ref mut deflate) = self.deflate {
-            let (opcode, _is_fin, payload) = frame.clone().into_parts();
-            match opcode {
-                hpx_yawc::OpCode::Text | hpx_yawc::OpCode::Binary => {
-                    if !payload.is_empty()
-                        && let Ok(decompressed) = deflate.decompress(&payload)
-                    {
-                        return match opcode {
-                            hpx_yawc::OpCode::Text => {
-                                let s = String::from_utf8_lossy(&decompressed).to_string();
-                                Message::Text(Utf8Bytes::from(s))
-                            }
-                            _ => Message::Binary(decompressed.into()),
-                        };
-                    }
-                    // Fall through to frame_to_message if decompression fails
-                    frame_to_message(frame)
-                }
-                _ => frame_to_message(frame),
-            }
-        } else {
-            frame_to_message(frame)
-        }
+            .map(|frame| Ok(frame_to_message(frame)))
     }
 }
 
 /// A WebSocket writer using the yawc backend.
 pub struct WebSocketWrite {
     inner: futures_util::stream::SplitSink<hpx_yawc::TcpWebSocket, hpx_yawc::Frame>,
-    deflate: Option<DeflateCodec>,
+    /// Whether the server accepted permessage-deflate compression.
+    compression_accepted: bool,
 }
 
 impl WebSocketWrite {
+    /// Returns `true` if the server accepted permessage-deflate compression.
+    #[inline]
+    pub fn compression_accepted(&self) -> bool {
+        self.compression_accepted
+    }
+
     /// Send a message.
     pub async fn send(&mut self, msg: Message) -> Result<(), Error> {
-        let frame = if let Some(ref mut deflate) = self.deflate {
-            match &msg {
-                Message::Text(text) => {
-                    let payload = text.as_str().as_bytes();
-                    if !payload.is_empty() {
-                        match deflate.compress(payload) {
-                            Ok(compressed) if !compressed.is_empty() => {
-                                hpx_yawc::Frame::binary(bytes::Bytes::from(compressed))
-                            }
-                            _ => message_to_frame(msg),
-                        }
-                    } else {
-                        message_to_frame(msg)
-                    }
-                }
-                Message::Binary(data) => {
-                    if !data.is_empty() {
-                        match deflate.compress(data) {
-                            Ok(compressed) if !compressed.is_empty() => {
-                                hpx_yawc::Frame::binary(bytes::Bytes::from(compressed))
-                            }
-                            _ => message_to_frame(msg),
-                        }
-                    } else {
-                        message_to_frame(msg)
-                    }
-                }
-                _ => message_to_frame(msg),
-            }
-        } else {
-            message_to_frame(msg)
-        };
+        let frame = message_to_frame(msg);
         self.inner
             .send(frame)
             .await
