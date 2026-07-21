@@ -27,7 +27,7 @@ workers = ["v8"]
 [dependencies]
 async-trait = { workspace = true }
 base64 = { workspace = true }
-blitz-dom = { workspace = true }
+blitz-dom = { workspace = true, features = ["floats"] }
 blitz-html = { workspace = true }
 blitz-traits = { workspace = true }
 chrono = { workspace = true }

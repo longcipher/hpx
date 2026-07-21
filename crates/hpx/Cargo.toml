@@ -69,9 +69,6 @@ ws = ["ws-yawc", "dep:flate2"]
 # Enable WebSocket support via yawc backend.
 ws-yawc = ["dep:hpx-yawc", "hpx-yawc/proxy"]
 
-# Enable WebSocket support via fastwebsockets backend.
-ws-fastwebsockets = ["dep:sha1", "dep:fastwebsockets", "dep:flate2"]
-
 # Enable webpki-roots for TLS certificate validation.
 webpki-roots = ["dep:webpki-root-certs"]
 
@@ -125,8 +122,8 @@ http1 = ["dep:httparse", "dep:smallvec", "tracing", "stream"]
 # Enable HTTP/2 support.
 http2 = ["dep:http2"]
 
-# Enable HTTP/3 support (opt-in; pulls in quinn + h3 + h3-quinn).
-http3 = ["dep:quinn", "dep:h3", "dep:h3-quinn", "rustls-tls-quic"]
+# Enable HTTP/3 support (opt-in; pulls in quinn + hpx-h3 + hpx-h3-quinn).
+http3 = ["dep:quinn", "dep:hpx-h3", "dep:hpx-h3-quinn", "rustls-tls-quic"]
 
 # Enable macros.
 macros = ["tokio/macros"]
@@ -173,11 +170,6 @@ openssl-tls = ["dep:openssl", "dep:tokio-openssl"]
 # Enable vendored OpenSSL (static linking).
 openssl-vendored = ["openssl-tls", "openssl/vendored"]
 
-## http3
-quinn = { workspace = true, optional = true, default-features = false, features = ["runtime-tokio", "rustls-ring"] }
-h3 = { workspace = true, optional = true }
-h3-quinn = { workspace = true, optional = true }
-
 ## macOS system proxy
 [target.'cfg(target_os = "macos")'.dependencies]
 system-configuration = { workspace = true, optional = true }
@@ -209,6 +201,9 @@ futures-util = { workspace = true }
 hickory-resolver = { workspace = true, optional = true }
 hmac = { workspace = true, optional = true }
 hotpath = { workspace = true, optional = true }
+# HTTP/3 protocol stack (gated by the `http3` feature).
+hpx-h3 = { workspace = true, optional = true }
+hpx-h3-quinn = { workspace = true, optional = true }
 hpx-yawc = { workspace = true, optional = true }
 http = { workspace = true }
 http-body = { workspace = true }
@@ -228,6 +223,7 @@ pkcs8 = { workspace = true, features = [
     "3des",
     "sha1-insecure",
 ], optional = true }
+quinn = { workspace = true, optional = true, features = ["runtime-tokio", "rustls-ring"] }
 rand.workspace = true
 rustls = { workspace = true, optional = true, features = [
     "std",
@@ -256,6 +252,7 @@ tokio = { workspace = true, features = [
     "rt",
     "io-util",
     "sync",
+    "macros",
 ] }
 tokio-boring = { workspace = true, optional = true }
 tokio-openssl = { workspace = true, optional = true }

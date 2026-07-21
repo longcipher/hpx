@@ -62,7 +62,10 @@ check-agents-md:
         if [ -z "$crate" ] || [ -z "$agents_ver" ]; then
             continue
         fi
-        cargo_ver=$(grep -E "^${crate} = " Cargo.toml 2>/dev/null | sed -n 's/.*"\([^"]*\)".*/\1/p' | head -1)
+        cargo_ver=$(grep -E "^${crate} = " Cargo.toml 2>/dev/null | sed -n 's/.*version = "\([^"]*\)".*/\1/p' | head -1)
+        if [ -z "$cargo_ver" ]; then
+            cargo_ver=$(grep -E "^${crate} = " Cargo.toml 2>/dev/null | sed -n 's/[^"]*"\([^"]*\)".*/\1/p' | head -1)
+        fi
         if [ -z "$cargo_ver" ]; then
             continue
         fi
@@ -94,8 +97,8 @@ publish:
     VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
     echo "Publishing workspace crates v$VERSION..."
     echo ""
-    # Dependency order: hpx-yawc → hpx → {hpx-browser, hpx-dl, hpx-emulation, hpx-streams} → hpx-cli
-    CRATES="hpx-yawc hpx hpx-browser hpx-dl hpx-emulation hpx-streams hpx-cli"
+    # Dependency order: hpx-yawc, hpx-h3 → hpx-h3-quinn → hpx → {hpx-browser, hpx-dl, hpx-emulation, hpx-streams} → {hpxless, hpx-cli}
+    CRATES="hpx-yawc hpx-h3 hpx-h3-quinn hpx hpx-browser hpx-dl hpx-emulation hpx-streams hpxless hpx-cli"
     for crate in $CRATES; do
     	# Check if already published at this version
     	if cargo search "$crate" --limit 1 2>/dev/null | grep -q "^$crate = \"$VERSION\""; then

@@ -5,6 +5,7 @@ use std::{
     fmt,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     pin::Pin,
+    sync::LazyLock,
     task::{Context, Poll},
 };
 
@@ -48,6 +49,7 @@ pub struct WebSocketRequestBuilder {
     proxy: Option<Proxy>,
     unsupported: UnsupportedSettings,
     config: WebSocketConfig,
+    #[allow(dead_code)]
     custom_headers: Vec<(String, String)>,
     /// Whether to request permessage-deflate extension.
     deflate_request: bool,
@@ -409,7 +411,7 @@ impl WebSocketRequestBuilder {
             http_builder = http_builder.header(name.as_str(), value);
         }
 
-// Add permessage-deflate extension request
+        // Add permessage-deflate extension request
         if self.deflate_request {
             http_builder = http_builder.header(
                 "Sec-WebSocket-Extensions",
@@ -461,7 +463,7 @@ impl WebSocketRequestBuilder {
             .await
             .map_err(|e| Error::upgrade(e.to_string()))?;
 
-Ok(WebSocketResponse {
+        Ok(WebSocketResponse {
             ws: Some(ws),
             config: self.config,
             deflate_request: self.deflate_request,
@@ -475,6 +477,7 @@ Ok(WebSocketResponse {
 /// HTTP status, version, or response headers.
 pub struct WebSocketResponse {
     ws: Option<hpx_yawc::TcpWebSocket>,
+    #[allow(dead_code)]
     config: WebSocketConfig,
     deflate_request: bool,
 }
@@ -537,7 +540,7 @@ impl WebSocketResponse {
             inner: ws,
             protocol: None,
             extensions: extensions.clone(),
-            deflate: extensions.as_ref().map(|ext| DeflateCodec::new(ext)),
+            deflate: extensions.as_ref().map(DeflateCodec::new),
         })
     }
 }
@@ -587,6 +590,7 @@ fn message_to_frame(msg: Message) -> hpx_yawc::Frame {
 /// A websocket connection using the yawc backend.
 pub struct WebSocket {
     inner: hpx_yawc::TcpWebSocket,
+    #[allow(dead_code)]
     protocol: Option<HeaderValue>,
     /// Negotiated WebSocket extensions (permessage-deflate parameters).
     pub extensions: Option<WebSocketExtensions>,
@@ -700,11 +704,11 @@ impl WebSocket {
         (
             WebSocketWrite {
                 inner: sink,
-                deflate: extensions.as_ref().map(|ext| DeflateCodec::new(ext)),
+                deflate: extensions.as_ref().map(DeflateCodec::new),
             },
             WebSocketRead {
                 inner: stream,
-                deflate: extensions.as_ref().map(|ext| DeflateCodec::new(ext)),
+                deflate: extensions.as_ref().map(DeflateCodec::new),
             },
         )
     }
@@ -731,10 +735,10 @@ impl Stream for WebSocketRead {
 impl WebSocketRead {
     /// Receive another message.
     pub async fn recv(&mut self) -> Option<Result<Message, Error>> {
-        match self.inner.next().await {
-            Some(frame) => Some(Ok(self.decompress_frame(frame))),
-            None => None,
-        }
+        self.inner
+            .next()
+            .await
+            .map(|frame| Ok(self.decompress_frame(frame)))
     }
 
     fn decompress_frame(&mut self, frame: hpx_yawc::Frame) -> Message {
@@ -742,16 +746,16 @@ impl WebSocketRead {
             let (opcode, _is_fin, payload) = frame.clone().into_parts();
             match opcode {
                 hpx_yawc::OpCode::Text | hpx_yawc::OpCode::Binary => {
-                    if !payload.is_empty() {
-                        if let Ok(decompressed) = deflate.decompress(&payload) {
-                            return match opcode {
-                                hpx_yawc::OpCode::Text => {
-                                    let s = String::from_utf8_lossy(&decompressed).to_string();
-                                    Message::Text(Utf8Bytes::from(s))
-                                }
-                                _ => Message::Binary(decompressed.into()),
-                            };
-                        }
+                    if !payload.is_empty()
+                        && let Ok(decompressed) = deflate.decompress(&payload)
+                    {
+                        return match opcode {
+                            hpx_yawc::OpCode::Text => {
+                                let s = String::from_utf8_lossy(&decompressed).to_string();
+                                Message::Text(Utf8Bytes::from(s))
+                            }
+                            _ => Message::Binary(decompressed.into()),
+                        };
                     }
                     // Fall through to frame_to_message if decompression fails
                     frame_to_message(frame)

@@ -31,11 +31,12 @@ use crate::{
 /// Dispatch channel receiver type for h3.
 ///
 /// Mirrors `proto::h2::client::ClientRx<B>` but lives under the h3 module.
+#[allow(dead_code)] // HTTP/3 dispatch scaffolding; wired in by future tasks.
 pub(crate) type ClientRx<B> = dispatch::Receiver<Request<B>, Response<IncomingBody>>;
 
 /// HTTP/3 connection dispatch task.
 ///
-/// Drives the h3 connection's [`h3::client::SendRequest`] by polling the
+/// Drives the h3 connection's [`hpx_h3::client::SendRequest`] by polling the
 /// dispatch channel for incoming requests and spawning per-request tasks
 /// that run the h3 request/response lifecycle (send_request → finish →
 /// recv_response → drain body).
@@ -43,7 +44,7 @@ pub(crate) type ClientRx<B> = dispatch::Receiver<Request<B>, Response<IncomingBo
 /// Unlike h2's `ConnTask` (which drives the h2 `Connection` future to
 /// completion), the h3 connection-driver future is spawned separately by
 /// [`QuicConnector::call`](crate::client::conn::quic::QuicConnector) and
-/// feeds the terminal [`h3::error::ConnectionError`] to `close_rx`.
+/// feeds the terminal [`hpx_h3::error::ConnectionError`] to `close_rx`.
 /// [`ConnTask`] polls `close_rx` to detect connection closure and shut down
 /// the dispatch loop.
 ///
@@ -51,6 +52,7 @@ pub(crate) type ClientRx<B> = dispatch::Receiver<Request<B>, Response<IncomingBo
 /// `send_request` is an `async fn` (not a sync `poll_ready` + `send_request`
 /// pair like h2). Each spawned task owns a `Clone` of the `SendRequest` and
 /// runs the full request lifecycle independently.
+#[allow(dead_code)] // HTTP/3 dispatch scaffolding; wired in by future tasks.
 pub(crate) struct ConnTask<B>
 where
     B: Body,
@@ -60,12 +62,12 @@ where
     B::Data: Send,
 {
     /// Cloneable h3 `SendRequest` for opening new request streams.
-    send_request: h3::client::SendRequest<h3_quinn::OpenStreams, Bytes>,
+    send_request: hpx_h3::client::SendRequest<hpx_h3_quinn::OpenStreams, Bytes>,
     /// Dispatch channel receiver — receives `(Request<B>, Callback)` pairs.
     req_rx: ClientRx<B>,
     /// Receives the terminal `ConnectionError` when the driver task
     /// observes `poll_close` resolving.
-    close_rx: mpsc::Receiver<h3::error::ConnectionError>,
+    close_rx: mpsc::Receiver<hpx_h3::error::ConnectionError>,
 }
 
 impl<B> ConnTask<B>
@@ -80,10 +82,11 @@ where
     /// The caller is responsible for spawning this future (typically via
     /// `tokio::spawn`) so it runs concurrently with the connection-driver
     /// task that feeds `close_rx`.
+    #[allow(dead_code)] // HTTP/3 dispatch scaffolding; wired in by future tasks.
     pub(crate) fn new(
-        send_request: h3::client::SendRequest<h3_quinn::OpenStreams, Bytes>,
+        send_request: hpx_h3::client::SendRequest<hpx_h3_quinn::OpenStreams, Bytes>,
         req_rx: ClientRx<B>,
-        close_rx: mpsc::Receiver<h3::error::ConnectionError>,
+        close_rx: mpsc::Receiver<hpx_h3::error::ConnectionError>,
     ) -> Self {
         Self {
             send_request,
@@ -189,11 +192,11 @@ where
 ///   in the response extensions as [`H3WebSocket`] so the caller can
 ///   extract it for WebSocket communication.
 ///
-/// Any [`h3::error::StreamError`] is mapped to [`H3Error`] (and then to
+/// Any [`hpx_h3::error::StreamError`] is mapped to [`H3Error`] (and then to
 /// [`Error`] via the `From<H3Error>` impl) per §5.1.9 of the design.
 #[allow(clippy::result_large_err)]
 pub(crate) async fn drive_request<B>(
-    send_request: &mut h3::client::SendRequest<h3_quinn::OpenStreams, Bytes>,
+    send_request: &mut hpx_h3::client::SendRequest<hpx_h3_quinn::OpenStreams, Bytes>,
     req: Request<B>,
 ) -> Result<Response<IncomingBody>, (Error, Option<Request<B>>)>
 where
@@ -211,12 +214,11 @@ where
     let is_connect = req.method() == http::Method::CONNECT;
 
     headers::strip_connection_headers(req.headers_mut(), true);
-    if !is_connect {
-        if let Some(len) = body.size_hint().exact()
-            && (len != 0 || headers::method_has_defined_payload_semantics(req.method()))
-        {
-            headers::set_content_length_if_missing(req.headers_mut(), len);
-        }
+    if !is_connect
+        && let Some(len) = body.size_hint().exact()
+        && (len != 0 || headers::method_has_defined_payload_semantics(req.method()))
+    {
+        headers::set_content_length_if_missing(req.headers_mut(), len);
     }
 
     // 2. Open a new bidirectional stream and send the request headers.
@@ -268,7 +270,7 @@ where
     Ok(response)
 }
 
-/// Map an [`h3::error::StreamError`] to an [`Error`] (the dispatch-level
+/// Map an [`hpx_h3::error::StreamError`] to an [`Error`] (the dispatch-level
 /// `crate::client::core::Error`) via [`H3Error`].
 ///
 /// Per §5.1.9 of the design, [`H3Error`] is the canonical HTTP/3 error type
@@ -277,7 +279,7 @@ where
 /// `crate::client::core::Error` (a separate type from `crate::error::Error`).
 /// We bridge this by:
 /// 1. Constructing the appropriate [`H3Error`] variant from the
-///    [`h3::error::StreamError`].
+///    [`hpx_h3::error::StreamError`].
 /// 2. Wrapping it via [`Error::new_body`] (the `crate::client::core::Error`
 ///    constructor that accepts any `StdError + Send + Sync` cause). The
 ///    `Kind::Body` mapping is conservative because stream errors most
@@ -298,21 +300,21 @@ where
 ///   `Undefined`, which are private/non-exhaustive in h3 0.0.8 and cannot
 ///   be matched directly from outside the crate) → `H3Error::Other` with
 ///   the original `StreamError` boxed as the cause.
-pub(crate) fn stream_error_to_error(err: h3::error::StreamError) -> Error {
+pub(crate) fn stream_error_to_error(err: hpx_h3::error::StreamError) -> Error {
     Error::new_body(stream_error_to_h3_error(err))
 }
 
-pub(crate) fn stream_error_to_h3_error(err: h3::error::StreamError) -> H3Error {
+pub(crate) fn stream_error_to_h3_error(err: hpx_h3::error::StreamError) -> H3Error {
     match err {
-        h3::error::StreamError::StreamError { code, .. } => H3Error::StreamReset {
+        hpx_h3::error::StreamError::StreamError { code, .. } => H3Error::StreamReset {
             code: code.value(),
             stream_id: 0,
         },
-        h3::error::StreamError::RemoteTerminate { code, .. } => H3Error::StreamReset {
+        hpx_h3::error::StreamError::RemoteTerminate { code, .. } => H3Error::StreamReset {
             code: code.value(),
             stream_id: 0,
         },
-        h3::error::StreamError::HeaderTooBig { .. } => H3Error::MaxConcurrentStreamsExceeded,
+        hpx_h3::error::StreamError::HeaderTooBig { .. } => H3Error::MaxConcurrentStreamsExceeded,
         other => H3Error::Other(Box::new(other)),
     }
 }
@@ -345,7 +347,7 @@ pub enum WsMessage {
 #[derive(Debug)]
 pub enum WsError {
     /// An error from the underlying h3 stream.
-    Stream(h3::error::StreamError),
+    Stream(hpx_h3::error::StreamError),
     /// The operation timed out.
     Timeout,
     /// The frame payload exceeds the configured maximum size.
@@ -374,8 +376,8 @@ impl std::error::Error for WsError {
     }
 }
 
-impl From<h3::error::StreamError> for WsError {
-    fn from(e: h3::error::StreamError) -> Self {
+impl From<hpx_h3::error::StreamError> for WsError {
+    fn from(e: hpx_h3::error::StreamError) -> Self {
         WsError::Stream(e)
     }
 }
@@ -386,7 +388,7 @@ const DEFAULT_MAX_FRAME_SIZE: usize = 1024 * 1024;
 /// Internal state shared across clones of [`H3WebSocket`].
 struct H3WebSocketInner {
     /// The underlying h3 request stream.
-    stream: h3::client::RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>,
+    stream: hpx_h3::client::RequestStream<hpx_h3_quinn::BidiStream<Bytes>, Bytes>,
     /// Buffer for accumulating partial WebSocket frame data from `recv_data()`.
     recv_buf: Vec<u8>,
 }
@@ -395,7 +397,7 @@ struct H3WebSocketInner {
 ///
 /// After an Extended CONNECT (RFC 9220) handshake, the h3 request stream
 /// becomes a bidirectional WebSocket data channel. This struct wraps the
-/// underlying [`h3::client::RequestStream`] and provides `send_text`,
+/// underlying [`hpx_h3::client::RequestStream`] and provides `send_text`,
 /// `send_binary`, `send_close`, `send_ping`, `send_pong`, and `recv`
 /// methods for exchanging properly framed WebSocket messages per RFC 6455.
 ///
@@ -436,7 +438,9 @@ impl H3WebSocket {
     /// use [`H3WebSocket::from_response`] instead.
     #[doc(hidden)]
     #[allow(dead_code)]
-    pub fn new(stream: h3::client::RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>) -> Self {
+    pub fn new(
+        stream: hpx_h3::client::RequestStream<hpx_h3_quinn::BidiStream<Bytes>, Bytes>,
+    ) -> Self {
         H3WebSocket {
             inner: Arc::new(tokio::sync::Mutex::new(H3WebSocketInner {
                 stream,
@@ -816,7 +820,7 @@ mod tests {
     /// with the response.
     ///
     /// The test stands up a local h3 server (rcgen + rustls + quinn +
-    /// h3::server), builds a `QuicConnector` to obtain an `H3Connection`,
+    /// hpx_h3::server), builds a `QuicConnector` to obtain an `H3Connection`,
     /// constructs a `ConnTask` from the connection's `send_request` +
     /// `close_rx` + a dispatch `Receiver`, spawns the `ConnTask`, sends a
     /// GET request through the dispatch `Sender`, and awaits the response
@@ -861,12 +865,14 @@ mod tests {
                 match incoming.await {
                     Ok(quinn_conn) => {
                         tokio::spawn(async move {
-                            let h3_quinn_conn = h3_quinn::Connection::new(quinn_conn);
-                            let mut h3_conn: h3::server::Connection<h3_quinn::Connection, Bytes> =
-                                match h3::server::Connection::new(h3_quinn_conn).await {
-                                    Ok(c) => c,
-                                    Err(_) => return,
-                                };
+                            let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                            let mut h3_conn: hpx_h3::server::Connection<
+                                hpx_h3_quinn::Connection,
+                                Bytes,
+                            > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
+                                Ok(c) => c,
+                                Err(_) => return,
+                            };
                             loop {
                                 match h3_conn.accept().await {
                                     Ok(Some(resolver)) => {

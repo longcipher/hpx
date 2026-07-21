@@ -33,7 +33,7 @@ const REQUEST_COUNT: u64 = 1000;
 /// The server responds to every GET with `200 OK` and no body.
 async fn setup_h3() -> (
     tokio::task::JoinHandle<()>,
-    h3::client::SendRequest<h3_quinn::OpenStreams, Bytes>,
+    hpx_h3::client::SendRequest<hpx_h3_quinn::OpenStreams, Bytes>,
     u16,
 ) {
     // 1. Generate a self-signed certificate (SAN: 127.0.0.1).
@@ -68,12 +68,14 @@ async fn setup_h3() -> (
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = h3_quinn::Connection::new(quinn_conn);
-                        let mut h3_conn: h3::server::Connection<h3_quinn::Connection, Bytes> =
-                            match h3::server::Connection::new(h3_quinn_conn).await {
-                                Ok(c) => c,
-                                Err(_) => return,
-                            };
+                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let mut h3_conn: hpx_h3::server::Connection<
+                            hpx_h3_quinn::Connection,
+                            Bytes,
+                        > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
+                            Ok(c) => c,
+                            Err(_) => return,
+                        };
                         loop {
                             match h3_conn.accept().await {
                                 Ok(Some(resolver)) => {

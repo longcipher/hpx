@@ -2,7 +2,7 @@
 //!
 //! This module defines [`Http3Options`] for configuring QUIC transport parameters
 //! (mapped to `quinn::TransportConfig`), HTTP/3 protocol parameters (mapped to
-//! `h3::client::builder`), fingerprint hooks, and extended CONNECT support for
+//! `hpx_h3::client::builder`), fingerprint hooks, and extended CONNECT support for
 //! [RFC 9220] WebSocket-over-h3.
 //!
 //! The structure mirrors [`crate::client::core::http2::Http2Options`] for
@@ -119,7 +119,7 @@ pub enum H3SettingId {
 ///
 /// This struct defines QUIC transport parameters (mapped to
 /// `quinn::TransportConfig`), HTTP/3 protocol parameters (mapped to
-/// `h3::client::builder`), fingerprint hooks mirroring the HTTP/2
+/// `hpx_h3::client::builder`), fingerprint hooks mirroring the HTTP/2
 /// `experimental_settings` mechanism, and the extended CONNECT flag for
 /// [RFC 9220] WebSocket-over-h3.
 ///
@@ -201,7 +201,7 @@ pub struct Http3Options {
     /// `rustls::ClientConfig::enable_early_data`.
     pub enable_0rtt: bool,
 
-    // ===== h3 protocol parameters (mapped to h3::client::builder) =====
+    // ===== h3 protocol parameters (mapped to hpx_h3::client::builder) =====
     /// `MAX_FIELD_SECTION_SIZE` — [RFC 9114 §4.2.2]. Bounds the size of
     /// request/response header blocks.
     ///
@@ -315,7 +315,7 @@ mod tests {
         assert_eq!(opts.initial_packet_padding, None);
         assert!(opts.enable_0rtt);
 
-        // h3 protocol parameters (mapped to h3::client::builder)
+        // h3 protocol parameters (mapped to hpx_h3::client::builder)
         assert_eq!(opts.max_field_section_size, Some(16 * 1024));
         assert!(opts.send_grease);
         assert_eq!(opts.qpack_max_table_capacity, Some(4096));

@@ -13,7 +13,7 @@ use flate2::{Compress, Compression, Decompress, FlushCompress, FlushDecompress};
 ///
 /// These are parsed from the server's `Sec-WebSocket-Extensions` response
 /// header after a successful handshake.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct WebSocketExtensions {
     /// Whether the client requested no context takeover.
     pub client_no_context_takeover: bool,
@@ -23,17 +23,6 @@ pub struct WebSocketExtensions {
     pub client_max_window_bits: Option<u8>,
     /// The server's maximum LZ77 window bits (1–15).
     pub server_max_window_bits: Option<u8>,
-}
-
-impl Default for WebSocketExtensions {
-    fn default() -> Self {
-        Self {
-            client_no_context_takeover: false,
-            server_no_context_takeover: false,
-            client_max_window_bits: None,
-            server_max_window_bits: None,
-        }
-    }
 }
 
 impl WebSocketExtensions {
@@ -92,7 +81,7 @@ pub fn negotiate_permessage_deflate(
                 let bits: u8 = value
                     .parse()
                     .map_err(|_| ParseError::InvalidParameter(param.to_string()))?;
-                if bits < 8 || bits > 15 {
+                if !(8..=15).contains(&bits) {
                     return Err(ParseError::InvalidParameter(format!(
                         "server_max_window_bits={bits} out of range (8–15)"
                     )));
@@ -103,7 +92,7 @@ pub fn negotiate_permessage_deflate(
                 let bits: u8 = value
                     .parse()
                     .map_err(|_| ParseError::InvalidParameter(param.to_string()))?;
-                if bits < 8 || bits > 15 {
+                if !(8..=15).contains(&bits) {
                     return Err(ParseError::InvalidParameter(format!(
                         "client_max_window_bits={bits} out of range (8–15)"
                     )));

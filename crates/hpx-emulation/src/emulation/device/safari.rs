@@ -61,8 +61,7 @@ macro_rules! mod_generator {
                 option: EmulationOption,
                 default_headers: Option<HeaderMap>,
             ) -> Emulation {
-                let mut builder = Emulation::builder()
-                    .tls_options($tls_options);
+                let mut builder = Emulation::builder().tls_options($tls_options);
                 #[cfg(feature = "http3")]
                 {
                     builder = builder.http3_options($http3_options);

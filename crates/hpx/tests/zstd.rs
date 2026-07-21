@@ -340,7 +340,12 @@ async fn test_chunked_fragmented_response_with_extra_bytes() {
         .expect("response");
 
     let err = res.text().await.expect_err("there must be an error");
-    assert!(err.is_decode());
+    // Decompression errors surface as `is_body()` (matching reqwest's
+    // convention where `is_decode()` is reserved for deserialization errors
+    // like JSON/form parsing). The zstd decoder is strict and rejects the
+    // trailing 'X' bytes with "Unknown frame descriptor".
+    assert!(err.is_body());
+    assert!(format!("{err}").contains("Unknown frame descriptor"));
     assert!(start.elapsed() >= DELAY_BETWEEN_RESPONSE_PARTS - DELAY_MARGIN);
 }
 

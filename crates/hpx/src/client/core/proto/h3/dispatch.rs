@@ -41,12 +41,12 @@ pub(crate) enum RecvResponseResult {
 /// Send the request body via `send_data` in a loop, then call `finish`.
 ///
 /// Polls the body for data frames via [`Body::poll_frame`] and sends each
-/// chunk via [`h3::client::RequestStream::send_data`]. Trailers are
+/// chunk via [`hpx_h3::client::RequestStream::send_data`]. Trailers are
 /// ignored (Phase 1 scope). After all data frames are consumed, calls
-/// [`h3::client::RequestStream::finish`] to half-close the send direction.
+/// [`hpx_h3::client::RequestStream::finish`] to half-close the send direction.
 #[allow(clippy::result_large_err)]
 pub(crate) async fn send_request_body<B>(
-    stream: &mut h3::client::RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>,
+    stream: &mut hpx_h3::client::RequestStream<hpx_h3_quinn::BidiStream<Bytes>, Bytes>,
     body: &mut B,
 ) -> Result<(), (Error, Option<http::Request<B>>)>
 where
@@ -95,7 +95,7 @@ where
 /// `Response<()>` from h3 so the caller can collect the body.
 #[allow(clippy::result_large_err)]
 pub(crate) async fn handle_response<B>(
-    stream: &mut h3::client::RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>,
+    stream: &mut hpx_h3::client::RequestStream<hpx_h3_quinn::BidiStream<Bytes>, Bytes>,
 ) -> Result<RecvResponseResult, (Error, Option<http::Request<B>>)> {
     let response = match stream.recv_response().await {
         Ok(response) => response,
@@ -106,8 +106,8 @@ pub(crate) async fn handle_response<B>(
             // observes a graceful shutdown rather than a stream error.
             if matches!(
                 &e,
-                h3::error::StreamError::RemoteTerminate { code, .. }
-                    if code.value() == h3::error::Code::H3_NO_ERROR.value()
+                hpx_h3::error::StreamError::RemoteTerminate { code, .. }
+                    if code.value() == hpx_h3::error::Code::H3_NO_ERROR.value()
             ) {
                 let (body_tx, body_rx) =
                     IncomingBody::new_channel(DecodedLength::CHUNKED, /* wanter = */ false);
@@ -161,7 +161,7 @@ pub(crate) async fn handle_response<B>(
 /// through the standard [`Body`] API.
 #[allow(clippy::result_large_err)]
 pub(crate) async fn collect_response_body<B>(
-    stream: &mut h3::client::RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>,
+    stream: &mut hpx_h3::client::RequestStream<hpx_h3_quinn::BidiStream<Bytes>, Bytes>,
     response: http::Response<()>,
 ) -> Result<http::Response<IncomingBody>, (Error, Option<http::Request<B>>)> {
     let mut chunks: Vec<Bytes> = Vec::new();

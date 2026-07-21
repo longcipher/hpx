@@ -169,13 +169,12 @@ where
             Poll::Pending => {
                 // If we received a 100 Continue while waiting for one,
                 // transition from WaitingContinue to Body so the body can be sent.
-                if received_continue {
-                    if let Writing::WaitingContinue(encoder) =
+                if received_continue
+                    && let Writing::WaitingContinue(encoder) =
                         std::mem::replace(&mut self.state.writing, Writing::Init)
-                    {
-                        trace!("received 100 Continue, proceeding to send body");
-                        self.state.writing = Writing::Body(encoder);
-                    }
+                {
+                    trace!("received 100 Continue, proceeding to send body");
+                    self.state.writing = Writing::Body(encoder);
                 }
                 return Poll::Pending;
             }
@@ -440,7 +439,6 @@ where
         match self.state.writing {
             Writing::Body(..) => return,
             Writing::Init | Writing::KeepAlive | Writing::Closed | Writing::WaitingContinue(..) => {
-                ()
             }
         }
 
@@ -661,7 +659,6 @@ where
             }
             Writing::WaitingContinue(_) => {
                 debug!("write_trailers called while waiting for 100 Continue, ignoring");
-                return;
             }
             _ => unreachable!("write_trailers invalid state: {:?}", self.state.writing),
         }

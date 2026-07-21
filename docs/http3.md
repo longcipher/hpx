@@ -215,7 +215,7 @@ pub struct Http3Options {
 
 The HTTP/3 stack is composed of three layers:
 
-```
+```text
 ┌─────────────────────────────┐
 │  h3 crate (HTTP/3 framing)  │  ← RFC 9114: SETTINGS, HEADERS, DATA frames
 ├─────────────────────────────┤

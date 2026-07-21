@@ -6,8 +6,8 @@
 //! 1. Resolves the request host via the existing `dns::Resolve` infrastructure
 //!    (reused from the HTTP/1 + HTTP/2 connector).
 //! 2. Establishes a QUIC connection via [`quinn::Endpoint::connect`].
-//! 3. Wraps the resulting [`quinn::Connection`] in [`h3_quinn::Connection`].
-//! 4. Builds an HTTP/3 client via [`h3::client::builder()`], applying the
+//! 3. Wraps the resulting [`quinn::Connection`] in [`hpx_h3_quinn::Connection`].
+//! 4. Builds an HTTP/3 client via [`hpx_h3::client::builder()`], applying the
 //!    [`Http3Options`] (max field section size, grease, …).
 //! 5. Spawns a driver task that polls `poll_close` and feeds `close_rx`.
 //! 6. Returns an [`H3Connection`] carrier (`send_request`, `close_rx`,
@@ -24,10 +24,10 @@
 //!   protocol layer (`proto/h3/client.rs`) is T1.9 scope.
 
 // NOTE: Adapted from the design spec §5.1.5 to match the actual h3 0.0.8 API:
-// - `h3::Error` does not exist in h3 0.0.8; `h3::client::builder().build()`
-//   returns `Result<_, h3::error::ConnectionError>`. The `H3Error::Framing`
-//   variant therefore carries `h3::error::ConnectionError` (not `h3::Error`).
-// - `h3::client::SendRequest<h3_quinn::OpenStreams, bytes::Bytes>` matches the
+// - `hpx_h3::Error` does not exist in h3 0.0.8; `hpx_h3::client::builder().build()`
+//   returns `Result<_, hpx_h3::error::ConnectionError>`. The `H3Error::Framing`
+//   variant therefore carries `hpx_h3::error::ConnectionError` (not `hpx_h3::Error`).
+// - `hpx_h3::client::SendRequest<hpx_h3_quinn::OpenStreams, bytes::Bytes>` matches the
 //   design's `H3Connection.send_request` signature exactly.
 
 use std::{
@@ -70,11 +70,11 @@ type H3Future = Pin<Box<dyn Future<Output = Result<H3Connection, H3Error>> + Sen
 /// connection pool (T1.7 scope) and analogous to `h2::client::SendRequest`
 /// for `Ver::Http2`.
 pub struct H3Connection {
-    /// `h3::client::SendRequest` for opening new request streams.
-    pub send_request: h3::client::SendRequest<h3_quinn::OpenStreams, Bytes>,
+    /// `hpx_h3::client::SendRequest` for opening new request streams.
+    pub send_request: hpx_h3::client::SendRequest<hpx_h3_quinn::OpenStreams, Bytes>,
     /// Receives the terminal `ConnectionError` when the driver task observes
     /// `poll_close` resolving.
-    pub close_rx: tokio::sync::mpsc::Receiver<h3::error::ConnectionError>,
+    pub close_rx: tokio::sync::mpsc::Receiver<hpx_h3::error::ConnectionError>,
     /// Timestamp of the last activity on this connection; used by the pool's
     /// idle eviction logic (T1.7 scope).
     pub idle_at: Instant,
@@ -96,7 +96,7 @@ pub struct H3Connection {
 impl fmt::Debug for H3Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("H3Connection")
-            .field("send_request", &"<h3::client::SendRequest>")
+            .field("send_request", &"<hpx_h3::client::SendRequest>")
             .field("close_rx", &self.close_rx)
             .field("idle_at", &self.idle_at)
             .field("is_broken", &self.is_broken.load(Ordering::Relaxed))
@@ -223,13 +223,13 @@ impl QuicConnector {
     ///
     /// If `max_idle_timeout` is `Some(d)`, the function will initiate a
     /// graceful shutdown after `d` of inactivity: it sends a GOAWAY frame
-    /// via [`h3::client::Connection::shutdown`], then waits for
+    /// via [`hpx_h3::client::Connection::shutdown`], then waits for
     /// `poll_close` to resolve. If `max_idle_timeout` is `None`, the
     /// function waits indefinitely for `poll_close` (the QUIC-level idle
     /// timeout, if set on the transport config, still applies).
     async fn drive_connection(
-        mut conn: h3::client::Connection<h3_quinn::Connection, Bytes>,
-        close_tx: tokio::sync::mpsc::Sender<h3::error::ConnectionError>,
+        mut conn: hpx_h3::client::Connection<hpx_h3_quinn::Connection, Bytes>,
+        close_tx: tokio::sync::mpsc::Sender<hpx_h3::error::ConnectionError>,
         is_broken: Arc<AtomicBool>,
         max_idle_timeout: Option<Duration>,
     ) {
@@ -368,11 +368,11 @@ impl Service<ConnectRequest> for QuicConnector {
                     }
                 };
 
-                // 5. Wrap quinn::Connection in h3_quinn::Connection.
-                let h3_quinn_conn = h3_quinn::Connection::new(quinn_conn);
+                // 5. Wrap quinn::Connection in hpx_h3_quinn::Connection.
+                let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
 
-                // 6. Build h3 client via h3::client::builder().
-                let mut builder = h3::client::builder();
+                // 6. Build h3 client via hpx_h3::client::builder().
+                let mut builder = hpx_h3::client::builder();
                 if let Some(max_field_section_size) = h3_options.max_field_section_size {
                     builder.max_field_section_size(max_field_section_size);
                 }
@@ -385,7 +385,7 @@ impl Service<ConnectRequest> for QuicConnector {
 
                 // 7. Spawn driver task polling poll_close and feeding close_rx.
                 let (close_tx, close_rx) =
-                    tokio::sync::mpsc::channel::<h3::error::ConnectionError>(1);
+                    tokio::sync::mpsc::channel::<hpx_h3::error::ConnectionError>(1);
                 // `Arc<AtomicBool>` shared between the driver task and
                 // the `H3Connection` carrier; the driver sets it to
                 // `true` when `poll_close` resolves, and

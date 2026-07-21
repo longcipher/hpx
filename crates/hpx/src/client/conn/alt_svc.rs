@@ -137,6 +137,7 @@ impl AltSvcCache {
     }
 
     /// Remove all entries for an authority.
+    #[allow(dead_code)] // HTTP/3 alt-svc invalidation API; reserved for future use.
     pub(crate) async fn invalidate(&self, authority: &(String, u16)) {
         self.entries.write().await.remove(authority);
     }

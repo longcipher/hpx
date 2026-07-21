@@ -23,7 +23,6 @@ use std::{
 };
 
 use bytes::{Buf, Bytes};
-use h3::error::Code;
 use hpx::{
     Client,
     http3::{__test_connect_request, H3Error, Http3Options, QuicConfig, QuicConnector},
@@ -32,6 +31,7 @@ use hpx::{
         quic::{build_quinn_client_config_with_root_store, build_quinn_endpoint},
     },
 };
+use hpx_h3::error::Code;
 use quinn::{Endpoint, ServerConfig, crypto::rustls::QuicServerConfig};
 use rustls::{
     RootCertStore, ServerConfig as RustlsServerConfig,
@@ -57,7 +57,7 @@ async fn http3_alpn_negotiated_over_quic() -> TestResult<()> {
     let certified_key = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])?;
     let cert_der: CertificateDer<'static> = certified_key.cert.der().clone();
     let key_der: PrivateKeyDer<'static> =
-        PrivatePkcs8KeyDer::from(certified_key.key_pair.serialize_der()).into();
+        PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der()).into();
 
     // 2. Build the server-side rustls `ServerConfig` with ALPN `[b"h3"]`.
     //
@@ -228,8 +228,8 @@ fn http3_options_configures_h3_settings() -> TestResult<()> {
 /// `QuicConnector::call`) is able to drive many concurrent request streams
 /// over a single QUIC connection.
 ///
-/// The test stands up a local h3 server (using `h3::server::Connection` over
-/// `h3_quinn::Connection`) that counts accepted QUIC connections and accepted
+/// The test stands up a local h3 server (using `hpx_h3::server::Connection` over
+/// `hpx_h3_quinn::Connection`) that counts accepted QUIC connections and accepted
 /// requests via `AtomicU64`s. It then builds a `QuicConnector` directly (NOT
 /// through `Client::build` — that wiring is T1.10 scope), calls
 /// `connector.call(__test_connect_request(uri))` once to obtain a single
@@ -237,7 +237,7 @@ fn http3_options_configures_h3_settings() -> TestResult<()> {
 /// tasks each sending one GET request and reading the response.
 ///
 /// Satisfies REQ-21 (Pool Integration): the pool's `Shared` reservation
-/// semantics for `Ver::Http3` are valid because `h3::client::SendRequest` is
+/// semantics for `Ver::Http3` are valid because `hpx_h3::client::SendRequest` is
 /// `Clone` (per h3-quinn `OpenStreams: Clone`) and multiplexes streams over
 /// one QUIC connection.
 ///
@@ -252,7 +252,7 @@ async fn http3_concurrent_requests_over_single_quic_connection() -> TestResult<(
     let certified_key = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])?;
     let cert_der: CertificateDer<'static> = certified_key.cert.der().clone();
     let key_der: PrivateKeyDer<'static> =
-        PrivatePkcs8KeyDer::from(certified_key.key_pair.serialize_der()).into();
+        PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der()).into();
 
     // 2. Build the server-side rustls `ServerConfig` with ALPN `[b"h3"]`.
     let provider = Arc::new(rustls::crypto::ring::default_provider());
@@ -296,11 +296,11 @@ async fn http3_concurrent_requests_over_single_quic_connection() -> TestResult<(
                         // driving the response on a separate task may cause the
                         // peer to observe `StreamError::RemoteTerminate`.
                         tokio::spawn(async move {
-                            let h3_quinn_conn = h3_quinn::Connection::new(quinn_conn);
-                            let mut h3_conn: h3::server::Connection<
-                                h3_quinn::Connection,
+                            let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                            let mut h3_conn: hpx_h3::server::Connection<
+                                hpx_h3_quinn::Connection,
                                 bytes::Bytes,
-                            > = match h3::server::Connection::new(h3_quinn_conn).await {
+                            > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                                 Ok(c) => c,
                                 Err(_) => return,
                             };
@@ -416,11 +416,12 @@ async fn http3_concurrent_requests_over_single_quic_connection() -> TestResult<(
         "fresh H3Connection should be valid (no close event, not idle-expired)"
     );
 
-    // 11. Clone `send_request` 10 times. `h3::client::SendRequest` is `Clone`
+    // 11. Clone `send_request` 10 times. `hpx_h3::client::SendRequest` is `Clone`
     //     via h3-quinn's `OpenStreams: Clone`, which is the basis for the pool's
     //     `Shared` reservation semantics for `Ver::Http3` (C-05).
-    let mut send_requests: Vec<h3::client::SendRequest<h3_quinn::OpenStreams, bytes::Bytes>> =
-        Vec::with_capacity(10);
+    let mut send_requests: Vec<
+        hpx_h3::client::SendRequest<hpx_h3_quinn::OpenStreams, bytes::Bytes>,
+    > = Vec::with_capacity(10);
     for _ in 0..10 {
         send_requests.push(h3_conn.send_request.clone());
     }
@@ -522,7 +523,7 @@ async fn http3_pool_invalid_connection_triggers_reconnect() -> TestResult<()> {
     let certified_key = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])?;
     let cert_der: CertificateDer<'static> = certified_key.cert.der().clone();
     let key_der: PrivateKeyDer<'static> =
-        PrivatePkcs8KeyDer::from(certified_key.key_pair.serialize_der()).into();
+        PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der()).into();
 
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let mut server_rustls_config = RustlsServerConfig::builder_with_provider(provider)
@@ -547,11 +548,11 @@ async fn http3_pool_invalid_connection_triggers_reconnect() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = h3_quinn::Connection::new(quinn_conn);
-                        let mut h3_conn: h3::server::Connection<
-                            h3_quinn::Connection,
+                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let mut h3_conn: hpx_h3::server::Connection<
+                            hpx_h3_quinn::Connection,
                             bytes::Bytes,
-                        > = match h3::server::Connection::new(h3_quinn_conn).await {
+                        > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
                             Err(_) => return,
                         };
@@ -681,7 +682,7 @@ async fn http3_pool_invalid_connection_triggers_reconnect() -> TestResult<()> {
 /// correct status, version, and body.
 ///
 /// The test stands up a local h3 server (rcgen + rustls + quinn +
-/// h3::server) that responds to `GET /hello` with `200 OK` and body
+/// hpx_h3::server) that responds to `GET /hello` with `200 OK` and body
 /// `hello, h3`. It then builds a `QuicConnector` with a custom root store
 /// (trusting the self-signed cert), injects it into a `ClientBuilder` via
 /// the `__test_with_quic_connector` escape hatch, builds a `Client` with
@@ -699,7 +700,7 @@ async fn http3_request_full() -> TestResult<()> {
     let certified_key = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])?;
     let cert_der: CertificateDer<'static> = certified_key.cert.der().clone();
     let key_der: PrivateKeyDer<'static> =
-        PrivatePkcs8KeyDer::from(certified_key.key_pair.serialize_der()).into();
+        PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der()).into();
 
     // 2. Build the server-side rustls `ServerConfig` with ALPN `[b"h3"]`.
     //    Uses `builder_with_provider` with an explicit `ring` provider to
@@ -732,11 +733,11 @@ async fn http3_request_full() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = h3_quinn::Connection::new(quinn_conn);
-                        let mut h3_conn: h3::server::Connection<
-                            h3_quinn::Connection,
+                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let mut h3_conn: hpx_h3::server::Connection<
+                            hpx_h3_quinn::Connection,
                             bytes::Bytes,
-                        > = match h3::server::Connection::new(h3_quinn_conn).await {
+                        > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
                             Err(_) => return,
                         };
@@ -902,7 +903,7 @@ async fn http3_post_with_body() -> TestResult<()> {
     let certified_key = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])?;
     let cert_der: CertificateDer<'static> = certified_key.cert.der().clone();
     let key_der: PrivateKeyDer<'static> =
-        PrivatePkcs8KeyDer::from(certified_key.key_pair.serialize_der()).into();
+        PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der()).into();
 
     // 2. Build the server-side rustls `ServerConfig` with ALPN `[b"h3"]`.
     let provider = Arc::new(rustls::crypto::ring::default_provider());
@@ -930,11 +931,11 @@ async fn http3_post_with_body() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = h3_quinn::Connection::new(quinn_conn);
-                        let mut h3_conn: h3::server::Connection<
-                            h3_quinn::Connection,
+                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let mut h3_conn: hpx_h3::server::Connection<
+                            hpx_h3_quinn::Connection,
                             bytes::Bytes,
-                        > = match h3::server::Connection::new(h3_quinn_conn).await {
+                        > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
                             Err(_) => return,
                         };
@@ -1122,7 +1123,7 @@ async fn http3_streaming_request_body() -> TestResult<()> {
     let certified_key = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])?;
     let cert_der: CertificateDer<'static> = certified_key.cert.der().clone();
     let key_der: PrivateKeyDer<'static> =
-        PrivatePkcs8KeyDer::from(certified_key.key_pair.serialize_der()).into();
+        PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der()).into();
 
     // 2. Build the server-side rustls `ServerConfig` with ALPN `[b"h3"]`.
     let provider = Arc::new(rustls::crypto::ring::default_provider());
@@ -1147,11 +1148,11 @@ async fn http3_streaming_request_body() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = h3_quinn::Connection::new(quinn_conn);
-                        let mut h3_conn: h3::server::Connection<
-                            h3_quinn::Connection,
+                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let mut h3_conn: hpx_h3::server::Connection<
+                            hpx_h3_quinn::Connection,
                             bytes::Bytes,
-                        > = match h3::server::Connection::new(h3_quinn_conn).await {
+                        > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
                             Err(_) => return,
                         };
@@ -1296,7 +1297,7 @@ async fn http3_streaming_request_body() -> TestResult<()> {
 /// and a subsequent request reconnects successfully.
 ///
 /// Approach:
-/// 1. Start a local h3 server (rcgen cert → rustls → quinn → h3::server).
+/// 1. Start a local h3 server (rcgen cert → rustls → quinn → hpx_h3::server).
 /// 2. Build a `Client` with `http3_only()` and the `__test_with_quic_connector`
 ///    escape hatch (exercises the pool layer, not the raw connector).
 /// 3. First request: GET / → assert 200 OK (establishes pool connection).
@@ -1317,7 +1318,7 @@ async fn http3_reconnection_after_server_closes() -> TestResult<()> {
     let certified_key = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])?;
     let cert_der: CertificateDer<'static> = certified_key.cert.der().clone();
     let key_der: PrivateKeyDer<'static> =
-        PrivatePkcs8KeyDer::from(certified_key.key_pair.serialize_der()).into();
+        PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der()).into();
 
     // 2. Build the server-side rustls `ServerConfig` with ALPN `[b"h3"]`.
     let provider = Arc::new(rustls::crypto::ring::default_provider());
@@ -1344,11 +1345,11 @@ async fn http3_reconnection_after_server_closes() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = h3_quinn::Connection::new(quinn_conn);
-                        let mut h3_conn: h3::server::Connection<
-                            h3_quinn::Connection,
+                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let mut h3_conn: hpx_h3::server::Connection<
+                            hpx_h3_quinn::Connection,
                             bytes::Bytes,
-                        > = match h3::server::Connection::new(h3_quinn_conn).await {
+                        > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
                             Err(_) => return,
                         };
@@ -1526,7 +1527,7 @@ async fn http3_reconnection_after_server_closes() -> TestResult<()> {
         .with_no_client_auth()
         .with_single_cert(
             vec![cert_der.clone()],
-            PrivatePkcs8KeyDer::from(certified_key.key_pair.serialize_der()).into(),
+            PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der()).into(),
         )?;
     server_rustls_config2.alpn_protocols = vec![b"h3".to_vec()];
 
@@ -1540,11 +1541,11 @@ async fn http3_reconnection_after_server_closes() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = h3_quinn::Connection::new(quinn_conn);
-                        let mut h3_conn: h3::server::Connection<
-                            h3_quinn::Connection,
+                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let mut h3_conn: hpx_h3::server::Connection<
+                            hpx_h3_quinn::Connection,
                             bytes::Bytes,
-                        > = match h3::server::Connection::new(h3_quinn_conn).await {
+                        > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
                             Err(_) => return,
                         };
@@ -1618,7 +1619,7 @@ async fn http3_reconnection_after_server_closes() -> TestResult<()> {
 /// per RFC 9114 §8.1.
 ///
 /// The server completes the h3 handshake (SETTINGS exchange) via
-/// `h3::server::Connection`, then intercepts the request stream via a
+/// `hpx_h3::server::Connection`, then intercepts the request stream via a
 /// cloned `quinn::Connection` and resets it with `H3_NO_ERROR`.
 #[tokio::test]
 async fn http3_stop_sending_no_error_graceful() -> TestResult<()> {
@@ -1628,7 +1629,7 @@ async fn http3_stop_sending_no_error_graceful() -> TestResult<()> {
     let certified_key = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])?;
     let cert_der: CertificateDer<'static> = certified_key.cert.der().clone();
     let key_der: PrivateKeyDer<'static> =
-        PrivatePkcs8KeyDer::from(certified_key.key_pair.serialize_der()).into();
+        PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der()).into();
 
     // 2. Build the server-side rustls `ServerConfig` with ALPN `[b"h3"]`.
     let provider = Arc::new(rustls::crypto::ring::default_provider());
@@ -1655,9 +1656,9 @@ async fn http3_stop_sending_no_error_graceful() -> TestResult<()> {
                 Ok(c) => c,
                 Err(_) => break,
             };
-            let h3_quinn_conn = h3_quinn::Connection::new(quinn_conn);
-            let mut h3_conn: h3::server::Connection<h3_quinn::Connection, bytes::Bytes> =
-                match h3::server::Connection::new(h3_quinn_conn).await {
+            let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+            let mut h3_conn: hpx_h3::server::Connection<hpx_h3_quinn::Connection, bytes::Bytes> =
+                match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                     Ok(c) => c,
                     Err(_) => continue,
                 };
@@ -1755,7 +1756,7 @@ async fn http3_stop_sending_no_error_graceful() -> TestResult<()> {
 /// `H3_INTERNAL_ERROR` (0x0102), the error is surfaced as
 /// `H3Error::StreamReset` and satisfies `is_body()`.
 ///
-/// The server completes the h3 handshake via `h3::server::Connection`,
+/// The server completes the h3 handshake via `hpx_h3::server::Connection`,
 /// then intercepts the request stream and resets it with
 /// `H3_INTERNAL_ERROR`.
 #[tokio::test]
@@ -1766,7 +1767,7 @@ async fn http3_stop_sending_internal_error() -> TestResult<()> {
     let certified_key = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])?;
     let cert_der: CertificateDer<'static> = certified_key.cert.der().clone();
     let key_der: PrivateKeyDer<'static> =
-        PrivatePkcs8KeyDer::from(certified_key.key_pair.serialize_der()).into();
+        PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der()).into();
 
     // 2. Build the server-side rustls `ServerConfig` with ALPN `[b"h3"]`.
     let provider = Arc::new(rustls::crypto::ring::default_provider());
@@ -1793,9 +1794,9 @@ async fn http3_stop_sending_internal_error() -> TestResult<()> {
                 Ok(c) => c,
                 Err(_) => break,
             };
-            let h3_quinn_conn = h3_quinn::Connection::new(quinn_conn);
-            let mut h3_conn: h3::server::Connection<h3_quinn::Connection, bytes::Bytes> =
-                match h3::server::Connection::new(h3_quinn_conn).await {
+            let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+            let mut h3_conn: hpx_h3::server::Connection<hpx_h3_quinn::Connection, bytes::Bytes> =
+                match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                     Ok(c) => c,
                     Err(_) => continue,
                 };
@@ -2043,7 +2044,7 @@ async fn http3_request_body_mid_stream_error() -> TestResult<()> {
     let certified_key = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])?;
     let cert_der: CertificateDer<'static> = certified_key.cert.der().clone();
     let key_der: PrivateKeyDer<'static> =
-        PrivatePkcs8KeyDer::from(certified_key.key_pair.serialize_der()).into();
+        PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der()).into();
 
     // 2. Build the server-side rustls `ServerConfig` with ALPN `[b"h3"]`.
     let provider = Arc::new(rustls::crypto::ring::default_provider());
@@ -2069,9 +2070,9 @@ async fn http3_request_body_mid_stream_error() -> TestResult<()> {
                 Ok(c) => c,
                 Err(_) => break,
             };
-            let h3_quinn_conn = h3_quinn::Connection::new(quinn_conn);
-            let mut h3_conn: h3::server::Connection<h3_quinn::Connection, bytes::Bytes> =
-                match h3::server::Connection::new(h3_quinn_conn).await {
+            let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+            let mut h3_conn: hpx_h3::server::Connection<hpx_h3_quinn::Connection, bytes::Bytes> =
+                match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                     Ok(c) => c,
                     Err(_) => continue,
                 };
@@ -2355,7 +2356,7 @@ async fn client_upgrades_to_h3_after_alt_svc() -> TestResult<()> {
     let certified_key = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])?;
     let cert_der: CertificateDer<'static> = certified_key.cert.der().clone();
     let key_der: PrivateKeyDer<'static> =
-        PrivatePkcs8KeyDer::from(certified_key.key_pair.serialize_der()).into();
+        PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der()).into();
 
     // 2. Build the h3 server-side rustls `ServerConfig` with ALPN `[b"h3"]`.
     let provider = Arc::new(rustls::crypto::ring::default_provider());
@@ -2382,11 +2383,11 @@ async fn client_upgrades_to_h3_after_alt_svc() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = h3_quinn::Connection::new(quinn_conn);
-                        let mut h3_conn: h3::server::Connection<
-                            h3_quinn::Connection,
+                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let mut h3_conn: hpx_h3::server::Connection<
+                            hpx_h3_quinn::Connection,
                             bytes::Bytes,
-                        > = match h3::server::Connection::new(h3_quinn_conn).await {
+                        > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
                             Err(_) => return,
                         };
@@ -2592,7 +2593,7 @@ async fn prefer_http3_prefers_h3_with_fallback() -> TestResult<()> {
     let certified_key = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])?;
     let cert_der: CertificateDer<'static> = certified_key.cert.der().clone();
     let key_der: PrivateKeyDer<'static> =
-        PrivatePkcs8KeyDer::from(certified_key.key_pair.serialize_der()).into();
+        PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der()).into();
 
     // 2. Build the h3 server-side rustls `ServerConfig` with ALPN `[b"h3"]`.
     let provider = Arc::new(rustls::crypto::ring::default_provider());
@@ -2619,11 +2620,11 @@ async fn prefer_http3_prefers_h3_with_fallback() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = h3_quinn::Connection::new(quinn_conn);
-                        let mut h3_conn: h3::server::Connection<
-                            h3_quinn::Connection,
+                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let mut h3_conn: hpx_h3::server::Connection<
+                            hpx_h3_quinn::Connection,
                             bytes::Bytes,
-                        > = match h3::server::Connection::new(h3_quinn_conn).await {
+                        > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
                             Err(_) => return,
                         };
@@ -3031,7 +3032,7 @@ async fn http3_zero_rtt_resumption() -> TestResult<()> {
     let certified_key = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])?;
     let cert_der: CertificateDer<'static> = certified_key.cert.der().clone();
     let key_der: PrivateKeyDer<'static> =
-        PrivatePkcs8KeyDer::from(certified_key.key_pair.serialize_der()).into();
+        PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der()).into();
 
     // 2. Build the server-side rustls `ServerConfig` with ALPN `[b"h3"]`.
     let provider = Arc::new(rustls::crypto::ring::default_provider());
@@ -3056,11 +3057,11 @@ async fn http3_zero_rtt_resumption() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = h3_quinn::Connection::new(quinn_conn);
-                        let mut h3_conn: h3::server::Connection<
-                            h3_quinn::Connection,
+                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let mut h3_conn: hpx_h3::server::Connection<
+                            hpx_h3_quinn::Connection,
                             bytes::Bytes,
-                        > = match h3::server::Connection::new(h3_quinn_conn).await {
+                        > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
                             Err(_) => return,
                         };
@@ -3291,7 +3292,7 @@ async fn http3_idle_timeout_closes_connection() -> TestResult<()> {
     let certified_key = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])?;
     let cert_der: CertificateDer<'static> = certified_key.cert.der().clone();
     let key_der: PrivateKeyDer<'static> =
-        PrivatePkcs8KeyDer::from(certified_key.key_pair.serialize_der()).into();
+        PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der()).into();
 
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let mut server_rustls_config = RustlsServerConfig::builder_with_provider(provider)
@@ -3315,11 +3316,11 @@ async fn http3_idle_timeout_closes_connection() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = h3_quinn::Connection::new(quinn_conn);
-                        let mut h3_conn: h3::server::Connection<
-                            h3_quinn::Connection,
+                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let mut h3_conn: hpx_h3::server::Connection<
+                            hpx_h3_quinn::Connection,
                             bytes::Bytes,
-                        > = match h3::server::Connection::new(h3_quinn_conn).await {
+                        > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
                             Err(_) => return,
                         };
@@ -3467,7 +3468,7 @@ async fn http3_idle_timeout_closes_connection() -> TestResult<()> {
 ///
 /// Verifies the RFC 9220 Extended CONNECT mechanism for WebSocket-over-h3:
 /// 1. Start an h3 server that supports Extended CONNECT with `:protocol = websocket`.
-/// 2. Send a CONNECT request with `:protocol = websocket` via `h3::ext::Protocol::WEB_SOCKET`.
+/// 2. Send a CONNECT request with `:protocol = websocket` via `hpx_h3::ext::Protocol::WEB_SOCKET`.
 /// 3. Verify the server receives the `:protocol` pseudo-header.
 /// 4. The server responds with 200 OK.
 /// 5. After 200 OK, the stream becomes a bidirectional WebSocket data channel.
@@ -3479,7 +3480,7 @@ async fn http3_extended_connect_websocket() -> TestResult<()> {
     let certified_key = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])?;
     let cert_der: CertificateDer<'static> = certified_key.cert.der().clone();
     let key_der: PrivateKeyDer<'static> =
-        PrivatePkcs8KeyDer::from(certified_key.key_pair.serialize_der()).into();
+        PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der()).into();
 
     // 2. Build the server-side rustls `ServerConfig` with ALPN `[b"h3"]`.
     let provider = Arc::new(rustls::crypto::ring::default_provider());
@@ -3510,12 +3511,14 @@ async fn http3_extended_connect_websocket() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = h3_quinn::Connection::new(quinn_conn);
-                        let mut h3_conn: h3::server::Connection<h3_quinn::Connection, Bytes> =
-                            match h3::server::Connection::new(h3_quinn_conn).await {
-                                Ok(c) => c,
-                                Err(_) => return,
-                            };
+                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let mut h3_conn: hpx_h3::server::Connection<
+                            hpx_h3_quinn::Connection,
+                            Bytes,
+                        > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
+                            Ok(c) => c,
+                            Err(_) => return,
+                        };
                         loop {
                             match h3_conn.accept().await {
                                 Ok(Some(resolver)) => {
@@ -3529,7 +3532,7 @@ async fn http3_extended_connect_websocket() -> TestResult<()> {
                                     let is_ws_connect = req.method() == http::Method::CONNECT
                                         && req
                                             .extensions()
-                                            .get::<h3::ext::Protocol>()
+                                            .get::<hpx_h3::ext::Protocol>()
                                             .is_some_and(|p| p.as_str() == "websocket");
 
                                     if is_ws_connect {
@@ -3616,10 +3619,10 @@ async fn http3_extended_connect_websocket() -> TestResult<()> {
         .await?;
 
     // 8. Create the h3 client from the QUIC connection.
-    let h3_quinn_conn = h3_quinn::Connection::new(quinn_conn);
-    let (_driver, mut send_request) = h3::client::new(h3_quinn_conn).await.map_err(
+    let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+    let (_driver, mut send_request) = hpx_h3::client::new(h3_quinn_conn).await.map_err(
         |e| -> Box<dyn std::error::Error + Send + Sync> {
-            format!("h3::client::new failed: {e}").into()
+            format!("hpx_h3::client::new failed: {e}").into()
         },
     )?;
 
@@ -3627,7 +3630,7 @@ async fn http3_extended_connect_websocket() -> TestResult<()> {
     let req = http::Request::builder()
         .method(http::Method::CONNECT)
         .uri(format!("https://127.0.0.1:{}/", server_addr.port()))
-        .extension(h3::ext::Protocol::WEB_SOCKET)
+        .extension(hpx_h3::ext::Protocol::WEB_SOCKET)
         .body(())
         .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
             format!("failed to build request: {e}").into()

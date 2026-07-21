@@ -562,7 +562,15 @@ fn engine_with_sqlite(world: &mut DownloadWorld, db_path: String) {
 
 #[given(expr = "an hpx-dl engine is configured with max {int} concurrent download")]
 fn engine_with_max_concurrent(world: &mut DownloadWorld, max_concurrent: usize) {
-    world.build_engine(|builder| builder.max_concurrent(max_concurrent));
+    // Use a longer coalesce delay in tests so that scenarios relying on
+    // priority ordering (e.g. queue.feature) can batch successive `add()`
+    // calls into a single scheduling pass regardless of cucumber step
+    // overhead. Production keeps the default 50ms; tests use 500ms.
+    world.build_engine(|builder| {
+        builder
+            .max_concurrent(max_concurrent)
+            .scheduler_coalesce_delay(Duration::from_millis(500))
+    });
 }
 
 #[given(regex = r#"^a file "([^"]*)" of (\d+)MB is available at "([^"]*)"$"#)]
@@ -959,27 +967,49 @@ async fn check_error_contains(world: &mut DownloadWorld, expected_msg: String) {
 
 #[then(regex = r#"^I should have received an? "([^"]*)" event$"#)]
 async fn check_event_received(world: &mut DownloadWorld, event_type: String) {
-    let events = &world.event_log.lock().await.events;
-    let found = events
-        .iter()
-        .any(|event| matches_event_type(event, &event_type));
-    assert!(found, "missing event type {event_type}");
+    // The event subscriber runs in a separate tokio task and may not have
+    // processed the event yet when we reach this step. Poll for up to 2s.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let found = world
+            .event_log
+            .lock()
+            .await
+            .events
+            .iter()
+            .any(|event| matches_event_type(event, &event_type));
+        if found {
+            return;
+        }
+        if Instant::now() >= deadline {
+            panic!("missing event type {event_type}");
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 }
 
 #[then(regex = r#"^I should have received at least (\d+) "([^"]*)" event$"#)]
 async fn check_min_events(world: &mut DownloadWorld, min_count: u64, event_type: String) {
-    let count = world
-        .event_log
-        .lock()
-        .await
-        .events
-        .iter()
-        .filter(|event| matches_event_type(event, &event_type))
-        .count() as u64;
-    assert!(
-        count >= min_count,
-        "expected at least {min_count} {event_type} events, found {count}"
-    );
+    // The event subscriber runs in a separate tokio task and may lag behind.
+    // Poll for up to 2s before asserting.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let count = world
+            .event_log
+            .lock()
+            .await
+            .events
+            .iter()
+            .filter(|event| matches_event_type(event, &event_type))
+            .count() as u64;
+        if count >= min_count {
+            return;
+        }
+        if Instant::now() >= deadline {
+            panic!("expected at least {min_count} {event_type} events, found {count}");
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 }
 
 #[then(regex = r"^the elapsed time should be at least (\d+) seconds$")]

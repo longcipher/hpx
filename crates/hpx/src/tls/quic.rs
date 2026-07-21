@@ -63,7 +63,7 @@ pub fn build_quinn_client_config_with_root_store(
 ) -> crate::Result<quinn::ClientConfig> {
     // Per [C-01] and [C-23]: ALPN is forced to `b"h3"` regardless of
     // `TlsOptions::alpn_protocols`.
-    let alpn_protocols = vec![AlpnProtocol::HTTP3.as_bytes().to_vec()];
+    let alpn_protocols = vec![AlpnProtocol::HTTP3.as_wire_bytes().to_vec()];
 
     // Per [C-03]: TLS config uses rustls. Use `builder_with_provider` with an
     // explicit `ring` provider to avoid the CryptoProvider ambiguity panic.

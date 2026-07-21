@@ -44,12 +44,16 @@ use super::{
     PoolConfigOptions, ProtocolConfigOptions, ProxyConfigOptions, TlsConfigOptions,
     TransportConfig, TransportConfigOptions,
 };
+#[cfg(feature = "http3")]
+use crate::client::conn::alt_svc::{AltSvcCache, H3FailureTracker};
 #[cfg(feature = "hickory-dns")]
 use crate::dns::hickory::HickoryDnsResolver;
 #[cfg(feature = "http1")]
 use crate::http1::Http1Options;
 #[cfg(feature = "http2")]
 use crate::http2::Http2Options;
+#[cfg(feature = "http3")]
+use crate::http3::{Http3Options, QuicConfig};
 use crate::{
     EmulationFactory, Proxy,
     dns::{DnsResolverWithOverrides, DynResolver, GaiResolver, IntoResolve, Resolve},
@@ -120,6 +124,14 @@ impl ClientBuilder {
         if config.proxy.auto_sys_proxy {
             config.proxy.proxies.push(ProxyMatcher::system());
         }
+
+        // HTTP/3 (QUIC) shared state — created outside the `service` block so
+        // it can also be stored in `Client` for test inspection.
+        #[cfg(feature = "http3")]
+        let alt_svc_cache = Arc::new(AltSvcCache::new());
+        #[cfg(feature = "http3")]
+        let h3_failure_tracker =
+            Arc::new(H3FailureTracker::new(std::time::Duration::from_secs(60)));
 
         // Create base client service
         let service = {
@@ -203,6 +215,33 @@ impl ClientBuilder {
                         HttpVersionPref::Http2
                     ))
                     .http2_timer(TokioTimer::new());
+            }
+
+            // HTTP/3 (QUIC) connector wiring.
+            //
+            // When the caller supplies a `QuicConnector` via the
+            // `__test_with_quic_connector` escape hatch (e.g., integration
+            // tests with a custom root store trusting a self-signed cert),
+            // pass it through to `HttpClient::Builder::h3_connector` verbatim.
+            //
+            // When `http_version_pref == HttpVersionPref::Http3`, set
+            // `Ver::Http3` on the `HttpClient::Builder` so `connect_to`
+            // routes through the `QuicConnector` instead of the TCP
+            // connector. If no connector is wired in (neither test escape
+            // hatch nor the production construction path), h3 requests fail
+            // at runtime with `ErrorKind::UserUnsupportedVersion` ("HTTP/3
+            // requested but no QuicConnector wired in") from the
+            // `Ver::Http3` branch of `connect_to`.
+            #[cfg(feature = "http3")]
+            {
+                if matches!(config.protocol.http_version_pref, HttpVersionPref::Http3) {
+                    builder = builder.http3_only(true);
+                }
+                if let Some(quic_connector) = config.test_quic_connector.take() {
+                    builder = builder.h3_connector(quic_connector);
+                }
+                builder = builder.alt_svc_cache(alt_svc_cache.clone());
+                builder = builder.h3_failure_tracker(h3_failure_tracker.clone());
             }
 
             builder
@@ -306,6 +345,10 @@ impl ClientBuilder {
 
         Ok(Client {
             inner: Arc::new(client),
+            #[cfg(feature = "http3")]
+            alt_svc_cache,
+            #[cfg(feature = "http3")]
+            h3_failure_tracker,
         })
     }
 
@@ -1718,12 +1761,144 @@ impl ClientBuilder {
         P: EmulationFactory,
     {
         let emulation = factory.emulation();
+
+        // Extract HTTP/3 options before `into_parts` consumes `emulation`.
+        #[cfg(feature = "http3")]
+        let http3_opts = emulation.http3_options().cloned();
+        #[cfg(feature = "http3")]
+        if let Some(opts) = http3_opts {
+            self.config.http3_options = Some(opts);
+        }
+
         let (transport_opts, headers, orig_headers) = emulation.into_parts();
 
         self.config
             .transport
             .transport_options
             .apply_transport_options(transport_opts);
+
         self.default_headers(headers).orig_headers(orig_headers)
+    }
+
+    // HTTP/3 (QUIC) options
+
+    /// Only use HTTP/3 over QUIC for this client.
+    ///
+    /// When set, the client routes requests through a `QuicConnector`
+    /// instead of the TCP connector. The TCP ALPN list is empty (h3 is
+    /// QUIC-only per constraint C-06).
+    ///
+    /// Requests against servers that do not support HTTP/3 will fail at
+    /// runtime.
+    #[cfg(feature = "http3")]
+    #[inline]
+    pub fn http3_only(mut self) -> ClientBuilder {
+        self.config.protocol.http_version_pref = HttpVersionPref::Http3;
+        self
+    }
+
+    /// Alias of [`http3_only()`](Self::http3_only) for reqwest API parity.
+    ///
+    /// Forces the client to use HTTP/3 (QUIC) exclusively. Equivalent to
+    /// calling `http3_only()`.
+    #[cfg(feature = "http3")]
+    #[inline]
+    pub fn http3_prior_knowledge(self) -> ClientBuilder {
+        self.http3_only()
+    }
+
+    /// Returns `true` if the client is configured to use HTTP/3 exclusively
+    /// (i.e., [`http3_only()`](Self::http3_only) or
+    /// [`http3_prior_knowledge()`](Self::http3_prior_knowledge) was called).
+    ///
+    /// `#[doc(hidden)]` — exposed for integration tests under
+    /// `crates/hpx/tests/http3.rs` to verify builder state without spinning
+    /// up a real h3 server.
+    #[cfg(feature = "http3")]
+    #[doc(hidden)]
+    #[inline]
+    pub fn is_http3_only(&self) -> bool {
+        matches!(
+            self.config.protocol.http_version_pref,
+            HttpVersionPref::Http3
+        )
+    }
+
+    /// Prefer HTTP/3 over HTTP/2 with graceful fallback.
+    ///
+    /// Sets `HttpVersionPref::All`, which allows the client to negotiate
+    /// h2/h1 over TCP while also enabling Alt-Svc (RFC 7838) discovery for
+    /// opportunistic h3 upgrades. When an h3 endpoint is discovered via
+    /// `Alt-Svc` and the QUIC handshake succeeds, subsequent requests are
+    /// routed over h3; otherwise, the client falls back to h2/h1.
+    ///
+    /// Unlike [`http3_only()`](Self::http3_only), this mode tolerates
+    /// servers that do not support h3 by falling back to h2/h1.
+    ///
+    /// Per constraint C-06, the TCP ALPN list does NOT include `h3` — h3 is
+    /// only reachable via QUIC, discovered through Alt-Svc headers on h2/h1
+    /// responses.
+    #[cfg(feature = "http3")]
+    #[inline]
+    pub fn prefer_http3(mut self) -> ClientBuilder {
+        self.config.protocol.http_version_pref = HttpVersionPref::All;
+        self
+    }
+
+    /// Set HTTP/3 (QUIC) protocol options.
+    ///
+    /// When `Some`, the supplied [`Http3Options`] overrides the default
+    /// Chrome 143 baseline used by `Client::build` when constructing the
+    /// `QuicConnector`. When `None`, the default is used.
+    #[cfg(feature = "http3")]
+    #[inline]
+    pub fn http3_options(mut self, options: Http3Options) -> ClientBuilder {
+        self.config.http3_options = Some(options);
+        self
+    }
+
+    /// Returns the stored [`Http3Options`], or `None` if
+    /// [`http3_options()`](Self::http3_options) was not called.
+    #[cfg(feature = "http3")]
+    #[inline]
+    pub fn http3_options_ref(&self) -> Option<&Http3Options> {
+        self.config.http3_options.as_ref()
+    }
+
+    /// Set a low-level [`QuicConfig`] override (a type alias for
+    /// `quinn::TransportConfig`). When `Some`, the override takes
+    /// precedence over the transport config derived from `http3_options`.
+    #[cfg(feature = "http3")]
+    #[inline]
+    pub fn quic_config(mut self, config: QuicConfig) -> ClientBuilder {
+        self.config.quic_config = Some(config);
+        self
+    }
+
+    /// Returns the stored [`QuicConfig`] override, or `None` if not set.
+    #[cfg(feature = "http3")]
+    #[inline]
+    pub fn quic_config_ref(&self) -> Option<&QuicConfig> {
+        self.config.quic_config.as_ref()
+    }
+
+    /// Test-only escape hatch for injecting a pre-constructed `QuicConnector`
+    /// (e.g., with a custom root store trusting a self-signed cert). When
+    /// `Some`, `Client::build` passes it through to
+    /// [`HttpClient::Builder::h3_connector`] verbatim, bypassing the normal
+    /// `QuicConnector` construction path. This lets integration tests
+    /// hit local h3 endpoints without having to materialize a real
+    /// publicly-trusted cert.
+    ///
+    /// `#[doc(hidden)]` — not part of the stable public API; exposed for
+    /// integration tests under `crates/hpx/tests/http3.rs`.
+    #[cfg(feature = "http3")]
+    #[doc(hidden)]
+    pub fn __test_with_quic_connector(
+        mut self,
+        connector: crate::client::conn::quic::QuicConnector,
+    ) -> ClientBuilder {
+        self.config.test_quic_connector = Some(connector);
+        self
     }
 }

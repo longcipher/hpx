@@ -983,6 +983,7 @@ where
 impl<C, B> HttpClient<C, B> {
     /// Returns a reference to the [`AltSvcCache`].
     #[cfg(feature = "http3")]
+    #[allow(dead_code)] // HTTP/3 Alt-Svc accessor; wired in by future tasks.
     pub(crate) fn alt_svc_cache(&self) -> &Arc<AltSvcCache> {
         &self.alt_svc_cache
     }
@@ -1098,7 +1099,7 @@ enum PoolTx<B> {
     /// Uses `Shared` reservation semantics (one connection per authority serves
     /// many streams), mirroring `Http2` (C-05). `H3Connection` does not carry
     /// the `B` type parameter (it uses `Bytes` internally via
-    /// `h3::client::SendRequest<h3_quinn::OpenStreams, Bytes>`); the `B` on
+    /// `hpx_h3::client::SendRequest<hpx_h3_quinn::OpenStreams, Bytes>`); the `B` on
     /// `PoolTx<B>` is preserved for the `Http1`/`Http2` variants and the
     /// `None` fallback.
     #[cfg(feature = "http3")]

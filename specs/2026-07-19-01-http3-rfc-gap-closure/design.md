@@ -497,7 +497,7 @@ The `if alpn == Some(b"h2") { connected.negotiated_h2() }` check at `tls/boring.
 
 RFC 7838 `Alt-Svc` header parser. Header format:
 
-```
+```text
 Alt-Svc: h3=":443"; ma=86400, h3-29=":443"; ma=3600
 Alt-Svc: clear
 ```
@@ -784,6 +784,7 @@ The `WsConfig` at `crates/hpx-transport/src/websocket/config.rs` gains an option
 **Decision:** Adopt **Option C** from `docs/tasks.md` §1.1: keep BoringSSL as the default backend for h1/h2 (preserving fingerprint fidelity), use rustls+quinn for h3. The two backends coexist; the `http3` Cargo feature enables `rustls-tls` (already a feature) plus the `rustls/quic` feature.
 
 **Consequences:**
+
 - ✅ No BoringSSL QUIC bindings needed (avoiding `boring-sys` FFI work).
 - ✅ Existing h1/h2 fingerprint emulation is untouched.
 - ✅ rustls+quinn is the well-trodden path (used by reqwest, h3, h3-quinn).
@@ -809,6 +810,7 @@ The `WsConfig` at `crates/hpx-transport/src/websocket/config.rs` gains an option
 **Decision:** Maintain one `quinn::Connection` per `(scheme, host, port)` authority. New requests clone the `h3::client::SendRequest` handle (which is cheap — it's a `Clone` multi-producer single-consumer channel) and open a new bidirectional h3 stream.
 
 **Consequences:**
+
 - ✅ Matches reqwest's proven model (`src/async_impl/h3_client/pool.rs:188-194`).
 - ✅ Maximizes multiplexing benefit (head-of-line blocking is per-stream, not per-connection).
 - ✅ Simpler pool logic (one entry per key, overwrite on insert).
@@ -828,6 +830,7 @@ The `WsConfig` at `crates/hpx-transport/src/websocket/config.rs` gains an option
 **Decision:** Use RFC 7838 `Alt-Svc` as the canonical discovery mechanism. `http3_prior_knowledge()` remains the explicit opt-in. DNS SRV is downgraded to an optional optimization (REQ-17, NG8 if not pursued).
 
 **Consequences:**
+
 - ✅ Standards-compliant (RFC 7838).
 - ✅ No DNS resolver changes needed.
 - ✅ Works with any HTTP/1 or HTTP/2 response — the cache is populated opportunistically.

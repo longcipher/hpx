@@ -228,7 +228,7 @@ impl AlpnProtocol {
         AlpnProtocol(value)
     }
 
-/// Returns the raw protocol name bytes (e.g. `b"h2"`, `b"http/1.1"`).
+    /// Returns the raw protocol name bytes (e.g. `b"h2"`, `b"http/1.1"`).
     ///
     /// This is the format expected by rustls's `ClientConfig::alpn_protocols`.
     #[inline]

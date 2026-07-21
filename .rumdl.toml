@@ -29,6 +29,9 @@ exclude = [
     # Specific files or patterns
     "CHANGELOG.md",
     "LICENSE.md",
+    # Vendored upstream crate READMEs reference files/dirs that don't exist
+    # in our workspace (e.g., ./h3-quinn/, ./examples/, CONTRIBUTING.md).
+    "crates/hpx-h3/README.md",
 ]
 
 # Respect .gitignore files when scanning directories (default: true)

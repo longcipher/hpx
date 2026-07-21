@@ -59,6 +59,9 @@ pub struct EngineConfig {
     pub retry_jitter: f64,
     /// Path to the storage database file.
     pub storage_path: PathBuf,
+    /// Coalescing delay the scheduler waits when starting from idle, to batch
+    /// rapid successive `add()` calls into a single scheduling pass.
+    pub scheduler_coalesce_delay: Duration,
 }
 
 impl Default for EngineConfig {
@@ -73,6 +76,7 @@ impl Default for EngineConfig {
             retry_max_delay: Duration::from_secs(30),
             retry_jitter: 0.25,
             storage_path: PathBuf::from("./hpx-dl.db"),
+            scheduler_coalesce_delay: SCHEDULER_IDLE_COALESCE_DELAY,
         }
     }
 }
@@ -148,6 +152,15 @@ impl EngineBuilder {
     #[must_use]
     pub const fn retry_max_attempts(mut self, n: u32) -> Self {
         self.config.retry_max_attempts = n;
+        self
+    }
+
+    /// Set the scheduler idle coalesce delay. When the scheduler starts from
+    /// idle (no active tasks, all permits available), it waits this duration
+    /// before popping from the queue, to batch rapid successive `add()` calls.
+    #[must_use]
+    pub const fn scheduler_coalesce_delay(mut self, delay: Duration) -> Self {
+        self.config.scheduler_coalesce_delay = delay;
         self
     }
 
@@ -565,7 +578,7 @@ impl EngineInner {
 
     async fn scheduler_loop(self: Arc<Self>) {
         if self.should_coalesce_idle_start() {
-            tokio::time::sleep(SCHEDULER_IDLE_COALESCE_DELAY).await;
+            tokio::time::sleep(self.config.scheduler_coalesce_delay).await;
         }
 
         loop {
@@ -1162,24 +1175,18 @@ fn build_client(
 
 /// Validate a download destination path for path traversal attacks.
 ///
-/// Rejects paths containing `..` (parent directory) components and absolute
-/// paths (root directory components) to prevent arbitrary file writes.
+/// Rejects paths containing `..` (parent directory) components to prevent
+/// escaping an intended directory root. Absolute paths are permitted: they
+/// represent explicit user intent, not a traversal attack. Callers that want
+/// to confine downloads to a specific directory should enforce that policy at
+/// the application layer.
 fn validate_download_path(path: &Path) -> Result<(), DownloadError> {
     for component in path.components() {
-        match component {
-            std::path::Component::ParentDir => {
-                return Err(DownloadError::PathTraversal(format!(
-                    "path contains '..' component: {}",
-                    path.display()
-                )));
-            }
-            std::path::Component::RootDir => {
-                return Err(DownloadError::PathTraversal(format!(
-                    "absolute paths are not allowed: {}",
-                    path.display()
-                )));
-            }
-            _ => {}
+        if component == std::path::Component::ParentDir {
+            return Err(DownloadError::PathTraversal(format!(
+                "path contains '..' component: {}",
+                path.display()
+            )));
         }
     }
     Ok(())
@@ -1295,6 +1302,10 @@ mod tests {
         assert_eq!(config.retry_max_delay, Duration::from_secs(30));
         assert!((config.retry_jitter - 0.25).abs() < f64::EPSILON);
         assert_eq!(config.storage_path, PathBuf::from("./hpx-dl.db"));
+        assert_eq!(
+            config.scheduler_coalesce_delay,
+            SCHEDULER_IDLE_COALESCE_DELAY
+        );
     }
 
     #[test]
@@ -1309,10 +1320,12 @@ mod tests {
             retry_max_delay: Duration::from_secs(60),
             retry_jitter: 0.5,
             storage_path: PathBuf::from("/tmp/custom.db"),
+            scheduler_coalesce_delay: Duration::from_millis(100),
         };
         assert_eq!(config.max_concurrent_downloads, 10);
         assert_eq!(config.global_speed_limit, Some(1_000_000));
         assert_eq!(config.storage_path, PathBuf::from("/tmp/custom.db"));
+        assert_eq!(config.scheduler_coalesce_delay, Duration::from_millis(100));
     }
 
     #[test]
@@ -1579,14 +1592,12 @@ mod tests {
     }
 
     #[test]
-    fn validate_path_rejects_absolute_path() {
+    fn validate_path_accepts_absolute_path() {
+        // Absolute paths are explicit user intent, not a traversal attack.
+        // Applications that need to confine downloads to a sandbox must
+        // enforce that policy themselves.
         let result = validate_download_path(Path::new("/etc/passwd"));
-        assert!(result.is_err(), "should reject absolute path");
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("absolute"),
-            "error should mention absolute paths, got: {err}"
-        );
+        assert!(result.is_ok(), "should accept absolute path");
     }
 
     #[test]
@@ -1602,8 +1613,11 @@ mod tests {
     }
 
     #[test]
-    fn validate_path_rejects_root_only() {
+    fn validate_path_accepts_root_path() {
+        // `/` is a directory, not a valid download target, but that is an
+        // OS-level concern (EISDIR at write time). The traversal validator
+        // only rejects `..` escape attempts.
         let result = validate_download_path(Path::new("/"));
-        assert!(result.is_err(), "should reject root path");
+        assert!(result.is_ok(), "should accept root path");
     }
 }

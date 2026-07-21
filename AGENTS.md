@@ -30,12 +30,12 @@
 
 When introducing new dependencies, prefer these versions unless compatibility requires an upgrade:
 
-- `clap = "4.6.1"`
+- `clap = "4.6.3"`
 - `config = "0.15.19"`
 - `eyre = "0.6.12"`
-- `serde = "1.0.228"`
-- `thiserror = "2.0.18"`
-- `tokio = "1.52.1"`
+- `serde = "1.0.229"`
+- `thiserror = "2.0.19"`
+- `tokio = "1.53.1"`
 - `tracing = "0.1.44"`
 - `tracing-subscriber = "0.3.23"`
 - `tracing-opentelemetry = "0.32.1"`
@@ -46,10 +46,10 @@ When introducing new dependencies, prefer these versions unless compatibility re
 - `utoipa-swagger-ui = "9.0.2"`
 - `arc-swap = "1.9.2"`
 - `hpx = "2.5.5"`
-- `scc = "3.8.4"`
+- `scc = "3.8.5"`
 - `winnow = "1.0.4"`
 - `shadow-rs = "1.7.0"`
-- `ecdysis = "1.0.1"`
+- `ecdysis = "1.1.1"`
 
 ## Dependency Priority and Forbidden Choices
 
@@ -221,6 +221,8 @@ If any command fails, report the failure and do not claim completion.
 | hpx-browser | library | `crates/hpx-browser` |
 | hpx-dl | library | `crates/hpx-dl` |
 | hpx-emulation | library | `crates/hpx-emulation` |
+| hpx-h3 | library | `crates/hpx-h3` |
+| hpx-h3-quinn | library | `crates/hpx-h3-quinn` |
 | hpx-streams | library | `crates/hpx-streams` |
 | yawc (hpx-yawc) | library | `crates/yawc` |
 | hpx-cli | binary | `bin/hpx-cli` |
@@ -236,6 +238,8 @@ If any command fails, report the failure and do not claim completion.
 │   ├── hpx-browser/          # Headless browser engine (DOM, JS runtime, CDP, canvas, layout)
 │   ├── hpx-dl/               # Download engine (segmented, resume, queue, SQLite persistence)
 │   ├── hpx-emulation/        # Browser emulation profiles (Chrome, Firefox, Safari, OkHttp)
+│   ├── hpx-h3/               # Fork of hyperium/h3 HTTP/3 protocol (vendored, edition 2024)
+│   ├── hpx-h3-quinn/         # Fork of hyperium/h3-quinn QUIC transport (vendored, edition 2024)
 │   ├── hpx-streams/          # HTTP response streaming (JSON/CSV/Protobuf/Arrow)
 │   └── yawc/                 # WebSocket client/server (RFC 6455, compression, proxy)
 ├── specs/                    # Feature design specs (pb-plan/pb-build)

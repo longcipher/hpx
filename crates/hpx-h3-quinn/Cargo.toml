@@ -1,0 +1,166 @@
+[package]
+name = "hpx-h3-quinn"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Fork of hyperium/h3-quinn QUIC transport implementation based on Quinn, vendored into the hpx workspace."
+keywords = ["http3", "quic", "h3", "quinn"]
+categories = ["network-programming", "web-programming"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+tracing = ["dep:tracing"]
+# Placeholder for the datagram feature. The actual implementation requires
+# vendoring h3-datagram, which is not currently in the workspace.
+datagram = []
+
+[dependencies]
+bytes = { workspace = true }
+futures-util = { workspace = true }
+hpx-h3 = { workspace = true }
+quinn = { workspace = true, features = ["futures-io"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true, optional = true }
+
+[lints.clippy]
+# Vendored third-party crate: allow `#[allow(...)]` attributes to suppress
+# noisy lints that would require invasive changes to upstream source.
+allow_attributes = "allow"
+# Vendored third-party crate: pedantic baseline is kept, but the lints below
+# are too noisy for upstream code and would require invasive changes.
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+doc_markdown = "allow"
+similar_names = "allow"
+too_many_lines = "allow"
+module_name_repetitions = "allow"
+struct_excessive_bools = "allow"
+fn_params_excessive_bools = "allow"
+items_after_statements = "allow"
+uninlined_format_args = "allow"
+return_self_not_must_use = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+cast_possible_wrap = "allow"
+cast_lossless = "allow"
+default_trait_access = "allow"
+match_same_arms = "allow"
+unused_async = "allow"
+manual_let_else = "allow"
+used_underscore_binding = "allow"
+ref_option_ref = "allow"
+ref_option = "allow"
+format_push_string = "allow"
+case_sensitive_file_extension_comparisons = "allow"
+unnecessary_wraps = "allow"
+needless_pass_by_value = "allow"
+trivially_copy_pass_by_ref = "allow"
+no_effect_underscore_binding = "allow"
+redundant_closure_for_method_calls = "allow"
+unwrap_used = "allow"
+expect_used = "allow"
+panic = "allow"
+result_large_err = "allow"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+borrow_as_ptr = "allow"
+branches_sharing_code = "allow"
+cloned_instead_of_copied = "allow"
+derive_partial_eq_without_eq = "allow"
+empty_line_after_doc_comments = "allow"
+empty_line_after_outer_attr = "allow"
+enum_glob_use = "allow"
+equatable_if_let = "allow"
+explicit_into_iter_loop = "allow"
+explicit_iter_loop = "allow"
+flat_map_option = "allow"
+if_not_else = "allow"
+if_then_some_else_none = "allow"
+implicit_clone = "allow"
+imprecise_flops = "allow"
+iter_on_empty_collections = "allow"
+iter_on_single_items = "allow"
+iter_with_drain = "allow"
+iter_without_into_iter = "allow"
+large_stack_frames = "allow"
+manual_assert = "allow"
+manual_clamp = "allow"
+manual_is_variant_and = "allow"
+manual_string_new = "allow"
+missing_const_for_fn = "allow"
+mutex_integer = "allow"
+naive_bytecount = "allow"
+needless_bitwise_bool = "allow"
+needless_continue = "allow"
+needless_for_each = "allow"
+needless_pass_by_ref_mut = "allow"
+nonstandard_macro_braces = "allow"
+option_as_ref_cloned = "allow"
+or_fun_call = "allow"
+path_buf_push_overwrite = "allow"
+read_zero_byte_vec = "allow"
+redundant_clone = "allow"
+redundant_else = "allow"
+single_char_pattern = "allow"
+string_lit_as_bytes = "allow"
+string_lit_chars_any = "allow"
+suboptimal_flops = "allow"
+suspicious_operation_groupings = "allow"
+trailing_empty_array = "allow"
+trait_duplication_in_bounds = "allow"
+transmute_undefined_repr = "allow"
+trivial_regex = "allow"
+tuple_array_conversions = "allow"
+type_repetition_in_bounds = "allow"
+uninhabited_references = "allow"
+unnecessary_self_imports = "allow"
+unnecessary_struct_initialization = "allow"
+unnested_or_patterns = "allow"
+unused_peekable = "allow"
+unused_rounding = "allow"
+use_self = "allow"
+useless_let_if_seq = "allow"
+while_float = "allow"
+zero_sized_map_values = "allow"
+as_ptr_cast_mut = "allow"
+cognitive_complexity = "allow"
+debug_assert_with_mut_call = "allow"
+fallible_impl_from = "allow"
+future_not_send = "allow"
+needless_collect = "allow"
+non_send_fields_in_send_ty = "allow"
+redundant_pub_crate = "allow"
+significant_drop_in_scrutinee = "allow"
+significant_drop_tightening = "allow"
+too_long_first_doc_paragraph = "allow"
+bool_to_int_with_if = "allow"
+duplicated_attributes = "allow"
+elidable_lifetime_names = "allow"
+ignored_unit_patterns = "allow"
+match_wildcard_for_single_variants = "allow"
+mut_mut = "allow"
+semicolon_if_nothing_returned = "allow"
+unnecessary_semicolon = "allow"
+unreadable_literal = "allow"
+unused_self = "allow"
+clear_with_drain = "allow"
+collection_is_never_read = "allow"
+
+[lints.rust]
+# Vendored third-party crate: allow missing docs and debug implementations.
+missing_docs = "allow"
+missing_debug_implementations = "allow"
+unreachable_pub = "allow"
+rust_2018_idioms = { level = "deny", priority = -1 }
+unused_must_use = "deny"

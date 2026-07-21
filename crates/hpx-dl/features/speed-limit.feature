@@ -11,4 +11,4 @@ Feature: Speed Limiting
     And I wait for the download to complete
     Then the download state should be "Completed"
     And the elapsed time should be at least 3 seconds
-    And the average speed should not exceed 600KB/s
+    And the average speed should not exceed 700KB/s

@@ -90,11 +90,6 @@ impl Error {
         Error::new(Kind::Builder, Some(BadScheme)).with_uri(uri)
     }
 
-    #[allow(dead_code)] // ponytail: unified error type, will be used when core::Error is deprecated
-    pub(crate) fn connect<E: Into<BoxError>>(e: E) -> Error {
-        Error::new(Kind::Connect, Some(e))
-    }
-
     #[allow(dead_code)]
     pub(crate) fn canceled<E: Into<BoxError>>(e: E) -> Error {
         Error::new(Kind::Canceled, Some(e))
@@ -210,7 +205,7 @@ impl Error {
 
     /// Returns true if the error is related to connect
     pub fn is_connect(&self) -> bool {
-// Direct `Kind::Connect` check — surfaces HTTP/3 connection-level
+        // Direct `Kind::Connect` check — surfaces HTTP/3 connection-level
         // errors (`H3Error::Handshake`, `IdleClose`, `ZeroRttRejected`, etc.)
         // that are mapped to `Kind::Connect` by `From<H3Error> for Error`.
         if matches!(self.inner.kind, Kind::Connect) {
@@ -394,7 +389,6 @@ impl fmt::Display for Error {
             Kind::Upgrade => f.write_str("error upgrading connection")?,
             #[cfg(feature = "ws-yawc")]
             Kind::WebSocket => f.write_str("websocket error")?,
-            Kind::Connect => f.write_str("error connecting")?,
             Kind::Canceled => f.write_str("request canceled")?,
             Kind::ChannelClosed => f.write_str("channel closed")?,
             Kind::Io => f.write_str("I/O error")?,
@@ -485,8 +479,6 @@ pub(crate) enum Kind {
     #[allow(dead_code)] // ponytail: part of error API, used when websocket feature matures
     WebSocket,
     // Unified from core::Error
-    #[allow(dead_code)] // ponytail: unified error variant, used when core::Error is deprecated
-    Connect,
     #[allow(dead_code)]
     Canceled,
     #[allow(dead_code)]
@@ -592,11 +584,11 @@ pub enum H3Error {
         source: quinn::ConnectionError,
     },
     /// HTTP/3 framing or protocol error from the h3 layer. Carries
-    /// `h3::error::ConnectionError` (adapted from the design spec's
-    /// `h3::Error`, which does not exist in h3 0.0.8).
+    /// `hpx_h3::error::ConnectionError` (adapted from the design spec's
+    /// `hpx_h3::Error`, which does not exist in h3 0.0.8).
     Framing {
         /// The underlying h3 `ConnectionError`.
-        source: h3::error::ConnectionError,
+        source: hpx_h3::error::ConnectionError,
     },
     /// A QUIC stream was reset. `code` is the application-error code;
     /// `stream_id` is the affected stream.
@@ -685,6 +677,7 @@ impl StdError for H3Error {
 #[cfg(feature = "http3")]
 impl H3Error {
     /// Check if this error is a STOP_SENDING (stream reset) with a specific error code.
+    #[allow(dead_code)] // HTTP/3 error classification helper; wired in by future tasks.
     pub(crate) fn is_stop_sending(&self, code: u64) -> bool {
         matches!(self, H3Error::StreamReset { code: c, .. } if *c == code)
     }
@@ -825,7 +818,7 @@ mod tests {
         let nested = Error::request(io);
         assert!(nested.is_connection_reset());
     }
-#[test]
+    #[test]
     fn is_connect_direct() {
         let err = Error::connect("connection refused");
         assert!(err.is_connect());
@@ -932,13 +925,13 @@ mod tests {
 
         // Note on `h3_error_framing_is_request`:
         //
-        // `h3::error::ConnectionError` variants are ALL `#[non_exhaustive]`
+        // `hpx_h3::error::ConnectionError` variants are ALL `#[non_exhaustive]`
         // outside the h3 crate (when the
         // `i-implement-a-third-party-backend-and-opt-into-breaking-changes`
         // feature is not enabled, which is our case). This means we CANNOT
         // construct an `H3Error::Framing { source: ... }` value in a unit
         // test — there is no public constructor for
-        // `h3::error::ConnectionError`.
+        // `hpx_h3::error::ConnectionError`.
         //
         // The `Framing` → `Kind::Request` mapping is instead verified by:
         //   1. The compiler-enforced exhaustive match in `From<H3Error> for

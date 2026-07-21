@@ -2,10 +2,6 @@
 members = ["bin/*", "crates/*"]
 resolver = "3"
 
-# Patch h3 crate to add WebSocket protocol support for RFC 9220
-[patch.crates-io]
-h3 = { path = "crates/h3-local" }
-
 [workspace.package]
 version = "2.5.5"
 edition = "2024"
@@ -190,84 +186,90 @@ all = "warn"
 # local crates
 hpx = { path = "crates/hpx", version = "2.5.5" }
 hpx-browser = { path = "crates/hpx-browser", version = "2.5.5" }
-hpx-cli = { path = "crates/hpx-cli", version = "2.5.5" }
+hpx-cli = { path = "bin/hpx-cli", version = "2.5.5" }
 hpx-dl = { path = "crates/hpx-dl", version = "2.5.5" }
+hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.5" }
+hpx-h3 = { path = "crates/hpx-h3", version = "2.5.5" }
+hpx-h3-quinn = { path = "crates/hpx-h3-quinn", version = "2.5.5" }
+hpx-streams = { path = "crates/hpx-streams", version = "2.5.5" }
 hpx-yawc = { path = "crates/yawc", version = "2.5.5" }
-hpxless = { path = "crates/hpxless", version = "2.5.5" }
+hpxless = { path = "bin/hpxless", version = "2.5.5" }
 
 # external crates
 ahash = "0.8.12"
 arc-swap = "1.9.2"
 arrayvec = "0.7.8"
 arrow = "59.1.0"
-clap = { version = "4.5.20", features = ["derive"] }
-async-trait = "0.1.80"
+assert_matches = "1.5.0"
+async-trait = "0.1.91"
 axum = "0.8.9"
 axum-core = "0.5.6"
 base64 = "0.22.1"
-blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "1973351bc8f26310b4fcdcedcd15cf55ed5dc107", version = "=0.3.0-beta.1", features = ["floats"] }
-blitz-html = { git = "https://github.com/DioxusLabs/blitz.git", rev = "1973351bc8f26310b4fcdcedcd15cf55ed5dc107", version = "=0.3.0-beta.1" }
-blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "1973351bc8f26310b4fcdcedcd15cf55ed5dc107", version = "=0.3.0-beta.1" }
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62", version = "=0.3.0-beta.1" }
+blitz-html = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62", version = "=0.3.0-beta.1" }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62", version = "=0.3.0-beta.1" }
 boring = "5.1.0"
 brotli = "8.0.4"
-bytes = "1.12.0"
-chrono = "0.4.44"
-clap = "4.6.1"
-const-oid = "0.10"
+bytes = "1.12.1"
+chrono = "0.4.45"
+clap = "4.6.3"
+const-oid = "0.10.2"
 cookie = "0.18.1"
 criterion = "0.8.2"
 crossbeam-channel = "0.5.16"
 csv = "1.4.0"
 cucumber = "0.23.0"
-deno_core = "0.407.0"
-der = "0.8.0"
+deno_core = "0.408.0"
+der = "0.8.1"
 digest = "0.11.3"
-ecdysis = "1.0.1"
+ecdysis = "1.1.1"
 encoding_rs = "0.8.35"
 eyre = "0.6.12"
-fastrand = "2.4.1"
+fastrand = "2.5.0"
 flate2 = "1.1.9"
 fontdb = "0.23.0"
-futures = "0.3.32"
-futures-channel = "0.3.32"
-futures-core = "0.3.32"
+futures = "0.3.33"
+futures-channel = "0.3.33"
+futures-core = "0.3.33"
 futures-rustls = "0.26.0"
-futures-util = "0.3.32"
+futures-util = "0.3.33"
 hex = "0.4.3"
-hickory-resolver = "0.26.0"
+hickory-resolver = "0.26.1"
 hmac = "0.13.0"
-hotpath = "0.21.2"
+hotpath = "0.21.5"
 http = "1.4.2"
 http-body = "1.1.0"
 http-body-util = "0.1.4"
 http2 = "0.5.19"
 httparse = "1.10.1"
-hyper = "1.10.1"
+hyper = "1.11.0"
 hyper-util = "0.1.20"
 image = "=0.25.6"
 ipnet = "2.12.0"
 js-sys = "0.3.103"
-libc = "0.2.186"
+libc = "0.2.187"
 md-5 = "0.11.0"
-memchr = "2.8.2"
+memchr = "2.8.3"
 mime = "0.3.17"
 mime_guess = "2.0.5"
-openssl = "0.10"
-parking_lot = "0.12.3"
+openssl = "0.10.81"
+parking_lot = "0.12.5"
 parley = "0.11.0"
 percent-encoding = "2.3.2"
-pin-project = "1.1.11"
+pin-project = "1.1.13"
 pin-project-lite = "0.2.17"
-pkcs12 = "0.2.0-pre.0"
+pkcs12 = "0.1.0"
 pkcs8 = "0.11.0"
 png = "0.18.1"
 pretty_env_logger = "0.5.0"
-proptest = "1.6.0"
+proptest = "1.11.0"
 prost = "0.14.4"
 quick-xml = "0.41.0"
+quinn = { version = "0.11.11", default-features = false }
 rand = "0.10.2"
 rand_chacha = "0.10.0"
 rand_distr = "0.6.0"
+rcgen = "0.14.8"
 rustfft = "6.4.1"
 rustls = "0.23.42"
 rustls-native-certs = "0.8.4"
@@ -277,12 +279,12 @@ rustybuzz = "0.20.1"
 scc = "3.8.5"
 schnellru = "0.2.4"
 selectors = "0.39.0"
-serde = "1.0.228"
-serde_json = "1.0.150"
+serde = "1.0.229"
+serde_json = "1.0.151"
 serde_urlencoded = "0.7.1"
 sha1 = "0.11.0"
 sha2 = "0.11.0"
-simd-json = "0.17.1"
+simd-json = "0.17.3"
 simdutf8 = "0.1.5"
 skia-safe = "0.99.0"
 smallvec = "1.15.2"
@@ -292,16 +294,16 @@ sqlx = "0.9.0"
 strum = "0.28.0"
 strum_macros = "0.28.0"
 stylo = "0.19.0"
-swash = "0.2.9"
+swash = "0.2.10"
 sync_wrapper = "1.0.2"
 system-configuration = "0.7.0"
-taffy = { version = "0.12.1", default-features = false }
+taffy = { version = "0.12.2", default-features = false }
 tempfile = "3.27.0"
-thiserror = "2.0.18"
-tokio = "1.52.1"
+thiserror = "2.0.19"
+tokio = "1.53.1"
 tokio-boring = "5.0.0"
-tokio-openssl = "0.6"
-tokio-rustls = "0.26"
+tokio-openssl = "0.6.5"
+tokio-rustls = "0.26.4"
 tokio-socks = "0.5.3"
 tokio-test = "0.4.5"
 tokio-util = "0.7.18"
@@ -311,40 +313,17 @@ tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 typed-builder = "0.23.2"
 url = "2.5.8"
-uuid = "1.23.5"
+uuid = "1.24.0"
 want = "0.3.1"
 wasm-bindgen = "0.2.126"
 web-sys = { version = "0.3.103", default-features = false }
-webpki-root-certs = "1.0.8"
-webpki-roots = "1.0.8"
+webpki-root-certs = "1.0.9"
+webpki-roots = "1.0.9"
 which = "8.0.5"
 windows-registry = "0.6.1"
 winnow = "1.0.4"
 zstd = "0.13.3"
 
-# WASM dependencies
-getrandom = "=0.2"
-js-sys = "0.3.85"
-wasm-bindgen = "0.2.108"
-wasm-bindgen-futures = "0.4.58"
-wasm-bindgen-test = "0.3.58"
-web-sys = { version = "0.3.85", default-features = false }
-
-# Additional async/runtime dependencies
-smol = "2.0.2"
-tokio-stream = { version = "0.1.18", features = ["sync"] }
-
-# TLS dependencies
-futures-rustls = "0.26"
-rustls-native-certs = "0.8"
-
-# HTTP/3 dependencies
-quinn = { version = "0.11", default-features = false }
-h3 = "0.0.8"
-h3-quinn = "0.0.10"
-
-# Test-only dependencies
-rcgen = "0.13"
 [profile.dev]
 opt-level = 1
 debug = 1
