@@ -15,9 +15,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 tracing = ["dep:tracing"]
-# Placeholder for the datagram feature. The actual implementation requires
-# vendoring h3-datagram, which is not currently in the workspace.
-datagram = []
 
 [dependencies]
 bytes = { workspace = true }
