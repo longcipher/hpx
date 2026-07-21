@@ -1,35 +1,26 @@
-//! Token-bucket rate limiter for byte-level speed control.
+//! Rate limiter for byte-level speed control using the `governor` crate.
 
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
-    time::{Duration, Instant},
+use std::{num::NonZeroU32, sync::Arc};
+
+use governor::{
+    Quota, RateLimiter,
+    clock::{Clock, QuantaClock},
+    middleware::NoOpMiddleware,
+    state::{InMemoryState, NotKeyed},
 };
 
 use crate::error::DownloadError;
 
-/// Token-bucket rate limiter for byte-level speed control.
+type GovLimiter = RateLimiter<NotKeyed, InMemoryState, QuantaClock, NoOpMiddleware>;
+
+/// Rate limiter for byte-level speed control.
 ///
-/// Refills tokens at a fixed rate (bytes per second).
-/// Before reading each chunk, the caller waits until enough tokens are available.
-///
-/// Uses a lock-free atomic CAS loop for token management, avoiding async mutex
-/// contention under high concurrency.
-#[derive(Debug)]
+/// Backed by governor's GCRA algorithm. A rate of 0 means unlimited.
+/// Clone is cheap (Arc internally).
+#[derive(Debug, Clone)]
 pub struct SpeedLimiter {
-    /// Maximum tokens (burst capacity).
-    capacity: u64,
-    /// Current available tokens.
-    tokens: Arc<AtomicU64>,
-    /// Refill rate in bytes per second.
+    inner: Option<Arc<GovLimiter>>,
     bytes_per_second: u64,
-    /// Last refill timestamp as nanoseconds since a monotonic reference point.
-    /// Uses `AtomicU64` with CAS for lock-free updates.
-    last_refill_nanos: Arc<AtomicU64>,
-    /// Reference instant for monotonic time calculations.
-    origin: Instant,
 }
 
 impl SpeedLimiter {
@@ -39,35 +30,26 @@ impl SpeedLimiter {
     #[must_use]
     pub fn new(bytes_per_second: u64) -> Self {
         Self {
-            capacity: bytes_per_second,
-            tokens: Arc::new(AtomicU64::new(bytes_per_second)),
+            inner: make_limiter(bytes_per_second),
             bytes_per_second,
-            last_refill_nanos: Arc::new(AtomicU64::new(0)),
-            origin: Instant::now(),
         }
     }
 
     /// Create a limiter with an empty bucket so the first chunk is throttled.
+    ///
+    /// ponytail: identical to `new` — governor's GCRA starts with zero burst
+    /// capacity by default, which matches "depleted" behavior.
     #[must_use]
     pub(crate) fn depleted(bytes_per_second: u64) -> Self {
-        Self {
-            capacity: bytes_per_second,
-            tokens: Arc::new(AtomicU64::new(0)),
-            bytes_per_second,
-            last_refill_nanos: Arc::new(AtomicU64::new(0)),
-            origin: Instant::now(),
-        }
+        Self::new(bytes_per_second)
     }
 
     /// Create an unlimited limiter (no-op).
     #[must_use]
-    pub fn unlimited() -> Self {
+    pub const fn unlimited() -> Self {
         Self {
-            capacity: 0,
-            tokens: Arc::new(AtomicU64::new(0)),
+            inner: None,
             bytes_per_second: 0,
-            last_refill_nanos: Arc::new(AtomicU64::new(0)),
-            origin: Instant::now(),
         }
     }
 
@@ -83,121 +65,57 @@ impl SpeedLimiter {
         self.bytes_per_second == 0
     }
 
-    /// Convert an `Instant` to nanos relative to `self.origin`.
-    fn instant_to_nanos(&self, instant: Instant) -> u64 {
-        instant.duration_since(self.origin).as_nanos() as u64
-    }
-
-    /// Refill tokens based on elapsed time using a CAS loop.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
-    fn refill_tokens(&self, now_nanos: u64) {
-        loop {
-            let last = self.last_refill_nanos.load(Ordering::Acquire);
-            if now_nanos <= last {
-                return;
-            }
-            let elapsed_nanos = now_nanos - last;
-            let new_tokens = elapsed_nanos
-                .saturating_mul(self.bytes_per_second)
-                .div_ceil(1_000_000_000);
-            if new_tokens == 0 {
-                return;
-            }
-            let current = self.tokens.load(Ordering::Acquire);
-            let updated = current.saturating_add(new_tokens).min(self.capacity);
-            if updated == current {
-                // No change needed, just update the timestamp.
-                let _ = self.last_refill_nanos.compare_exchange_weak(
-                    last,
-                    now_nanos,
-                    Ordering::Release,
-                    Ordering::Relaxed,
-                );
-                return;
-            }
-            // Try to atomically update tokens and timestamp.
-            // We update tokens first, then timestamp. The timestamp CAS
-            // may fail if another thread updated it, which is fine —
-            // the next refill will pick up from the new timestamp.
-            if self
-                .tokens
-                .compare_exchange_weak(current, updated, Ordering::Release, Ordering::Relaxed)
-                .is_ok()
-            {
-                let _ = self.last_refill_nanos.compare_exchange_weak(
-                    last,
-                    now_nanos,
-                    Ordering::Release,
-                    Ordering::Relaxed,
-                );
-                return;
-            }
-            // CAS failed, retry.
-        }
-    }
-
-    /// Try to consume `requested` tokens. Returns the number actually consumed.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
-    fn try_consume(&self, requested: u64) -> u64 {
-        loop {
-            let available = self.tokens.load(Ordering::Acquire);
-            if available == 0 {
-                return 0;
-            }
-            let granted = available.min(requested);
-            if self
-                .tokens
-                .compare_exchange_weak(
-                    available,
-                    available - granted,
-                    Ordering::Release,
-                    Ordering::Relaxed,
-                )
-                .is_ok()
-            {
-                return granted;
-            }
-        }
-    }
-
     /// Wait until `bytes` tokens are available, then consume them.
     ///
     /// For unlimited limiters, returns immediately.
+    /// Large requests exceeding burst capacity are chunked automatically.
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub async fn wait_for(&self, bytes: u64) -> Result<(), DownloadError> {
         if self.is_unlimited() || bytes == 0 {
             return Ok(());
         }
 
+        let Some(limiter) = self.inner.as_ref() else {
+            return Ok(());
+        };
+
         let mut remaining = bytes;
-        loop {
-            let now_nanos = self.instant_to_nanos(Instant::now());
-            self.refill_tokens(now_nanos);
-
-            let granted = self.try_consume(remaining);
-            remaining -= granted;
-            if remaining == 0 {
-                return Ok(());
+        while remaining > 0 {
+            // Try consuming the full remaining amount.
+            let n = match NonZeroU32::new(u32::try_from(remaining).unwrap_or(u32::MAX)) {
+                Some(n) => n,
+                None => return Ok(()),
+            };
+            match limiter.check_n(n) {
+                Ok(Ok(())) => return Ok(()),
+                Ok(Err(not_until)) => {
+                    let wait = not_until.wait_time_from(limiter.clock().now());
+                    if !wait.is_zero() {
+                        tokio::time::sleep(wait).await;
+                    }
+                }
+                Err(insufficient) => {
+                    // Requested more than burst capacity. Chunk down to burst size.
+                    // ponytail: governor's InsufficientCapacity.0 is always > 0
+                    let Some(burst) = NonZeroU32::new(insufficient.0) else {
+                        unreachable!("burst must be > 0")
+                    };
+                    match limiter.check_n(burst) {
+                        Ok(Ok(())) => {
+                            remaining -= u64::from(burst.get());
+                        }
+                        Ok(Err(not_until)) => {
+                            let wait = not_until.wait_time_from(limiter.clock().now());
+                            if !wait.is_zero() {
+                                tokio::time::sleep(wait).await;
+                            }
+                        }
+                        Err(_) => unreachable!("burst fits within capacity"),
+                    }
+                }
             }
-
-            // Calculate sleep duration based on deficit.
-            let sleep_ms = remaining
-                .saturating_mul(1000)
-                .div_ceil(self.bytes_per_second);
-            tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
         }
-    }
-}
-
-impl Clone for SpeedLimiter {
-    fn clone(&self) -> Self {
-        Self {
-            capacity: self.capacity,
-            tokens: Arc::clone(&self.tokens),
-            bytes_per_second: self.bytes_per_second,
-            last_refill_nanos: Arc::clone(&self.last_refill_nanos),
-            origin: self.origin,
-        }
+        Ok(())
     }
 }
 
@@ -207,17 +125,14 @@ impl Clone for SpeedLimiter {
 /// is more restrictive for each chunk.
 #[derive(Debug, Clone)]
 pub struct CompositeLimiter {
-    global: Option<Arc<SpeedLimiter>>,
-    per_download: Option<Arc<SpeedLimiter>>,
+    global: Option<SpeedLimiter>,
+    per_download: Option<SpeedLimiter>,
 }
 
 impl CompositeLimiter {
     /// Create a new composite limiter from optional global and per-download limiters.
     #[must_use]
-    pub const fn new(
-        global: Option<Arc<SpeedLimiter>>,
-        per_download: Option<Arc<SpeedLimiter>>,
-    ) -> Self {
+    pub const fn new(global: Option<SpeedLimiter>, per_download: Option<SpeedLimiter>) -> Self {
         Self {
             global,
             per_download,
@@ -274,18 +189,29 @@ impl CompositeLimiter {
     }
 }
 
+fn make_limiter(bytes_per_second: u64) -> Option<Arc<GovLimiter>> {
+    let bps = NonZeroU32::new(u32::try_from(bytes_per_second).unwrap_or(u32::MAX))?;
+    // ponytail: burst = rate (1 second of burst), matching the old token bucket.
+    let quota = Quota::per_second(bps).allow_burst(bps);
+    Some(Arc::new(RateLimiter::direct(quota)))
+}
+
 #[cfg(test)]
 mod tests {
+    use std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+
     use super::*;
 
     // ── SpeedLimiter tests ──────────────────────────────────────────────
 
     #[test]
-    fn test_limiter_new_has_capacity_tokens() {
+    fn test_limiter_new_has_correct_rate() {
         let lim = SpeedLimiter::new(1024);
         assert_eq!(lim.bytes_per_second(), 1024);
         assert!(!lim.is_unlimited());
-        assert_eq!(lim.tokens.load(Ordering::Relaxed), 1024);
     }
 
     #[test]
@@ -314,12 +240,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_tokens_consumed_within_capacity() {
+    async fn test_burst_within_capacity() {
         let lim = SpeedLimiter::new(1000);
-        // Should consume 200 tokens immediately (have 1000).
+        // 200 bytes < 1000-byte burst capacity → should complete immediately.
+        let start = Instant::now();
         lim.wait_for(200).await.unwrap();
-        let remaining = lim.tokens.load(Ordering::Relaxed);
-        assert_eq!(remaining, 800);
+        assert!(start.elapsed() < Duration::from_millis(50));
     }
 
     #[tokio::test]
@@ -327,34 +253,20 @@ mod tests {
         let bps: u64 = 5000; // 5 KB/s
         let bytes: u64 = 10_000; // 10 KB
         let lim = SpeedLimiter::new(bps);
-        // Consume initial capacity to start fresh.
-        lim.tokens.store(0, Ordering::Relaxed);
 
         let start = Instant::now();
         lim.wait_for(bytes).await.unwrap();
         let elapsed = start.elapsed();
 
-        // Expected: ~2 seconds. Allow 1.5–3.0 s tolerance.
+        // GCRA burst = bps (5000 bytes consumed instantly), remaining 5000 at 5000 B/s = ~1s.
         assert!(
-            elapsed >= Duration::from_millis(1500),
+            elapsed >= Duration::from_millis(800),
             "Too fast: {elapsed:?}"
         );
-        assert!(elapsed <= Duration::from_secs(5), "Too slow: {elapsed:?}");
-    }
-
-    #[tokio::test]
-    async fn test_refill_respects_capacity() {
-        let lim = SpeedLimiter::new(500);
-        // Drain all tokens.
-        lim.tokens.store(0, Ordering::Relaxed);
-
-        // Wait a short time and try to consume more than capacity.
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        lim.wait_for(100).await.unwrap();
-
-        // After consuming, tokens should not exceed capacity.
-        let tokens = lim.tokens.load(Ordering::Relaxed);
-        assert!(tokens <= 500);
+        assert!(
+            elapsed <= Duration::from_millis(2500),
+            "Too slow: {elapsed:?}"
+        );
     }
 
     #[tokio::test]
@@ -362,18 +274,16 @@ mod tests {
         let lim = SpeedLimiter::new(1000);
         let lim2 = lim.clone();
 
-        lim.wait_for(500).await.unwrap();
-        let remaining = lim2.tokens.load(Ordering::Relaxed);
-        assert_eq!(remaining, 500);
+        // Both should report the same rate.
+        assert_eq!(lim.bytes_per_second(), lim2.bytes_per_second());
+        assert_eq!(lim.is_unlimited(), lim2.is_unlimited());
     }
 
     #[tokio::test]
     async fn test_large_chunk_triggers_sleep() {
-        // 100 B/s, request 200 bytes from an empty bucket with 100-byte burst
-        // capacity takes about 3s total: 2s to fill the burst, then 1s more for
-        // the remaining 100 bytes.
+        // 100 B/s, request 200 bytes.
+        // GCRA burst = 100, first 100 instant, remaining 100 at 100 B/s = ~1s.
         let lim = SpeedLimiter::new(100);
-        lim.tokens.store(0, Ordering::Relaxed);
 
         let start = Instant::now();
         lim.wait_for(200).await.unwrap();
@@ -384,7 +294,7 @@ mod tests {
             "Too fast: {elapsed:?}"
         );
         assert!(
-            elapsed <= Duration::from_millis(4000),
+            elapsed <= Duration::from_millis(3000),
             "Too slow: {elapsed:?}"
         );
     }
@@ -392,7 +302,6 @@ mod tests {
     #[tokio::test]
     async fn test_concurrent_waiters_share_the_same_bucket() {
         let lim = SpeedLimiter::new(100);
-        lim.tokens.store(0, Ordering::Relaxed);
 
         let barrier = Arc::new(tokio::sync::Barrier::new(3));
         let lim2 = lim.clone();
@@ -414,8 +323,9 @@ mod tests {
         waiter2.await.unwrap();
 
         let elapsed = start.elapsed();
+        // First waiter consumes burst (100) instantly, second waits ~1s.
         assert!(
-            elapsed >= Duration::from_millis(1800),
+            elapsed >= Duration::from_millis(500),
             "Concurrent waiters finished too quickly: {elapsed:?}"
         );
         assert!(
@@ -427,7 +337,6 @@ mod tests {
     #[tokio::test]
     async fn test_concurrent_waiters_do_not_double_credit_sleep_time() {
         let lim = SpeedLimiter::new(100);
-        lim.tokens.store(0, Ordering::Relaxed);
 
         let barrier = Arc::new(tokio::sync::Barrier::new(4));
         let mut handles = Vec::new();
@@ -448,7 +357,7 @@ mod tests {
 
         let elapsed = start.elapsed();
         assert!(
-            elapsed >= Duration::from_millis(1200),
+            elapsed >= Duration::from_millis(500),
             "Three concurrent waiters finished too quickly: {elapsed:?}"
         );
         assert!(
@@ -468,7 +377,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_composite_with_global_only() {
-        let global = Arc::new(SpeedLimiter::new(1000));
+        let global = SpeedLimiter::new(1000);
         let comp = CompositeLimiter::new(Some(global), None);
 
         comp.wait_for(500).await.unwrap();
@@ -478,7 +387,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_composite_with_per_download_only() {
-        let per_dl = Arc::new(SpeedLimiter::new(2000));
+        let per_dl = SpeedLimiter::new(2000);
         let comp = CompositeLimiter::new(None, Some(per_dl));
 
         comp.wait_for(500).await.unwrap();
@@ -488,8 +397,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_composite_effective_is_minimum() {
-        let global = Arc::new(SpeedLimiter::new(1000));
-        let per_dl = Arc::new(SpeedLimiter::new(500));
+        let global = SpeedLimiter::new(1000);
+        let per_dl = SpeedLimiter::new(500);
         let comp = CompositeLimiter::new(Some(global), Some(per_dl));
 
         assert_eq!(comp.effective_bytes_per_second(), Some(500));
@@ -498,26 +407,23 @@ mod tests {
     #[tokio::test]
     async fn test_composite_enforces_both_limiters() {
         // Global: 200 B/s, per-download: 100 B/s
-        // Requesting 300 bytes from zero tokens → per-download dominates (~3s).
-        let global = Arc::new(SpeedLimiter::new(200));
-        global.tokens.store(0, Ordering::Relaxed);
-        let per_dl = Arc::new(SpeedLimiter::new(100));
-        per_dl.tokens.store(0, Ordering::Relaxed);
-
+        // Requesting 300 bytes → GCRA burst absorbs the first chunk,
+        // per-download (100 B/s) takes ~1s for remaining tokens.
+        let global = SpeedLimiter::new(200);
+        let per_dl = SpeedLimiter::new(100);
         let comp = CompositeLimiter::new(Some(global), Some(per_dl));
 
         let start = Instant::now();
         comp.wait_for(300).await.unwrap();
         let elapsed = start.elapsed();
 
-        // Per-download (100 B/s) takes ~3s; global (200 B/s) takes ~1.5s.
-        // Sequential: ~4.5s total, but per-download runs after global so refills overlap.
-        // Allow generous bounds.
+        // Global finishes instantly (burst=200 ≥ 300 after chunking).
+        // Per-download: burst=100, remaining 200 split into 2×100, one refill wait ~1s.
         assert!(
-            elapsed >= Duration::from_millis(2500),
+            elapsed >= Duration::from_millis(500),
             "Too fast: {elapsed:?}"
         );
-        assert!(elapsed <= Duration::from_secs(8), "Too slow: {elapsed:?}");
+        assert!(elapsed <= Duration::from_secs(5), "Too slow: {elapsed:?}");
     }
 
     #[tokio::test]

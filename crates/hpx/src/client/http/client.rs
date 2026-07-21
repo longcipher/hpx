@@ -1099,7 +1099,7 @@ enum PoolTx<B> {
     /// Uses `Shared` reservation semantics (one connection per authority serves
     /// many streams), mirroring `Http2` (C-05). `H3Connection` does not carry
     /// the `B` type parameter (it uses `Bytes` internally via
-    /// `hpx_h3::client::SendRequest<hpx_h3_quinn::OpenStreams, Bytes>`); the `B` on
+    /// `hpx_h3::client::SendRequest<hpx_h3::quinn::OpenStreams, Bytes>`); the `B` on
     /// `PoolTx<B>` is preserved for the `Http1`/`Http2` variants and the
     /// `None` fallback.
     #[cfg(feature = "http3")]
@@ -1730,7 +1730,7 @@ impl Builder {
         C::Response: AsyncRead + AsyncWrite + Connection + Unpin + Send + 'static,
         C::Error: Into<BoxError>,
         C::Future: Unpin + Send + 'static,
-        B: Body + Send,
+        B: Body + Send + 'static,
         B::Data: Send,
     {
         let exec = self.exec.clone();

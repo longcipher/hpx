@@ -212,9 +212,7 @@ impl EngineBuilder {
             active_tasks: Mutex::new(StdHashMap::new()),
             scheduler_running: AtomicBool::new(false),
             concurrency: Arc::new(Semaphore::new(config.max_concurrent_downloads.max(1))),
-            global_limiter: config
-                .global_speed_limit
-                .map(|limit| Arc::new(SpeedLimiter::depleted(limit))),
+            global_limiter: config.global_speed_limit.map(SpeedLimiter::depleted),
             persistence,
         });
 
@@ -317,7 +315,7 @@ struct EngineInner {
     active_tasks: Mutex<StdHashMap<DownloadId, tokio::task::JoinHandle<()>>>,
     scheduler_running: AtomicBool,
     concurrency: Arc<Semaphore>,
-    global_limiter: Option<Arc<SpeedLimiter>>,
+    global_limiter: Option<SpeedLimiter>,
     persistence: Arc<PersistenceHandle>,
 }
 
@@ -738,9 +736,7 @@ impl EngineInner {
 
         let limiter = CompositeLimiter::new(
             self.global_limiter.clone(),
-            request
-                .speed_limit
-                .map(|limit| Arc::new(SpeedLimiter::depleted(limit))),
+            request.speed_limit.map(SpeedLimiter::depleted),
         );
 
         let mut downloader = if let Some(proxy) = request.proxy.as_ref() {

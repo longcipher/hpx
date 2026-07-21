@@ -1,12 +1,12 @@
 //! QUIC Transport implementation with Quinn
 //!
-//! This module implements QUIC traits with Quinn.
-//!
-//! This crate is a fork of [`hyperium/h3-quinn`](https://github.com/hyperium/h3)
-//! vendored into the hpx workspace. Lint suppressions below keep the upstream
-//! source tractable while still inheriting the workspace lint baseline.
+//! This module implements QUIC traits with Quinn. It was merged into `hpx-h3`
+//! from the former standalone `hpx-h3-quinn` crate, which was a fork of
+//! [`hyperium/h3-quinn`](https://github.com/hyperium/h3) vendored into the hpx
+//! workspace. Lint suppressions below keep the upstream source tractable while
+//! still inheriting the workspace lint baseline.
 
-// Vendored third-party crate: suppress noisy lints that would require
+// Vendored third-party module: suppress noisy lints that would require
 // invasive changes to upstream code.
 #![allow(
     unreachable_pub,
@@ -39,15 +39,16 @@ use futures_util::{
     Stream, StreamExt,
     stream::{self},
 };
-use hpx_h3::{
-    error::Code,
-    quic::{self, ConnectionErrorIncoming, StreamErrorIncoming, StreamId, WriteBuf},
-};
 use quinn::ReadError;
 pub use quinn::{self, AcceptBi, AcceptUni, Endpoint, OpenBi, OpenUni, VarInt};
 use tokio_util::sync::ReusableBoxFuture;
 #[cfg(feature = "tracing")]
 use tracing::instrument;
+
+use crate::{
+    error::Code,
+    quic::{self, ConnectionErrorIncoming, StreamErrorIncoming, StreamId, WriteBuf},
+};
 
 /// BoxStream with Sync trait
 type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Sync + Send + 'a>>;
@@ -121,7 +122,7 @@ where
     }
 }
 
-fn convert_connection_error(e: quinn::ConnectionError) -> hpx_h3::quic::ConnectionErrorIncoming {
+fn convert_connection_error(e: quinn::ConnectionError) -> crate::quic::ConnectionErrorIncoming {
     match e {
         quinn::ConnectionError::ApplicationClosed(application_close) => {
             ConnectionErrorIncoming::ApplicationClose {

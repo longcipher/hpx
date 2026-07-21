@@ -62,7 +62,7 @@ where
     B::Data: Send,
 {
     /// Cloneable h3 `SendRequest` for opening new request streams.
-    send_request: hpx_h3::client::SendRequest<hpx_h3_quinn::OpenStreams, Bytes>,
+    send_request: hpx_h3::client::SendRequest<hpx_h3::quinn::OpenStreams, Bytes>,
     /// Dispatch channel receiver — receives `(Request<B>, Callback)` pairs.
     req_rx: ClientRx<B>,
     /// Receives the terminal `ConnectionError` when the driver task
@@ -84,7 +84,7 @@ where
     /// task that feeds `close_rx`.
     #[allow(dead_code)] // HTTP/3 dispatch scaffolding; wired in by future tasks.
     pub(crate) fn new(
-        send_request: hpx_h3::client::SendRequest<hpx_h3_quinn::OpenStreams, Bytes>,
+        send_request: hpx_h3::client::SendRequest<hpx_h3::quinn::OpenStreams, Bytes>,
         req_rx: ClientRx<B>,
         close_rx: mpsc::Receiver<hpx_h3::error::ConnectionError>,
     ) -> Self {
@@ -196,7 +196,7 @@ where
 /// [`Error`] via the `From<H3Error>` impl) per §5.1.9 of the design.
 #[allow(clippy::result_large_err)]
 pub(crate) async fn drive_request<B>(
-    send_request: &mut hpx_h3::client::SendRequest<hpx_h3_quinn::OpenStreams, Bytes>,
+    send_request: &mut hpx_h3::client::SendRequest<hpx_h3::quinn::OpenStreams, Bytes>,
     req: Request<B>,
 ) -> Result<Response<IncomingBody>, (Error, Option<Request<B>>)>
 where
@@ -388,7 +388,7 @@ const DEFAULT_MAX_FRAME_SIZE: usize = 1024 * 1024;
 /// Internal state shared across clones of [`H3WebSocket`].
 struct H3WebSocketInner {
     /// The underlying h3 request stream.
-    stream: hpx_h3::client::RequestStream<hpx_h3_quinn::BidiStream<Bytes>, Bytes>,
+    stream: hpx_h3::client::RequestStream<hpx_h3::quinn::BidiStream<Bytes>, Bytes>,
     /// Buffer for accumulating partial WebSocket frame data from `recv_data()`.
     recv_buf: Vec<u8>,
 }
@@ -439,7 +439,7 @@ impl H3WebSocket {
     #[doc(hidden)]
     #[allow(dead_code)]
     pub fn new(
-        stream: hpx_h3::client::RequestStream<hpx_h3_quinn::BidiStream<Bytes>, Bytes>,
+        stream: hpx_h3::client::RequestStream<hpx_h3::quinn::BidiStream<Bytes>, Bytes>,
     ) -> Self {
         H3WebSocket {
             inner: Arc::new(tokio::sync::Mutex::new(H3WebSocketInner {
@@ -865,9 +865,9 @@ mod tests {
                 match incoming.await {
                     Ok(quinn_conn) => {
                         tokio::spawn(async move {
-                            let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                            let h3_quinn_conn = hpx_h3::quinn::Connection::new(quinn_conn);
                             let mut h3_conn: hpx_h3::server::Connection<
-                                hpx_h3_quinn::Connection,
+                                hpx_h3::quinn::Connection,
                                 Bytes,
                             > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                                 Ok(c) => c,

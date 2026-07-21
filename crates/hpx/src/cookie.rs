@@ -1,13 +1,35 @@
 //! HTTP Cookies
 
-use std::{fmt, sync::Arc, time::SystemTime};
+use std::{
+    fmt,
+    sync::{Arc, OnceLock},
+    time::SystemTime,
+};
 
 use bytes::Bytes;
 use cookie::{Cookie as RawCookie, CookieJar, Expiration, SameSite};
 use http::Uri;
+use publicsuffix::{List as PslList, Psl};
 use scc::HashMap as SccHashMap;
 
 use crate::{IntoUri, error::Error, ext::UriExt, header::HeaderValue};
+
+// The Mozilla Public Suffix List, bundled at compile time and parsed once on
+// first use. Stored behind an `Arc` so every `Jar` shares a single parsed
+// copy (~230 KB) instead of re-parsing per instance.
+static PSL: OnceLock<Arc<PslList>> = OnceLock::new();
+
+/// Returns a shared, lazily-initialized handle to the bundled Public Suffix
+/// List. Parsing only happens once per process; subsequent callers receive an
+/// `Arc::clone` (a single atomic refcount bump).
+fn shared_psl() -> Arc<PslList> {
+    PSL.get_or_init(|| {
+        let list =
+            PslList::from_bytes(include_bytes!("public_suffix_list.dat")).unwrap_or_default();
+        Arc::new(list)
+    })
+    .clone()
+}
 
 /// Cookie header values in two forms.
 #[derive(Debug, Clone)]
@@ -65,9 +87,15 @@ pub struct Cookie<'a>(RawCookie<'a>);
 /// Uses `scc::HashMap` for lock-free reads with fine-grained entry-level
 /// mutations, avoiding the full-map clone that `ArcSwap` requires on every
 /// write.
+///
+/// Includes a bundled Mozilla Public Suffix List (PSL) so that cookies with a
+/// `Domain` attribute pointing at a public suffix (e.g. `co.uk`,
+/// `github.io`) are rejected per RFC 6265 Section 5.3 step 6, preventing
+/// cross-registrable-domain cookie leakage.
 pub struct Jar {
     compression: bool,
     store: Arc<SccHashMap<String, SccHashMap<String, CookieJar>>>,
+    psl: Arc<PslList>,
 }
 
 // ===== impl CookieStore =====
@@ -237,6 +265,7 @@ impl Jar {
         Self {
             compression,
             store: Arc::new(SccHashMap::new()),
+            psl: shared_psl(),
         }
     }
 
@@ -245,6 +274,7 @@ impl Jar {
         Arc::new(Jar {
             compression: true,
             store: self.store.clone(),
+            psl: self.psl.clone(),
         })
     }
 
@@ -253,6 +283,7 @@ impl Jar {
         Arc::new(Jar {
             compression: false,
             store: self.store.clone(),
+            psl: self.psl.clone(),
         })
     }
 
@@ -357,11 +388,30 @@ impl Jar {
         };
         let cookie: RawCookie<'static> = cookie.into();
         let Ok(uri) = uri.into_uri() else { return };
-        let domain = cookie
-            .domain()
-            .map(normalize_domain)
-            .or_else(|| uri.host())
-            .unwrap_or_default();
+        let host = uri.host();
+        let cookie_domain = cookie.domain().map(normalize_domain);
+        // Public Suffix List check (RFC 6265 Section 5.3 step 6): reject
+        // cookies whose `Domain` attribute is itself a public suffix (e.g.
+        // `co.uk`, `github.io`) to prevent cross-registrable-domain cookie
+        // leakage.
+        let domain: &str = match cookie_domain {
+            Some(d) => {
+                if is_public_suffix(&self.psl, d) {
+                    // Exception: when the cookie's domain equals the request
+                    // host AND the host is itself a public suffix, allow the
+                    // cookie but treat it as host-only by storing under the
+                    // request host.
+                    if host == Some(d) {
+                        host.unwrap_or_default()
+                    } else {
+                        return;
+                    }
+                } else {
+                    d
+                }
+            }
+            None => host.unwrap_or_default(),
+        };
         let path = cookie.path().unwrap_or_else(|| normalize_path(&uri));
 
         let expired = cookie
@@ -414,11 +464,30 @@ impl Jar {
     {
         let cookie: RawCookie<'static> = cookie.into();
         let Ok(uri) = uri.into_uri() else { return };
-        let domain = cookie
-            .domain()
-            .map(normalize_domain)
-            .or_else(|| uri.host())
-            .unwrap_or_default();
+        let host = uri.host();
+        let cookie_domain = cookie.domain().map(normalize_domain);
+        // Public Suffix List check (RFC 6265 Section 5.3 step 6): reject
+        // cookies whose `Domain` attribute is itself a public suffix (e.g.
+        // `co.uk`, `github.io`) to prevent cross-registrable-domain cookie
+        // leakage.
+        let domain: &str = match cookie_domain {
+            Some(d) => {
+                if is_public_suffix(&self.psl, d) {
+                    // Exception: when the cookie's domain equals the request
+                    // host AND the host is itself a public suffix, allow the
+                    // cookie but treat it as host-only by storing under the
+                    // request host.
+                    if host == Some(d) {
+                        host.unwrap_or_default()
+                    } else {
+                        return;
+                    }
+                } else {
+                    d
+                }
+            }
+            None => host.unwrap_or_default(),
+        };
         let path = cookie.path().unwrap_or_else(|| normalize_path(&uri));
 
         let expired = cookie
@@ -619,6 +688,12 @@ impl fmt::Debug for Jar {
 }
 
 const DEFAULT_PATH: &str = "/";
+
+/// Returns `true` when `domain` is a public suffix (e.g. `com`, `co.uk`,
+/// `github.io`). Uses the bundled Mozilla Public Suffix List.
+fn is_public_suffix(psl: &PslList, domain: &str) -> bool {
+    psl.suffix(domain.as_bytes()).is_some_and(|s| s == domain)
+}
 
 /// Determines if the given `host` matches the cookie `domain` according to
 /// [RFC 6265 section 5.1.3](https://datatracker.ietf.org/doc/html/rfc6265#section-5.1.3).

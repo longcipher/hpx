@@ -18,8 +18,7 @@ hpx/
 │   └── hpxless/          # Standalone CDP-compatible headless browser server
 ├── crates/
 │   ├── hpx/              # Core HTTP client library (TLS, HTTP/1+2+3, pooling, middleware)
-│   ├── hpx-h3/           # Vendored hyperium/h3 — HTTP/3 framing (RFC 9114, RFC 9220 WebSocket)
-│   ├── hpx-h3-quinn/     # Vendored hyperium/h3-quinn — QUIC transport for HTTP/3
+│   ├── hpx-h3/           # Vendored hyperium/h3 — HTTP/3 framing + Quinn QUIC transport (RFC 9114, RFC 9220 WebSocket)
 │   ├── hpx-emulation/    # Browser fingerprint profiles (JA3/JA4, HTTP/2+3 settings)
 │   ├── hpx-browser/      # Headless browser engine (DOM, CSS, layout, JS, challenge detection)
 │   ├── hpx-dl/           # Segmented download engine (resume, queue, persistence)
@@ -63,18 +62,6 @@ Vendored fork of [hyperium/h3](https://github.com/hyperium/h3) with RFC 9220 Web
 **Use when:** You need HTTP/3 protocol handling. This is an internal dependency of `hpx` — you typically don't need to depend on it directly.
 
 **Depends on:** `bytes`, `futures-util`, `http`, `tokio`.
-
----
-
-### [`hpx-h3-quinn`](https://crates.io/crates/hpx-h3-quinn) — QUIC Transport for HTTP/3
-
-Vendored fork of [hyperium/h3-quinn](https://github.com/hyperium/h3-quinn). Bridges the `h3` protocol layer to Quinn's QUIC implementation.
-
-**Provides:** `h3_quinn::Connection`, `h3_quinn::SendRequest` — QUIC transport adapter for HTTP/3.
-
-**Use when:** You need QUIC transport for HTTP/3. This is an internal dependency of `hpx` — you typically don't need to depend on it directly.
-
-**Depends on:** `hpx-h3`, `quinn`, `futures-util`, `bytes`.
 
 ---
 
@@ -317,13 +304,9 @@ hpxless (binary)
   └── ecdysis        (graceful shutdown)
 
 hpx (core)
-  ├── hpx-h3          (HTTP/3 framing, optional via http3 feature)
-  ├── hpx-h3-quinn    (QUIC transport, optional via http3 feature)
+  ├── hpx-h3          (HTTP/3 framing + Quinn QUIC transport, optional via http3 feature)
   ├── hpx-emulation   (optional, via emulation feature)
   └── hpx-yawc        (optional, via ws feature)
-
-hpx-h3-quinn
-  └── hpx-h3          (HTTP/3 protocol)
 
 hpx-dl
   └── hpx            (HTTP client for segments)
@@ -335,7 +318,7 @@ hpx-browser
   └── hpx            (network layer)
 ```
 
-**Standalone usage:** Each crate can be used independently. `hpx-yawc` works without `hpx` for raw WebSocket connections. `hpx-dl` can be used with its own `EngineBuilder` without the CLI. `hpx-h3` and `hpx-h3-quinn` can be used for custom HTTP/3 server/client implementations.
+**Standalone usage:** Each crate can be used independently. `hpx-yawc` works without `hpx` for raw WebSocket connections. `hpx-dl` can be used with its own `EngineBuilder` without the CLI. `hpx-h3` (with the `quinn` feature) can be used for custom HTTP/3 server/client implementations.
 
 ## Feature Flags
 

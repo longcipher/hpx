@@ -146,10 +146,12 @@ impl CertStoreBuilder {
             #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
             {
                 // Rustls doesn't have a direct equivalent to set_default_paths that loads from env vars automatically
-                // in the same way OpenSSL does, but we can use rustls-native-certs or webpki-roots.
+                // in the same way OpenSSL does, but we can use rustls-native-certs or webpki-root-certs.
                 // For now, we might just ignore or use webpki-roots if enabled.
                 // The user prompt mentioned webpki-roots.
-                builder.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+                builder.add_parsable_certificates(
+                    webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().cloned(),
+                );
             }
         }
         self

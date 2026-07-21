@@ -229,7 +229,7 @@ fn http3_options_configures_h3_settings() -> TestResult<()> {
 /// over a single QUIC connection.
 ///
 /// The test stands up a local h3 server (using `hpx_h3::server::Connection` over
-/// `hpx_h3_quinn::Connection`) that counts accepted QUIC connections and accepted
+/// `hpx_h3::quinn::Connection`) that counts accepted QUIC connections and accepted
 /// requests via `AtomicU64`s. It then builds a `QuicConnector` directly (NOT
 /// through `Client::build` — that wiring is T1.10 scope), calls
 /// `connector.call(__test_connect_request(uri))` once to obtain a single
@@ -296,9 +296,9 @@ async fn http3_concurrent_requests_over_single_quic_connection() -> TestResult<(
                         // driving the response on a separate task may cause the
                         // peer to observe `StreamError::RemoteTerminate`.
                         tokio::spawn(async move {
-                            let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                            let h3_quinn_conn = hpx_h3::quinn::Connection::new(quinn_conn);
                             let mut h3_conn: hpx_h3::server::Connection<
-                                hpx_h3_quinn::Connection,
+                                hpx_h3::quinn::Connection,
                                 bytes::Bytes,
                             > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                                 Ok(c) => c,
@@ -420,7 +420,7 @@ async fn http3_concurrent_requests_over_single_quic_connection() -> TestResult<(
     //     via h3-quinn's `OpenStreams: Clone`, which is the basis for the pool's
     //     `Shared` reservation semantics for `Ver::Http3` (C-05).
     let mut send_requests: Vec<
-        hpx_h3::client::SendRequest<hpx_h3_quinn::OpenStreams, bytes::Bytes>,
+        hpx_h3::client::SendRequest<hpx_h3::quinn::OpenStreams, bytes::Bytes>,
     > = Vec::with_capacity(10);
     for _ in 0..10 {
         send_requests.push(h3_conn.send_request.clone());
@@ -548,9 +548,9 @@ async fn http3_pool_invalid_connection_triggers_reconnect() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let h3_quinn_conn = hpx_h3::quinn::Connection::new(quinn_conn);
                         let mut h3_conn: hpx_h3::server::Connection<
-                            hpx_h3_quinn::Connection,
+                            hpx_h3::quinn::Connection,
                             bytes::Bytes,
                         > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
@@ -733,9 +733,9 @@ async fn http3_request_full() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let h3_quinn_conn = hpx_h3::quinn::Connection::new(quinn_conn);
                         let mut h3_conn: hpx_h3::server::Connection<
-                            hpx_h3_quinn::Connection,
+                            hpx_h3::quinn::Connection,
                             bytes::Bytes,
                         > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
@@ -931,9 +931,9 @@ async fn http3_post_with_body() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let h3_quinn_conn = hpx_h3::quinn::Connection::new(quinn_conn);
                         let mut h3_conn: hpx_h3::server::Connection<
-                            hpx_h3_quinn::Connection,
+                            hpx_h3::quinn::Connection,
                             bytes::Bytes,
                         > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
@@ -1148,9 +1148,9 @@ async fn http3_streaming_request_body() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let h3_quinn_conn = hpx_h3::quinn::Connection::new(quinn_conn);
                         let mut h3_conn: hpx_h3::server::Connection<
-                            hpx_h3_quinn::Connection,
+                            hpx_h3::quinn::Connection,
                             bytes::Bytes,
                         > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
@@ -1345,9 +1345,9 @@ async fn http3_reconnection_after_server_closes() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let h3_quinn_conn = hpx_h3::quinn::Connection::new(quinn_conn);
                         let mut h3_conn: hpx_h3::server::Connection<
-                            hpx_h3_quinn::Connection,
+                            hpx_h3::quinn::Connection,
                             bytes::Bytes,
                         > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
@@ -1541,9 +1541,9 @@ async fn http3_reconnection_after_server_closes() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let h3_quinn_conn = hpx_h3::quinn::Connection::new(quinn_conn);
                         let mut h3_conn: hpx_h3::server::Connection<
-                            hpx_h3_quinn::Connection,
+                            hpx_h3::quinn::Connection,
                             bytes::Bytes,
                         > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
@@ -1656,8 +1656,8 @@ async fn http3_stop_sending_no_error_graceful() -> TestResult<()> {
                 Ok(c) => c,
                 Err(_) => break,
             };
-            let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
-            let mut h3_conn: hpx_h3::server::Connection<hpx_h3_quinn::Connection, bytes::Bytes> =
+            let h3_quinn_conn = hpx_h3::quinn::Connection::new(quinn_conn);
+            let mut h3_conn: hpx_h3::server::Connection<hpx_h3::quinn::Connection, bytes::Bytes> =
                 match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                     Ok(c) => c,
                     Err(_) => continue,
@@ -1794,8 +1794,8 @@ async fn http3_stop_sending_internal_error() -> TestResult<()> {
                 Ok(c) => c,
                 Err(_) => break,
             };
-            let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
-            let mut h3_conn: hpx_h3::server::Connection<hpx_h3_quinn::Connection, bytes::Bytes> =
+            let h3_quinn_conn = hpx_h3::quinn::Connection::new(quinn_conn);
+            let mut h3_conn: hpx_h3::server::Connection<hpx_h3::quinn::Connection, bytes::Bytes> =
                 match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                     Ok(c) => c,
                     Err(_) => continue,
@@ -2070,8 +2070,8 @@ async fn http3_request_body_mid_stream_error() -> TestResult<()> {
                 Ok(c) => c,
                 Err(_) => break,
             };
-            let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
-            let mut h3_conn: hpx_h3::server::Connection<hpx_h3_quinn::Connection, bytes::Bytes> =
+            let h3_quinn_conn = hpx_h3::quinn::Connection::new(quinn_conn);
+            let mut h3_conn: hpx_h3::server::Connection<hpx_h3::quinn::Connection, bytes::Bytes> =
                 match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                     Ok(c) => c,
                     Err(_) => continue,
@@ -2383,9 +2383,9 @@ async fn client_upgrades_to_h3_after_alt_svc() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let h3_quinn_conn = hpx_h3::quinn::Connection::new(quinn_conn);
                         let mut h3_conn: hpx_h3::server::Connection<
-                            hpx_h3_quinn::Connection,
+                            hpx_h3::quinn::Connection,
                             bytes::Bytes,
                         > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
@@ -2620,9 +2620,9 @@ async fn prefer_http3_prefers_h3_with_fallback() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let h3_quinn_conn = hpx_h3::quinn::Connection::new(quinn_conn);
                         let mut h3_conn: hpx_h3::server::Connection<
-                            hpx_h3_quinn::Connection,
+                            hpx_h3::quinn::Connection,
                             bytes::Bytes,
                         > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
@@ -3057,9 +3057,9 @@ async fn http3_zero_rtt_resumption() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let h3_quinn_conn = hpx_h3::quinn::Connection::new(quinn_conn);
                         let mut h3_conn: hpx_h3::server::Connection<
-                            hpx_h3_quinn::Connection,
+                            hpx_h3::quinn::Connection,
                             bytes::Bytes,
                         > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
@@ -3316,9 +3316,9 @@ async fn http3_idle_timeout_closes_connection() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let h3_quinn_conn = hpx_h3::quinn::Connection::new(quinn_conn);
                         let mut h3_conn: hpx_h3::server::Connection<
-                            hpx_h3_quinn::Connection,
+                            hpx_h3::quinn::Connection,
                             bytes::Bytes,
                         > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
@@ -3511,9 +3511,9 @@ async fn http3_extended_connect_websocket() -> TestResult<()> {
             match incoming.await {
                 Ok(quinn_conn) => {
                     tokio::spawn(async move {
-                        let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+                        let h3_quinn_conn = hpx_h3::quinn::Connection::new(quinn_conn);
                         let mut h3_conn: hpx_h3::server::Connection<
-                            hpx_h3_quinn::Connection,
+                            hpx_h3::quinn::Connection,
                             Bytes,
                         > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
                             Ok(c) => c,
@@ -3619,7 +3619,7 @@ async fn http3_extended_connect_websocket() -> TestResult<()> {
         .await?;
 
     // 8. Create the h3 client from the QUIC connection.
-    let h3_quinn_conn = hpx_h3_quinn::Connection::new(quinn_conn);
+    let h3_quinn_conn = hpx_h3::quinn::Connection::new(quinn_conn);
     let (_driver, mut send_request) = hpx_h3::client::new(h3_quinn_conn).await.map_err(
         |e| -> Box<dyn std::error::Error + Send + Sync> {
             format!("hpx_h3::client::new failed: {e}").into()

@@ -604,34 +604,39 @@ mod tests {
         assert_eq!(back_proxy.kind, ProxyKind::Http);
     }
 
-    #[test]
-    fn proxy_config_to_hpx_proxy_http() {
-        let config = ProxyConfig {
-            url: "http://proxy:8080".to_string(),
-            kind: ProxyKind::Http,
-        };
-        let proxy = hpx::Proxy::try_from(config).expect("valid proxy config");
-        // Verify it can be used to build a client (proxy is valid)
-        let _client = hpx::Client::builder().proxy(proxy).build().expect("client");
-    }
+    #[cfg(feature = "http")]
+    mod http_proxy_tests {
+        use super::*;
 
-    #[test]
-    fn proxy_config_to_hpx_proxy_https() {
-        let config = ProxyConfig {
-            url: "http://proxy:8080".to_string(),
-            kind: ProxyKind::Https,
-        };
-        let proxy = hpx::Proxy::try_from(config).expect("valid proxy config");
-        let _client = hpx::Client::builder().proxy(proxy).build().expect("client");
-    }
+        #[test]
+        fn proxy_config_to_hpx_proxy_http() {
+            let config = ProxyConfig {
+                url: "http://proxy:8080".to_string(),
+                kind: ProxyKind::Http,
+            };
+            let proxy = hpx::Proxy::try_from(config).expect("valid proxy config");
+            // Verify it can be used to build a client (proxy is valid)
+            let _client = hpx::Client::builder().proxy(proxy).build().expect("client");
+        }
 
-    #[test]
-    fn proxy_config_to_hpx_proxy_socks5() {
-        let config = ProxyConfig {
-            url: "socks5://proxy:1080".to_string(),
-            kind: ProxyKind::Socks5,
-        };
-        let proxy = hpx::Proxy::try_from(config).expect("valid proxy config");
-        let _client = hpx::Client::builder().proxy(proxy).build().expect("client");
+        #[test]
+        fn proxy_config_to_hpx_proxy_https() {
+            let config = ProxyConfig {
+                url: "http://proxy:8080".to_string(),
+                kind: ProxyKind::Https,
+            };
+            let proxy = hpx::Proxy::try_from(config).expect("valid proxy config");
+            let _client = hpx::Client::builder().proxy(proxy).build().expect("client");
+        }
+
+        #[test]
+        fn proxy_config_to_hpx_proxy_socks5() {
+            let config = ProxyConfig {
+                url: "socks5://proxy:1080".to_string(),
+                kind: ProxyKind::Socks5,
+            };
+            let proxy = hpx::Proxy::try_from(config).expect("valid proxy config");
+            let _client = hpx::Client::builder().proxy(proxy).build().expect("client");
+        }
     }
 }

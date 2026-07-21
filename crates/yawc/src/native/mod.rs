@@ -153,10 +153,7 @@ use tokio::{
 };
 use tokio_rustls::{
     TlsConnector,
-    rustls::{
-        self,
-        pki_types::{ServerName, TrustAnchor},
-    },
+    rustls::{self, pki_types::ServerName},
 };
 use tokio_util::codec::Framed;
 pub use upgrade::UpgradeFut;
@@ -1359,11 +1356,8 @@ static TLS_CONNECTOR: OnceLock<TlsConnector> = OnceLock::new();
 fn tls_connector() -> &'static TlsConnector {
     TLS_CONNECTOR.get_or_init(|| {
         let mut root_cert_store = rustls::RootCertStore::empty();
-        root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().map(|ta| TrustAnchor {
-            subject: ta.subject.clone(),
-            subject_public_key_info: ta.subject_public_key_info.clone(),
-            name_constraints: ta.name_constraints.clone(),
-        }));
+        root_cert_store
+            .add_parsable_certificates(webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().cloned());
 
         let maybe_provider = rustls::crypto::CryptoProvider::get_default().cloned();
 

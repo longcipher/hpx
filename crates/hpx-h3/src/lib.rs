@@ -193,3 +193,7 @@ mod qpack;
 mod stream;
 #[cfg(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"))]
 mod webtransport;
+
+/// Quinn QUIC transport backend (merged from hpx-h3-quinn).
+#[cfg(feature = "quinn")]
+pub mod quinn;

@@ -5,7 +5,6 @@ use std::{
 };
 
 use ahash::RandomState;
-use schnellru::ByLength;
 
 /// Pre-seeded [`RandomState`] for consistent internal hashing.
 ///
@@ -25,9 +24,6 @@ pub type HashSet<T> = std::collections::HashSet<T, RandomState>;
 
 /// A type alias for a hash map using `ahash` with a pre-seeded `RandomState`.
 pub type HashMap<K, V> = std::collections::HashMap<K, V, RandomState>;
-
-/// A specialized LRU cache using `schnellru` with a fixed capacity
-pub type LruMap<K, V> = schnellru::LruMap<K, V, ByLength, RandomState>;
 
 /// A wrapper that memoizes the hash value of its contained data.
 #[derive(Debug)]

@@ -221,7 +221,6 @@ If any command fails, report the failure and do not claim completion.
 | hpx-dl | library | `crates/hpx-dl` |
 | hpx-emulation | library | `crates/hpx-emulation` |
 | hpx-h3 | library | `crates/hpx-h3` |
-| hpx-h3-quinn | library | `crates/hpx-h3-quinn` |
 | hpx-streams | library | `crates/hpx-streams` |
 | yawc (hpx-yawc) | library | `crates/yawc` |
 | hpx-cli | binary | `bin/hpx-cli` |
@@ -238,7 +237,6 @@ If any command fails, report the failure and do not claim completion.
 │   ├── hpx-dl/               # Download engine (segmented, resume, queue, SQLite persistence)
 │   ├── hpx-emulation/        # Browser emulation profiles (Chrome, Firefox, Safari, OkHttp)
 │   ├── hpx-h3/               # Fork of hyperium/h3 HTTP/3 protocol (vendored, edition 2024)
-│   ├── hpx-h3-quinn/         # Fork of hyperium/h3-quinn QUIC transport (vendored, edition 2024)
 │   ├── hpx-streams/          # HTTP response streaming (JSON/CSV/Protobuf/Arrow)
 │   └── yawc/                 # WebSocket client/server (RFC 6455, compression, proxy)
 ├── specs/                    # Feature design specs (pb-plan/pb-build)

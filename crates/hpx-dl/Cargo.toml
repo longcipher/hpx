@@ -41,6 +41,7 @@ digest = { workspace = true }
 faster-hex = { workspace = true }
 fastrand = { workspace = true }
 futures-util = { workspace = true }
+governor = { workspace = true }
 hotpath = { workspace = true, optional = true }
 hpx = { workspace = true, optional = true, features = ["stream"] }
 md-5 = { workspace = true }

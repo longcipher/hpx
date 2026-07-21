@@ -207,7 +207,9 @@ impl TlsConnectorBuilder {
             (*store.0).clone()
         } else {
             let mut root_store = rustls::RootCertStore::empty();
-            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            root_store.add_parsable_certificates(
+                webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().cloned(),
+            );
             root_store
         };
         let protocol_versions = protocol_versions(self.min_version, self.max_version)?;

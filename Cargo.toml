@@ -198,7 +198,6 @@ hpx-cli = { path = "bin/hpx-cli", version = "2.5.7" }
 hpx-dl = { path = "crates/hpx-dl", version = "2.5.7" }
 hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.7" }
 hpx-h3 = { path = "crates/hpx-h3", version = "2.5.7" }
-hpx-h3-quinn = { path = "crates/hpx-h3-quinn", version = "2.5.7" }
 hpx-streams = { path = "crates/hpx-streams", version = "2.5.7" }
 hpx-yawc = { path = "crates/yawc", version = "2.5.7" }
 hpxless = { path = "bin/hpxless", version = "2.5.7" }
@@ -242,6 +241,7 @@ futures-channel = "0.3.33"
 futures-core = "0.3.33"
 futures-rustls = "0.26.0"
 futures-util = "0.3.33"
+governor = "0.10"
 hickory-resolver = "0.26.1"
 hmac = "0.13.0"
 hotpath = "0.21.5"
@@ -252,7 +252,7 @@ http2 = "0.5.19"
 httparse = "1.10.1"
 hyper = "1.11.0"
 hyper-util = "0.1.20"
-image = "=0.25.6"
+image = "0.25"
 ipnet = "2.12.0"
 jiff = "0.2.34"
 js-sys = "0.3.103"
@@ -261,6 +261,7 @@ md-5 = "0.11.0"
 memchr = "2.8.3"
 mime = "0.3.17"
 mime_guess = "2.0.5"
+moka = { version = "0.12", features = ["sync"] }
 openssl = "0.10.81"
 parking_lot = "0.12.5"
 parley = "0.11.0"
@@ -271,6 +272,7 @@ pkcs8 = "0.11.0"
 png = "0.18.1"
 proptest = "1.11.0"
 prost = "0.14.4"
+publicsuffix = "2"
 quick-xml = "0.41.0"
 quinn = { version = "0.11.11", default-features = false }
 rand = "0.10.2"
@@ -284,7 +286,6 @@ rustls-pemfile = "2.2.0"
 rustls-pki-types = "1.15.0"
 rustybuzz = "0.20.1"
 scc = "3.8.5"
-schnellru = "0.2.4"
 selectors = "0.39.0"
 serde = "1.0.229"
 serde_json = "1.0.151"
@@ -324,7 +325,6 @@ want = "0.3.1"
 wasm-bindgen = "0.2.126"
 web-sys = { version = "0.3.103", default-features = false }
 webpki-root-certs = "1.0.9"
-webpki-roots = "1.0.9"
 which = "8.0.5"
 windows-registry = "0.6.1"
 winnow = "1.0.4"

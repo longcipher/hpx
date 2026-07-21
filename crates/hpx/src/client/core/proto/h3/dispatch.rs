@@ -46,7 +46,7 @@ pub(crate) enum RecvResponseResult {
 /// [`hpx_h3::client::RequestStream::finish`] to half-close the send direction.
 #[allow(clippy::result_large_err)]
 pub(crate) async fn send_request_body<B>(
-    stream: &mut hpx_h3::client::RequestStream<hpx_h3_quinn::BidiStream<Bytes>, Bytes>,
+    stream: &mut hpx_h3::client::RequestStream<hpx_h3::quinn::BidiStream<Bytes>, Bytes>,
     body: &mut B,
 ) -> Result<(), (Error, Option<http::Request<B>>)>
 where
@@ -95,7 +95,7 @@ where
 /// `Response<()>` from h3 so the caller can collect the body.
 #[allow(clippy::result_large_err)]
 pub(crate) async fn handle_response<B>(
-    stream: &mut hpx_h3::client::RequestStream<hpx_h3_quinn::BidiStream<Bytes>, Bytes>,
+    stream: &mut hpx_h3::client::RequestStream<hpx_h3::quinn::BidiStream<Bytes>, Bytes>,
 ) -> Result<RecvResponseResult, (Error, Option<http::Request<B>>)> {
     let response = match stream.recv_response().await {
         Ok(response) => response,
@@ -161,7 +161,7 @@ pub(crate) async fn handle_response<B>(
 /// through the standard [`Body`] API.
 #[allow(clippy::result_large_err)]
 pub(crate) async fn collect_response_body<B>(
-    stream: &mut hpx_h3::client::RequestStream<hpx_h3_quinn::BidiStream<Bytes>, Bytes>,
+    stream: &mut hpx_h3::client::RequestStream<hpx_h3::quinn::BidiStream<Bytes>, Bytes>,
     response: http::Response<()>,
 ) -> Result<http::Response<IncomingBody>, (Error, Option<http::Request<B>>)> {
     let mut chunks: Vec<Bytes> = Vec::new();

@@ -1,14 +1,13 @@
 use std::{
     borrow::Borrow,
-    collections::hash_map::Entry,
+    collections::{VecDeque, hash_map::Entry},
     hash::{Hash, Hasher},
 };
 
 use boring::ssl::{SslSession, SslSessionRef, SslVersion};
 use parking_lot::Mutex;
-use schnellru::ByLength;
 
-use crate::hash::{HASHER, HashMap, LruMap};
+use crate::hash::{HASHER, HashMap};
 
 const DEFAULT_SHARD_COUNT: usize = 16;
 
@@ -60,7 +59,7 @@ pub struct SessionCache<T> {
 
 struct SessionCacheShard<T> {
     reverse: HashMap<HashSession, SessionKey<T>>,
-    per_host_sessions: HashMap<SessionKey<T>, LruMap<HashSession, ()>>,
+    per_host_sessions: HashMap<SessionKey<T>, VecDeque<HashSession>>,
     per_host_session_capacity: usize,
 }
 
@@ -77,28 +76,23 @@ where
     }
 
     fn insert(&mut self, key: SessionKey<T>, session: SslSession) {
-        let per_host_sessions = self
-            .per_host_sessions
-            .entry(key.clone())
-            .or_insert_with(|| {
-                LruMap::with_hasher(ByLength::new(self.per_host_session_capacity as _), HASHER)
-            });
+        let per_host_sessions = self.per_host_sessions.entry(key.clone()).or_default();
 
         if per_host_sessions.len() >= self.per_host_session_capacity
-            && let Some((evicted_session, _)) = per_host_sessions.pop_oldest()
+            && let Some(evicted_session) = per_host_sessions.pop_front()
         {
             self.reverse.remove(&evicted_session);
         }
 
         let session = HashSession(session);
-        per_host_sessions.insert(session.clone(), ());
+        per_host_sessions.push_back(session.clone());
         self.reverse.insert(session, key);
     }
 
     fn get(&mut self, key: &SessionKey<T>) -> Option<SslSession> {
         let session = {
             let per_host_sessions = self.per_host_sessions.get_mut(key)?;
-            per_host_sessions.peek_oldest()?.0.clone().0
+            per_host_sessions.front()?.clone().0
         };
 
         if session.protocol_version() == SslVersion::TLS1_3 {
@@ -115,10 +109,10 @@ where
         };
 
         if let Entry::Occupied(mut per_host_sessions) = self.per_host_sessions.entry(key) {
-            per_host_sessions
-                .get_mut()
-                .remove(&HashSession(session.to_owned()));
-            if per_host_sessions.get().is_empty() {
+            let sessions = per_host_sessions.get_mut();
+            let target_id = session.id();
+            sessions.retain(|s| s.0.id() != target_id);
+            if sessions.is_empty() {
                 per_host_sessions.remove();
             }
         }

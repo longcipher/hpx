@@ -20,6 +20,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 i-implement-a-third-party-backend-and-opt-into-breaking-changes = []
 tracing = ["dep:tracing"]
+# Enable Quinn QUIC transport backend (merged from hpx-h3-quinn).
+quinn = ["dep:quinn", "dep:tokio-util"]
 
 [dependencies]
 bytes = { workspace = true }
@@ -27,7 +29,9 @@ fastrand = { workspace = true }
 futures-util = { workspace = true, features = ["io"] }
 http = { workspace = true }
 pin-project-lite = { workspace = true }
+quinn = { workspace = true, features = ["futures-io"], optional = true }
 tokio = { workspace = true, features = ["sync"] }
+tokio-util = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 
 [dev-dependencies]

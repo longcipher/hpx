@@ -96,7 +96,7 @@ tokio-rustls = { workspace = true, features = [
 tokio-socks = { workspace = true, optional = true }
 tokio-util = { workspace = true, features = ["codec"] }
 tracing = { workspace = true }
-webpki-roots = { workspace = true }
+webpki-root-certs = { workspace = true }
 
 # ==============================================================================
 # WebAssembly target-specific dependencies
@@ -138,7 +138,7 @@ smol = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-webpki-roots = { workspace = true }
+webpki-root-certs = { workspace = true }
 
 [lints.rust]
 

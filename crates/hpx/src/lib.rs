@@ -232,7 +232,7 @@
 //!
 //! ## Certificate Store
 //!
-//! By default, hpx uses Mozilla's root certificates through the webpki-roots crate.
+//! By default, hpx uses Mozilla's root certificates through the webpki-root-certs crate.
 //! This static root certificate bundle is not automatically updated and ignores any root
 //! certificates installed on the host. You can disable default-features to use the system's default
 //! certificate path. Additionally, hpx provides a certificate store for users to customize and
@@ -261,7 +261,7 @@
 //! - **ws**: Provides websocket support.
 //! - **hickory-dns**: Enables a hickory-dns async resolver instead of default threadpool using
 //!   `getaddrinfo`.
-//! - **webpki-roots** *(enabled by default)*: Use the webpki-roots crate for root certificates.
+//! - **webpki-roots** *(enabled by default)*: Use the webpki-root-certs crate for root certificates.
 //! - **system-proxy**: Enable system proxy support.
 //! - **tracing**: Enable tracing logging support.
 //!
@@ -306,7 +306,7 @@ use tokio_openssl as _;
 #[cfg(feature = "webpki-roots")]
 use webpki_root_certs as _;
 #[cfg(feature = "rustls-tls")]
-use webpki_roots as _;
+use webpki_root_certs as _;
 
 #[macro_use]
 mod trace;

@@ -97,8 +97,8 @@ publish:
     VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
     echo "Publishing workspace crates v$VERSION..."
     echo ""
-    # Dependency order: hpx-yawc, hpx-h3 → hpx-h3-quinn → hpx → {hpx-browser, hpx-dl, hpx-emulation, hpx-streams} → {hpxless, hpx-cli}
-    CRATES="hpx-yawc hpx-h3 hpx-h3-quinn hpx hpx-browser hpx-dl hpx-emulation hpx-streams hpxless hpx-cli"
+    # Dependency order: hpx-yawc, hpx-h3 → hpx → {hpx-browser, hpx-dl, hpx-emulation, hpx-streams} → {hpxless, hpx-cli}
+    CRATES="hpx-yawc hpx-h3 hpx hpx-browser hpx-dl hpx-emulation hpx-streams hpxless hpx-cli"
     for crate in $CRATES; do
     	# Check if already published at this version
     	if cargo search "$crate" --limit 1 2>/dev/null | grep -q "^$crate = \"$VERSION\""; then

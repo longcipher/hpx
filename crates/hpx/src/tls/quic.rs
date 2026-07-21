@@ -24,7 +24,7 @@ use crate::{
 };
 
 /// Build a `quinn::ClientConfig` from `TlsOptions` + `Http3Options`, using
-/// the `webpki-roots` CA bundle as the trust anchor.
+/// the `webpki-root-certs` CA bundle as the trust anchor.
 ///
 /// ALPN is forced to `[b"h3"]` per [C-01] and [C-23]. `enable_0rtt` is mapped
 /// to `rustls::ClientConfig::enable_early_data` per [C-19].
@@ -36,7 +36,7 @@ pub fn build_quinn_client_config(
     h3_opts: &Http3Options,
 ) -> crate::Result<quinn::ClientConfig> {
     let mut root_store = rustls::RootCertStore::empty();
-    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    root_store.add_parsable_certificates(webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().cloned());
     build_quinn_client_config_with_root_store(tls_opts, h3_opts, root_store)
 }
 

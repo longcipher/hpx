@@ -13,14 +13,14 @@ use std::{
     time::{Duration, Instant},
 };
 
+use moka::{policy::EvictionPolicy, sync::Cache};
 use parking_lot::Mutex;
-use schnellru::ByLength;
 use tokio::sync::oneshot;
 
 use super::exec::{self, Exec};
 use crate::{
     client::core::rt::{ArcTimer, Executor, Timer},
-    hash::{HASHER, HashMap, HashSet, LruMap},
+    hash::{HASHER, HashMap, HashSet},
 };
 
 const DEFAULT_SHARD_COUNT: usize = 16;
@@ -44,9 +44,9 @@ pub trait Poolable: Unpin + Send + Sized + 'static {
     fn can_share(&self) -> bool;
 }
 
-pub trait Key: Eq + Hash + Clone + Debug + Unpin + Send + 'static {}
+pub trait Key: Eq + Hash + Clone + Debug + Unpin + Send + Sync + 'static {}
 
-impl<T> Key for T where T: Eq + Hash + Clone + Debug + Unpin + Send + 'static {}
+impl<T> Key for T where T: Eq + Hash + Clone + Debug + Unpin + Send + Sync + 'static {}
 
 /// A marker to identify what version a pooled connection is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -79,14 +79,16 @@ pub enum Reservation<T> {
 
 /// Simple type alias in case the key type needs to be adjusted.
 // pub type Key = (http::uri::Scheme, http::uri::Authority); //Arc<String>;
-struct PoolShard<T, K: Eq + Hash> {
+struct PoolShard<T, K: Key> {
     // A flag that a connection is being established, and the connection
     // should be shared. This prevents making multiple HTTP/2 connections
     // to the same host.
     connecting: HashSet<K>,
     // These are internal Conns sitting in the event loop in the KeepAlive
     // state, waiting to receive a new Request to send on the socket.
-    idle: LruMap<K, Vec<Idle<T>>>,
+    idle: Cache<K, Arc<Mutex<Vec<Idle<T>>>>>,
+    // Tracks active keys for iteration (moka doesn't support iteration).
+    idle_keys: Vec<K>,
     max_idle_per_host: usize,
     // These are outstanding Checkouts that are waiting for a socket to be
     // able to send a Request one. This is used when "racing" for a new
@@ -128,7 +130,7 @@ impl Config {
     }
 }
 
-impl<T, K: Key> ShardedPool<T, K> {
+impl<T: Send + 'static, K: Key> ShardedPool<T, K> {
     fn new<E, M>(config: &Config, executor: E, timer: Option<M>, shard_count: usize) -> Self
     where
         E: Executor<exec::BoxSendFuture> + Send + Sync + Clone + 'static,
@@ -143,7 +145,9 @@ impl<T, K: Key> ShardedPool<T, K> {
             shard_count,
         }
     }
+}
 
+impl<T, K: Key> ShardedPool<T, K> {
     fn shard_for(&self, key: &K) -> (&Mutex<PoolShard<T, K>>, usize) {
         let index = self.shard_index(key);
         (&self.shards[index], index)
@@ -158,7 +162,7 @@ impl<T, K: Key> ShardedPool<T, K> {
     }
 }
 
-impl<T, K: Key> Pool<T, K> {
+impl<T: Send + 'static, K: Key> Pool<T, K> {
     pub fn new<E, M>(config: Config, executor: E, timer: Option<M>) -> Pool<T, K>
     where
         E: Executor<exec::BoxSendFuture> + Send + Sync + Clone + 'static,
@@ -362,18 +366,20 @@ impl<'a, T: Poolable + 'a, K: Debug> IdlePopper<'a, T, K> {
     }
 }
 
-impl<T, K: Key> PoolShard<T, K> {
+impl<T: Send + 'static, K: Key> PoolShard<T, K> {
     fn new<E, M>(config: &Config, executor: E, timer: Option<M>) -> Self
     where
         E: Executor<exec::BoxSendFuture> + Send + Sync + Clone + 'static,
         M: Timer + Send + Sync + Clone + 'static,
     {
+        let max_capacity = config.max_pool_size.map_or(u64::MAX, |n| n.get() as u64);
         Self {
             connecting: HashSet::with_hasher(HASHER),
-            idle: LruMap::with_hasher(
-                ByLength::new(config.max_pool_size.map_or(u32::MAX, NonZero::get)),
-                HASHER,
-            ),
+            idle: Cache::builder()
+                .max_capacity(max_capacity)
+                .eviction_policy(EvictionPolicy::lru())
+                .build(),
+            idle_keys: Vec::new(),
             idle_interval_ref: None,
             max_idle_per_host: config.max_idle_per_host,
             waiters: HashMap::with_hasher(HASHER),
@@ -386,7 +392,7 @@ impl<T, K: Key> PoolShard<T, K> {
 
 impl<T: Poolable, K: Key> PoolShard<T, K> {
     fn put(&mut self, key: &K, value: T, pool_ref: &Arc<ShardedPool<T, K>>, shard_index: usize) {
-        if value.can_share() && self.idle.peek(key).is_some() {
+        if value.can_share() && self.idle.contains_key(key) {
             trace!("put; existing idle HTTP/2 connection for {:?}", key);
             return;
         }
@@ -430,23 +436,31 @@ impl<T: Poolable, K: Key> PoolShard<T, K> {
         if let Some(value) = value {
             // borrow-check scope...
             {
-                let idle_list = self
-                    .idle
-                    .get_or_insert(key.clone(), Vec::<Idle<T>>::default);
-
-                if let Some(idle_list) = idle_list {
-                    if self.max_idle_per_host <= idle_list.len() {
-                        trace!("max idle per host for {:?}, dropping connection", key);
-                        return;
+                let idle_list = match self.idle.get(key) {
+                    Some(list) => list,
+                    None => {
+                        let new_list = Arc::new(Mutex::new(Vec::new()));
+                        self.idle.insert(key.clone(), new_list.clone());
+                        self.idle_keys.push(key.clone());
+                        new_list
                     }
+                };
+                let mut idle_guard = idle_list.lock();
 
-                    debug!("pooling idle connection for {:?}", key);
-                    idle_list.push(Idle {
-                        value,
-                        idle_at: Instant::now(),
-                    });
+                if self.max_idle_per_host <= idle_guard.len() {
+                    trace!("max idle per host for {:?}, dropping connection", key);
+                    return;
                 }
+
+                debug!("pooling idle connection for {:?}", key);
+                idle_guard.push(Idle {
+                    value,
+                    idle_at: Instant::now(),
+                });
             }
+
+            // Flush pending moka operations so capacity eviction is visible.
+            self.idle.run_pending_tasks();
 
             self.spawn_idle_interval(pool_ref, shard_index);
         } else {
@@ -537,34 +551,38 @@ impl<T: Poolable, K: Key> PoolShard<T, K> {
         let dur = self.timeout.expect("interval assumes timeout");
         let now = Instant::now();
 
-        let mut keys_to_remove = Vec::new();
-        for (key, values) in self.idle.iter_mut() {
-            values.retain(|entry| {
-                if !entry.value.is_open() {
-                    trace!("idle interval evicting closed for {:?}", key);
-                    return false;
+        self.idle_keys.retain(|key| {
+            match self.idle.get(key) {
+                Some(arc_list) => {
+                    let mut list = arc_list.lock();
+                    list.retain(|entry| {
+                        if !entry.value.is_open() {
+                            trace!("idle interval evicting closed for {:?}", key);
+                            return false;
+                        }
+
+                        // Avoid `Instant::sub` to avoid issues like rust-lang/rust#86470.
+                        if now.saturating_duration_since(entry.idle_at) > dur {
+                            trace!("idle interval evicting expired for {:?}", key);
+                            return false;
+                        }
+
+                        // Otherwise, keep this value...
+                        true
+                    });
+
+                    if list.is_empty() {
+                        drop(list);
+                        trace!("idle interval removing empty key {:?}", key);
+                        self.idle.remove(key);
+                        false
+                    } else {
+                        true
+                    }
                 }
-
-                // Avoid `Instant::sub` to avoid issues like rust-lang/rust#86470.
-                if now.saturating_duration_since(entry.idle_at) > dur {
-                    trace!("idle interval evicting expired for {:?}", key);
-                    return false;
-                }
-
-                // Otherwise, keep this value...
-                true
-            });
-
-            // If the list is empty, remove the key.
-            if values.is_empty() {
-                keys_to_remove.push(key.clone());
+                None => false, // evicted by moka or removed elsewhere
             }
-        }
-
-        for key in keys_to_remove {
-            trace!("idle interval removing empty key {:?}", key);
-            self.idle.remove(&key);
-        }
+        });
     }
 }
 
@@ -714,18 +732,21 @@ impl<T: Poolable, K: Key> Checkout<T, K> {
             let (shard, _shard_index) = pool.shard_for(&self.key);
             let mut inner = shard.lock();
             let expiration = Expiration::new(inner.timeout);
-            let maybe_entry = inner.idle.get(&self.key).and_then(|list| {
+            let maybe_entry = inner.idle.get(&self.key).and_then(|arc_list| {
+                let mut list = arc_list.lock();
                 trace!("take? {:?}: expiration = {:?}", self.key, expiration.0);
                 // A block to end the mutable borrow on list,
                 // so the map below can check is_empty()
-                {
+                let pop_result = {
                     let popper = IdlePopper {
                         key: &self.key,
-                        list,
+                        list: &mut *list,
                     };
                     popper.pop(&expiration)
-                }
-                .map(|e| (e, list.is_empty()))
+                };
+                let is_empty = list.is_empty();
+                drop(list);
+                pop_result.map(|e| (e, is_empty))
             });
 
             let (entry, empty) = if let Some((e, empty)) = maybe_entry {
@@ -737,6 +758,7 @@ impl<T: Poolable, K: Key> Checkout<T, K> {
 
             if empty {
                 inner.idle.remove(&self.key);
+                inner.idle_keys.retain(|k| k != &self.key);
             }
 
             if entry.is_none() && self.waiter.is_none() {
@@ -939,11 +961,11 @@ mod tests {
         KeyImpl(http::uri::Scheme::HTTP, s.parse().expect("host key"))
     }
 
-    fn pool_no_timer<T, K: Key>() -> Pool<T, K> {
+    fn pool_no_timer<T: Send + 'static, K: Key>() -> Pool<T, K> {
         pool_max_idle_no_timer(usize::MAX)
     }
 
-    fn pool_max_idle_no_timer<T, K: Key>(max_idle: usize) -> Pool<T, K> {
+    fn pool_max_idle_no_timer<T: Send + 'static, K: Key>(max_idle: usize) -> Pool<T, K> {
         Pool::new(
             super::Config {
                 idle_timeout: Some(Duration::from_millis(100)),
@@ -1023,7 +1045,7 @@ mod tests {
             pool.locked(&key)
                 .idle
                 .get(&key)
-                .map(|entries| entries.len()),
+                .map(|list| list.lock().len()),
             Some(3)
         );
         let timeout = pool.locked(&key).timeout.unwrap();
@@ -1050,7 +1072,7 @@ mod tests {
             pool.locked(&key)
                 .idle
                 .get(&key)
-                .map(|entries| entries.len()),
+                .map(|list| list.lock().len()),
             Some(2)
         );
     }
@@ -1077,7 +1099,7 @@ mod tests {
             pool.locked(&key)
                 .idle
                 .get(&key)
-                .map(|entries| entries.len()),
+                .map(|list| list.lock().len()),
             Some(3)
         );
 
@@ -1089,7 +1111,7 @@ mod tests {
             pool.locked(&key)
                 .idle
                 .get(&key)
-                .map(|entries| entries.len()),
+                .map(|list| list.lock().len()),
             Some(3)
         );
 
