@@ -64,7 +64,7 @@ impl WebSocketRequestBuilder {
             unsupported: UnsupportedSettings::default(),
             config: WebSocketConfig::default(),
             custom_headers: Vec::new(),
-            deflate_request: true,
+            deflate_request: false,
         }
     }
 
@@ -127,7 +127,10 @@ impl WebSocketRequestBuilder {
 
     /// Sets whether to request the permessage-deflate (RFC 7692) extension.
     ///
-    /// Defaults to `true`. Set to `false` to disable compression negotiation.
+    /// Defaults to `false` because the yawc backend cannot verify server acceptance
+    /// of the extension (response headers are not exposed). Set to `true` to opt in,
+    /// but note that deflate I/O will be applied unconditionally after the handshake
+    /// regardless of whether the server actually negotiated it.
     #[inline]
     pub fn deflate_request(mut self, deflate_request: bool) -> Self {
         self.deflate_request = deflate_request;
