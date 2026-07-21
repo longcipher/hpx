@@ -7,7 +7,6 @@ use std::{
 
 use bytes::Bytes;
 use hyper_util::rt::TokioIo;
-use pin_project::pin_project;
 use sha1::{Digest, Sha1};
 #[cfg(feature = "axum")]
 use {
@@ -250,65 +249,65 @@ where
 }
 
 pub(super) fn sec_websocket_protocol(key: &[u8]) -> String {
-    use base64::prelude::*;
     let mut sha1 = Sha1::new();
     sha1.update(key);
     sha1.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"); // magic string
     let result = sha1.finalize();
-    BASE64_STANDARD.encode(&result[..])
+    base64_simd::STANDARD.encode_to_string(&result[..])
 }
 
-/// Future that completes the WebSocket upgrade process on a server, returning a WebSocket stream.
-///
-/// This future is returned by the [`WebSocket::upgrade`](super::WebSocket::upgrade) and
-/// [`WebSocket::upgrade_with_options`](super::WebSocket::upgrade_with_options) functions after initiating
-/// a WebSocket protocol upgrade. It manages completion of the HTTP upgrade handshake and initializes
-/// a WebSocket connection with the negotiated parameters.
-///
-/// # Important
-/// The associated HTTP upgrade response must be sent to the client before polling this future.
-/// The future will not complete until the response is sent and the HTTP connection is upgraded
-/// to the WebSocket protocol.
-///
-/// # Example
-/// ```no_run
-/// use http_body_util::Empty;
-/// use hyper::{
-///     Request, Response,
-///     body::{Bytes, Incoming},
-///     server::conn::http1,
-///     service::service_fn,
-/// };
-/// use yawc::{Options, Result, UpgradeFut, WebSocket};
-///
-/// async fn handle_client(fut: UpgradeFut) -> yawc::Result<()> {
-///     let ws = fut.await?;
-///     // use `ws`
-///     Ok(())
-/// }
-///
-/// async fn server_upgrade(mut req: Request<Incoming>) -> yawc::Result<Response<Empty<Bytes>>> {
-///     let (response, fut) = WebSocket::upgrade_with_options(&mut req, Options::default())?;
-///
-///     tokio::task::spawn(async move {
-///         if let Err(e) = handle_client(fut).await {
-///             eprintln!("Error in websocket connection: {}", e);
-///         }
-///     });
-///
-///     Ok(response)
-/// }
-/// ```
-///
-/// # Fields
-/// - `inner`: The underlying hyper upgrade future that completes the protocol switch
-/// - `negotiation`: Parameters negotiated during the upgrade, like compression settings
-#[pin_project]
-#[derive(Debug)]
-pub struct UpgradeFut {
-    #[pin]
-    pub(super) inner: hyper::upgrade::OnUpgrade,
-    pub(super) negotiation: Option<Negotiation>,
+pin_project_lite::pin_project! {
+    /// Future that completes the WebSocket upgrade process on a server, returning a WebSocket stream.
+    ///
+    /// This future is returned by the [`WebSocket::upgrade`](super::WebSocket::upgrade) and
+    /// [`WebSocket::upgrade_with_options`](super::WebSocket::upgrade_with_options) functions after initiating
+    /// a WebSocket protocol upgrade. It manages completion of the HTTP upgrade handshake and initializes
+    /// a WebSocket connection with the negotiated parameters.
+    ///
+    /// # Important
+    /// The associated HTTP upgrade response must be sent to the client before polling this future.
+    /// The future will not complete until the response is sent and the HTTP connection is upgraded
+    /// to the WebSocket protocol.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use http_body_util::Empty;
+    /// use hyper::{
+    ///     Request, Response,
+    ///     body::{Bytes, Incoming},
+    ///     server::conn::http1,
+    ///     service::service_fn,
+    /// };
+    /// use yawc::{Options, Result, UpgradeFut, WebSocket};
+    ///
+    /// async fn handle_client(fut: UpgradeFut) -> yawc::Result<()> {
+    ///     let ws = fut.await?;
+    ///     // use `ws`
+    ///     Ok(())
+    /// }
+    ///
+    /// async fn server_upgrade(mut req: Request<Incoming>) -> yawc::Result<Response<Empty<Bytes>>> {
+    ///     let (response, fut) = WebSocket::upgrade_with_options(&mut req, Options::default())?;
+    ///
+    ///     tokio::task::spawn(async move {
+    ///         if let Err(e) = handle_client(fut).await {
+    ///             eprintln!("Error in websocket connection: {}", e);
+    ///         }
+    ///     });
+    ///
+    ///     Ok(response)
+    /// }
+    /// ```
+    ///
+    /// # Fields
+    /// - `inner`: The underlying hyper upgrade future that completes the protocol switch
+    /// - `negotiation`: Parameters negotiated during the upgrade, like compression settings
+    #[derive(Debug)]
+    pub struct UpgradeFut {
+        #[pin]
+        pub(super) inner: hyper::upgrade::OnUpgrade,
+        pub(super) negotiation: Option<Negotiation>,
+    }
 }
 
 impl std::future::Future for UpgradeFut {

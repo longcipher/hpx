@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use futures::TryStreamExt;
 use tokio_util::io::StreamReader;
 
@@ -8,7 +7,6 @@ use crate::{StreamBodyResult, protobuf_len_codec::ProtobufLenPrefixCodec};
 /// format].
 ///
 /// [Protobuf format]: https://protobuf.dev/programming-guides/encoding/
-#[async_trait]
 pub trait ProtobufStreamResponse {
     /// Streams the response as batches of Protobuf messages.
     ///
@@ -50,7 +48,6 @@ pub trait ProtobufStreamResponse {
         T: prost::Message + Default + Send;
 }
 
-#[async_trait]
 impl ProtobufStreamResponse for hpx::Response {
     fn protobuf_stream<T>(
         self,

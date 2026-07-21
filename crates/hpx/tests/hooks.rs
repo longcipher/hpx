@@ -52,7 +52,7 @@ impl OnErrorHook for ErrorCounterHook {
 
 #[tokio::test]
 async fn test_before_request_hook_executes() {
-    let _ = pretty_env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async move { http::Response::default() });
 
@@ -79,7 +79,7 @@ async fn test_before_request_hook_executes() {
 
 #[tokio::test]
 async fn test_after_response_hook_executes() {
-    let _ = pretty_env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async move { http::Response::default() });
 
@@ -101,7 +101,7 @@ async fn test_after_response_hook_executes() {
 
 #[tokio::test]
 async fn test_on_request_closure() {
-    let _ = pretty_env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |req| async move {
         // Check that our custom header was added
@@ -134,7 +134,7 @@ async fn test_on_request_closure() {
 
 #[tokio::test]
 async fn test_on_response_closure() {
-    let _ = pretty_env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let response_count = Arc::new(AtomicUsize::new(0));
     let count_clone = response_count.clone();
@@ -159,7 +159,7 @@ async fn test_on_response_closure() {
 
 #[tokio::test]
 async fn test_logging_hook() {
-    let _ = pretty_env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async move { http::Response::default() });
 
@@ -178,7 +178,7 @@ async fn test_logging_hook() {
 
 #[tokio::test]
 async fn test_multiple_hooks() {
-    let _ = pretty_env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async move { http::Response::default() });
 
@@ -211,7 +211,7 @@ async fn test_multiple_hooks() {
 
 #[tokio::test]
 async fn test_header_injection_hook() {
-    let _ = pretty_env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |req| async move {
         // Check that our custom header was added
@@ -248,7 +248,7 @@ async fn test_header_injection_hook() {
 
 #[tokio::test]
 async fn test_request_id_hook() {
-    let _ = pretty_env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |req| async move {
         // Check that request ID was added

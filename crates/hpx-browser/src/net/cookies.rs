@@ -161,16 +161,19 @@ fn parse_http_date(s: &str) -> Option<u64> {
         "%a %b %e %H:%M:%S %Y",
     ];
     for f in FORMATS {
-        if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(s, f) {
-            let ts = ndt.and_utc().timestamp();
-            if ts >= 0 {
-                return Some(ts as u64);
+        if let Ok(dt) = jiff::civil::DateTime::strptime(f, s) {
+            // HTTP dates are always GMT/UTC. Attach UTC timezone to get a timestamp.
+            if let Ok(zoned) = dt.to_zoned(jiff::tz::TimeZone::UTC) {
+                let secs = zoned.timestamp().as_second();
+                if secs >= 0 {
+                    return Some(secs as u64);
+                }
             }
         }
     }
-    chrono::DateTime::parse_from_rfc2822(s)
+    jiff::fmt::rfc2822::parse(s)
         .ok()
-        .map(|dt| dt.timestamp().max(0) as u64)
+        .map(|zoned| zoned.timestamp().as_second().max(0) as u64)
 }
 
 /// Parse a Set-Cookie header value into a Cookie.

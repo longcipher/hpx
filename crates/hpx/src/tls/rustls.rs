@@ -742,7 +742,7 @@ mod tests {
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
-    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use base64_simd::STANDARD;
     use bytes::Bytes;
     use http_body_util::Full;
     use hyper::{Response, server::conn::http1, service::service_fn};
@@ -969,7 +969,9 @@ mod tests {
             .add_pem_cert(CA_CERT_PEM)
             .build()
             .unwrap();
-        let pkcs12 = STANDARD.decode(CLIENT_PKCS12_DER_B64.trim()).unwrap();
+        let pkcs12 = STANDARD
+            .decode_to_vec(CLIENT_PKCS12_DER_B64.trim().as_bytes())
+            .unwrap();
         let identity = Identity::from_pkcs12_der(&pkcs12, "changeit").unwrap();
         let client = Client::builder()
             .no_proxy()

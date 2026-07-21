@@ -23,7 +23,8 @@ async fn hash_file<H: Digest>(
         }
         hasher.update(&buf[..n]);
     }
-    Ok(hex::encode(hasher.finalize()))
+    let out = hasher.finalize();
+    Ok(faster_hex::hex_string(out.as_slice()))
 }
 
 /// Compute the checksum of a file using the given algorithm.

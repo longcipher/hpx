@@ -3,14 +3,22 @@ members = ["bin/*", "crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "2.5.6"
+version = "2.5.7"
 edition = "2024"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license = "Apache-2.0"
 repository = "https://github.com/longcipher/hpx"
 
 [workspace.metadata.cargo-shear]
-ignored = ["futures-core", "selectors", "stylo", "hpx-cli"]
+ignored = [
+    "futures-core",
+    "selectors",
+    "stylo",
+    "hpx-cli",
+    "hpx-emulation",
+    "hpx-streams",
+    "hpxless",
+]
 
 # Enable pedantic lints for stricter code quality
 # Priority -1 so individual lint settings override
@@ -184,16 +192,16 @@ all = "warn"
 
 [workspace.dependencies]
 # local crates
-hpx = { path = "crates/hpx", version = "2.5.6" }
-hpx-browser = { path = "crates/hpx-browser", version = "2.5.6" }
-hpx-cli = { path = "bin/hpx-cli", version = "2.5.6" }
-hpx-dl = { path = "crates/hpx-dl", version = "2.5.6" }
-hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.6" }
-hpx-h3 = { path = "crates/hpx-h3", version = "2.5.6" }
-hpx-h3-quinn = { path = "crates/hpx-h3-quinn", version = "2.5.6" }
-hpx-streams = { path = "crates/hpx-streams", version = "2.5.6" }
-hpx-yawc = { path = "crates/yawc", version = "2.5.6" }
-hpxless = { path = "bin/hpxless", version = "2.5.6" }
+hpx = { path = "crates/hpx", version = "2.5.7" }
+hpx-browser = { path = "crates/hpx-browser", version = "2.5.7" }
+hpx-cli = { path = "bin/hpx-cli", version = "2.5.7" }
+hpx-dl = { path = "crates/hpx-dl", version = "2.5.7" }
+hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.7" }
+hpx-h3 = { path = "crates/hpx-h3", version = "2.5.7" }
+hpx-h3-quinn = { path = "crates/hpx-h3-quinn", version = "2.5.7" }
+hpx-streams = { path = "crates/hpx-streams", version = "2.5.7" }
+hpx-yawc = { path = "crates/yawc", version = "2.5.7" }
+hpxless = { path = "bin/hpxless", version = "2.5.7" }
 
 # external crates
 ahash = "0.8.12"
@@ -204,14 +212,14 @@ assert_matches = "1.5.0"
 async-trait = "0.1.91"
 axum = "0.8.9"
 axum-core = "0.5.6"
-base64 = "0.22.1"
+base64-simd = "0.8.0"
 blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62", version = "=0.3.0-beta.1" }
 blitz-html = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62", version = "=0.3.0-beta.1" }
 blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62", version = "=0.3.0-beta.1" }
+bon = "3.9.3"
 boring = "5.1.0"
 brotli = "8.0.4"
 bytes = "1.12.1"
-chrono = "0.4.45"
 clap = "4.6.3"
 const-oid = "0.10.2"
 cookie = "0.18.1"
@@ -225,6 +233,7 @@ digest = "0.11.3"
 ecdysis = "1.1.1"
 encoding_rs = "0.8.35"
 eyre = "0.6.12"
+faster-hex = "0.10.0"
 fastrand = "2.5.0"
 flate2 = "1.1.9"
 fontdb = "0.23.0"
@@ -233,7 +242,6 @@ futures-channel = "0.3.33"
 futures-core = "0.3.33"
 futures-rustls = "0.26.0"
 futures-util = "0.3.33"
-hex = "0.4.3"
 hickory-resolver = "0.26.1"
 hmac = "0.13.0"
 hotpath = "0.21.5"
@@ -246,6 +254,7 @@ hyper = "1.11.0"
 hyper-util = "0.1.20"
 image = "=0.25.6"
 ipnet = "2.12.0"
+jiff = "0.2.34"
 js-sys = "0.3.103"
 libc = "0.2.187"
 md-5 = "0.11.0"
@@ -256,12 +265,10 @@ openssl = "0.10.81"
 parking_lot = "0.12.5"
 parley = "0.11.0"
 percent-encoding = "2.3.2"
-pin-project = "1.1.13"
 pin-project-lite = "0.2.17"
-pkcs12 = "0.1.0"
+pkcs12 = "0.2.0-pre.0"
 pkcs8 = "0.11.0"
 png = "0.18.1"
-pretty_env_logger = "0.5.0"
 proptest = "1.11.0"
 prost = "0.14.4"
 quick-xml = "0.41.0"
@@ -311,7 +318,6 @@ tower = "0.5.3"
 tower-http = "0.7.0"
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
-typed-builder = "0.23.2"
 url = "2.5.8"
 uuid = "1.24.0"
 want = "0.3.1"

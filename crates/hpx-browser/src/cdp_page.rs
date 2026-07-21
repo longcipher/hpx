@@ -312,9 +312,9 @@ impl CdpPage {
             CdpClientError::command_failed("Page.captureScreenshot", "missing data field")
         })?;
 
-        use base64::Engine;
-        base64::engine::general_purpose::STANDARD
-            .decode(data)
+        use base64_simd::STANDARD;
+        STANDARD
+            .decode_to_vec(data.as_bytes())
             .map_err(|e| CdpClientError::command_failed("Page.captureScreenshot", &e.to_string()))
     }
 
@@ -338,9 +338,9 @@ impl CdpPage {
             CdpClientError::command_failed("Page.printToPDF", "missing data field")
         })?;
 
-        use base64::Engine;
-        base64::engine::general_purpose::STANDARD
-            .decode(data)
+        use base64_simd::STANDARD;
+        STANDARD
+            .decode_to_vec(data.as_bytes())
             .map_err(|e| CdpClientError::command_failed("Page.printToPDF", &e.to_string()))
     }
 
@@ -523,9 +523,9 @@ impl CdpPage {
             CdpClientError::command_failed("Page.captureScreenshot", "missing data field")
         })?;
 
-        use base64::Engine;
-        base64::engine::general_purpose::STANDARD
-            .decode(data)
+        use base64_simd::STANDARD;
+        STANDARD
+            .decode_to_vec(data.as_bytes())
             .map_err(|e| CdpClientError::command_failed("Page.captureScreenshot", &e.to_string()))
     }
 
@@ -558,9 +558,9 @@ impl CdpPage {
             CdpClientError::command_failed("Page.printToPDF", "missing data field")
         })?;
 
-        use base64::Engine;
-        base64::engine::general_purpose::STANDARD
-            .decode(data)
+        use base64_simd::STANDARD;
+        STANDARD
+            .decode_to_vec(data.as_bytes())
             .map_err(|e| CdpClientError::command_failed("Page.printToPDF", &e.to_string()))
     }
 }

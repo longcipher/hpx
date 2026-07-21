@@ -4,13 +4,12 @@ use std::time::Duration;
 
 use futures_util::future::join_all;
 use hpx::Client;
-use pretty_env_logger::env_logger;
 use support::{layer::DelayLayer, server};
 use tower::{layer::util::Identity, limit::ConcurrencyLimitLayer, timeout::TimeoutLayer};
 
 #[tokio::test]
 async fn non_op_layer() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async { http::Response::default() });
 
@@ -29,7 +28,7 @@ async fn non_op_layer() {
 
 #[tokio::test]
 async fn non_op_layer_with_timeout() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let client = Client::builder()
         .connector_layer(Identity::new())
@@ -50,7 +49,7 @@ async fn non_op_layer_with_timeout() {
 
 #[tokio::test]
 async fn with_connect_timeout_layer_never_returning() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let client = Client::builder()
         .connector_layer(TimeoutLayer::new(Duration::from_millis(100)))
@@ -70,7 +69,7 @@ async fn with_connect_timeout_layer_never_returning() {
 
 #[tokio::test]
 async fn with_connect_timeout_layer_slow() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async { http::Response::default() });
 
@@ -92,7 +91,7 @@ async fn with_connect_timeout_layer_slow() {
 
 #[tokio::test]
 async fn multiple_timeout_layers_under_threshold() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async { http::Response::default() });
 
@@ -115,7 +114,7 @@ async fn multiple_timeout_layers_under_threshold() {
 
 #[tokio::test]
 async fn multiple_timeout_layers_over_threshold() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async { http::Response::default() });
 
@@ -140,7 +139,7 @@ async fn multiple_timeout_layers_over_threshold() {
 
 #[tokio::test]
 async fn with_concurrency_limit_layer_timeout() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async { http::Response::default() });
 
@@ -176,7 +175,7 @@ async fn with_concurrency_limit_layer_timeout() {
 
 #[tokio::test]
 async fn with_concurrency_limit_layer_success() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async { http::Response::default() });
 
@@ -215,7 +214,7 @@ async fn with_concurrency_limit_layer_success() {
 
 #[tokio::test]
 async fn no_generic_bounds_required_for_client_new() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async { http::Response::default() });
 

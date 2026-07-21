@@ -20,7 +20,7 @@ doctest = false
 [features]
 default = ["emulation", "http1", "http2"]
 
-emulation = ["dep:typed-builder"]
+emulation = ["dep:bon"]
 emulation-compression = []
 emulation-rand = ["emulation", "dep:strum_macros", "dep:strum", "dep:rand"]
 emulation-serde = ["dep:serde"]
@@ -29,13 +29,13 @@ http2 = ["hpx/http2"]
 http3 = ["hpx/http3"]
 
 [dependencies]
+bon = { workspace = true, optional = true }
 hpx = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 strum = { workspace = true, optional = true }
 strum_macros = { workspace = true, optional = true }
-typed-builder = { workspace = true, optional = true }
 
 [dev-dependencies]
 futures-util = { workspace = true }

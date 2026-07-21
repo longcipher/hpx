@@ -62,7 +62,7 @@ url = { workspace = true }
 axum-core = { workspace = true, optional = true }
 
 # Encoding and cryptography
-base64 = { workspace = true }
+base64-simd = { workspace = true }
 
 # Compression
 flate2 = { workspace = true }
@@ -74,7 +74,7 @@ hyper-util = { workspace = true, features = ["tokio"] }
 
 # Utilities
 percent-encoding = { workspace = true }
-pin-project = { workspace = true }
+pin-project-lite = { workspace = true }
 sha1 = { workspace = true }
 
 # Optional dependencies

@@ -620,7 +620,7 @@ mod tests {
     async fn parse_reads_until_blocked() {
         use crate::client::core::proto::h1::ClientTransaction;
 
-        let _ = pretty_env_logger::try_init();
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
         let mock = Mock::new()
             // Split over multiple reads will read all of it
             .read(b"HTTP/1.1 200 OK\r\n")
@@ -774,7 +774,7 @@ mod tests {
 
     #[tokio::test]
     async fn write_buf_flatten() {
-        let _ = pretty_env_logger::try_init();
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
         let mock = Mock::new()
             .write(b"hello world, it's crate::core:!")
@@ -794,7 +794,7 @@ mod tests {
 
     #[test]
     fn write_buf_flatten_partially_flushed() {
-        let _ = pretty_env_logger::try_init();
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
         let b = |s: &str| Cursor::new(s.as_bytes().to_vec());
 
@@ -829,7 +829,7 @@ mod tests {
 
     #[tokio::test]
     async fn write_buf_queue_disable_auto() {
-        let _ = pretty_env_logger::try_init();
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
         let mock = Mock::new()
             .write(b"hello ")

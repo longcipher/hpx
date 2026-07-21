@@ -444,15 +444,12 @@ impl WebSocketRequestBuilder {
                 if let Some(auth) = intercept.basic_auth()
                     && let Ok(auth_str) = auth.to_str()
                     && let Some(encoded) = auth_str.strip_prefix("Basic ")
+                    && let Ok(decoded) = base64_simd::STANDARD.decode_to_vec(encoded.as_bytes())
+                    && let Ok(cred) = String::from_utf8(decoded)
+                    && let Some((user, pass)) = cred.split_once(':')
                 {
-                    use base64::Engine;
-                    if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded)
-                        && let Ok(cred) = String::from_utf8(decoded)
-                        && let Some((user, pass)) = cred.split_once(':')
-                    {
-                        let _ = proxy_url.set_username(user);
-                        let _ = proxy_url.set_password(Some(pass));
-                    }
+                    let _ = proxy_url.set_username(user);
+                    let _ = proxy_url.set_password(Some(pass));
                 }
                 let proxy_config = Self::make_proxy_config(proxy_url);
                 ws_builder = ws_builder.with_proxy(proxy_config);

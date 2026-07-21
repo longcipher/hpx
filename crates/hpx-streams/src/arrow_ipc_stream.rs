@@ -1,5 +1,4 @@
 use arrow::array::RecordBatch;
-use async_trait::async_trait;
 use futures::TryStreamExt;
 
 use crate::{StreamBodyResult, arrow_ipc_len_codec::ArrowIpcCodec};
@@ -8,7 +7,6 @@ use crate::{StreamBodyResult, arrow_ipc_len_codec::ArrowIpcCodec};
 /// IPC format].
 ///
 /// [Apache Arrow IPC format]: https://arrow.apache.org/docs/format/Columnar.html#serialization-and-interprocess-communication-ipc
-#[async_trait]
 pub trait ArrowIpcStreamResponse {
     /// Streams the response as batches of Arrow IPC messages.
     ///
@@ -43,7 +41,6 @@ pub trait ArrowIpcStreamResponse {
     ) -> impl futures::Stream<Item = StreamBodyResult<RecordBatch>> + Send;
 }
 
-#[async_trait]
 impl ArrowIpcStreamResponse for hpx::Response {
     fn arrow_ipc_stream(
         self,

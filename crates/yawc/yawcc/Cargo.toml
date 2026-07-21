@@ -21,7 +21,7 @@ readme = "README.md"
 [workspace]
 
 [dependencies]
-chrono = { workspace = true }
+chrono = "0.4"
 clap = { workspace = true, features = ["derive"] }
 eyre = { workspace = true }
 futures = { workspace = true, features = ["std"] }

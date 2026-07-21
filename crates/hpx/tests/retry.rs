@@ -12,7 +12,7 @@ use support::server;
 
 #[tokio::test]
 async fn retries_apply_in_scope() {
-    let _ = pretty_env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let cnt = Arc::new(AtomicUsize::new(0));
     let server = server::http(move |_req| {
@@ -54,7 +54,7 @@ async fn retries_apply_in_scope() {
 
 #[tokio::test]
 async fn status_recovery_retries_payment_required_once() {
-    let _ = pretty_env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let attempts = Arc::new(AtomicUsize::new(0));
     let attempts_for_assert = attempts.clone();
@@ -112,7 +112,7 @@ async fn status_recovery_retries_payment_required_once() {
 
 #[tokio::test]
 async fn status_recovery_skips_non_replayable_bodies() {
-    let _ = pretty_env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let attempts = Arc::new(AtomicUsize::new(0));
     let attempts_for_assert = attempts.clone();
@@ -150,7 +150,7 @@ async fn status_recovery_skips_non_replayable_bodies() {
 
 #[tokio::test]
 async fn status_recovery_skips_oversized_bodies() {
-    let _ = pretty_env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let attempts = Arc::new(AtomicUsize::new(0));
     let attempts_for_assert = attempts.clone();
@@ -186,7 +186,7 @@ async fn status_recovery_skips_oversized_bodies() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn default_retries_have_a_limit() {
-    let _ = pretty_env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http_with_config(
         move |req| async move {

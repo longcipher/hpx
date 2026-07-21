@@ -22,34 +22,33 @@
    cargo add <crate> -p <crate-name> --workspace
    ```
 
-4. Root `[workspace.dependencies]` must use numeric versions only.
-5. Root `[workspace.dependencies]` must not carry features by default.
-6. Sub-crates must use `workspace = true` for `version`, `edition`, and shared dependencies.
+4. Root `[workspace.dependencies]` must not carry features by default.
+5. Sub-crates must use `workspace = true` for `version`, `edition`, and shared dependencies.
 
-## Preferred Dependencies and Versions
+## Preferred Dependencies
 
-When introducing new dependencies, prefer these versions unless compatibility requires an upgrade:
+When introducing new dependencies, prefer these crates and always use the latest stable version (via `cargo add`):
 
-- `clap = "4.6.3"`
-- `config = "0.15.19"`
-- `eyre = "0.6.12"`
-- `serde = "1.0.229"`
-- `thiserror = "2.0.19"`
-- `tokio = "1.53.1"`
-- `tracing = "0.1.44"`
-- `tracing-subscriber = "0.3.23"`
-- `tracing-opentelemetry = "0.32.1"`
-- `opentelemetry = "0.31.0"`
-- `opentelemetry-otlp = "0.31.0"`
-- `sqlx = "0.9.0"`
-- `utoipa = "5.4.0"`
-- `utoipa-swagger-ui = "9.0.2"`
-- `arc-swap = "1.9.2"`
-- `hpx = "2.5.5"`
-- `scc = "3.8.5"`
-- `winnow = "1.0.4"`
-- `shadow-rs = "1.7.0"`
-- `ecdysis = "1.1.1"`
+- `clap` — CLI argument parsing
+- `config` — configuration management
+- `eyre` — application-level error handling
+- `serde` — serialization/deserialization
+- `thiserror` — library error types
+- `tokio` — async runtime
+- `tracing` — structured logging
+- `tracing-subscriber` — log subscriber
+- `tracing-opentelemetry` — tracing ↔ OpenTelemetry bridge
+- `opentelemetry` — metrics/traces API
+- `opentelemetry-otlp` — OTLP gRPC exporter
+- `sqlx` — async SQL driver
+- `utoipa` — OpenAPI doc generation
+- `utoipa-swagger-ui` — Swagger UI
+- `arc-swap` — atomic swap for `Arc`
+- `hpx` — HTTP client (this project)
+- `scc` — concurrent map/set
+- `winnow` — parser combinators
+- `shadow-rs` — build info
+- `ecdysis` — graceful restart/reload
 
 ## Dependency Priority and Forbidden Choices
 

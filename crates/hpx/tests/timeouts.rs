@@ -2,12 +2,11 @@ mod support;
 use std::time::Duration;
 
 use hpx::Client;
-use pretty_env_logger::env_logger;
 use support::server;
 
 #[tokio::test]
 async fn client_timeout() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| {
         async {
@@ -32,7 +31,7 @@ async fn client_timeout() {
 
 #[tokio::test]
 async fn request_timeout() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| {
         async {
@@ -59,7 +58,7 @@ async fn request_timeout() {
 
 #[tokio::test]
 async fn connect_timeout() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let client = Client::builder()
         .connect_timeout(Duration::from_millis(100))
@@ -81,7 +80,7 @@ async fn connect_timeout() {
 
 #[tokio::test]
 async fn connect_many_timeout_succeeds() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async { http::Response::default() });
     let port = server.addr().port();
@@ -108,7 +107,7 @@ async fn connect_many_timeout_succeeds() {
 
 #[tokio::test]
 async fn connect_many_timeout() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let client = Client::builder()
         .resolve_to_addrs(
@@ -138,7 +137,7 @@ async fn connect_many_timeout() {
 #[cfg(feature = "stream")]
 #[tokio::test]
 async fn response_timeout() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| {
         async {
@@ -167,7 +166,7 @@ async fn response_timeout() {
 
 #[tokio::test]
 async fn read_timeout_applies_to_headers() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| {
         async {
@@ -194,7 +193,7 @@ async fn read_timeout_applies_to_headers() {
 #[cfg(feature = "stream")]
 #[tokio::test]
 async fn read_timeout_applies_to_body() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| {
         async {
@@ -224,7 +223,7 @@ async fn read_timeout_applies_to_body() {
 #[cfg(feature = "stream")]
 #[tokio::test]
 async fn read_timeout_allows_slow_response_body() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| {
         async {
@@ -262,7 +261,7 @@ async fn read_timeout_allows_slow_response_body() {
 
 #[tokio::test]
 async fn response_body_timeout_forwards_size_hint() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async { http::Response::new(b"hello".to_vec().into()) });
 

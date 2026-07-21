@@ -152,48 +152,48 @@ pub const EXTENSION_PERMUTATION_INDICES: &[ExtensionType] = &[
     ExtensionType::ENCRYPTED_CLIENT_HELLO,
 ];
 
-#[derive(TypedBuilder)]
+#[derive(Builder)]
 pub struct FirefoxTlsConfig {
     #[builder(default = SIGALGS_LIST)]
     sigalgs_list: &'static str,
 
-    #[builder(setter(into))]
+    #[builder(into)]
     cipher_list: &'static str,
 
-    #[builder(setter(into))]
+    #[builder(into)]
     curves_list: &'static str,
 
     #[builder(default = true)]
     session_ticket: bool,
 
-    #[builder(default = false, setter(into))]
+    #[builder(default = false, into)]
     enable_ech_grease: bool,
 
-    #[builder(default = false, setter(into))]
+    #[builder(default = false, into)]
     enable_signed_cert_timestamps: bool,
 
-    #[builder(default = false, setter(into))]
+    #[builder(default = false, into)]
     pre_shared_key: bool,
 
-    #[builder(default = false, setter(into))]
+    #[builder(default = false, into)]
     psk_skip_session_tickets: bool,
 
-    #[builder(default = DELEGATED_CREDENTIALS, setter(into))]
+    #[builder(default = DELEGATED_CREDENTIALS, into)]
     delegated_credentials: &'static str,
 
-    #[builder(default = RECORD_SIZE_LIMIT, setter(into))]
+    #[builder(default = RECORD_SIZE_LIMIT, into)]
     record_size_limit: u16,
 
-    #[builder(default, setter(into))]
+    #[builder(into)]
     key_shares_limit: Option<u8>,
 
-    #[builder(default = true, setter(into))]
+    #[builder(default = true, into)]
     psk_dhe_ke: bool,
 
-    #[builder(default, setter(into))]
+    #[builder(into)]
     certificate_compression_algorithms: Option<&'static [CertificateCompressionAlgorithm]>,
 
-    #[builder(default = EXTENSION_PERMUTATION_INDICES, setter(into))]
+    #[builder(default = EXTENSION_PERMUTATION_INDICES, into)]
     extension_permutation: &'static [ExtensionType],
 }
 

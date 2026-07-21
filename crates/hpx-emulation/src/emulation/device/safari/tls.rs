@@ -137,7 +137,7 @@ pub const SIGALGS_LIST_2: &str = join!(
 pub const CERT_COMPRESSION_ALGORITHM: &[CertificateCompressionAlgorithm] =
     &[CertificateCompressionAlgorithm::ZLIB];
 
-#[derive(TypedBuilder)]
+#[derive(Builder)]
 pub struct SafariTlsConfig {
     #[builder(default = TlsVersion::TLS_1_0)]
     min_tls_version: TlsVersion,
@@ -153,7 +153,6 @@ pub struct SafariTlsConfig {
 
     cipher_list: &'static str,
 
-    #[builder(default, setter(strip_option))]
     preserve_tls13_cipher_list: Option<bool>,
 }
 

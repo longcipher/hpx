@@ -219,7 +219,6 @@ fn extract_proxy_auth(url: &Url) -> Option<String> {
         return None;
     }
 
-    use base64::Engine;
     use percent_encoding::percent_decode_str;
 
     let user = percent_decode_str(user).decode_utf8_lossy().into_owned();
@@ -227,7 +226,7 @@ fn extract_proxy_auth(url: &Url) -> Option<String> {
         .decode_utf8_lossy()
         .into_owned();
     let credentials = format!("{user}:{pass}");
-    let encoded = base64::engine::general_purpose::STANDARD.encode(credentials.as_bytes());
+    let encoded = base64_simd::STANDARD.encode_to_string(credentials.as_bytes());
     Some(format!("Basic {encoded}"))
 }
 
@@ -312,9 +311,8 @@ mod tests {
         let auth = auth.unwrap();
         assert!(auth.starts_with("Basic "));
         // Verify base64 encoding
-        use base64::Engine;
-        let decoded = base64::engine::general_purpose::STANDARD
-            .decode(auth.strip_prefix("Basic ").unwrap())
+        let decoded = base64_simd::STANDARD
+            .decode_to_vec(auth.strip_prefix("Basic ").unwrap().as_bytes())
             .unwrap();
         assert_eq!(String::from_utf8(decoded).unwrap(), "admin:secret");
     }
@@ -339,9 +337,8 @@ mod tests {
         let auth = extract_proxy_auth(&url);
         assert!(auth.is_some());
         let auth = auth.unwrap();
-        use base64::Engine;
-        let decoded = base64::engine::general_purpose::STANDARD
-            .decode(auth.strip_prefix("Basic ").unwrap())
+        let decoded = base64_simd::STANDARD
+            .decode_to_vec(auth.strip_prefix("Basic ").unwrap().as_bytes())
             .unwrap();
         assert_eq!(String::from_utf8(decoded).unwrap(), "user@domain:p@ss");
     }

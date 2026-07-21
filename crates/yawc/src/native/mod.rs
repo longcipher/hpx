@@ -1349,9 +1349,8 @@ fn verify(response: &Response<Incoming>, options: Options) -> Result<Negotiation
 }
 
 fn generate_key() -> String {
-    use base64::prelude::*;
     let input: [u8; 16] = rand::random();
-    BASE64_STANDARD.encode(input)
+    base64_simd::STANDARD.encode_to_string(&input[..])
 }
 
 /// Creates a TLS connector with root certificates for secure WebSocket connections.

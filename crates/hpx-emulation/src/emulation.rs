@@ -2,12 +2,12 @@ pub(crate) mod device;
 #[cfg(feature = "emulation-rand")]
 mod rand;
 
+use bon::Builder;
 use device::{chrome::*, firefox::*, okhttp::*, opera::*, safari::*};
 #[cfg(feature = "emulation-serde")]
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "emulation-rand")]
 use strum_macros::VariantArray;
-use typed_builder::TypedBuilder;
 
 macro_rules! define_enum {
     (
@@ -387,7 +387,7 @@ impl EmulationOS {
 /// - `emulation_os`: The operating system to emulate. Defaults to `EmulationOS::default()`.
 /// - `skip_http2`: Whether to skip HTTP/2 support. Defaults to `false`.
 /// - `skip_headers`: Whether to skip adding default headers. Defaults to `false`.
-#[derive(Default, Clone, Debug, TypedBuilder)]
+#[derive(Default, Clone, Debug, Builder)]
 pub struct EmulationOption {
     /// The browser version to emulate.
     #[builder(default)]

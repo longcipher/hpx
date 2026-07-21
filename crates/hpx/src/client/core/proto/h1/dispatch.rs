@@ -631,7 +631,7 @@ mod tests {
 
     #[test]
     fn client_read_bytes_before_writing_request() {
-        let _ = pretty_env_logger::try_init();
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
         tokio_test::task::spawn(()).enter(|cx, _| {
             let (io, mut handle) = tokio_test::io::Builder::new().build_with_handle();
@@ -666,7 +666,7 @@ mod tests {
 
     #[tokio::test]
     async fn client_flushing_is_not_ready_for_next_request() {
-        let _ = pretty_env_logger::try_init();
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
         let (io, _handle) = tokio_test::io::Builder::new()
             .write(b"POST / HTTP/1.1\r\ncontent-length: 4\r\n\r\n")
@@ -697,7 +697,7 @@ mod tests {
 
     #[tokio::test]
     async fn body_empty_chunks_ignored() {
-        let _ = pretty_env_logger::try_init();
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
         let io = tokio_test::io::Builder::new()
             // no reading or writing, just be blocked for the test...

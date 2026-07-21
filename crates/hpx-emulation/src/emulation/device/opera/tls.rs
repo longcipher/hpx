@@ -48,7 +48,7 @@ pub const SIGALGS_LIST: &str = join!(
 pub const CERT_COMPRESSION_ALGORITHM: &[CertificateCompressionAlgorithm] =
     &[CertificateCompressionAlgorithm::BROTLI];
 
-#[derive(TypedBuilder)]
+#[derive(Builder)]
 pub struct OperaTlsConfig {
     #[builder(default = CURVES)]
     curves: &'static str,
@@ -59,19 +59,19 @@ pub struct OperaTlsConfig {
     #[builder(default = CIPHER_LIST)]
     cipher_list: &'static str,
 
-    #[builder(default = AlpsProtocol::HTTP2, setter(into))]
+    #[builder(default = AlpsProtocol::HTTP2, into)]
     alps_protos: AlpsProtocol,
 
     #[builder(default = false)]
     alps_use_new_codepoint: bool,
 
-    #[builder(default = false, setter(into))]
+    #[builder(default = false, into)]
     enable_ech_grease: bool,
 
-    #[builder(default = false, setter(into))]
+    #[builder(default = false, into)]
     permute_extensions: bool,
 
-    #[builder(default = false, setter(into))]
+    #[builder(default = false, into)]
     pre_shared_key: bool,
 }
 

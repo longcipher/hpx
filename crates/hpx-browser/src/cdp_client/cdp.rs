@@ -782,12 +782,11 @@ mod integration_tests {
             .map(|s| s.trim().to_string())
             .ok_or("missing sec-websocket-key")?;
 
-        use base64::prelude::*;
         use sha1::{Digest, Sha1};
         let mut sha = Sha1::new();
         sha.update(key.as_bytes());
         sha.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
-        let accept = BASE64_STANDARD.encode(sha.finalize());
+        let accept = base64_simd::STANDARD.encode_to_string(sha.finalize().as_slice());
 
         let response = format!(
             "HTTP/1.1 101 Switching Protocols\r\n\

@@ -950,7 +950,7 @@ impl Canvas2D {
 
     pub fn to_data_url(&self) -> String {
         let png_bytes = self.to_png_bytes();
-        let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png_bytes);
+        let b64 = base64_simd::STANDARD.encode_to_string(&png_bytes);
         format!("data:image/png;base64,{b64}")
     }
 

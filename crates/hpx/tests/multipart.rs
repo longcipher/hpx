@@ -1,11 +1,10 @@
 mod support;
 use http_body_util::BodyExt;
-use pretty_env_logger::env_logger;
 use support::server;
 
 #[tokio::test]
 async fn text_part() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let form = hpx::multipart::Form::new().text("foo", "bar");
 
@@ -56,7 +55,7 @@ async fn text_part() {
 async fn stream_part() {
     use futures_util::{future, stream};
 
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let stream = hpx::Body::wrap_stream(stream::once(future::ready(Ok::<_, hpx::Error>(
         "part1 part2".to_owned(),
@@ -114,7 +113,7 @@ async fn stream_part() {
 #[cfg(feature = "stream")]
 #[tokio::test]
 async fn async_impl_file_part() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     println!("Current directory: {:?}", std::env::current_dir());
 
     let form = hpx::multipart::Form::new()

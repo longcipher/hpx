@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use serde::Deserialize;
 use tokio_util::io::StreamReader;
@@ -9,7 +8,6 @@ use crate::{
 
 /// Extension trait for [`hpx::Response`] that provides streaming support for the JSON array
 /// and JSON Lines (NL/NewLines) formats.
-#[async_trait]
 pub trait JsonStreamResponse {
     /// Streams the response as a JSON array.
     ///
@@ -85,7 +83,6 @@ pub trait JsonStreamResponse {
 
 const INITIAL_CAPACITY: usize = 8 * 1024;
 
-#[async_trait]
 impl JsonStreamResponse for hpx::Response {
     fn json_nl_stream<T>(
         self,

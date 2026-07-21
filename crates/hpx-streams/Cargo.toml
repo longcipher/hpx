@@ -23,7 +23,6 @@ protobuf = ["dep:prost"]
 
 [dependencies]
 arrow = { workspace = true, optional = true, features = ["ipc", "arrow-ipc"] }
-async-trait = { workspace = true }
 bytes = { workspace = true }
 csv = { workspace = true, optional = true }
 futures = { workspace = true }

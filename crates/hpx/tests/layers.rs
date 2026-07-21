@@ -10,7 +10,6 @@ use std::{
 
 use futures_util::future::join_all;
 use hpx::{Body, Client, ClientResponseBody};
-use pretty_env_logger::env_logger;
 use support::{
     layer::{DelayLayer, SharedConcurrencyLimitLayer},
     server,
@@ -63,7 +62,7 @@ where
 
 #[tokio::test]
 async fn non_op_layer() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async { http::Response::default() });
 
@@ -82,7 +81,7 @@ async fn non_op_layer() {
 
 #[tokio::test]
 async fn layer_accepts_public_client_response_body() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async { http::Response::default() });
 
@@ -101,7 +100,7 @@ async fn layer_accepts_public_client_response_body() {
 
 #[tokio::test]
 async fn non_op_layer_with_timeout() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let client = Client::builder()
         .layer(Identity::new())
@@ -122,7 +121,7 @@ async fn non_op_layer_with_timeout() {
 
 #[tokio::test]
 async fn with_connect_timeout_layer_never_returning() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let client = Client::builder()
         .layer(TimeoutLayer::new(Duration::from_millis(100)))
@@ -142,7 +141,7 @@ async fn with_connect_timeout_layer_never_returning() {
 
 #[tokio::test]
 async fn with_connect_timeout_layer_slow() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async { http::Response::default() });
 
@@ -164,7 +163,7 @@ async fn with_connect_timeout_layer_slow() {
 
 #[tokio::test]
 async fn timeout_layer_does_not_break_follow_up_requests() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let request_count = Arc::new(AtomicUsize::new(0));
     let server_count = Arc::clone(&request_count);
@@ -200,7 +199,7 @@ async fn timeout_layer_does_not_break_follow_up_requests() {
 
 #[tokio::test]
 async fn multiple_timeout_layers_under_threshold() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async { http::Response::default() });
 
@@ -223,7 +222,7 @@ async fn multiple_timeout_layers_under_threshold() {
 
 #[tokio::test]
 async fn multiple_timeout_layers_over_threshold() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async { http::Response::default() });
 
@@ -248,7 +247,7 @@ async fn multiple_timeout_layers_over_threshold() {
 
 #[tokio::test]
 async fn layer_insert_headers() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |req| async move {
         let headers = req.headers().clone();
@@ -279,7 +278,7 @@ async fn layer_insert_headers() {
 
 #[tokio::test]
 async fn with_concurrency_limit_layer_timeout() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async { http::Response::default() });
 
@@ -315,7 +314,7 @@ async fn with_concurrency_limit_layer_timeout() {
 
 #[tokio::test]
 async fn with_concurrency_limit_layer_success() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async { http::Response::default() });
 
@@ -354,7 +353,7 @@ async fn with_concurrency_limit_layer_success() {
 
 #[tokio::test]
 async fn no_generic_bounds_required_for_client_new() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async { http::Response::default() });
 

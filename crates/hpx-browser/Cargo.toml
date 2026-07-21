@@ -26,11 +26,10 @@ workers = ["v8"]
 
 [dependencies]
 async-trait = { workspace = true }
-base64 = { workspace = true }
+base64-simd = { workspace = true }
 blitz-dom = { workspace = true, features = ["floats"] }
 blitz-html = { workspace = true }
 blitz-traits = { workspace = true }
-chrono = { workspace = true }
 deno_core = { workspace = true, optional = true }
 fontdb = { workspace = true, optional = true }
 futures-util = { workspace = true }
@@ -42,6 +41,7 @@ hyper-util = { workspace = true, features = [
     "server-auto",
 ], optional = true }
 image = { workspace = true, optional = true }
+jiff = { workspace = true }
 parking_lot.workspace = true
 parley = { workspace = true }
 png = { workspace = true, optional = true }

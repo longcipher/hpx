@@ -1,7 +1,6 @@
 #![allow(unused)]
 use std::{fmt, fmt::Write};
 
-use base64::prelude::*;
 use bytes::Bytes;
 
 use crate::header::{Entry, HeaderMap, HeaderValue, OccupiedEntry};
@@ -19,7 +18,7 @@ where
             let _ = write!(buf_str, "{password}");
         }
 
-        let encoded = BASE64_STANDARD.encode(buf_str.as_bytes());
+        let encoded = base64_simd::STANDARD.encode_to_string(buf_str.as_bytes());
         buf.extend(encoded.into_bytes());
         buf
     };

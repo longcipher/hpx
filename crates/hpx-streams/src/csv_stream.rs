@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use serde::Deserialize;
 use tokio_util::io::StreamReader;
@@ -6,7 +5,6 @@ use tokio_util::io::StreamReader;
 use crate::{StreamBodyError, StreamBodyResult, error::StreamBodyKind};
 
 /// Extension trait for [`hpx::Response`] that provides streaming support for the CSV format.
-#[async_trait]
 pub trait CsvStreamResponse {
     /// Streams the response as CSV, where each line is a CSV row.
     ///
@@ -54,7 +52,6 @@ pub trait CsvStreamResponse {
         T: for<'de> Deserialize<'de>;
 }
 
-#[async_trait]
 impl CsvStreamResponse for hpx::Response {
     fn csv_stream<T>(
         self,

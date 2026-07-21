@@ -8,6 +8,7 @@ pub mod okhttp;
 pub mod opera;
 pub mod safari;
 
+pub use bon::Builder;
 pub use chrome::tls::tls_fingerprint_from_preset;
 #[cfg(feature = "emulation-compression")]
 pub use hpx::header::ACCEPT_ENCODING;
@@ -23,6 +24,5 @@ pub use hpx::{
         TlsVersion,
     },
 };
-pub use typed_builder::TypedBuilder;
 
 pub use crate::emulation::{EmulationOS, EmulationOption};

@@ -13,7 +13,6 @@ use http::{
     },
 };
 use http_body_util::{BodyExt, Full};
-use pretty_env_logger::env_logger;
 use support::server;
 use tokio::io::AsyncWriteExt;
 
@@ -378,7 +377,7 @@ async fn user_agent() {
 
 #[tokio::test]
 async fn response_text() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async { http::Response::new("Hello".into()) });
 
@@ -396,7 +395,7 @@ async fn response_text() {
 
 #[tokio::test]
 async fn response_bytes() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async { http::Response::new("Hello".into()) });
 
@@ -415,7 +414,7 @@ async fn response_bytes() {
 #[tokio::test]
 #[cfg(feature = "json")]
 async fn response_json() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |_req| async { http::Response::new("\"Hello\"".into()) });
 
@@ -432,7 +431,7 @@ async fn response_json() {
 
 #[tokio::test]
 async fn body_pipe_response() {
-    let _ = env_logger::try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
     let server = server::http(move |req| async move {
         if req.uri() == "/get" {
@@ -479,7 +478,7 @@ async fn body_pipe_response() {
 
 #[tokio::test]
 async fn overridden_dns_resolution_with_gai() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     let server = server::http(move |_req| async { http::Response::new("Hello".into()) });
 
     let overridden_domain = "rust-lang.org";
@@ -502,7 +501,7 @@ async fn overridden_dns_resolution_with_gai() {
 
 #[tokio::test]
 async fn overridden_dns_resolution_with_gai_multiple() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     let server = server::http(move |_req| async { http::Response::new("Hello".into()) });
 
     let overridden_domain = "rust-lang.org";
@@ -537,7 +536,7 @@ async fn overridden_dns_resolution_with_gai_multiple() {
 #[cfg(feature = "hickory-dns")]
 #[tokio::test]
 async fn overridden_dns_resolution_with_hickory_dns() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     let server = server::http(move |_req| async { http::Response::new("Hello".into()) });
 
     let overridden_domain = "rust-lang.org";
@@ -561,7 +560,7 @@ async fn overridden_dns_resolution_with_hickory_dns() {
 #[cfg(feature = "hickory-dns")]
 #[tokio::test]
 async fn overridden_dns_resolution_with_hickory_dns_multiple() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     let server = server::http(move |_req| async { http::Response::new("Hello".into()) });
 
     let overridden_domain = "rust-lang.org";

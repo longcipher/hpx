@@ -673,7 +673,7 @@ fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
 #[cfg(test)]
 mod test {
-    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use base64_simd::STANDARD;
 
     use super::Identity;
 
@@ -715,7 +715,9 @@ mod test {
 
     #[test]
     fn identity_from_pkcs12_der_bundle() {
-        let pkcs12 = STANDARD.decode(CLIENT_PKCS12_DER_B64.trim()).unwrap();
+        let pkcs12 = STANDARD
+            .decode_to_vec(CLIENT_PKCS12_DER_B64.trim().as_bytes())
+            .unwrap();
 
         Identity::from_pkcs12_der(&pkcs12, "changeit").unwrap();
     }
