@@ -3,8 +3,7 @@
 //! `HeaderComposer` builds HTTP header maps with proper deduplication:
 //! custom headers take priority over fingerprint defaults.
 
-use std::collections::HashSet;
-
+use ahash::AHashSet;
 use hpx::header::{HeaderMap, HeaderName, HeaderValue};
 
 /// Composes HTTP headers with priority-based deduplication.
@@ -69,9 +68,10 @@ impl HeaderComposer {
     /// Composes the final `HeaderMap` with deduplication.
     ///
     /// Returns an error if any header name or value is invalid.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn compose(self) -> Result<HeaderMap, ComposeError> {
         let mut headers = HeaderMap::new();
-        let mut seen: HashSet<String> = HashSet::new();
+        let mut seen: AHashSet<String> = AHashSet::new();
 
         // Custom headers first (higher priority)
         for (name, value) in self

@@ -1,5 +1,4 @@
-use std::collections::HashSet;
-
+use ahash::AHashSet;
 use blitz_dom::{
     Attribute as BlitzAttribute, BaseDocument, DocumentConfig, ElementData as BlitzElementData,
     Node as BlitzNode, NodeData as BlitzNodeData, QualName as H5QualName, ns,
@@ -193,6 +192,7 @@ impl Dom {
         &mut self.inner
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn get(&self, id: NodeId) -> Option<Node> {
         let blitz_node = self.inner.get_node(id.0)?;
         Some(self.convert_node(blitz_node))
@@ -343,15 +343,17 @@ impl Dom {
             .collect()
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn text_content(&self, id: NodeId) -> String {
         let mut result = String::new();
         self.collect_text(id, &mut result);
         result
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn collect_text(&self, root: NodeId, result: &mut String) {
         let mut stack: Vec<NodeId> = vec![root];
-        let mut visited: HashSet<NodeId> = HashSet::with_capacity(64);
+        let mut visited: AHashSet<NodeId> = AHashSet::with_capacity(64);
         let mut steps: usize = 0;
         while let Some(id) = stack.pop() {
             if !visited.insert(id) {
@@ -450,6 +452,7 @@ impl Dom {
         out
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn serialize_node(&self, root: NodeId, out: &mut String) {
         enum SerWork {
             Open(NodeId),
@@ -461,7 +464,7 @@ impl Dom {
         ];
 
         let mut stack: Vec<SerWork> = vec![SerWork::Open(root)];
-        let mut visited: HashSet<NodeId> = HashSet::with_capacity(64);
+        let mut visited: AHashSet<NodeId> = AHashSet::with_capacity(64);
         let mut steps: usize = 0;
         while let Some(work) = stack.pop() {
             match work {
@@ -562,7 +565,7 @@ impl Dom {
         };
 
         let mut queue: Vec<(NodeId, NodeId)> = Vec::new();
-        let mut visited: HashSet<NodeId> = HashSet::with_capacity(64);
+        let mut visited: AHashSet<NodeId> = AHashSet::with_capacity(64);
         visited.insert(source_root);
 
         let mut child = source.get(source_root).and_then(|n| n.first_child);
@@ -622,7 +625,7 @@ impl Dom {
         }
         stack.extend(seed.into_iter().rev());
 
-        let mut visited: HashSet<NodeId> = HashSet::with_capacity(64);
+        let mut visited: AHashSet<NodeId> = AHashSet::with_capacity(64);
         let mut steps: usize = 0;
         while let Some(id) = stack.pop() {
             if !visited.insert(id) {
@@ -665,7 +668,7 @@ impl Dom {
         }
         stack.extend(seed.into_iter().rev());
 
-        let mut visited: HashSet<NodeId> = HashSet::with_capacity(64);
+        let mut visited: AHashSet<NodeId> = AHashSet::with_capacity(64);
         let mut steps: usize = 0;
         while let Some(id) = stack.pop() {
             if !visited.insert(id) {
@@ -692,6 +695,7 @@ impl Dom {
         }
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn convert_node(&self, blitz_node: &BlitzNode) -> Node {
         let id = NodeId(blitz_node.id);
         let parent = blitz_node.parent.map(NodeId);

@@ -3,8 +3,7 @@
 //! Captures CDP Network domain events and builds a HAR 1.2 archive.
 //! Uses manual ISO 8601 timestamps to avoid the chrono dependency.
 
-use std::collections::HashMap;
-
+use ahash::AHashMap;
 use serde::Serialize;
 use tokio::sync::broadcast;
 
@@ -191,14 +190,14 @@ struct PendingRequest {
 /// Mutable capture state guarded by a single async task.
 #[derive(Debug)]
 struct CaptureState {
-    pending: HashMap<String, PendingRequest>,
+    pending: AHashMap<String, PendingRequest>,
     entries: Vec<HarEntry>,
 }
 
 impl CaptureState {
     fn new() -> Self {
         Self {
-            pending: HashMap::new(),
+            pending: AHashMap::new(),
             entries: Vec::new(),
         }
     }

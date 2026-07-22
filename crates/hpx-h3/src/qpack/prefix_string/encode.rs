@@ -45,13 +45,11 @@ impl HuffmanEncoder {
 
         let forward =
             end_range.byte as usize - self.buffer.len() + if end_range.bit > 0 { 1 } else { 0 };
-        for _ in 0..forward {
-            // push filler value that will end huffman decoding if not
-            // modified
-            self.buffer.push(255);
-        }
+        // push filler value that will end huffman decoding if not modified
+        self.buffer.resize(self.buffer.len() + forward, 255);
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn put(&mut self, code: u8) -> Result<(), Error> {
         let encode_value = &HPACK_STRING[code as usize];
 

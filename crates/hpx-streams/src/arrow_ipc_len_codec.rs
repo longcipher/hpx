@@ -24,6 +24,7 @@ impl tokio_util::codec::Decoder for ArrowIpcCodec {
     type Item = RecordBatch;
     type Error = StreamBodyError;
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<RecordBatch>, StreamBodyError> {
         let buf_len = buf.len();
         if buf_len == 0 {

@@ -85,6 +85,7 @@ impl BrowserEventLoop {
     /// Each tick fires pending rAF callbacks then runs deno_core's event loop
     /// with a 100ms slice. Returns `AllWorkDone` when deno_core reports no
     /// more pending work, or `Timeout` if the deadline is reached.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub async fn run_until_idle(
         &mut self,
         timeout: Duration,

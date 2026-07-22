@@ -81,6 +81,7 @@ pub struct Decoder {
 impl Decoder {
     // Decode field lines received on Request of Push stream.
     // https://www.rfc-editor.org/rfc/rfc9204.html#name-field-line-representations
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn decode_header<T: Buf>(&self, buf: &mut T) -> Result<Decoded, DecoderError> {
         let (required_ref, base) = HeaderPrefix::decode(buf)?
             .get(self.table.total_inserted(), self.table.max_mem_size())?;
@@ -92,7 +93,7 @@ impl Decoder {
         let decoder_table = self.table.decoder(base);
 
         let mut mem_size = 0;
-        let mut fields = Vec::new();
+        let mut fields = Vec::with_capacity(8);
         while buf.has_remaining() {
             let field = Self::parse_header_field(&decoder_table, buf)?;
             mem_size += field.mem_size() as u64;
@@ -134,6 +135,7 @@ impl Decoder {
         Ok(self.table.total_inserted())
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn parse_instruction<R: Buf>(&self, read: &mut R) -> Result<Option<Instruction>, DecoderError> {
         if read.remaining() < 1 {
             return Ok(None);
@@ -173,6 +175,7 @@ impl Decoder {
         Ok(instruction)
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn parse_header_field<R: Buf>(
         table: &DynamicTableDecoder<'_>,
         buf: &mut R,
@@ -211,6 +214,7 @@ impl Decoder {
 
 // Decode field lines received on Request or Push stream.
 // https://www.rfc-editor.org/rfc/rfc9204.html#name-field-line-representations
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn decode_stateless<T: Buf>(buf: &mut T, max_size: u64) -> Result<Decoded, DecoderError> {
     let (required_ref, _base) = HeaderPrefix::decode(buf)?.get(0, 0)?;
 
@@ -219,7 +223,7 @@ pub fn decode_stateless<T: Buf>(buf: &mut T, max_size: u64) -> Result<Decoded, D
     }
 
     let mut mem_size = 0;
-    let mut fields = Vec::new();
+    let mut fields = Vec::with_capacity(8);
     while buf.has_remaining() {
         let field = match HeaderBlockField::decode(buf.chunk()[0]) {
             HeaderBlockField::IndexedWithPostBase => return Err(DecoderError::MissingRefs(0)),

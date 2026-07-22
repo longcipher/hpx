@@ -18,18 +18,23 @@ rustdoc-args = ["--cfg", "docsrs"]
 arrow = ["dep:arrow"]
 csv = ["dep:csv", "dep:serde"]
 default = []
+hotpath = ["dep:hotpath"]
 json = ["dep:serde", "dep:serde_json", "hpx/json"]
 protobuf = ["dep:prost"]
+# Enable SIMD-accelerated JSON parsing (requires json feature).
+simd-json = ["json", "dep:simd-json"]
 
 [dependencies]
 arrow = { workspace = true, optional = true, features = ["ipc", "arrow-ipc"] }
 bytes = { workspace = true }
 csv = { workspace = true, optional = true }
 futures = { workspace = true }
+hotpath = { workspace = true, optional = true }
 hpx = { workspace = true, features = ["stream"] }
 prost = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
+simd-json = { workspace = true, optional = true }
 tokio-util = { workspace = true, features = ["io", "codec"] }
 
 [lints]

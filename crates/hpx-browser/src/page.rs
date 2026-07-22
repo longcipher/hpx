@@ -8,7 +8,7 @@ use std::{
 #[cfg(feature = "v8")]
 use crate::js_runtime::runtime::BrowserJsRuntime;
 use crate::{
-    challenge::{ChallengeVerdict, EngineClass, engine_classify},
+    challenge::{ChallengeVerdict, EngineClass, engine_classify, engine_classify_lower},
     dom::Dom,
     host::EngineHandle,
     net::{HttpClient, RedirectPolicy},
@@ -116,12 +116,16 @@ impl Page {
     }
 
     /// Reload the page with new HTML (reuses V8 isolate in v8 mode).
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn reload_html(&mut self, html: &str, url: &str) {
+        // Lowercase once and share between title extraction and challenge
+        // classification; both only need case-insensitive matching on the body.
+        let lowered_html = html.to_lowercase();
         self.dom = crate::html_parser::parse_html(html);
         self.url = url.to_string();
         self.html = html.to_string();
-        self.title = extract_title(html);
-        self.challenge_class = engine_classify(html);
+        self.title = extract_title_lower(&lowered_html, html);
+        self.challenge_class = engine_classify_lower(&lowered_html);
         #[cfg(feature = "v8")]
         {
             if self.js_runtime.is_some() {
@@ -597,8 +601,17 @@ async fn cookie_snapshot(client: &HttpClient, url: &str) -> String {
 /// Extract <title> from HTML (cheap string scan, no full parse).
 fn extract_title(html: &str) -> String {
     let lower = html.to_lowercase();
-    if let Some(start) = lower.find("<title") {
-        let after_tag = &html[start..];
+    extract_title_lower(&lower, html)
+}
+
+/// Extract <title> from HTML using a pre-lowercased body.
+///
+/// `lowered_html` is used only to locate the `<title` start tag and the
+/// `</title>` end marker (case-insensitive matches); `original_html` is
+/// indexed to preserve the title's original casing.
+fn extract_title_lower(lowered_html: &str, original_html: &str) -> String {
+    if let Some(start) = lowered_html.find("<title") {
+        let after_tag = &original_html[start..];
         if let Some(gt) = after_tag.find('>') {
             let content = &after_tag[gt + 1..];
             if let Some(end) = content.to_lowercase().find("</title>") {

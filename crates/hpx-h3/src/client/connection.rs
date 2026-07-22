@@ -184,7 +184,7 @@ where
         //# ([COOKIES]) MAY be split into separate field lines, each with one or
         //# more cookie-pairs, before compression.
 
-        let mut block = BytesMut::new();
+        let mut block = BytesMut::with_capacity(256);
         let mem_size = qpack::encode_stateless(&mut block, headers).map_err(|_e| {
             self.handle_connection_error_on_stream(InternalConnectionError {
                 code: Code::H3_INTERNAL_ERROR,

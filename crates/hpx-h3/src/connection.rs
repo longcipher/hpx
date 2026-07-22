@@ -1050,7 +1050,7 @@ where
         //= type=TODO
         //# Characters in field names MUST be
         //# converted to lowercase prior to their encoding.
-        let mut block = BytesMut::new();
+        let mut block = BytesMut::with_capacity(256);
 
         let mem_size =
             qpack::encode_stateless(&mut block, Header::trailer(trailers)).map_err(|_e| {

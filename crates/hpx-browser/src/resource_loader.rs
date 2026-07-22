@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use ahash::AHashSet;
+
 use crate::dom::{Dom, NodeId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -84,11 +86,12 @@ fn extract_from_element(dom: &Dom, id: NodeId) -> Option<ResourceUrl> {
 }
 
 /// Extract all resource URLs from the DOM.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn extract_resource_urls(dom: &Dom) -> Vec<ResourceUrl> {
     let mut results = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen = AHashSet::new();
     let mut stack = vec![NodeId::DOCUMENT];
-    let mut visited = HashSet::new();
+    let mut visited = AHashSet::new();
 
     while let Some(id) = stack.pop() {
         if !visited.insert(id) {

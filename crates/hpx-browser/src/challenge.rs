@@ -159,34 +159,51 @@ fn verdict_for(tag: &str, len: usize) -> ChallengeVerdict {
 
 // ── Public API ──────────────────────────────────────────────────────────
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn engine_classify(body: &str) -> EngineClass {
     let lower = body.to_lowercase();
-    let len = body.len();
+    engine_classify_impl(&lower)
+}
+
+/// Classify a challenge engine from an already-lowercased body.
+///
+/// This skips the full-body `to_lowercase` allocation, which is useful when the
+/// caller has already lowercased the body (e.g. `Page::reload_html` shares one
+/// lowered copy between title extraction and challenge classification). All
+/// internal matching is case-insensitive and operates on the lowered input.
+pub fn engine_classify_lower(lowered_body: &str) -> EngineClass {
+    engine_classify_impl(lowered_body)
+}
+
+fn engine_classify_impl(lowered_body: &str) -> EngineClass {
+    let len = lowered_body.len();
 
     let tag: &'static str = 'tag: {
         for (n, t) in UNAMBIGUOUS {
-            if lower.contains(n) {
+            if lowered_body.contains(n) {
                 break 'tag t;
             }
         }
-        if AWSWAF_MARKERS.iter().any(|n| lower.contains(n))
-            && AWSWAF_ACTIVE_LOADER.iter().any(|n| lower.contains(n))
+        if AWSWAF_MARKERS.iter().any(|n| lowered_body.contains(n))
+            && AWSWAF_ACTIVE_LOADER
+                .iter()
+                .any(|n| lowered_body.contains(n))
         {
             break 'tag "AWS-WAF-CHL";
         }
         if len < INTERSTITIAL_MAX_BYTES {
             for (n, t) in PHRASE {
-                if lower.contains(n) {
+                if lowered_body.contains(n) {
                     break 'tag t;
                 }
             }
             for (n, t) in SMALL_BODY {
-                if lower.contains(n) && small_body_row_qualifies(n, &lower) {
+                if lowered_body.contains(n) && small_body_row_qualifies(n, lowered_body) {
                     break 'tag t;
                 }
             }
         }
-        if len < BLOCKED_WORD_MAX_BYTES && lower.contains("blocked") {
+        if len < BLOCKED_WORD_MAX_BYTES && lowered_body.contains("blocked") {
             break 'tag "BLOCKED";
         }
         if len < THIN_BODY_MAX_BYTES {

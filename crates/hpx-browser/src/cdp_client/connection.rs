@@ -82,6 +82,7 @@ where
         self.cdp.fail_all_pending("WebSocket connection terminated");
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn handle_text_frame(&self, text: &str) {
         match serde_json::from_str::<Value>(text) {
             Ok(json) => {

@@ -54,6 +54,7 @@ where
     type Item = T;
     type Error = StreamBodyError;
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<T>, StreamBodyError> {
         if buf.is_empty() {
             return Ok(None);
@@ -93,13 +94,7 @@ where
                     if let Some(prim_start) = self.json_cursor.current_primitive_start.take() {
                         let obj_slice = trim_ascii(&buf[prim_start..abs_pos]);
                         if !obj_slice.is_empty() {
-                            let result = serde_json::from_slice(obj_slice).map_err(|err| {
-                                StreamBodyError::new(
-                                    StreamBodyKind::CodecError,
-                                    Some(Box::new(err)),
-                                    None,
-                                )
-                            });
+                            let result = parse_json_slice(obj_slice);
                             buf.advance(abs_pos + 1);
                             self.json_cursor.current_offset = 0;
                             self.json_cursor.delimiter_expected = false;
@@ -114,13 +109,7 @@ where
                         // Closed a nested array/object item
                         self.json_cursor.delimiter_expected = true;
                         let obj_slice = &buf[self.json_cursor.current_obj_pos..=abs_pos];
-                        let result = serde_json::from_slice(obj_slice).map_err(|err| {
-                            StreamBodyError::new(
-                                StreamBodyKind::CodecError,
-                                Some(Box::new(err)),
-                                None,
-                            )
-                        });
+                        let result = parse_json_slice(obj_slice);
                         self.json_cursor.current_obj_pos = 0;
                         buf.advance(abs_pos + 1);
                         self.json_cursor.current_offset = 0;
@@ -134,13 +123,7 @@ where
                         if let Some(prim_start) = self.json_cursor.current_primitive_start.take() {
                             self.json_cursor.delimiter_expected = true;
                             let obj_slice = &buf[prim_start..=abs_pos];
-                            let result = serde_json::from_slice(obj_slice).map_err(|err| {
-                                StreamBodyError::new(
-                                    StreamBodyKind::CodecError,
-                                    Some(Box::new(err)),
-                                    None,
-                                )
-                            });
+                            let result = parse_json_slice(obj_slice);
                             buf.advance(abs_pos + 1);
                             self.json_cursor.current_offset = 0;
                             return result;
@@ -174,13 +157,7 @@ where
                     if self.json_cursor.opened_brackets == 0 {
                         self.json_cursor.delimiter_expected = true;
                         let obj_slice = &buf[self.json_cursor.current_obj_pos..=abs_pos];
-                        let result = serde_json::from_slice(obj_slice).map_err(|err| {
-                            StreamBodyError::new(
-                                StreamBodyKind::CodecError,
-                                Some(Box::new(err)),
-                                None,
-                            )
-                        });
+                        let result = parse_json_slice(obj_slice);
                         self.json_cursor.current_obj_pos = 0;
                         buf.advance(abs_pos + 1);
                         self.json_cursor.current_offset = 0;
@@ -191,13 +168,7 @@ where
                     if let Some(prim_start) = self.json_cursor.current_primitive_start.take() {
                         let obj_slice = trim_ascii(&buf[prim_start..abs_pos]);
                         if !obj_slice.is_empty() {
-                            let result = serde_json::from_slice(obj_slice).map_err(|err| {
-                                StreamBodyError::new(
-                                    StreamBodyKind::CodecError,
-                                    Some(Box::new(err)),
-                                    None,
-                                )
-                            });
+                            let result = parse_json_slice(obj_slice);
                             buf.advance(abs_pos + 1);
                             self.json_cursor.current_offset = 0;
                             self.json_cursor.delimiter_expected = false;
@@ -233,6 +204,7 @@ where
         Ok(None)
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn decode_eof(&mut self, buf: &mut BytesMut) -> Result<Option<T>, StreamBodyError> {
         // Try normal decode first (handles ]-terminated values)
         if let Some(item) = self.decode(buf)? {
@@ -242,9 +214,7 @@ where
         if let Some(prim_start) = self.json_cursor.current_primitive_start.take() {
             let obj_slice = trim_ascii(&buf[prim_start..buf.len()]);
             if !obj_slice.is_empty() {
-                let result = serde_json::from_slice(obj_slice).map_err(|err| {
-                    StreamBodyError::new(StreamBodyKind::CodecError, Some(Box::new(err)), None)
-                })?;
+                let result = parse_json_slice(obj_slice)?;
                 buf.clear();
                 return Ok(Some(result));
             }
@@ -340,6 +310,32 @@ mod tests {
     }
 }
 
+/// Deserialize a JSON value from a byte slice.
+///
+/// Uses SIMD-accelerated parsing when the `simd-json` feature is enabled, falling back to
+/// `serde_json` otherwise. The deserialized type is inferred from the call site.
+#[cfg(not(feature = "simd-json"))]
+fn parse_json_slice<T>(obj_slice: &[u8]) -> Result<T, StreamBodyError>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    serde_json::from_slice(obj_slice)
+        .map_err(|err| StreamBodyError::new(StreamBodyKind::CodecError, Some(Box::new(err)), None))
+}
+
+/// Deserialize a JSON value from a byte slice using SIMD-accelerated parsing.
+#[cfg(feature = "simd-json")]
+fn parse_json_slice<T>(obj_slice: &[u8]) -> Result<T, StreamBodyError>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    // simd-json requires a mutable buffer; copy the borrowed slice into an owned Vec.
+    let mut bytes = obj_slice.to_vec();
+    simd_json::from_slice(&mut bytes)
+        .map_err(|err| StreamBodyError::new(StreamBodyKind::CodecError, Some(Box::new(err)), None))
+}
+
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn trim_ascii(bytes: &[u8]) -> &[u8] {
     let start = bytes
         .iter()

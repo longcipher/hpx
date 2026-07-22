@@ -181,6 +181,7 @@ impl CdpClient {
             .await
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     async fn send_command_internal(
         &self,
         method: &str,
@@ -306,6 +307,7 @@ impl CdpClient {
     }
 
     /// Dispatch an incoming message (called by the WebSocket reader).
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn dispatch_message(&self, msg: CdpMessage) {
         let sender = if let Some(id) = msg.id {
             let mut pending = self.pending_responses.lock();

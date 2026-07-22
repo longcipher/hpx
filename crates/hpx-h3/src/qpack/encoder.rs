@@ -50,6 +50,7 @@ pub struct Encoder {
 }
 
 impl Encoder {
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn encode<W, T, H>(
         &mut self,
         stream_id: u64,
@@ -108,6 +109,7 @@ impl Encoder {
         Ok(())
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn encode_field<W: BufMut>(
         table: &mut DynamicTableEncoder<'_>,
         block: &mut Vec<u8>,
@@ -189,6 +191,7 @@ impl Default for Encoder {
     }
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn encode_stateless<W, T, H>(block: &mut W, fields: T) -> Result<u64, EncoderError>
 where
     W: BufMut,

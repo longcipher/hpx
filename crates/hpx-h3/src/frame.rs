@@ -57,6 +57,7 @@ where
     /// Polls the stream for the next frame header
     ///
     /// When a frame header is received use `poll_data` to retrieve the frame's data.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn poll_next(
         &mut self,
         cx: &mut Context<'_>,
@@ -215,6 +216,7 @@ pub struct FrameDecoder {
 }
 
 impl FrameDecoder {
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn decode<B: Buf>(
         &mut self,
         src: &mut BufList<B>,

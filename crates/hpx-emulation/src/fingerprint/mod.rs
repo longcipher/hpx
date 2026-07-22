@@ -265,6 +265,7 @@ impl Default for TlsFingerprint {
 
 impl TlsFingerprint {
     /// Converts the curves list to a colon-separated string for BoringSSL/OpenSSL.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn curves_string(&self) -> String {
         self.curves
             .iter()
@@ -274,6 +275,7 @@ impl TlsFingerprint {
     }
 
     /// Converts the cipher suites to a colon-separated string.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn cipher_suites_string(&self) -> String {
         self.cipher_suites
             .iter()
@@ -283,6 +285,7 @@ impl TlsFingerprint {
     }
 
     /// Converts the signature algorithms to a colon-separated string.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn signature_algorithms_string(&self) -> String {
         self.signature_algorithms
             .iter()

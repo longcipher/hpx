@@ -23,8 +23,10 @@ cdp-client = ["dep:which"]
 proptest = ["dep:proptest"]
 v8 = ["dep:deno_core"]
 workers = ["v8"]
+hotpath = ["dep:hotpath"]
 
 [dependencies]
+ahash = { workspace = true }
 async-trait = { workspace = true }
 base64-simd = { workspace = true }
 blitz-dom = { workspace = true, features = ["floats"] }
@@ -33,6 +35,7 @@ blitz-traits = { workspace = true }
 deno_core = { workspace = true, optional = true }
 fontdb = { workspace = true, optional = true }
 futures-util = { workspace = true }
+hotpath = { workspace = true, optional = true }
 hpx = { workspace = true }
 hpx-yawc = { workspace = true, optional = true }
 hyper = { workspace = true, features = ["server", "http1"], optional = true }

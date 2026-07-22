@@ -94,6 +94,7 @@ impl JsonStreamResponse for hpx::Response {
         self.json_nl_stream_with_capacity(max_obj_len, INITIAL_CAPACITY)
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn json_nl_stream_with_capacity<T>(
         self,
         max_obj_len: usize,
@@ -111,9 +112,7 @@ impl JsonStreamResponse for hpx::Response {
         frames_reader
             .into_stream()
             .map(|frame_res| match frame_res {
-                Ok(frame_str) => serde_json::from_str(frame_str.as_str()).map_err(|err| {
-                    StreamBodyError::new(StreamBodyKind::CodecError, Some(Box::new(err)), None)
-                }),
+                Ok(frame_str) => parse_json_line(frame_str.as_str()),
                 Err(err) => Err(StreamBodyError::new(
                     StreamBodyKind::CodecError,
                     Some(Box::new(err)),
@@ -148,6 +147,31 @@ impl JsonStreamResponse for hpx::Response {
 
         frames_reader.into_stream()
     }
+}
+
+/// Deserialize a JSON value from a line of text.
+///
+/// Uses SIMD-accelerated parsing when the `simd-json` feature is enabled, falling back to
+/// `serde_json` otherwise.
+#[cfg(not(feature = "simd-json"))]
+fn parse_json_line<T>(s: &str) -> Result<T, StreamBodyError>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    serde_json::from_str(s)
+        .map_err(|err| StreamBodyError::new(StreamBodyKind::CodecError, Some(Box::new(err)), None))
+}
+
+/// Deserialize a JSON value from a line of text using SIMD-accelerated parsing.
+#[cfg(feature = "simd-json")]
+fn parse_json_line<T>(s: &str) -> Result<T, StreamBodyError>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    // simd-json requires a mutable buffer; copy the line's bytes into an owned Vec.
+    let mut bytes = s.as_bytes().to_vec();
+    simd_json::from_slice(&mut bytes)
+        .map_err(|err| StreamBodyError::new(StreamBodyKind::CodecError, Some(Box::new(err)), None))
 }
 
 #[cfg(test)]

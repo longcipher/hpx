@@ -54,6 +54,7 @@ impl HuffmanDecoder {
         }
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn decode_next(&self, bit_pos: &mut BitWindow, input: &[u8]) -> Result<Option<u8>, Error> {
         bit_pos.forwards(self.lookup);
 

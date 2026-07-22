@@ -3,6 +3,7 @@ use blitz_html::HtmlDocument;
 
 use crate::dom::Dom;
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn parse_html(html: &str) -> Dom {
     let mut config = DocumentConfig::default();
     config.style_threading = StyleThreading::Sequential;

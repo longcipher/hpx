@@ -22,11 +22,14 @@ i-implement-a-third-party-backend-and-opt-into-breaking-changes = []
 tracing = ["dep:tracing"]
 # Enable Quinn QUIC transport backend (merged from hpx-h3-quinn).
 quinn = ["dep:quinn", "dep:tokio-util"]
+# Enable hotpath profiling instrumentation.
+hotpath = ["dep:hotpath"]
 
 [dependencies]
 bytes = { workspace = true }
 fastrand = { workspace = true }
 futures-util = { workspace = true, features = ["io"] }
+hotpath = { workspace = true, optional = true }
 http = { workspace = true }
 pin-project-lite = { workspace = true }
 quinn = { workspace = true, features = ["futures-io"], optional = true }

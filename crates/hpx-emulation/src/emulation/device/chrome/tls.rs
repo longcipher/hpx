@@ -78,6 +78,7 @@ const CHROME_SIGALGS: &[SigAlg] = &[
 ];
 
 /// Builds a structured `FpTls` from a `TlsPreset`.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn tls_fingerprint_from_preset(preset: TlsPreset) -> FpTls {
     match preset {
         TlsPreset::ChromeBase => FpTls {

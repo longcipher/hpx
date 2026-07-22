@@ -53,6 +53,7 @@ pub trait CsvStreamResponse {
 }
 
 impl CsvStreamResponse for hpx::Response {
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn csv_stream<T>(
         self,
         max_obj_len: usize,

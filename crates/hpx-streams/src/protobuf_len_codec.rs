@@ -35,6 +35,7 @@ where
     type Item = T;
     type Error = StreamBodyError;
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<T>, StreamBodyError> {
         let buf_len = buf.len();
         if buf_len == 0 {
@@ -85,6 +86,7 @@ where
 /// The caller must ensure that `bytes` is non-empty and either `bytes.len() >= 10` or the last
 /// element in bytes is < `0x80`.
 #[inline]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn decode_varint_slice(bytes: &[u8]) -> Result<(u64, usize), StreamBodyError> {
     assert!(!bytes.is_empty());
     assert!(bytes.len() > 10 || bytes[bytes.len() - 1] < 0x80);

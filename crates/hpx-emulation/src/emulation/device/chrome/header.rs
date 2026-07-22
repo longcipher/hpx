@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn header_initializer(
     sec_ch_ua: &'static str,
     ua: &'static str,
@@ -18,6 +19,7 @@ pub fn header_initializer(
     headers
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn header_initializer_with_zstd(
     sec_ch_ua: &'static str,
     ua: &'static str,
@@ -36,6 +38,7 @@ pub fn header_initializer_with_zstd(
     headers
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn header_initializer_with_zstd_priority(
     sec_ch_ua: &'static str,
     ua: &'static str,
