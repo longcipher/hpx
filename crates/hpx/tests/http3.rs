@@ -3630,7 +3630,7 @@ async fn http3_extended_connect_websocket() -> TestResult<()> {
     let req = http::Request::builder()
         .method(http::Method::CONNECT)
         .uri(format!("https://127.0.0.1:{}/", server_addr.port()))
-        .extension(hpx_h3::ext::Protocol::WEB_SOCKET)
+        .extension(hpx_h3::ext::Protocol::WEBSOCKET)
         .body(())
         .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
             format!("failed to build request: {e}").into()
