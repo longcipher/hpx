@@ -581,6 +581,16 @@ impl Response {
         self.res.extensions_mut()
     }
 
+    /// Get a mutable reference to the underlying [`http::Response`].
+    ///
+    /// This is useful for advanced use cases that need direct access to the
+    /// inner response, such as extracting protocol-specific extensions
+    /// (e.g. [`hpx::http3::H3WebSocket::from_response`]).
+    #[inline]
+    pub fn inner(&mut self) -> &mut http::Response<Body> {
+        &mut self.res
+    }
+
     /// Prevent the underlying connection from being reused by the pool.
     ///
     /// If the response has a `PoisonPillHandle` in its extensions (set by the

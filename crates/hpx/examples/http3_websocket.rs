@@ -34,14 +34,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .body(hpx::Body::from(""))?;
 
     // ── Step 3: Execute the handshake ─────────────────────────────────
-    let mut response = client.execute(req).await?;
+    let mut response = client.execute(req.into()).await?;
     println!("WebSocket handshake status: {}", response.status());
 
     // ── Step 4: Extract the H3WebSocket from the response ─────────────
     // After a successful Extended CONNECT (200 OK), the h3 request stream
     // becomes a bidirectional WebSocket data channel. The client stores
     // the stream in the response extensions as an `H3WebSocket`.
-    let mut ws = hpx::http3::H3WebSocket::from_response(&mut response)
+    let mut ws = hpx::http3::H3WebSocket::from_response(response.inner())
         .expect("Extended CONNECT response must contain an H3WebSocket");
 
     // ── Step 5: Send WebSocket messages ───────────────────────────────
