@@ -835,7 +835,7 @@ mod tests {
         let certified_key = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])?;
         let cert_der: CertificateDer<'static> = certified_key.cert.der().clone();
         let key_der: PrivateKeyDer<'static> =
-            PrivatePkcs8KeyDer::from(certified_key.key_pair.serialize_der()).into();
+            PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der()).into();
 
         // 2. Build the server-side rustls `ServerConfig` with ALPN `[b"h3"]`.
         //    Uses `builder_with_provider` with an explicit `ring` provider to
