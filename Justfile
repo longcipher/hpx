@@ -1,14 +1,14 @@
 format:
     rumdl fmt .
     cargo sort -w -g
-    cargo fmt --all
+    cargo +nightly fmt --all
 fix:
     rumdl check --fix .
 lint:
     rumdl check .
     cargo sort -w -g -c
-    cargo fmt --all -- --check
-    cargo clippy --all -- -D warnings
+    cargo +nightly fmt --all -- --check
+    cargo +nightly clippy --all -- -D warnings
     cargo shear
     just check-agents-md
 test:

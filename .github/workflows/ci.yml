@@ -18,10 +18,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: nightly-2026-07-22
           components: rustfmt, clippy
+
+      - name: Pin default toolchain to avoid ICE in tests
+        run: |
+          rustup toolchain install nightly-2026-07-22 --component rustfmt,clippy
+          rustup override set nightly-2026-07-22
 
       - uses: taiki-e/install-action@v2
         with:
