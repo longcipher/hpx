@@ -212,9 +212,9 @@ async-trait = "0.1.91"
 axum = "0.8.9"
 axum-core = "0.5.6"
 base64-simd = "0.8.0"
-blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "00a2f69182898f1c9e39834744e036979a33288f", version = "=0.3.0-beta.1" }
-blitz-html = { git = "https://github.com/DioxusLabs/blitz.git", rev = "00a2f69182898f1c9e39834744e036979a33288f", version = "=0.3.0-beta.1" }
-blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "00a2f69182898f1c9e39834744e036979a33288f", version = "=0.3.0-beta.1" }
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "2f5bce346097a02657840aab7d51ccbd1142b5bc", version = "=0.3.0-beta.1" }
+blitz-html = { git = "https://github.com/DioxusLabs/blitz.git", rev = "2f5bce346097a02657840aab7d51ccbd1142b5bc", version = "=0.3.0-beta.1" }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "2f5bce346097a02657840aab7d51ccbd1142b5bc", version = "=0.3.0-beta.1" }
 bon = "3.9.3"
 boring = "5.1.0"
 brotli = "8.0.4"
