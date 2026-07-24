@@ -313,7 +313,7 @@ const PREDEFINED_HEADERS: [HeaderField; 99] = decl_fields![
 mod tests {
     use super::*;
 
-    /// https://www.rfc-editor.org/rfc/rfc9204.html#name-static-table
+    /// <https://www.rfc-editor.org/rfc/rfc9204.html#name-static-table>
     ///  3.1.  Static Table
     ///  [...]
     ///  Note the QPACK static table is indexed from 0, whereas the HPACK

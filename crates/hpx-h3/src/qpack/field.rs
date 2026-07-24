@@ -3,7 +3,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-/// https://tools.ietf.org/html/rfc7541
+/// <https://tools.ietf.org/html/rfc7541>
 /// 4.1.  Calculating Table Size
 pub const ESTIMATED_OVERHEAD_BYTES: usize = 32;
 
@@ -91,7 +91,7 @@ where
 mod tests {
     use super::*;
 
-    /// https://tools.ietf.org/html/rfc7541#section-4.1
+    /// <https://tools.ietf.org/html/rfc7541#section-4.1>
     /// "The size of an entry is the sum of its name's length in octets (as
     ///  defined in Section 5.2), its value's length in octets, and 32."
     /// "The size of an entry is calculated using the length of its name and

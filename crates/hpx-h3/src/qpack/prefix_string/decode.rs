@@ -376,7 +376,7 @@ mod tests {
         } )* }
     }
 
-    /// https://tools.ietf.org/html/rfc7541
+    /// <https://tools.ietf.org/html/rfc7541>
     /// Appendix B.  Huffman Code
     #[test]
     #[allow(clippy::cognitive_complexity)]
@@ -642,7 +642,7 @@ mod tests {
         ];
     }
 
-    /// https://tools.ietf.org/html/rfc7541
+    /// <https://tools.ietf.org/html/rfc7541>
     /// Appendix B.  Huffman Code
     #[test]
     fn test_decode_all_code_joined() {

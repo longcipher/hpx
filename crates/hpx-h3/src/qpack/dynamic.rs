@@ -6,7 +6,7 @@ use std::{
 use super::{field::HeaderField, static_::StaticTable};
 use crate::qpack::vas::{self, VirtualAddressSpace};
 
-/// https://www.rfc-editor.org/rfc/rfc9204.html#maximum-dynamic-table-capacity
+/// <https://www.rfc-editor.org/rfc/rfc9204.html#maximum-dynamic-table-capacity>
 const SETTINGS_MAX_TABLE_CAPACITY_MAX: usize = 1_073_741_823; // 2^30 -1
 const SETTINGS_MAX_BLOCKED_STREAMS_MAX: usize = 65_535; // 2^16 - 1
 
@@ -539,7 +539,7 @@ mod tests {
     const STREAM_ID: u64 = 0x4;
 
     // Test on table size
-    /// https://tools.ietf.org/html/rfc7541#section-4.1
+    /// <https://tools.ietf.org/html/rfc7541#section-4.1>
     /// "The size of the dynamic table is the sum of the size of its entries."
     #[test]
     fn test_table_size_is_sum_of_its_entries() {
@@ -559,7 +559,7 @@ mod tests {
         assert_eq!(table.curr_size, table_size);
     }
 
-    /// https://www.rfc-editor.org/rfc/rfc9204.html#name-maximum-dynamic-table-capac
+    /// <https://www.rfc-editor.org/rfc/rfc9204.html#name-maximum-dynamic-table-capac>
     /// "To bound the memory requirements of the decoder, the decoder
     /// limits the maximum value the encoder is permitted to set for the
     /// dynamic table capacity. In HTTP/3, this limit is determined by
@@ -573,7 +573,7 @@ mod tests {
         assert_eq!(res_change, Err(Error::MaximumTableSizeTooLarge));
     }
 
-    /// https://www.rfc-editor.org/rfc/rfc9204.html#name-dynamic-table-capacity-and-
+    /// <https://www.rfc-editor.org/rfc/rfc9204.html#name-dynamic-table-capacity-and->
     /// "This mechanism can be used to completely clear entries from the
     ///  dynamic table by setting a maximum size of 0, which can subsequently
     ///  be restored."
@@ -585,7 +585,7 @@ mod tests {
         assert_eq!(table.max_mem_size(), 0);
     }
 
-    /// https://www.rfc-editor.org/rfc/rfc9204.html#name-maximum-dynamic-table-capac
+    /// <https://www.rfc-editor.org/rfc/rfc9204.html#name-maximum-dynamic-table-capac>
     /// "To bound the memory requirements of the decoder, the decoder
     /// limits the maximum value the encoder is permitted to set for the
     /// dynamic table capacity. In HTTP/3, this limit is determined by
@@ -601,7 +601,7 @@ mod tests {
 
     // Test duplicated fields
 
-    /// https://www.rfc-editor.org/rfc/rfc9204.html#name-dynamic-table
+    /// <https://www.rfc-editor.org/rfc/rfc9204.html#name-dynamic-table>
     /// "The dynamic table can contain duplicate entries (i.e., entries with
     ///  the same name and same value).  Therefore, duplicate entries MUST NOT
     ///  be treated as an error by a decoder."
@@ -634,7 +634,7 @@ mod tests {
         assert_eq!(table.curr_size, field.mem_size());
     }
 
-    /// https://www.rfc-editor.org/rfc/rfc9204.html#name-dynamic-table-capacity-and-
+    /// <https://www.rfc-editor.org/rfc/rfc9204.html#name-dynamic-table-capacity-and->
     /// "Before a new entry is added to the dynamic table, entries are evicted
     ///  from the end of the dynamic table until the size of the dynamic table
     ///  is less than or equal to (maximum size - new entry size) or until the
@@ -658,7 +658,7 @@ mod tests {
         );
     }
 
-    /// https://www.rfc-editor.org/rfc/rfc9204.html#name-dynamic-table-capacity-and-
+    /// <https://www.rfc-editor.org/rfc/rfc9204.html#name-dynamic-table-capacity-and->
     /// "It is an error if the encoder attempts to add an entry that is
     /// larger than the dynamic table capacity; the decoder MUST treat
     /// this as a connection error of type QPACK_ENCODER_STREAM_ERROR."
@@ -680,7 +680,7 @@ mod tests {
         }
     }
 
-    /// https://www.rfc-editor.org/rfc/rfc9204.html#name-dynamic-table-capacity-and-
+    /// <https://www.rfc-editor.org/rfc/rfc9204.html#name-dynamic-table-capacity-and->
     /// "This mechanism can be used to completely clear entries from the
     ///  dynamic table by setting a maximum size of 0, which can subsequently
     ///  be restored."

@@ -359,7 +359,7 @@ mod tests {
         assert_eq!(result, Err(DecoderError::HeaderTooLong(44)));
     }
 
-    /// https://www.rfc-editor.org/rfc/rfc9204.html#name-insert-with-name-reference
+    /// <https://www.rfc-editor.org/rfc/rfc9204.html#name-insert-with-name-reference>
     /// 4.3.2.  Insert With Name Reference
     #[test]
     fn test_insert_field_with_name_ref_into_dynamic_table() {
@@ -384,7 +384,7 @@ mod tests {
         );
     }
 
-    /// https://www.rfc-editor.org/rfc/rfc9204.html#name-insert-with-name-reference
+    /// <https://www.rfc-editor.org/rfc/rfc9204.html#name-insert-with-name-reference>
     /// 4.3.2.  Insert With Name Reference
     #[test]
     fn test_insert_field_with_wrong_name_index_from_static_table() {
@@ -398,7 +398,7 @@ mod tests {
         assert_eq!(res, Err(DecoderError::InvalidStaticIndex(3000)));
     }
 
-    /// https://www.rfc-editor.org/rfc/rfc9204.html#name-insert-with-name-referencehtml
+    /// <https://www.rfc-editor.org/rfc/rfc9204.html#name-insert-with-name-referencehtml>
     /// 4.3.2.  Insert With Name Reference
     #[test]
     fn test_insert_field_with_wrong_name_index_from_dynamic_table() {
@@ -420,7 +420,7 @@ mod tests {
         assert!(dec.is_empty());
     }
 
-    /// https://www.rfc-editor.org/rfc/rfc9204.html#name-insert-with-literal-name
+    /// <https://www.rfc-editor.org/rfc/rfc9204.html#name-insert-with-literal-name>
     /// 4.3.3.  Insert with Literal Name
     #[test]
     fn test_insert_field_without_name_ref() {
@@ -452,7 +452,7 @@ mod tests {
         }
     }
 
-    /// https://www.rfc-editor.org/rfc/rfc9204.html#name-duplicate
+    /// <https://www.rfc-editor.org/rfc/rfc9204.html#name-duplicate>
     /// 4.3.4.  Duplicate
     #[test]
     fn test_duplicate_field() {
@@ -479,7 +479,7 @@ mod tests {
         );
     }
 
-    /// https://www.rfc-editor.org/rfc/rfc9204.html#name-set-dynamic-table-capacity
+    /// <https://www.rfc-editor.org/rfc/rfc9204.html#name-set-dynamic-table-capacity>
     /// 4.3.1.  Set Dynamic Table Capacity
     #[test]
     fn test_dynamic_table_size_update() {
