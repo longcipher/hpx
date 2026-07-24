@@ -389,7 +389,7 @@ struct CoreConfig {
     /// Test-only escape hatch for injecting a pre-constructed `QuicConnector`
     /// (e.g., with a custom root store trusting a self-signed cert). When
     /// `Some`, `Client::build` passes it through to
-    /// [`HttpClient::Builder::h3_connector`] verbatim, bypassing the normal
+    /// `HttpClient::Builder::h3_connector` verbatim, bypassing the normal
     /// `QuicConnector` construction from `http3_options` / `quic_config`.
     /// `#[doc(hidden)]` escape hatch — not part of the stable public API.
     #[cfg(feature = "http3")]

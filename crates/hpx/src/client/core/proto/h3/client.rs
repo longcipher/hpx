@@ -188,7 +188,7 @@ where
 /// - Steps 4-5 are skipped (CONNECT has no body; `finish` is called without
 ///   data to half-close the send direction).
 /// - Step 7 is skipped; after a 200 OK response, the stream becomes a
-///   bidirectional WebSocket data channel. The [`RequestStream`] is stored
+///   bidirectional WebSocket data channel. The `RequestStream` is stored
 ///   in the response extensions as [`H3WebSocket`] so the caller can
 ///   extract it for WebSocket communication.
 ///
@@ -393,7 +393,7 @@ struct H3WebSocketInner {
     recv_buf: Vec<u8>,
 }
 
-/// A WebSocket-over-h3 transport backed by an h3 [`RequestStream`].
+/// A WebSocket-over-h3 transport backed by an h3 `RequestStream`.
 ///
 /// After an Extended CONNECT (RFC 9220) handshake, the h3 request stream
 /// becomes a bidirectional WebSocket data channel. This struct wraps the

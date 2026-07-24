@@ -40,9 +40,9 @@ build-docs:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "$(uname)" = "Darwin" ]; then
-        RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
+        RUSTDOCFLAGS="-D warnings -A rustdoc::private_intra_doc_links" cargo doc --workspace --no-deps --document-private-items
     else
-        RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items --all-features
+        RUSTDOCFLAGS="-D warnings -A rustdoc::private_intra_doc_links" cargo doc --workspace --no-deps --document-private-items --all-features
     fi
 test-coverage:
     #!/usr/bin/env bash

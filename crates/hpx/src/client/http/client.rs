@@ -914,7 +914,7 @@ where
     /// Behavior:
     /// - If `h3_connector` is `Some`, acquire the pool's "connecting" lock
     ///   for `Ver::Http3` (dedups concurrent connect attempts per C-05),
-    ///   drive the [`QuicConnector`] via [`Oneshot`] to obtain an
+    ///   drive the [`crate::client::conn::quic::QuicConnector`] via [`Oneshot`] to obtain an
     ///   [`H3Connection`], wrap it as `PoolTx::Http3`, and insert into the
     ///   pool.
     /// - If `h3_connector` is `None`, fail fast with
