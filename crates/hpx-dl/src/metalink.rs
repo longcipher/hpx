@@ -181,6 +181,7 @@ impl MetalinkFile {
     /// This method does not currently return errors, but returns a `Result`
     /// for forward compatibility.
     #[must_use]
+    #[expect(clippy::expect_used, reason = "metalink URLs validated during parsing")]
     pub fn into_download_requests(self, destination: impl Into<PathBuf>) -> Vec<DownloadRequest> {
         let mut requests = Vec::new();
         let dest = destination.into();
@@ -194,7 +195,8 @@ impl MetalinkFile {
         let request = DownloadRequest::builder(&self.urls[0].url, dest)
             .checksum_opt(self.hashes.first().cloned())
             .mirrors(mirrors)
-            .build();
+            .build()
+            .expect("metalink URLs validated during parsing");
 
         requests.push(request);
         requests

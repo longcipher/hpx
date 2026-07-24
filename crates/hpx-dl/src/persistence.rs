@@ -175,7 +175,8 @@ mod tests {
         let now = 1_700_000_000;
         let request = DownloadRequest::builder("https://example.com/file.bin", "/tmp/file.bin")
             .priority(DownloadPriority::Normal)
-            .build();
+            .build()
+            .unwrap();
         DownloadRecord {
             id,
             request: request.clone(),
@@ -342,7 +343,8 @@ mod tests {
         let now = 1_700_000_000;
         let request = DownloadRequest::builder("https://example.com/file.bin", "/tmp/file.bin")
             .priority(DownloadPriority::Normal)
-            .build();
+            .build()
+            .unwrap();
         DownloadRecord {
             id,
             request: request.clone(),

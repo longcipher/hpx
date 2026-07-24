@@ -115,8 +115,7 @@ async fn memory_benchmark() {
     let html = include_str!("../benches/test_page.html");
     let rss_before = current_rss_bytes();
 
-    let engine = hpx_browser::host::EngineHandle::new();
-    let mut page = Page::new(engine);
+    let mut page = Page::new();
     for _ in 0..100 {
         page.reload_html(html, "http://example.com");
     }

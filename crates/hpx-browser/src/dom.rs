@@ -17,9 +17,36 @@ impl NodeId {
 
     #[must_use]
     pub fn to_raw(self) -> u32 {
-        self.0 as u32
+        #[expect(clippy::expect_used, reason = "NodeId fits in u32")]
+        {
+            u32::try_from(self.0).expect("NodeId value exceeds u32 range")
+        }
     }
 }
+
+/// Iterator over the children of a node, reading directly from the
+/// underlying `BaseDocument` children vec without allocating.
+pub struct ChildrenIter<'a> {
+    iter: std::slice::Iter<'a, usize>,
+}
+
+impl<'a> Iterator for ChildrenIter<'a> {
+    type Item = NodeId;
+    fn next(&mut self) -> Option<NodeId> {
+        self.iter.next().map(|&id| NodeId(id))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
+}
+
+impl<'a> DoubleEndedIterator for ChildrenIter<'a> {
+    fn next_back(&mut self) -> Option<NodeId> {
+        self.iter.next_back().map(|&id| NodeId(id))
+    }
+}
+
+impl<'a> ExactSizeIterator for ChildrenIter<'a> {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QualName {
@@ -161,6 +188,126 @@ impl Node {
     }
 }
 
+/// Lightweight borrowed reference to a DOM node that reads directly from the
+/// underlying `BaseDocument`. Does **not** allocate `Vec<Attribute>`, `String`
+/// for `QualName`, or compute sibling positions — unlike [`Dom::get`].
+#[derive(Clone, Copy)]
+pub struct NodeRef<'a> {
+    dom: &'a Dom,
+    id: NodeId,
+}
+
+impl<'a> NodeRef<'a> {
+    pub fn id(&self) -> NodeId {
+        self.id
+    }
+
+    fn blitz_data(&self) -> Option<&'a BlitzNodeData> {
+        self.dom.inner.get_node(self.id.0).map(|n| &n.data)
+    }
+
+    pub fn is_element(&self) -> bool {
+        matches!(
+            self.blitz_data(),
+            Some(BlitzNodeData::Element(_)) | Some(BlitzNodeData::AnonymousBlock(_))
+        )
+    }
+
+    pub fn is_text(&self) -> bool {
+        matches!(self.blitz_data(), Some(BlitzNodeData::Text(_)))
+    }
+
+    pub fn is_comment(&self) -> bool {
+        matches!(self.blitz_data(), Some(BlitzNodeData::Comment))
+    }
+
+    pub fn is_document(&self) -> bool {
+        matches!(self.blitz_data(), Some(BlitzNodeData::Document))
+    }
+
+    pub fn text(&self) -> Option<&'a str> {
+        match self.blitz_data() {
+            Some(BlitzNodeData::Text(t)) => Some(&t.content),
+            _ => None,
+        }
+    }
+
+    pub fn tag_name(&self) -> Option<&'a str> {
+        match self.blitz_data() {
+            Some(BlitzNodeData::Element(e)) | Some(BlitzNodeData::AnonymousBlock(e)) => {
+                Some(&e.name.local)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn get_attr(&self, name: &str) -> Option<&'a str> {
+        match self.blitz_data() {
+            Some(BlitzNodeData::Element(e)) | Some(BlitzNodeData::AnonymousBlock(e)) => e
+                .attrs
+                .iter()
+                .find(|a| &*a.name.local == name)
+                .map(|a| a.value.as_str()),
+            _ => None,
+        }
+    }
+
+    pub fn has_class(&self, class: &str) -> bool {
+        self.get_attr("class")
+            .is_some_and(|v| v.split_whitespace().any(|c| c == class))
+    }
+
+    pub fn first_child(&self) -> Option<NodeId> {
+        self.dom
+            .inner
+            .get_node(self.id.0)
+            .and_then(|n| n.children.first().map(|&c| NodeId(c)))
+    }
+
+    pub fn next_sibling(&self) -> Option<NodeId> {
+        let node = self.dom.inner.get_node(self.id.0)?;
+        let parent_id = node.parent?;
+        let parent = self.dom.inner.get_node(parent_id)?;
+        let pos = parent.children.iter().position(|&c| c == self.id.0)?;
+        parent.children.get(pos + 1).map(|&c| NodeId(c))
+    }
+
+    pub fn parent(&self) -> Option<NodeId> {
+        self.dom
+            .inner
+            .get_node(self.id.0)
+            .and_then(|n| n.parent.map(NodeId))
+    }
+
+    pub fn node_type(&self) -> u32 {
+        match self.blitz_data() {
+            Some(BlitzNodeData::Element(_)) | Some(BlitzNodeData::AnonymousBlock(_)) => 1,
+            Some(BlitzNodeData::Text(_)) => 3,
+            Some(BlitzNodeData::Comment) => 8,
+            Some(BlitzNodeData::Document) => 9,
+            None => 0,
+        }
+    }
+}
+
+impl<'a> std::fmt::Debug for NodeRef<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.blitz_data() {
+            Some(BlitzNodeData::Element(e)) | Some(BlitzNodeData::AnonymousBlock(e)) => {
+                write!(f, "<{}", e.name.local)?;
+                for attr in e.attrs.iter() {
+                    write!(f, " {}=\"{}\"", attr.name.local, attr.value)?;
+                }
+                write!(f, ">")
+            }
+            Some(BlitzNodeData::Text(t)) => write!(f, "Text({:?})", t.content),
+            Some(BlitzNodeData::Comment) => write!(f, "Comment"),
+            Some(BlitzNodeData::Document) => write!(f, "Document"),
+            None => write!(f, "NodeRef(<invalid {}>)", self.id.0),
+        }
+    }
+}
+
 pub struct Dom {
     inner: BaseDocument,
 }
@@ -190,6 +337,22 @@ impl Dom {
 
     pub fn inner_mut(&mut self) -> &mut BaseDocument {
         &mut self.inner
+    }
+
+    /// Returns a lightweight borrowed reference to a node without allocating.
+    pub fn node_ref(&self, id: NodeId) -> NodeRef<'_> {
+        NodeRef { dom: self, id }
+    }
+
+    /// Returns an iterator over the children of a node, reading directly
+    /// from the `BaseDocument` children vec without allocating.
+    pub fn children_of(&self, id: NodeId) -> ChildrenIter<'_> {
+        let slice = self
+            .inner
+            .get_node(id.0)
+            .map(|n| n.children.as_slice())
+            .unwrap_or(&[]);
+        ChildrenIter { iter: slice.iter() }
     }
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
@@ -330,16 +493,12 @@ impl Dom {
     }
 
     pub fn children(&self, parent: NodeId) -> Vec<NodeId> {
-        self.inner
-            .get_node(parent.0)
-            .map(|n| n.children.iter().map(|&id| NodeId(id)).collect())
-            .unwrap_or_default()
+        self.children_of(parent).collect()
     }
 
     pub fn child_elements(&self, parent: NodeId) -> Vec<NodeId> {
-        self.children(parent)
-            .into_iter()
-            .filter(|id| self.get(*id).is_some_and(|n| n.is_element()))
+        self.children_of(parent)
+            .filter(|&id| NodeRef { dom: self, id }.is_element())
             .collect()
     }
 
@@ -363,21 +522,11 @@ impl Dom {
             if steps > WALK_LIMIT {
                 break;
             }
-            let node = match self.get(id) {
-                Some(n) => n,
-                None => continue,
-            };
-            match &node.data {
-                NodeData::Text(t) => result.push_str(t),
-                _ => {
-                    let mut kids: Vec<NodeId> = Vec::new();
-                    let mut child = node.first_child;
-                    while let Some(c) = child {
-                        kids.push(c);
-                        child = self.get(c).and_then(|n| n.next_sibling);
-                    }
-                    stack.extend(kids.into_iter().rev());
-                }
+            let nr = NodeRef { dom: self, id };
+            if let Some(text) = nr.text() {
+                result.push_str(text);
+            } else {
+                stack.extend(self.children_of(id).rev());
             }
         }
     }
@@ -394,21 +543,14 @@ impl Dom {
     }
 
     pub fn get_element_by_id(&self, id_value: &str) -> Option<NodeId> {
-        self.find_element(NodeId::DOCUMENT, &|node| {
-            node.as_element()
-                .and_then(|e| e.attrs.iter().find(|a| a.name.local == "id"))
-                .is_some_and(|a| a.value == id_value)
-        })
+        self.find_element(NodeId::DOCUMENT, &|nr| nr.get_attr("id") == Some(id_value))
     }
 
     pub fn get_elements_by_tag_name(&self, root: NodeId, tag: &str) -> Vec<NodeId> {
         let mut results = Vec::new();
         self.collect_elements(
             root,
-            &|node| {
-                node.as_element()
-                    .is_some_and(|e| e.name.local.eq_ignore_ascii_case(tag))
-            },
+            &|nr| nr.tag_name().is_some_and(|t| t.eq_ignore_ascii_case(tag)),
             &mut results,
         );
         results
@@ -416,15 +558,7 @@ impl Dom {
 
     pub fn get_elements_by_class_name(&self, root: NodeId, class: &str) -> Vec<NodeId> {
         let mut results = Vec::new();
-        self.collect_elements(
-            root,
-            &|node| {
-                node.as_element()
-                    .and_then(|e| e.attrs.iter().find(|a| a.name.local == "class"))
-                    .is_some_and(|a| a.value.split_whitespace().any(|c| c == class))
-            },
-            &mut results,
-        );
+        self.collect_elements(root, &|nr| nr.has_class(class), &mut results);
         results
     }
 
@@ -436,17 +570,10 @@ impl Dom {
 
     pub fn serialize_inner_html(&self, id: NodeId) -> String {
         let mut out = String::new();
-        let node = match self.get(id) {
-            Some(n) => n,
-            None => return out,
-        };
-        let mut kids: Vec<NodeId> = Vec::new();
-        let mut child = node.first_child;
-        while let Some(child_id) = child {
-            kids.push(child_id);
-            child = self.get(child_id).and_then(|n| n.next_sibling);
+        if self.inner.get_node(id.0).is_none() {
+            return out;
         }
-        for c in kids {
+        for c in self.children_of(id) {
             self.serialize_node(c, &mut out);
         }
         out
@@ -456,7 +583,7 @@ impl Dom {
     fn serialize_node(&self, root: NodeId, out: &mut String) {
         enum SerWork {
             Open(NodeId),
-            Close(String),
+            Close(NodeId),
         }
         const VOID_ELEMENTS: &[&str] = &[
             "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
@@ -468,7 +595,17 @@ impl Dom {
         let mut steps: usize = 0;
         while let Some(work) = stack.pop() {
             match work {
-                SerWork::Close(s) => out.push_str(&s),
+                SerWork::Close(id) => {
+                    if let Some(blitz_node) = self.inner.get_node(id.0) {
+                        if let BlitzNodeData::Element(e) | BlitzNodeData::AnonymousBlock(e) =
+                            &blitz_node.data
+                        {
+                            out.push_str("</");
+                            out.push_str(&e.name.local);
+                            out.push('>');
+                        }
+                    }
+                }
                 SerWork::Open(id) => {
                     if !visited.insert(id) {
                         continue;
@@ -477,15 +614,15 @@ impl Dom {
                     if steps > WALK_LIMIT {
                         break;
                     }
-                    let node = match self.get(id) {
+                    let blitz_node = match self.inner.get_node(id.0) {
                         Some(n) => n,
                         None => continue,
                     };
-                    match &node.data {
-                        NodeData::Element(elem) => {
+                    match &blitz_node.data {
+                        BlitzNodeData::Element(e) | BlitzNodeData::AnonymousBlock(e) => {
                             out.push('<');
-                            out.push_str(&elem.name.local);
-                            for attr in &elem.attrs {
+                            out.push_str(&e.name.local);
+                            for attr in e.attrs.iter() {
                                 out.push(' ');
                                 out.push_str(&attr.name.local);
                                 out.push_str("=\"");
@@ -495,50 +632,31 @@ impl Dom {
                                 out.push('"');
                             }
                             out.push('>');
-                            let is_void = VOID_ELEMENTS.contains(&elem.name.local.as_str());
-                            if !is_void {
-                                stack.push(SerWork::Close(format!("</{}>", elem.name.local)));
+                            let tag: &str = &e.name.local;
+                            if !VOID_ELEMENTS.contains(&tag) {
+                                stack.push(SerWork::Close(id));
                             }
-                            let mut kids: Vec<NodeId> = Vec::new();
-                            let mut child = node.first_child;
-                            while let Some(c) = child {
-                                kids.push(c);
-                                child = self.get(c).and_then(|n| n.next_sibling);
-                            }
-                            for c in kids.into_iter().rev() {
+                            for c in self.children_of(id).rev() {
                                 stack.push(SerWork::Open(c));
                             }
                         }
-                        NodeData::Text(text) => {
+                        BlitzNodeData::Text(t) => {
                             out.push_str(
-                                &text
+                                &t.content
                                     .replace('&', "&amp;")
                                     .replace('<', "&lt;")
                                     .replace('>', "&gt;"),
                             );
                         }
-                        NodeData::Comment(text) => {
+                        BlitzNodeData::Comment => {
                             out.push_str("<!--");
-                            out.push_str(text);
                             out.push_str("-->");
                         }
-                        NodeData::DocumentType { name, .. } => {
-                            out.push_str("<!DOCTYPE ");
-                            out.push_str(name);
-                            out.push('>');
-                        }
-                        NodeData::Document | NodeData::DocumentFragment => {
-                            let mut kids: Vec<NodeId> = Vec::new();
-                            let mut child = node.first_child;
-                            while let Some(c) = child {
-                                kids.push(c);
-                                child = self.get(c).and_then(|n| n.next_sibling);
-                            }
-                            for c in kids.into_iter().rev() {
+                        BlitzNodeData::Document => {
+                            for c in self.children_of(id).rev() {
                                 stack.push(SerWork::Open(c));
                             }
                         }
-                        _ => {}
                     }
                 }
             }
@@ -568,10 +686,8 @@ impl Dom {
         let mut visited: AHashSet<NodeId> = AHashSet::with_capacity(64);
         visited.insert(source_root);
 
-        let mut child = source.get(source_root).and_then(|n| n.first_child);
-        while let Some(c) = child {
+        for c in source.children_of(source_root) {
             queue.push((c, new_root));
-            child = source.get(c).and_then(|n| n.next_sibling);
         }
 
         let mut steps: usize = 0;
@@ -591,10 +707,8 @@ impl Dom {
                 None => continue,
             };
             self.append_child(dest_parent, new_id);
-            let mut child = source.get(src_id).and_then(|n| n.first_child);
-            while let Some(c) = child {
+            for c in source.children_of(src_id) {
                 queue.push((c, new_id));
-                child = source.get(c).and_then(|n| n.next_sibling);
             }
         }
 
@@ -602,29 +716,15 @@ impl Dom {
     }
 
     pub fn node_type(&self, id: NodeId) -> u32 {
-        match self.get(id).map(|n| n.data) {
-            Some(NodeData::Element(_)) => 1,
-            Some(NodeData::Text(_)) => 3,
-            Some(NodeData::ProcessingInstruction { .. }) => 7,
-            Some(NodeData::Comment(_)) => 8,
-            Some(NodeData::Document) => 9,
-            Some(NodeData::DocumentType { .. }) => 10,
-            Some(NodeData::DocumentFragment) => 11,
-            Some(NodeData::ShadowRoot { .. }) => 11,
-            None => 0,
-        }
+        NodeRef { dom: self, id }.node_type()
     }
 
-    fn find_element(&self, root: NodeId, predicate: &dyn Fn(&Node) -> bool) -> Option<NodeId> {
-        let mut stack: Vec<NodeId> = Vec::new();
-        let mut child = self.get(root).and_then(|n| n.first_child);
-        let mut seed: Vec<NodeId> = Vec::new();
-        while let Some(c) = child {
-            seed.push(c);
-            child = self.get(c).and_then(|n| n.next_sibling);
-        }
-        stack.extend(seed.into_iter().rev());
-
+    fn find_element(
+        &self,
+        root: NodeId,
+        predicate: &dyn Fn(&NodeRef<'_>) -> bool,
+    ) -> Option<NodeId> {
+        let mut stack: Vec<NodeId> = self.children_of(root).rev().collect();
         let mut visited: AHashSet<NodeId> = AHashSet::with_capacity(64);
         let mut steps: usize = 0;
         while let Some(id) = stack.pop() {
@@ -635,20 +735,11 @@ impl Dom {
             if steps > WALK_LIMIT {
                 break;
             }
-            let node = match self.get(id) {
-                Some(n) => n,
-                None => continue,
-            };
-            if predicate(&node) {
+            let nr = NodeRef { dom: self, id };
+            if predicate(&nr) {
                 return Some(id);
             }
-            let mut kids: Vec<NodeId> = Vec::new();
-            let mut child = node.first_child;
-            while let Some(c) = child {
-                kids.push(c);
-                child = self.get(c).and_then(|n| n.next_sibling);
-            }
-            stack.extend(kids.into_iter().rev());
+            stack.extend(self.children_of(id).rev());
         }
         None
     }
@@ -656,18 +747,10 @@ impl Dom {
     fn collect_elements(
         &self,
         root: NodeId,
-        predicate: &dyn Fn(&Node) -> bool,
+        predicate: &dyn Fn(&NodeRef<'_>) -> bool,
         results: &mut Vec<NodeId>,
     ) {
-        let mut stack: Vec<NodeId> = Vec::new();
-        let mut seed: Vec<NodeId> = Vec::new();
-        let mut child = self.get(root).and_then(|n| n.first_child);
-        while let Some(c) = child {
-            seed.push(c);
-            child = self.get(c).and_then(|n| n.next_sibling);
-        }
-        stack.extend(seed.into_iter().rev());
-
+        let mut stack: Vec<NodeId> = self.children_of(root).rev().collect();
         let mut visited: AHashSet<NodeId> = AHashSet::with_capacity(64);
         let mut steps: usize = 0;
         while let Some(id) = stack.pop() {
@@ -678,20 +761,11 @@ impl Dom {
             if steps > WALK_LIMIT {
                 break;
             }
-            let node = match self.get(id) {
-                Some(n) => n,
-                None => continue,
-            };
-            if predicate(&node) {
+            let nr = NodeRef { dom: self, id };
+            if predicate(&nr) {
                 results.push(id);
             }
-            let mut kids: Vec<NodeId> = Vec::new();
-            let mut child = node.first_child;
-            while let Some(c) = child {
-                kids.push(c);
-                child = self.get(c).and_then(|n| n.next_sibling);
-            }
-            stack.extend(kids.into_iter().rev());
+            stack.extend(self.children_of(id).rev());
         }
     }
 
@@ -787,75 +861,59 @@ impl std::fmt::Debug for Dom {
 pub struct DomElement<'a> {
     pub dom: &'a Dom,
     pub id: NodeId,
-    data: ElementData,
 }
 
 impl<'a> DomElement<'a> {
     pub fn new(dom: &'a Dom, id: NodeId) -> Option<Self> {
-        let node = dom.get(id)?;
-        if !node.is_element() {
+        let nr = NodeRef { dom, id };
+        if !nr.is_element() {
             return None;
         }
-        let data = node.as_element()?.clone();
-        Some(Self { dom, id, data })
+        Some(Self { dom, id })
     }
 
     pub fn node_id(&self) -> NodeId {
         self.id
     }
 
-    pub fn local_name(&self) -> &str {
-        &self.data.name.local
+    fn nr(&self) -> NodeRef<'a> {
+        NodeRef {
+            dom: self.dom,
+            id: self.id,
+        }
     }
 
-    pub fn id(&self) -> Option<&str> {
-        self.data
-            .attrs
-            .iter()
-            .find(|a| a.name.local == "id")
-            .map(|a| a.value.as_str())
+    pub fn local_name(&self) -> &'a str {
+        self.nr().tag_name().unwrap_or("")
+    }
+
+    pub fn id(&self) -> Option<&'a str> {
+        self.nr().get_attr("id")
     }
 
     pub fn has_class(&self, name: &str) -> bool {
-        self.data
-            .attrs
-            .iter()
-            .find(|a| a.name.local == "class")
-            .is_some_and(|a| a.value.split_whitespace().any(|c| c == name))
+        self.nr().has_class(name)
     }
 
     pub fn has_attribute(&self, name: &str) -> bool {
-        self.data
-            .attrs
-            .iter()
-            .any(|a| a.name.local.eq_ignore_ascii_case(name))
+        self.nr().get_attr(name).is_some()
     }
 
-    pub fn attr(&self, name: &str) -> Option<&str> {
-        self.data
-            .attrs
-            .iter()
-            .find(|a| a.name.local.eq_ignore_ascii_case(name))
-            .map(|a| a.value.as_str())
-    }
-
-    fn node(&self) -> Node {
-        self.dom
-            .get(self.id)
-            .unwrap_or_else(|| panic!("DomElement::node invariant: node {} must exist", self.id.0))
-    }
-
-    fn element_data(&self) -> &ElementData {
-        &self.data
+    pub fn attr(&self, name: &str) -> Option<&'a str> {
+        self.nr().get_attr(name)
     }
 }
 
 impl<'a> std::fmt::Debug for DomElement<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let data = self.element_data();
-        write!(f, "<{}", data.name.local)?;
-        for attr in &data.attrs {
-            write!(f, " {}=\"{}\"", attr.name.local, attr.value)?;
+        let nr = self.nr();
+        write!(f, "<{}", nr.tag_name().unwrap_or("?"))?;
+        if let Some(BlitzNodeData::Element(e)) | Some(BlitzNodeData::AnonymousBlock(e)) =
+            nr.blitz_data()
+        {
+            for attr in e.attrs.iter() {
+                write!(f, " {}=\"{}\"", attr.name.local, attr.value)?;
+            }
         }
         write!(f, ">")
     }

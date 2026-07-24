@@ -58,6 +58,10 @@ pub struct EngineConfig {
     /// Jitter factor for retry backoff (0.0–1.0).
     pub retry_jitter: f64,
     /// Path to the storage database file.
+    ///
+    /// Defaults to `$XDG_DATA_HOME/hpx-dl/downloads.db` (or
+    /// `~/.local/share/hpx-dl/downloads.db` when `XDG_DATA_HOME` is unset).
+    /// Falls back to `./hpx-dl.db` if the home directory cannot be determined.
     pub storage_path: PathBuf,
     /// Coalescing delay the scheduler waits when starting from idle, to batch
     /// rapid successive `add()` calls into a single scheduling pass.
@@ -75,7 +79,7 @@ impl Default for EngineConfig {
             retry_initial_delay: Duration::from_secs(1),
             retry_max_delay: Duration::from_secs(30),
             retry_jitter: 0.25,
-            storage_path: PathBuf::from("./hpx-dl.db"),
+            storage_path: default_storage_path(),
             scheduler_coalesce_delay: SCHEDULER_IDLE_COALESCE_DELAY,
         }
     }
@@ -1098,7 +1102,32 @@ fn backup_legacy_snapshot(path: &Path) -> Result<(), DownloadError> {
 fn current_timestamp() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_secs() as i64)
+        .map_or(0, |duration| {
+            i64::try_from(duration.as_secs()).unwrap_or(i64::MAX)
+        })
+}
+
+/// Compute a platform-appropriate default storage path.
+///
+/// Uses `$XDG_DATA_HOME/hpx-dl/downloads.db` (defaulting XDG to
+/// `$HOME/.local/share`) when the home directory can be determined.
+/// Falls back to `./hpx-dl.db` otherwise.
+fn default_storage_path() -> PathBuf {
+    let data_dir = std::env::var("XDG_DATA_HOME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .map(|home| PathBuf::from(home).join(".local").join("share"))
+        });
+
+    match data_dir {
+        Some(dir) => dir.join("hpx-dl").join("downloads.db"),
+        None => PathBuf::from("./hpx-dl.db"),
+    }
 }
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
@@ -1284,6 +1313,15 @@ mod tests {
                 .sum();
             Ok(())
         }
+
+        async fn upsert(&self, download: &DownloadRecord) -> Result<(), DownloadError> {
+            if self.fail_save {
+                return Err(DownloadError::Storage("save failed".to_string()));
+            }
+            let mut records = self.records.lock().unwrap();
+            records.insert(download.id, download.clone());
+            Ok(())
+        }
     }
 
     #[test]
@@ -1297,7 +1335,7 @@ mod tests {
         assert_eq!(config.retry_initial_delay, Duration::from_secs(1));
         assert_eq!(config.retry_max_delay, Duration::from_secs(30));
         assert!((config.retry_jitter - 0.25).abs() < f64::EPSILON);
-        assert_eq!(config.storage_path, PathBuf::from("./hpx-dl.db"));
+        assert_eq!(config.storage_path, default_storage_path());
         assert_eq!(
             config.scheduler_coalesce_delay,
             SCHEDULER_IDLE_COALESCE_DELAY
@@ -1356,7 +1394,8 @@ mod tests {
         let now = 1_700_000_000;
         let request =
             DownloadRequest::builder("https://example.com/file.bin", temp.path().join("file.bin"))
-                .build();
+                .build()
+                .unwrap();
         let persisted = vec![PersistedDownload {
             id: DownloadId::new(),
             entry: DownloadEntry {
@@ -1393,7 +1432,8 @@ mod tests {
         let now = 1_700_000_000;
         let request = DownloadRequest::builder("https://example.com/file.bin", "/tmp/file.bin")
             .priority(DownloadPriority::Normal)
-            .build();
+            .build()
+            .unwrap();
         let storage = Arc::new(TestStorage::with_record(DownloadRecord {
             id,
             request: request.clone(),
@@ -1426,8 +1466,9 @@ mod tests {
             .build()
             .expect("build with failing storage");
 
-        let request =
-            DownloadRequest::builder("https://example.com/file.bin", "/tmp/file.bin").build();
+        let request = DownloadRequest::builder("https://example.com/file.bin", "/tmp/file.bin")
+            .build()
+            .unwrap();
         let error = engine
             .add(request)
             .expect_err("add should surface storage failure");
@@ -1443,8 +1484,9 @@ mod tests {
             .build()
             .expect("build engine");
 
-        let request =
-            DownloadRequest::builder("https://example.com/file.bin", "/tmp/file.bin").build();
+        let request = DownloadRequest::builder("https://example.com/file.bin", "/tmp/file.bin")
+            .build()
+            .unwrap();
         let id = engine.add(request).expect("add download");
 
         let segments: Vec<SegmentState> = (0..5u32)
@@ -1491,7 +1533,7 @@ mod tests {
 
         let url = "https://example.com/file.bin";
         let dest = "/tmp/file.bin";
-        let request = DownloadRequest::builder(url, dest).build();
+        let request = DownloadRequest::builder(url, dest).build().unwrap();
         let id = engine.add(request).expect("add download");
 
         // Verify initial persisted state: Queued

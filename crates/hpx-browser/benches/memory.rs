@@ -25,8 +25,7 @@ fn bench_memory_100_navigations(c: &mut Criterion) {
         b.iter(|| {
             let url = "http://example.com";
             // Simulate 100 navigations: create Page, reload_html 100 times, drop
-            let engine = hpx_browser::host::EngineHandle::new();
-            let mut page = hpx_browser::page::Page::new(engine);
+            let mut page = hpx_browser::page::Page::new();
             for _ in 0..100 {
                 page.reload_html(html, url);
             }

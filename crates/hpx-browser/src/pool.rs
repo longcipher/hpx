@@ -28,19 +28,22 @@ impl PagePool {
     }
 
     /// Acquire a page from the pool or create a new one.
-    #[allow(
-        clippy::await_holding_lock,
-        reason = "std Mutex guard dropped before any await; single-threaded executor"
-    )]
+    ///
+    /// The mutex is only held briefly during the synchronous `pop_front`;
+    /// any async page construction happens after the lock is released.
     pub async fn acquire(
         &self,
         profile: Option<StealthProfile>,
     ) -> Result<Page, crate::page::PageError> {
-        let mut pages = self.idle_pages.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(mut page) = pages.pop_front() {
+        // Try to reuse a pooled page (brief sync lock).
+        if let Some(mut page) = {
+            let mut pages = self.idle_pages.lock().unwrap_or_else(|e| e.into_inner());
+            pages.pop_front()
+        } {
             page.reload_html("<html><head></head><body></body></html>", "about:blank");
             return Ok(page);
         }
+        // No pooled page available — create a new one (async, no lock held).
         Page::from_html("<html><head></head><body></body></html>", profile.is_some()).await
     }
 

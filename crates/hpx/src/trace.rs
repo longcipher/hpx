@@ -22,15 +22,16 @@ macro_rules! trace {
 }
 
 macro_rules! trace_span {
-    ($($arg:tt)*) => {
+    ($($arg:tt)*) => {{
+        #[cfg(feature = "tracing")]
         {
-            #[cfg(feature = "tracing")]
-            {
-                let _span = ::tracing::trace_span!($($arg)+);
-                let _ = _span.entered();
-            }
+            Some(::tracing::trace_span!($($arg)+).entered())
         }
-    }
+        #[cfg(not(feature = "tracing"))]
+        {
+            None::<()>
+        }
+    }}
 }
 
 macro_rules! warn {

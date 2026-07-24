@@ -338,7 +338,7 @@ impl codec::Decoder for Decoder {
         if opcode == OpCode::Ping && payload_len > 125 {
             return Err(WebSocketError::PingFrameTooLarge);
         }
-        if payload_len >= self.max_payload_size {
+        if payload_len > self.max_payload_size {
             return Err(WebSocketError::FrameTooLarge);
         }
 
@@ -496,5 +496,191 @@ mod tests {
         let frame = Frame::binary(data.clone());
         let decoded = roundtrip(&frame);
         assert_eq!(decoded.into_payload().len(), 70000);
+    }
+
+    #[test]
+    fn max_payload_size_boundary_exact() {
+        let mut encoder = Encoder::new(Role::Client);
+        let mut buf = BytesMut::new();
+        let frame = Frame::binary(vec![42u8; 100]);
+        encoder.encode(frame, &mut buf).unwrap();
+
+        // max_payload_size = 100 => payload_len (100) > 100 is false => accepted
+        let mut decoder = Decoder::new(Role::Server, 100);
+        let result = decoder.decode(&mut buf).unwrap();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().into_payload().len(), 100);
+    }
+
+    #[test]
+    fn max_payload_size_boundary_rejects() {
+        let mut encoder = Encoder::new(Role::Client);
+        let mut buf = BytesMut::new();
+        let frame = Frame::binary(vec![42u8; 101]);
+        encoder.encode(frame, &mut buf).unwrap();
+
+        // max_payload_size = 100 => payload_len (101) > 100 => error
+        let mut decoder = Decoder::new(Role::Server, 100);
+        let result = decoder.decode(&mut buf);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rsv2_or_rsv3_set_returns_error() {
+        // Manually construct a frame with RSV2 bit set
+        let mut buf = BytesMut::new();
+        // First byte: FIN=1, RSV1=0, RSV2=1, RSV3=0, opcode=Text(0x1)
+        buf.extend_from_slice(&[0b10100001, 0b00000000]); // RSV2 set, no mask, len=0
+
+        let mut decoder = Decoder::new(Role::Client, 1 << 20);
+        let result = decoder.decode(&mut buf);
+        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(crate::WebSocketError::ReservedBitsNotZero)
+        ));
+    }
+
+    #[test]
+    fn rsv3_set_returns_error() {
+        // Manually construct a frame with RSV3 bit set
+        let mut buf = BytesMut::new();
+        // First byte: FIN=1, RSV1=0, RSV2=0, RSV3=1, opcode=Text(0x1)
+        buf.extend_from_slice(&[0b10010001, 0b00000000]); // RSV3 set, no mask, len=0
+
+        let mut decoder = Decoder::new(Role::Client, 1 << 20);
+        let result = decoder.decode(&mut buf);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn empty_buffer_returns_none() {
+        let mut decoder = Decoder::new(Role::Client, 1 << 20);
+        let mut buf = BytesMut::new();
+        let result = decoder.decode(&mut buf).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn incomplete_header_returns_none() {
+        let mut decoder = Decoder::new(Role::Client, 1 << 20);
+        let mut buf = BytesMut::from(&[0x81u8][..]); // Only 1 byte
+        let result = decoder.decode(&mut buf).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn server_requires_mask() {
+        let mut encoder = Encoder::new(Role::Client);
+        let mut buf = BytesMut::new();
+        let frame = Frame::text("test");
+        encoder.encode(frame, &mut buf).unwrap();
+
+        // Server decoder should unmask correctly
+        let mut decoder = Decoder::new(Role::Server, 1 << 20);
+        let result = decoder.decode(&mut buf).unwrap();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().into_payload().as_ref(), b"test");
+    }
+
+    #[test]
+    fn server_rejects_unmasked_frame() {
+        // Manually construct an unmasked text frame
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(&[0x81, 0x05]); // FIN=1, no mask, len=5
+        buf.extend_from_slice(b"hello");
+
+        let mut decoder = Decoder::new(Role::Server, 1 << 20);
+        let result = decoder.decode(&mut buf);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn ping_frame_with_125_byte_payload() {
+        let mut encoder = Encoder::new(Role::Client);
+        let mut buf = BytesMut::new();
+        let frame = Frame::ping(vec![42u8; 125]);
+        encoder.encode(frame, &mut buf).unwrap();
+
+        let mut decoder = Decoder::new(Role::Server, 1 << 20);
+        let result = decoder.decode(&mut buf).unwrap();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().into_payload().len(), 125);
+    }
+
+    #[test]
+    fn ping_frame_exceeding_125_bytes_rejected() {
+        let mut encoder = Encoder::new(Role::Client);
+        let mut buf = BytesMut::new();
+        let frame = Frame::ping(vec![42u8; 126]);
+        encoder.encode(frame, &mut buf).unwrap();
+
+        let mut decoder = Decoder::new(Role::Server, 1 << 20);
+        let result = decoder.decode(&mut buf);
+        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(crate::WebSocketError::PingFrameTooLarge)
+        ));
+    }
+
+    #[test]
+    fn control_frame_must_be_fin() {
+        // Manually construct a fragmented ping (FIN=0)
+        let mut buf = BytesMut::new();
+        // First byte: FIN=0, opcode=Ping(0x9)
+        buf.extend_from_slice(&[0x09, 0x00]); // No mask, len=0
+
+        let mut decoder = Decoder::new(Role::Client, 1 << 20);
+        let result = decoder.decode(&mut buf);
+        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(crate::WebSocketError::ControlFrameFragmented)
+        ));
+    }
+
+    #[test]
+    fn invalid_opcode_returns_error() {
+        // Opcode 0x3 is reserved
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(&[0x83, 0x00]); // FIN=1, opcode=0x3
+
+        let mut decoder = Decoder::new(Role::Client, 1 << 20);
+        let result = decoder.decode(&mut buf);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rsv1_on_non_compressed_frame_still_decodes() {
+        // RSV1 is allowed (it marks compression), codec just sets is_compressed
+        let mut encoder = Encoder::new(Role::Client);
+        let mut buf = BytesMut::new();
+        let mut frame = Frame::text("compressed");
+        frame.is_compressed = true;
+        encoder.encode(frame, &mut buf).unwrap();
+
+        let mut decoder = Decoder::new(Role::Server, 1 << 20);
+        let result = decoder.decode(&mut buf).unwrap();
+        assert!(result.is_some());
+        let decoded = result.unwrap();
+        assert!(decoded.is_compressed);
+    }
+
+    #[test]
+    fn incremental_decode_small_frames() {
+        let mut encoder = Encoder::new(Role::Client);
+        let frame1 = Frame::text("first");
+        let frame2 = Frame::text("second");
+        let mut buf = BytesMut::new();
+        encoder.encode(frame1, &mut buf).unwrap();
+        encoder.encode(frame2, &mut buf).unwrap();
+
+        let mut decoder = Decoder::new(Role::Server, 1 << 20);
+        let r1 = decoder.decode(&mut buf).unwrap().unwrap();
+        assert_eq!(r1.into_payload().as_ref(), b"first");
+        let r2 = decoder.decode(&mut buf).unwrap().unwrap();
+        assert_eq!(r2.into_payload().as_ref(), b"second");
+        assert!(decoder.decode(&mut buf).unwrap().is_none());
     }
 }

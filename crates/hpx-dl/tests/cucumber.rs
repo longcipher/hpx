@@ -678,7 +678,7 @@ async fn add_download(world: &mut DownloadWorld, url: String, dest: String) {
         if let Some(proxy) = world.default_proxy.clone() {
             builder = builder.proxy(proxy);
         }
-        let request = builder.build();
+        let request = builder.build().expect("build download request");
         match engine.add(request) {
             Ok(id) => {
                 world.last_download_id = Some(id);
@@ -706,7 +706,7 @@ async fn add_download_with_priority(
         if let Some(proxy) = world.default_proxy.clone() {
             builder = builder.proxy(proxy);
         }
-        match engine.add(builder.build()) {
+        match builder.build().and_then(|r| engine.add(r)) {
             Ok(id) => {
                 world.last_download_id = Some(id);
                 world.downloads_by_name.insert(dest.clone(), id);
@@ -736,7 +736,7 @@ async fn add_download_with_checksum(
         if let Some(proxy) = world.default_proxy.clone() {
             builder = builder.proxy(proxy);
         }
-        match engine.add(builder.build()) {
+        match builder.build().and_then(|r| engine.add(r)) {
             Ok(id) => {
                 world.last_download_id = Some(id);
                 world.downloads_by_name.insert(dest.clone(), id);

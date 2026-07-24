@@ -132,17 +132,10 @@ pub trait Storage: Send + Sync {
 
     /// Insert or replace a download record atomically.
     ///
-    /// The default implementation is **not atomic** — it performs a
-    /// load-then-delete-then-save sequence that has a TOCTOU window under
-    /// concurrent access. Implementors **must** override this method with
-    /// an atomic operation (e.g., SQL `INSERT ... ON CONFLICT DO UPDATE`).
-    async fn upsert(&self, download: &DownloadRecord) -> Result<(), DownloadError> {
-        if self.load(download.id).await?.is_some() {
-            self.delete(download.id).await?;
-        }
-
-        self.save(download).await
-    }
+    /// Implementations **must** use an atomic operation (e.g., SQL
+    /// `INSERT ... ON CONFLICT DO UPDATE`) to avoid TOCTOU races that
+    /// a naive load-then-delete-then-save sequence would introduce.
+    async fn upsert(&self, download: &DownloadRecord) -> Result<(), DownloadError>;
 }
 
 // ---------------------------------------------------------------------------

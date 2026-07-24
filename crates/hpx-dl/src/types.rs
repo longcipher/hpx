@@ -4,6 +4,8 @@ use std::{collections::HashMap, fmt, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::DownloadError;
+
 /// Unique identifier for a download job.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DownloadId(pub uuid::Uuid);
@@ -308,10 +310,48 @@ impl DownloadRequestBuilder {
         self
     }
 
-    /// Build the [`DownloadRequest`].
-    #[must_use]
-    pub fn build(self) -> DownloadRequest {
-        DownloadRequest {
+    /// Build the [`DownloadRequest`], validating all fields.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DownloadError::InvalidConfiguration`] if:
+    /// - `url` is empty or not a valid URL
+    /// - `destination` is empty
+    /// - `max_connections` is `Some(0)` (must be > 0)
+    pub fn build(self) -> Result<DownloadRequest, DownloadError> {
+        if self.url.is_empty() {
+            return Err(DownloadError::InvalidConfiguration(
+                "download URL must not be empty".to_string(),
+            ));
+        }
+        url::Url::parse(&self.url).map_err(|e| {
+            DownloadError::InvalidConfiguration(format!("invalid download URL '{}': {e}", self.url))
+        })?;
+
+        if self.destination.as_os_str().is_empty() {
+            return Err(DownloadError::InvalidConfiguration(
+                "download destination must not be empty".to_string(),
+            ));
+        }
+
+        if self.max_connections == Some(0) {
+            return Err(DownloadError::InvalidConfiguration(
+                "max_connections must be greater than zero".to_string(),
+            ));
+        }
+
+        for mirror in &self.mirrors {
+            if mirror.is_empty() {
+                return Err(DownloadError::InvalidConfiguration(
+                    "mirror URL must not be empty".to_string(),
+                ));
+            }
+            url::Url::parse(mirror).map_err(|e| {
+                DownloadError::InvalidConfiguration(format!("invalid mirror URL '{mirror}': {e}"))
+            })?;
+        }
+
+        Ok(DownloadRequest {
             url: self.url,
             destination: self.destination,
             priority: self.priority,
@@ -321,7 +361,7 @@ impl DownloadRequestBuilder {
             speed_limit: self.speed_limit,
             mirrors: self.mirrors,
             proxy: self.proxy,
-        }
+        })
     }
 }
 
@@ -424,7 +464,8 @@ mod tests {
             .max_connections(4)
             .speed_limit(1_000_000)
             .mirror("https://mirror.example.com/file.bin")
-            .build();
+            .build()
+            .unwrap();
 
         assert_eq!(request.url, "https://example.com/file.bin");
         assert_eq!(request.destination, PathBuf::from("/tmp/file.bin"));
@@ -438,7 +479,9 @@ mod tests {
 
     #[test]
     fn download_request_builder_defaults() {
-        let request = DownloadRequest::builder("https://example.com", "/tmp/out").build();
+        let request = DownloadRequest::builder("https://example.com", "/tmp/out")
+            .build()
+            .unwrap();
 
         assert_eq!(request.priority, DownloadPriority::Normal);
         assert!(request.checksum.is_none());
@@ -554,7 +597,8 @@ mod tests {
         };
         let request = DownloadRequest::builder("https://example.com/file", "/tmp/file")
             .proxy(proxy.clone())
-            .build();
+            .build()
+            .unwrap();
 
         assert!(request.proxy.is_some());
         let req_proxy = request.proxy.expect("proxy present");
@@ -564,7 +608,9 @@ mod tests {
 
     #[test]
     fn download_request_without_proxy_defaults_to_none() {
-        let request = DownloadRequest::builder("https://example.com", "/tmp/out").build();
+        let request = DownloadRequest::builder("https://example.com", "/tmp/out")
+            .build()
+            .unwrap();
         assert!(request.proxy.is_none());
     }
 
@@ -577,7 +623,8 @@ mod tests {
                 kind: ProxyKind::Socks5,
             })
             .max_connections(4)
-            .build();
+            .build()
+            .unwrap();
 
         assert_eq!(request.priority, DownloadPriority::High);
         assert_eq!(request.max_connections, Some(4));
@@ -593,7 +640,8 @@ mod tests {
                 url: "http://proxy:8080".to_string(),
                 kind: ProxyKind::Http,
             })
-            .build();
+            .build()
+            .unwrap();
 
         let json = serde_json::to_string(&request).expect("serialize");
         let back: DownloadRequest = serde_json::from_str(&json).expect("deserialize");
@@ -638,5 +686,72 @@ mod tests {
             let proxy = hpx::Proxy::try_from(config).expect("valid proxy config");
             let _client = hpx::Client::builder().proxy(proxy).build().expect("client");
         }
+    }
+
+    // --- DownloadRequest validation tests ---
+
+    #[test]
+    fn build_rejects_empty_url() {
+        let err = DownloadRequest::builder("", "/tmp/file")
+            .build()
+            .unwrap_err();
+        assert!(matches!(err, DownloadError::InvalidConfiguration(_)));
+        assert!(err.to_string().contains("must not be empty"));
+    }
+
+    #[test]
+    fn build_rejects_invalid_url() {
+        let err = DownloadRequest::builder("not a url", "/tmp/file")
+            .build()
+            .unwrap_err();
+        assert!(matches!(err, DownloadError::InvalidConfiguration(_)));
+        assert!(err.to_string().contains("invalid download URL"));
+    }
+
+    #[test]
+    fn build_rejects_empty_destination() {
+        let err = DownloadRequest::builder("https://example.com/file", "")
+            .build()
+            .unwrap_err();
+        assert!(matches!(err, DownloadError::InvalidConfiguration(_)));
+        assert!(err.to_string().contains("destination must not be empty"));
+    }
+
+    #[test]
+    fn build_rejects_zero_max_connections() {
+        let err = DownloadRequest::builder("https://example.com/file", "/tmp/file")
+            .max_connections(0)
+            .build()
+            .unwrap_err();
+        assert!(matches!(err, DownloadError::InvalidConfiguration(_)));
+        assert!(err.to_string().contains("max_connections"));
+    }
+
+    #[test]
+    fn build_accepts_valid_url() {
+        let request = DownloadRequest::builder("https://example.com/file", "/tmp/file")
+            .build()
+            .unwrap();
+        assert_eq!(request.url, "https://example.com/file");
+    }
+
+    #[test]
+    fn build_rejects_empty_mirror() {
+        let err = DownloadRequest::builder("https://example.com/file", "/tmp/file")
+            .mirror("")
+            .build()
+            .unwrap_err();
+        assert!(matches!(err, DownloadError::InvalidConfiguration(_)));
+        assert!(err.to_string().contains("mirror URL must not be empty"));
+    }
+
+    #[test]
+    fn build_rejects_invalid_mirror_url() {
+        let err = DownloadRequest::builder("https://example.com/file", "/tmp/file")
+            .mirror("not a url")
+            .build()
+            .unwrap_err();
+        assert!(matches!(err, DownloadError::InvalidConfiguration(_)));
+        assert!(err.to_string().contains("invalid mirror URL"));
     }
 }

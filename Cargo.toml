@@ -3,7 +3,7 @@ members = ["bin/*", "crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "2.5.10"
+version = "2.5.11"
 edition = "2024"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license = "Apache-2.0"
@@ -192,15 +192,15 @@ all = "warn"
 
 [workspace.dependencies]
 # local crates
-hpx = { path = "crates/hpx", version = "2.5.10" }
-hpx-browser = { path = "crates/hpx-browser", version = "2.5.10" }
-hpx-cli = { path = "bin/hpx-cli", version = "2.5.10" }
-hpx-dl = { path = "crates/hpx-dl", version = "2.5.10" }
-hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.10" }
-hpx-h3 = { path = "crates/hpx-h3", version = "2.5.10" }
-hpx-streams = { path = "crates/hpx-streams", version = "2.5.10" }
-hpx-yawc = { path = "crates/yawc", version = "2.5.10" }
-hpxless = { path = "bin/hpxless", version = "2.5.10" }
+hpx = { path = "crates/hpx", version = "2.5.11" }
+hpx-browser = { path = "crates/hpx-browser", version = "2.5.11" }
+hpx-cli = { path = "bin/hpx-cli", version = "2.5.11" }
+hpx-dl = { path = "crates/hpx-dl", version = "2.5.11" }
+hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.11" }
+hpx-h3 = { path = "crates/hpx-h3", version = "2.5.11" }
+hpx-streams = { path = "crates/hpx-streams", version = "2.5.11" }
+hpx-yawc = { path = "crates/yawc", version = "2.5.11" }
+hpxless = { path = "bin/hpxless", version = "2.5.11" }
 
 # external crates
 ahash = "0.8.12"
@@ -212,9 +212,9 @@ async-trait = "0.1.91"
 axum = "0.8.9"
 axum-core = "0.5.6"
 base64-simd = "0.8.0"
-blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62", version = "=0.3.0-beta.1" }
-blitz-html = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62", version = "=0.3.0-beta.1" }
-blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62", version = "=0.3.0-beta.1" }
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "00a2f69182898f1c9e39834744e036979a33288f", version = "=0.3.0-beta.1" }
+blitz-html = { git = "https://github.com/DioxusLabs/blitz.git", rev = "00a2f69182898f1c9e39834744e036979a33288f", version = "=0.3.0-beta.1" }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "00a2f69182898f1c9e39834744e036979a33288f", version = "=0.3.0-beta.1" }
 bon = "3.9.3"
 boring = "5.1.0"
 brotli = "8.0.4"
@@ -226,7 +226,7 @@ criterion = "0.8.2"
 crossbeam-channel = "0.5.16"
 csv = "1.4.0"
 cucumber = "0.23.0"
-deno_core = "0.408.0"
+deno_core = "0.409.0"
 der = "0.8.1"
 digest = "0.11.3"
 ecdysis = "1.1.1"
@@ -283,7 +283,7 @@ rustfft = "6.4.1"
 rustls = "0.23.42"
 rustls-native-certs = "0.8.4"
 rustls-pemfile = "2.2.0"
-rustls-pki-types = "1.15.0"
+rustls-pki-types = "1.15.1"
 rustybuzz = "0.20.1"
 scc = "3.8.5"
 selectors = "0.39.0"

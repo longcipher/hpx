@@ -368,7 +368,9 @@ impl Storage for SqliteStorage {
                 .entry(download_id)
                 .or_default()
                 .push(SegmentState {
-                    index: row.get::<i64, _>("idx") as u32,
+                    index: u32::try_from(row.get::<i64, _>("idx")).map_err(|e| {
+                        DownloadError::Storage(format!("invalid segment index: {e}"))
+                    })?,
                     start: to_u64(row.get::<i64, _>("start")),
                     end: to_u64(row.get::<i64, _>("end")),
                     state,
@@ -596,7 +598,8 @@ impl SqliteStorage {
         for row in rows {
             let state_str: String = row.get("state");
             segments.push(SegmentState {
-                index: row.get::<i64, _>("idx") as u32,
+                index: u32::try_from(row.get::<i64, _>("idx"))
+                    .map_err(|e| DownloadError::Storage(format!("invalid segment index: {e}")))?,
                 start: to_u64(row.get::<i64, _>("start")),
                 end: to_u64(row.get::<i64, _>("end")),
                 state: parse_segment_status(&state_str)?,
@@ -611,7 +614,7 @@ impl SqliteStorage {
 fn chrono_timestamp() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
 #[cfg(test)]
@@ -632,7 +635,8 @@ mod tests {
         let now = 1_700_000_000;
         let request = DownloadRequest::builder("https://example.com/file.bin", "/tmp/file.bin")
             .priority(DownloadPriority::Normal)
-            .build();
+            .build()
+            .unwrap();
         DownloadRecord {
             id,
             request: request.clone(),
@@ -653,7 +657,8 @@ mod tests {
         let now = 1_700_000_000;
         let request = DownloadRequest::builder("https://example.com/large.bin", "/tmp/large.bin")
             .priority(DownloadPriority::High)
-            .build();
+            .build()
+            .unwrap();
         DownloadRecord {
             id,
             request: request.clone(),
@@ -781,7 +786,8 @@ mod tests {
         let id = DownloadId::new();
         let request = DownloadRequest::builder("https://example.com/file", "/tmp/file")
             .priority(DownloadPriority::Low)
-            .build();
+            .build()
+            .unwrap();
         let record = DownloadRecord {
             id,
             request: request.clone(),
@@ -824,7 +830,8 @@ mod tests {
         r2.id = DownloadId::new();
         r2.request = DownloadRequest::builder("https://example.org/other.bin", "/tmp/file.bin")
             .priority(DownloadPriority::Normal)
-            .build();
+            .build()
+            .unwrap();
 
         storage.save(&r1).await.expect("save r1");
         storage.save(&r2).await.expect("save r2");
@@ -965,7 +972,8 @@ mod tests {
         record.request =
             DownloadRequest::builder("https://example.org/replaced.bin", "/tmp/replaced.bin")
                 .priority(DownloadPriority::Critical)
-                .build();
+                .build()
+                .unwrap();
         record.state = DownloadState::Paused;
 
         storage.upsert(&record).await.expect("upsert");

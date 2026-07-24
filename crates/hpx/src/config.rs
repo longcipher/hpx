@@ -139,3 +139,166 @@ macro_rules! impl_request_config_value {
         }
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Define test marker types
+    #[derive(Clone, Debug, PartialEq)]
+    struct TimeoutConfig(std::time::Duration);
+
+    impl RequestConfigValue for TimeoutConfig {
+        type Value = std::time::Duration;
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    struct MaxRetries;
+
+    impl RequestConfigValue for MaxRetries {
+        type Value = usize;
+    }
+
+    #[test]
+    fn request_config_default_is_none() {
+        let config = RequestConfig::<TimeoutConfig>::default();
+        assert!(config.as_ref().is_none());
+    }
+
+    #[test]
+    fn request_config_new_with_value() {
+        let config = RequestConfig::<TimeoutConfig>::new(Some(std::time::Duration::from_secs(5)));
+        assert!(config.as_ref().is_some());
+        assert_eq!(config.as_ref().unwrap(), &std::time::Duration::from_secs(5));
+    }
+
+    #[test]
+    fn request_config_new_with_none() {
+        let config = RequestConfig::<TimeoutConfig>::new(None);
+        assert!(config.as_ref().is_none());
+    }
+
+    #[test]
+    fn fetch_returns_client_value_when_request_empty() {
+        let client = RequestConfig::<TimeoutConfig>::new(Some(std::time::Duration::from_secs(10)));
+        let ext = Extensions::new();
+        let result = client.fetch(&ext);
+        assert_eq!(result, Some(&std::time::Duration::from_secs(10)));
+    }
+
+    #[test]
+    fn fetch_returns_request_value_over_client() {
+        let client = RequestConfig::<TimeoutConfig>::new(Some(std::time::Duration::from_secs(10)));
+        let mut ext = Extensions::new();
+        ext.insert(RequestConfig::<TimeoutConfig>::new(Some(
+            std::time::Duration::from_secs(5),
+        )));
+        let result = client.fetch(&ext);
+        assert_eq!(result, Some(&std::time::Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn fetch_returns_none_when_both_empty() {
+        let client = RequestConfig::<TimeoutConfig>::new(None);
+        let ext = Extensions::new();
+        assert!(client.fetch(&ext).is_none());
+    }
+
+    #[test]
+    fn store_inserts_when_not_present() {
+        let config = RequestConfig::<MaxRetries>::new(Some(3));
+        let mut ext = Extensions::new();
+        config.store(&mut ext);
+        assert_eq!(RequestConfig::<MaxRetries>::get(&ext), Some(&3));
+    }
+
+    #[test]
+    fn store_does_not_overwrite_existing() {
+        let config = RequestConfig::<MaxRetries>::new(Some(3));
+        let mut ext = Extensions::new();
+        ext.insert(RequestConfig::<MaxRetries>::new(Some(5)));
+        config.store(&mut ext);
+        // The existing value (5) should remain
+        assert_eq!(RequestConfig::<MaxRetries>::get(&ext), Some(&5));
+    }
+
+    #[test]
+    fn get_returns_value_when_present() {
+        let mut ext = Extensions::new();
+        ext.insert(RequestConfig::<MaxRetries>::new(Some(7)));
+        assert_eq!(RequestConfig::<MaxRetries>::get(&ext), Some(&7));
+    }
+
+    #[test]
+    fn get_returns_none_when_absent() {
+        let ext = Extensions::new();
+        assert!(RequestConfig::<MaxRetries>::get(&ext).is_none());
+    }
+
+    #[test]
+    fn get_returns_none_when_inner_value_is_none() {
+        let mut ext = Extensions::new();
+        ext.insert(RequestConfig::<MaxRetries>::new(None));
+        assert!(RequestConfig::<MaxRetries>::get(&ext).is_none());
+    }
+
+    #[test]
+    fn remove_extracts_value() {
+        let mut ext = Extensions::new();
+        ext.insert(RequestConfig::<MaxRetries>::new(Some(42)));
+        let removed = RequestConfig::<MaxRetries>::remove(&mut ext);
+        assert_eq!(removed, Some(42));
+        assert!(RequestConfig::<MaxRetries>::get(&ext).is_none());
+    }
+
+    #[test]
+    fn remove_returns_none_when_absent() {
+        let mut ext = Extensions::new();
+        assert!(RequestConfig::<MaxRetries>::remove(&mut ext).is_none());
+    }
+
+    #[test]
+    fn load_replaces_inner_value() {
+        let mut config = RequestConfig::<MaxRetries>::new(Some(1));
+        let mut ext = Extensions::new();
+        ext.insert(RequestConfig::<MaxRetries>::new(Some(99)));
+        let result = config.load(&mut ext);
+        assert_eq!(result, Some(&99));
+        assert_eq!(config.as_ref(), Some(&99));
+    }
+
+    #[test]
+    fn load_keeps_existing_when_ext_empty() {
+        let mut config = RequestConfig::<MaxRetries>::new(Some(5));
+        let mut ext = Extensions::new();
+        let result = config.load(&mut ext);
+        assert_eq!(result, Some(&5));
+    }
+
+    #[test]
+    fn get_mut_provides_mutable_access() {
+        let mut ext = Extensions::new();
+        *RequestConfig::<MaxRetries>::get_mut(&mut ext) = Some(10);
+        assert_eq!(RequestConfig::<MaxRetries>::get(&ext), Some(&10));
+    }
+
+    #[test]
+    fn type_safety_different_configs_dont_interfere() {
+        #[derive(Clone, Debug, PartialEq)]
+        struct TagA;
+        #[derive(Clone, Debug, PartialEq)]
+        struct TagB;
+        impl RequestConfigValue for TagA {
+            type Value = String;
+        }
+        impl RequestConfigValue for TagB {
+            type Value = String;
+        }
+
+        let mut ext = Extensions::new();
+        ext.insert(RequestConfig::<TagA>::new(Some("hello".into())));
+        // TagB should not see TagA's value
+        assert!(RequestConfig::<TagB>::get(&ext).is_none());
+        assert_eq!(RequestConfig::<TagA>::get(&ext), Some(&"hello".to_string()));
+    }
+}

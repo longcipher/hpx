@@ -35,6 +35,7 @@ prost = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
 simd-json = { workspace = true, optional = true }
+thiserror = { workspace = true }
 tokio-util = { workspace = true, features = ["io", "codec"] }
 
 [lints]

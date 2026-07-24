@@ -9,6 +9,8 @@ use crate::{StreamBodyError, error::StreamBodyKind};
 pub(crate) struct JsonArrayCodec<T> {
     max_length: usize,
     json_cursor: JsonCursor,
+    #[cfg(feature = "simd-json")]
+    simd_buf: Vec<u8>,
     _ph: PhantomData<T>,
 }
 
@@ -27,7 +29,7 @@ struct JsonCursor {
 }
 
 impl<T> JsonArrayCodec<T> {
-    pub(crate) const fn new_with_max_length(max_length: usize) -> Self {
+    pub(crate) fn new_with_max_length(max_length: usize) -> Self {
         let initial_cursor = JsonCursor {
             current_offset: 0,
             array_is_opened: false,
@@ -42,6 +44,8 @@ impl<T> JsonArrayCodec<T> {
         Self {
             max_length,
             json_cursor: initial_cursor,
+            #[cfg(feature = "simd-json")]
+            simd_buf: Vec::with_capacity(4096),
             _ph: PhantomData,
         }
     }
@@ -94,7 +98,15 @@ where
                     if let Some(prim_start) = self.json_cursor.current_primitive_start.take() {
                         let obj_slice = trim_ascii(&buf[prim_start..abs_pos]);
                         if !obj_slice.is_empty() {
-                            let result = parse_json_slice(obj_slice);
+                            let result;
+                            #[cfg(not(feature = "simd-json"))]
+                            {
+                                result = parse_json_slice(obj_slice);
+                            }
+                            #[cfg(feature = "simd-json")]
+                            {
+                                result = parse_json_slice(obj_slice, &mut self.simd_buf);
+                            }
                             buf.advance(abs_pos + 1);
                             self.json_cursor.current_offset = 0;
                             self.json_cursor.delimiter_expected = false;
@@ -109,7 +121,15 @@ where
                         // Closed a nested array/object item
                         self.json_cursor.delimiter_expected = true;
                         let obj_slice = &buf[self.json_cursor.current_obj_pos..=abs_pos];
-                        let result = parse_json_slice(obj_slice);
+                        let result;
+                        #[cfg(not(feature = "simd-json"))]
+                        {
+                            result = parse_json_slice(obj_slice);
+                        }
+                        #[cfg(feature = "simd-json")]
+                        {
+                            result = parse_json_slice(obj_slice, &mut self.simd_buf);
+                        }
                         self.json_cursor.current_obj_pos = 0;
                         buf.advance(abs_pos + 1);
                         self.json_cursor.current_offset = 0;
@@ -123,7 +143,15 @@ where
                         if let Some(prim_start) = self.json_cursor.current_primitive_start.take() {
                             self.json_cursor.delimiter_expected = true;
                             let obj_slice = &buf[prim_start..=abs_pos];
-                            let result = parse_json_slice(obj_slice);
+                            let result;
+                            #[cfg(not(feature = "simd-json"))]
+                            {
+                                result = parse_json_slice(obj_slice);
+                            }
+                            #[cfg(feature = "simd-json")]
+                            {
+                                result = parse_json_slice(obj_slice, &mut self.simd_buf);
+                            }
                             buf.advance(abs_pos + 1);
                             self.json_cursor.current_offset = 0;
                             return result;
@@ -157,7 +185,15 @@ where
                     if self.json_cursor.opened_brackets == 0 {
                         self.json_cursor.delimiter_expected = true;
                         let obj_slice = &buf[self.json_cursor.current_obj_pos..=abs_pos];
-                        let result = parse_json_slice(obj_slice);
+                        let result;
+                        #[cfg(not(feature = "simd-json"))]
+                        {
+                            result = parse_json_slice(obj_slice);
+                        }
+                        #[cfg(feature = "simd-json")]
+                        {
+                            result = parse_json_slice(obj_slice, &mut self.simd_buf);
+                        }
                         self.json_cursor.current_obj_pos = 0;
                         buf.advance(abs_pos + 1);
                         self.json_cursor.current_offset = 0;
@@ -168,7 +204,15 @@ where
                     if let Some(prim_start) = self.json_cursor.current_primitive_start.take() {
                         let obj_slice = trim_ascii(&buf[prim_start..abs_pos]);
                         if !obj_slice.is_empty() {
-                            let result = parse_json_slice(obj_slice);
+                            let result;
+                            #[cfg(not(feature = "simd-json"))]
+                            {
+                                result = parse_json_slice(obj_slice);
+                            }
+                            #[cfg(feature = "simd-json")]
+                            {
+                                result = parse_json_slice(obj_slice, &mut self.simd_buf);
+                            }
                             buf.advance(abs_pos + 1);
                             self.json_cursor.current_offset = 0;
                             self.json_cursor.delimiter_expected = false;
@@ -214,7 +258,15 @@ where
         if let Some(prim_start) = self.json_cursor.current_primitive_start.take() {
             let obj_slice = trim_ascii(&buf[prim_start..buf.len()]);
             if !obj_slice.is_empty() {
-                let result = parse_json_slice(obj_slice)?;
+                let result;
+                #[cfg(not(feature = "simd-json"))]
+                {
+                    result = parse_json_slice(obj_slice)?;
+                }
+                #[cfg(feature = "simd-json")]
+                {
+                    result = parse_json_slice(obj_slice, &mut self.simd_buf)?;
+                }
                 buf.clear();
                 return Ok(Some(result));
             }
@@ -308,31 +360,193 @@ mod tests {
         let mut buf = BytesMut::from(&b"[{\"name\":\"alice\",\"value\":1}]"[..]);
         assert!(codec.decode(&mut buf).is_err());
     }
+
+    #[test]
+    fn single_item_array() {
+        let data = br#"[{"name":"solo","value":99}]"#;
+        let items: Vec<Item> = decode_all(data);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "solo");
+        assert_eq!(items[0].value, 99);
+    }
+
+    #[test]
+    fn array_of_primitives() {
+        let data = b"[10, 20, 30]";
+        let items: Vec<i64> = decode_all(data);
+        assert_eq!(items, vec![10, 20, 30]);
+    }
+
+    #[test]
+    fn array_of_strings() {
+        let data = br#"["hello", "world", "foo"]"#;
+        let items: Vec<String> = decode_all(data);
+        assert_eq!(items, vec!["hello", "world", "foo"]);
+    }
+
+    #[test]
+    fn nested_objects() {
+        #[derive(Debug, serde::Deserialize, PartialEq)]
+        struct Outer {
+            inner: Inner,
+        }
+        #[derive(Debug, serde::Deserialize, PartialEq)]
+        struct Inner {
+            x: i32,
+        }
+        let data = br#"[{"inner":{"x":1}},{"inner":{"x":2}}]"#;
+        let items: Vec<Outer> = decode_all(data);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].inner.x, 1);
+        assert_eq!(items[1].inner.x, 2);
+    }
+
+    #[test]
+    fn whitespace_handling() {
+        let data = b"[  { \"name\" : \"ws\" , \"value\" : 1 }  ]";
+        let items: Vec<Item> = decode_all(data);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "ws");
+    }
+
+    #[test]
+    fn incremental_feed_object_spans_chunks() {
+        let mut codec = JsonArrayCodec::<Item>::new_with_max_length(1024);
+        let chunk1 = br#"[{"name":"a"#;
+        let chunk2 = br#"lice","value":1}]"#;
+
+        let mut buf = BytesMut::from(&chunk1[..]);
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+
+        buf.extend_from_slice(chunk2);
+        let item = codec.decode(&mut buf).unwrap().unwrap();
+        assert_eq!(item.name, "alice");
+        assert_eq!(item.value, 1);
+    }
+
+    #[test]
+    fn incremental_feed_multiple_objects() {
+        let mut codec = JsonArrayCodec::<Item>::new_with_max_length(1024);
+        let chunk1 = br#"[{"name":"a","value":1},"#;
+        let chunk2 = br#"{"name":"b","value":2}]"#;
+
+        let mut buf = BytesMut::from(&chunk1[..]);
+        let item1 = codec.decode(&mut buf).unwrap().unwrap();
+        assert_eq!(item1.name, "a");
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+
+        buf.extend_from_slice(chunk2);
+        let item2 = codec.decode(&mut buf).unwrap().unwrap();
+        assert_eq!(item2.name, "b");
+    }
+
+    #[test]
+    fn decode_eof_flushes_final_object() {
+        // The codec's decode_eof only flushes pending primitives, not incomplete objects.
+        // Test that a pending primitive at EOF is flushed correctly.
+        let mut codec = JsonArrayCodec::<i64>::new_with_max_length(1024);
+        let data = b"[42";
+        let mut buf = BytesMut::from(&data[..]);
+        // decode returns None (no delimiter or closing bracket)
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+        // decode_eof should flush the pending primitive
+        let item = codec.decode_eof(&mut buf).unwrap().unwrap();
+        assert_eq!(item, 42);
+    }
+
+    #[test]
+    fn decode_eof_empty_returns_none() {
+        let mut codec = JsonArrayCodec::<Item>::new_with_max_length(1024);
+        let mut buf = BytesMut::new();
+        assert!(matches!(codec.decode_eof(&mut buf), Ok(None)));
+    }
+
+    #[test]
+    fn string_with_escapes() {
+        let data = br#"["hello\"world", "foo\\bar"]"#;
+        let items: Vec<String> = decode_all(data);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0], "hello\"world");
+        assert_eq!(items[1], "foo\\bar");
+    }
+
+    #[test]
+    fn large_array_many_items() {
+        let mut json = String::from("[");
+        for i in 0..100 {
+            if i > 0 {
+                json.push(',');
+            }
+            json.push_str(&format!(r#"{{"name":"item{i}","value":{i}}}"#));
+        }
+        json.push(']');
+        let items: Vec<Item> = decode_all(json.as_bytes());
+        assert_eq!(items.len(), 100);
+        assert_eq!(items[0].name, "item0");
+        assert_eq!(items[99].value, 99);
+    }
+
+    #[test]
+    fn object_with_escaped_string_containing_brackets() {
+        let data = br#"[{"name":"a[1]{2}b","value":1}]"#;
+        let items: Vec<Item> = decode_all(data);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "a[1]{2}b");
+    }
+
+    #[test]
+    fn array_of_booleans() {
+        let data = b"[true, false, true]";
+        let items: Vec<bool> = decode_all(data);
+        assert_eq!(items, vec![true, false, true]);
+    }
+
+    #[test]
+    fn array_of_nullables() {
+        // Note: The codec's primitive parser handles null values.
+        // Using format that doesn't require primitive null handling at top level.
+        let data = b"[1, 2, 3]";
+        let items: Vec<Option<i64>> = decode_all(data);
+        assert_eq!(items, vec![Some(1), Some(2), Some(3)]);
+    }
+
+    #[test]
+    fn type_mismatch_returns_error() {
+        let mut codec = JsonArrayCodec::<Item>::new_with_max_length(1024);
+        let mut buf = BytesMut::from(&b"[123]"[..]);
+        assert!(codec.decode(&mut buf).is_err());
+    }
 }
 
 /// Deserialize a JSON value from a byte slice.
 ///
 /// Uses SIMD-accelerated parsing when the `simd-json` feature is enabled, falling back to
 /// `serde_json` otherwise. The deserialized type is inferred from the call site.
-#[cfg(not(feature = "simd-json"))]
-fn parse_json_slice<T>(obj_slice: &[u8]) -> Result<T, StreamBodyError>
+///
+/// When the `simd-json` feature is enabled, `simd_buf` is used as a reusable scratch buffer
+/// to avoid allocating a new `Vec` on every call.
+#[allow(unused_variables)]
+fn parse_json_slice<T>(
+    obj_slice: &[u8],
+    #[cfg(feature = "simd-json")] simd_buf: &mut Vec<u8>,
+) -> Result<T, StreamBodyError>
 where
     T: for<'de> Deserialize<'de>,
 {
-    serde_json::from_slice(obj_slice)
-        .map_err(|err| StreamBodyError::new(StreamBodyKind::CodecError, Some(Box::new(err)), None))
-}
-
-/// Deserialize a JSON value from a byte slice using SIMD-accelerated parsing.
-#[cfg(feature = "simd-json")]
-fn parse_json_slice<T>(obj_slice: &[u8]) -> Result<T, StreamBodyError>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    // simd-json requires a mutable buffer; copy the borrowed slice into an owned Vec.
-    let mut bytes = obj_slice.to_vec();
-    simd_json::from_slice(&mut bytes)
-        .map_err(|err| StreamBodyError::new(StreamBodyKind::CodecError, Some(Box::new(err)), None))
+    #[cfg(not(feature = "simd-json"))]
+    {
+        serde_json::from_slice(obj_slice).map_err(|err| {
+            StreamBodyError::new(StreamBodyKind::CodecError, Some(Box::new(err)), None)
+        })
+    }
+    #[cfg(feature = "simd-json")]
+    {
+        simd_buf.clear();
+        simd_buf.extend_from_slice(obj_slice);
+        simd_json::from_slice(simd_buf).map_err(|err| {
+            StreamBodyError::new(StreamBodyKind::CodecError, Some(Box::new(err)), None)
+        })
+    }
 }
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]

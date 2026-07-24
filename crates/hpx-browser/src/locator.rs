@@ -144,15 +144,15 @@ impl Locator {
 
 /// Escape a CSS selector (or attribute name) for safe JS string interpolation.
 ///
-/// Replaces single quotes with `\'` so the string can be safely embedded in
-/// a single-quoted JS string literal.
+/// Delegates to the shared [`crate::utils::escape_js_string`] which handles
+/// backslashes, quotes, backticks, and control characters.
 ///
 /// # Errors
 ///
 /// Never returns an error.
 #[must_use]
 pub fn escape_selector(s: &str) -> String {
-    s.replace('\'', "\\'")
+    crate::utils::escape_js_string(s)
 }
 
 impl CdpPage {

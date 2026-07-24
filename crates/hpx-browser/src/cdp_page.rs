@@ -565,29 +565,10 @@ impl CdpPage {
     }
 }
 
-/// Escape a string for safe interpolation into a JS single-quoted literal.
-///
-/// Handles `\`, `'`, and newlines — the three characters that would break
-/// a single-quoted JS string.
-fn escape_js_string(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '\'' => out.push_str("\\'"),
-            '`' => out.push_str("\\`"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            _ => out.push(ch),
-        }
-    }
-    out
-}
-
 /// Build the JS expression that resolves `true` when `selector` matches
 /// an element, or rejects after `timeout_ms`.
 fn build_wait_for_selector_js(selector: &str, timeout_ms: u128) -> String {
-    let escaped = escape_js_string(selector);
+    let escaped = crate::utils::escape_js_string(selector);
     format!(
         "new Promise((resolve, reject) => {{ \
            const sel = '{escaped}'; \
@@ -668,27 +649,27 @@ mod tests {
 
     #[test]
     fn escape_js_string_simple() {
-        assert_eq!(escape_js_string("hello"), "hello");
+        assert_eq!(crate::utils::escape_js_string("hello"), "hello");
     }
 
     #[test]
     fn escape_js_string_quotes() {
-        assert_eq!(escape_js_string("it's"), "it\\'s");
+        assert_eq!(crate::utils::escape_js_string("it's"), "it\\'s");
     }
 
     #[test]
     fn escape_js_string_backslash() {
-        assert_eq!(escape_js_string("a\\b"), "a\\\\b");
+        assert_eq!(crate::utils::escape_js_string("a\\b"), "a\\\\b");
     }
 
     #[test]
     fn escape_js_string_newlines() {
-        assert_eq!(escape_js_string("a\nb\r"), "a\\nb\\r");
+        assert_eq!(crate::utils::escape_js_string("a\nb\r"), "a\\nb\\r");
     }
 
     #[test]
     fn escape_js_string_backtick() {
-        assert_eq!(escape_js_string("a`b"), "a\\`b");
+        assert_eq!(crate::utils::escape_js_string("a`b"), "a\\`b");
     }
 
     #[test]

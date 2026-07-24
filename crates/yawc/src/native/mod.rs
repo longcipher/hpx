@@ -492,18 +492,17 @@ impl FragmentLayer {
 
     /// Fragments an outgoing frame if necessary and queues the fragments.
     ///
-    /// Panics if the user tries to manually fragment while auto-fragmentation is enabled.
-    fn fragment_outgoing(&mut self, frame: Frame) {
+    /// Returns an error if the user tries to manually fragment while auto-fragmentation is enabled.
+    fn fragment_outgoing(&mut self, frame: Frame) -> Result<()> {
         // Check for invalid manual fragmentation with auto-fragmentation enabled
         if !frame.is_fin() && self.fragment_size.is_some() {
-            panic!(
-                "Fragment the frames yourself or use `fragment_size`, but not both. Use Streaming"
-            );
+            return Err(WebSocketError::ConflictingFragmentation);
         }
 
         let max_fragment_size = self.fragment_size.unwrap_or(usize::MAX);
         self.outgoing_fragments
             .extend(frame.into_fragments(max_fragment_size));
+        Ok(())
     }
 
     /// Returns the next queued outgoing fragment, if any.
@@ -704,7 +703,7 @@ impl FragmentLayer {
 /// ```
 ///
 /// **Important**: Attempting to send manual fragments (frames with `FIN=0`) through `WebSocket`
-/// while automatic fragmentation is enabled will panic. Use [`Streaming`] for manual fragmentation.
+/// while automatic fragmentation is enabled will return an error. Use [`Streaming`] for manual fragmentation.
 ///
 /// See [`examples/streaming.rs`](https://github.com/infinitefield/yawc/blob/master/examples/streaming.rs)
 /// for a complete example of manual fragment control for streaming large files.
@@ -1274,7 +1273,7 @@ where
 
     fn start_send(self: Pin<&mut Self>, item: Frame) -> std::result::Result<(), Self::Error> {
         let this = self.get_mut();
-        this.fragment_layer.fragment_outgoing(item);
+        this.fragment_layer.fragment_outgoing(item)?;
         Ok(())
     }
 

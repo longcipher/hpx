@@ -1,5 +1,3 @@
-#![allow(clippy::too_many_arguments)]
-
 use std::{
     io::Write,
     path::PathBuf,
@@ -7,26 +5,56 @@ use std::{
 };
 
 use eyre::Context;
-use hpx_browser::{dom::NodeId, host::EngineHandle, page::Page};
+use hpx_browser::{dom::NodeId, page::Page};
 use tokio::sync::Semaphore;
 
 use crate::cli::DumpFormat;
 
-pub(crate) async fn handle_fetch(
-    url: String,
-    dump: DumpFormat,
-    selector: Option<String>,
-    wait: u64,
-    timeout: u64,
-    wait_until: String,
-    eval: Option<String>,
-    output: Option<PathBuf>,
-    quiet: bool,
-    _obey_robots: bool,
-    allow_private_network: bool,
-    _v8_flags: Option<String>,
-    _storage_dir: Option<PathBuf>,
-) -> eyre::Result<()> {
+pub(crate) struct FetchConfig {
+    pub url: String,
+    pub dump: DumpFormat,
+    pub selector: Option<String>,
+    pub wait: u64,
+    pub timeout: u64,
+    pub wait_until: String,
+    pub eval: Option<String>,
+    pub output: Option<PathBuf>,
+    pub quiet: bool,
+    pub allow_private_network: bool,
+}
+
+pub(crate) struct ScrapeConfig {
+    pub urls: Vec<String>,
+    pub eval: Option<String>,
+    pub concurrency: usize,
+    pub format: String,
+    pub timeout: u64,
+    pub quiet: bool,
+    pub allow_private_network: bool,
+}
+
+pub(crate) struct ServeConfig {
+    pub port: u16,
+    pub host: String,
+    pub stealth: bool,
+    pub workers: u16,
+    pub quiet: bool,
+}
+
+pub(crate) async fn handle_fetch(config: FetchConfig) -> eyre::Result<()> {
+    let FetchConfig {
+        url,
+        dump,
+        selector,
+        wait,
+        timeout,
+        wait_until,
+        eval,
+        output,
+        quiet,
+        allow_private_network,
+    } = config;
+
     if !quiet {
         eprintln!("fetch: {url} (dump={dump:?}, wait={wait}s, timeout={timeout}s)");
     }
@@ -89,7 +117,7 @@ pub(crate) async fn handle_fetch(
         };
 
         let result = rt.block_on(async move {
-            let mut page = Page::new(EngineHandle::new());
+            let mut page = Page::new();
             page.navigate(&url_clone)
                 .await
                 .wrap_err("navigation failed")?;
@@ -99,24 +127,24 @@ pub(crate) async fn handle_fetch(
             }
 
             let content = match dump {
-                DumpFormat::Html => page.content(),
+                DumpFormat::Html => page.content().to_string(),
                 DumpFormat::Text => page
                     .text_content()
                     .await
                     .wrap_err("text extraction failed")?,
                 DumpFormat::Links => {
                     let html = page.content();
-                    let links = extract_links(&html);
+                    let links = extract_links(html);
                     format_links_tsv(&links)
                 }
                 DumpFormat::Assets => {
                     let html = page.content();
-                    let assets = extract_assets(&html);
+                    let assets = extract_assets(html);
                     format_assets_ndjson(&assets)
                 }
                 DumpFormat::Markdown => {
                     // ponytail: markdown conversion pending Task 4.4
-                    page.content()
+                    page.content().to_string()
                 }
                 DumpFormat::Cookies => {
                     // ponytail: cookie extraction pending storage integration
@@ -242,18 +270,17 @@ struct ScrapeResult {
     error: Option<String>,
 }
 
-pub(crate) async fn handle_scrape(
-    urls: Vec<String>,
-    eval: Option<String>,
-    concurrency: usize,
-    format: String,
-    timeout: u64,
-    quiet: bool,
-    obey_robots: bool,
-    allow_private_network: bool,
-    v8_flags: Option<String>,
-    storage_dir: Option<PathBuf>,
-) -> eyre::Result<()> {
+pub(crate) async fn handle_scrape(config: ScrapeConfig) -> eyre::Result<()> {
+    let ScrapeConfig {
+        urls,
+        eval,
+        concurrency,
+        format,
+        timeout,
+        quiet,
+        allow_private_network,
+    } = config;
+
     if !quiet {
         eprintln!(
             "scrape: {} urls (concurrency={concurrency}, format={format}, timeout={timeout}s)",
@@ -262,14 +289,7 @@ pub(crate) async fn handle_scrape(
         if let Some(expr) = &eval {
             eprintln!("  eval: {expr}");
         }
-        eprintln!("  obey_robots: {obey_robots}");
         eprintln!("  allow_private_network: {allow_private_network}");
-        if let Some(flags) = &v8_flags {
-            eprintln!("  v8_flags: {flags}");
-        }
-        if let Some(dir) = &storage_dir {
-            eprintln!("  storage_dir: {}", dir.display());
-        }
     }
 
     let sem = std::sync::Arc::new(Semaphore::new(concurrency));
@@ -339,13 +359,13 @@ async fn scrape_single_url(url: &str, eval: Option<&str>, _timeout: u64) -> Scra
         };
 
         let result = rt.block_on(async move {
-            let mut page = Page::new(EngineHandle::new());
+            let mut page = Page::new();
             page.navigate(&url_owned)
                 .await
                 .wrap_err("navigation failed")?;
 
-            let title = page.title();
-            let html = page.content();
+            let title = page.title().to_string();
+            let html = page.content().to_string();
             let text = page
                 .text_content()
                 .await
@@ -395,20 +415,14 @@ async fn scrape_single_url(url: &str, eval: Option<&str>, _timeout: u64) -> Scra
     }
 }
 
-pub(crate) async fn handle_serve(
-    port: u16,
-    host: String,
-    stealth: bool,
-    workers: u16,
-    _allow_file_access: bool,
-    _storage_dir: Option<PathBuf>,
-    quiet: bool,
-    _obey_robots: bool,
-    allow_private_network: bool,
-    _v8_flags: Option<String>,
-) -> eyre::Result<()> {
-    // ponytail: allow_file_access, storage_dir, obey_robots, v8_flags not wired yet.
-    let _ = allow_private_network; // CDP server uses Page which has SSRF via HttpClient
+pub(crate) async fn handle_serve(config: ServeConfig) -> eyre::Result<()> {
+    let ServeConfig {
+        port,
+        host,
+        stealth,
+        workers,
+        quiet,
+    } = config;
 
     let html = "<html><body></body></html>";
 

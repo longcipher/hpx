@@ -90,37 +90,34 @@ impl Error {
         Error::new(Kind::Builder, Some(BadScheme)).with_uri(uri)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn canceled<E: Into<BoxError>>(e: E) -> Error {
         Error::new(Kind::Canceled, Some(e))
     }
 
-    #[allow(dead_code)]
     pub(crate) fn channel_closed<E: Into<BoxError>>(e: E) -> Error {
         Error::new(Kind::ChannelClosed, Some(e))
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: wire up when transport layer integration completes
     pub(crate) fn io<E: Into<BoxError>>(e: E) -> Error {
         Error::new(Kind::Io, Some(e))
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: wire up when body streaming integration completes
     pub(crate) fn body_write<E: Into<BoxError>>(e: E) -> Error {
         Error::new(Kind::BodyWrite, Some(e))
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: wire up when graceful shutdown integration completes
     pub(crate) fn shutdown<E: Into<BoxError>>(e: E) -> Error {
         Error::new(Kind::Shutdown, Some(e))
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: wire up when HTTP/2 error integration completes
     pub(crate) fn http2<E: Into<BoxError>>(e: E) -> Error {
         Error::new(Kind::Http2, Some(e))
     }
 
-    #[allow(dead_code)]
     pub(crate) fn proxy_connect<E: Into<BoxError>>(e: E) -> Error {
         Error::new(Kind::ProxyConnect, Some(e))
     }
@@ -479,20 +476,13 @@ pub(crate) enum Kind {
     #[allow(dead_code)] // ponytail: part of error API, used when websocket feature matures
     WebSocket,
     // Unified from core::Error
-    #[allow(dead_code)]
     Canceled,
-    #[allow(dead_code)]
     ChannelClosed,
-    #[allow(dead_code)]
     Io,
-    #[allow(dead_code)]
     BodyWrite,
-    #[allow(dead_code)]
     Shutdown,
-    #[allow(dead_code)]
     Http2,
     // Unified from client::Error
-    #[allow(dead_code)]
     ProxyConnect,
 }
 

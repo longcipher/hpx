@@ -306,28 +306,9 @@ define_enum!(
     IOS => "ios"
 );
 
-define_enum!(
-    /// Represents the platform for emulation.
-    ///
-    /// Maps to [`EmulationOS`] via [`From<Platform> for EmulationOS`].
-    /// Default is `Windows`.
-    plain,
-    Platform, Windows,
-    Windows => "windows",
-    MacOS => "macos",
-    Linux => "linux",
-    Android => "android",
-    IOS => "ios"
-);
-
-impl Platform {
-    /// Returns `true` for mobile platforms (`Android` and `IOS`).
-    #[inline]
-    pub const fn is_mobile(&self) -> bool {
-        matches!(self, Platform::Android | Platform::IOS)
-    }
-
-    /// Returns the `sec-ch-ua-platform` header value for this platform.
+/// ======== EmulationOS impls ========
+impl EmulationOS {
+    /// Returns the `sec-ch-ua-platform` header value for this OS.
     #[inline]
     pub const fn sec_ch_ua_platform(self) -> &'static str {
         match self {
@@ -338,37 +319,11 @@ impl Platform {
             Self::IOS => "\"iOS\"",
         }
     }
-}
 
-impl From<Platform> for EmulationOS {
+    /// Returns `true` for mobile platforms (`Android` and `IOS`).
     #[inline]
-    fn from(platform: Platform) -> Self {
-        match platform {
-            Platform::Windows => Self::Windows,
-            Platform::MacOS => Self::MacOS,
-            Platform::Linux => Self::Linux,
-            Platform::Android => Self::Android,
-            Platform::IOS => Self::IOS,
-        }
-    }
-}
-
-/// ======== EmulationOS impls ========
-impl EmulationOS {
-    #[inline]
-    const fn platform(&self) -> &'static str {
-        match self {
-            EmulationOS::MacOS => "\"macOS\"",
-            EmulationOS::Linux => "\"Linux\"",
-            EmulationOS::Windows => "\"Windows\"",
-            EmulationOS::Android => "\"Android\"",
-            EmulationOS::IOS => "\"iOS\"",
-        }
-    }
-
-    #[inline]
-    const fn is_mobile(&self) -> bool {
-        matches!(self, EmulationOS::Android | EmulationOS::IOS)
+    pub const fn is_mobile(&self) -> bool {
+        matches!(self, Self::Android | Self::IOS)
     }
 }
 
@@ -393,13 +348,9 @@ pub struct EmulationOption {
     #[builder(default)]
     emulation: Emulation,
 
-    /// The operating system.
+    /// The operating system to emulate.
     #[builder(default)]
     emulation_os: EmulationOS,
-
-    /// The platform.
-    #[builder(default)]
-    platform: Platform,
 
     /// Whether to skip HTTP/2.
     #[builder(default = false)]
@@ -413,13 +364,7 @@ pub struct EmulationOption {
 /// ======== EmulationOption impls ========
 impl hpx::EmulationFactory for EmulationOption {
     #[inline]
-    fn emulation(mut self) -> hpx::Emulation {
-        // ponytail: platform takes precedence over emulation_os when platform
-        // is not the default (Windows). This avoids the ambiguity of MacOS being
-        // both the default and a valid explicit choice.
-        if self.platform != Platform::Windows {
-            self.emulation_os = EmulationOS::from(self.platform);
-        }
+    fn emulation(self) -> hpx::Emulation {
         self.emulation.into_emulation(self)
     }
 }
@@ -431,46 +376,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn platform_is_mobile() {
-        assert!(!Platform::Windows.is_mobile());
-        assert!(!Platform::MacOS.is_mobile());
-        assert!(!Platform::Linux.is_mobile());
-        assert!(Platform::Android.is_mobile());
-        assert!(Platform::IOS.is_mobile());
+    fn emulation_os_is_mobile() {
+        assert!(!EmulationOS::Windows.is_mobile());
+        assert!(!EmulationOS::MacOS.is_mobile());
+        assert!(!EmulationOS::Linux.is_mobile());
+        assert!(EmulationOS::Android.is_mobile());
+        assert!(EmulationOS::IOS.is_mobile());
     }
 
     #[test]
-    fn platform_to_emulation_os() {
-        assert!(matches!(
-            EmulationOS::from(Platform::Windows),
-            EmulationOS::Windows
-        ));
-        assert!(matches!(
-            EmulationOS::from(Platform::MacOS),
-            EmulationOS::MacOS
-        ));
-        assert!(matches!(
-            EmulationOS::from(Platform::Linux),
-            EmulationOS::Linux
-        ));
-        assert!(matches!(
-            EmulationOS::from(Platform::Android),
-            EmulationOS::Android
-        ));
-        assert!(matches!(EmulationOS::from(Platform::IOS), EmulationOS::IOS));
+    fn emulation_os_sec_ch_ua_platform() {
+        assert_eq!(EmulationOS::Linux.sec_ch_ua_platform(), "\"Linux\"");
+        assert_eq!(EmulationOS::Windows.sec_ch_ua_platform(), "\"Windows\"");
+        assert_eq!(EmulationOS::MacOS.sec_ch_ua_platform(), "\"macOS\"");
+        assert_eq!(EmulationOS::Android.sec_ch_ua_platform(), "\"Android\"");
+        assert_eq!(EmulationOS::IOS.sec_ch_ua_platform(), "\"iOS\"");
     }
 
     #[test]
-    fn emulation_option_builder_with_platform() {
-        let option = EmulationOption::builder().platform(Platform::Linux).build();
-        assert!(matches!(option.platform, Platform::Linux));
+    fn emulation_option_builder_with_os() {
+        let option = EmulationOption::builder()
+            .emulation_os(EmulationOS::Linux)
+            .build();
+        assert!(matches!(option.emulation_os, EmulationOS::Linux));
     }
 
     #[test]
-    fn platform_affects_emulation_output() {
+    fn emulation_os_affects_emulation_output() {
         let mut emu = EmulationOption::builder()
             .emulation(Emulation::Chrome147)
-            .platform(Platform::Linux)
+            .emulation_os(EmulationOS::Linux)
             .build()
             .emulation();
         let ua = emu
@@ -501,18 +436,8 @@ mod tests {
     }
 
     #[test]
-    fn platform_sec_ch_ua_platform() {
-        assert_eq!(Platform::Linux.sec_ch_ua_platform(), "\"Linux\"");
-        assert_eq!(Platform::Windows.sec_ch_ua_platform(), "\"Windows\"");
-        assert_eq!(Platform::MacOS.sec_ch_ua_platform(), "\"macOS\"");
-        assert_eq!(Platform::Android.sec_ch_ua_platform(), "\"Android\"");
-        assert_eq!(Platform::IOS.sec_ch_ua_platform(), "\"iOS\"");
-    }
-
-    #[test]
-    fn explicit_emulation_os_preserved_when_platform_default() {
-        // When platform is default (Windows) but emulation_os is explicitly set,
-        // emulation_os should be preserved.
+    fn emulation_os_linux_preserved() {
+        // When emulation_os is explicitly set, it should be used directly.
         let mut em = EmulationOption::builder()
             .emulation(Emulation::Chrome147)
             .emulation_os(EmulationOS::Linux)

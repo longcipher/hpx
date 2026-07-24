@@ -109,10 +109,18 @@ impl JsonStreamResponse for hpx::Response {
         let frames_reader =
             tokio_util::codec::FramedRead::with_capacity(reader, codec, buf_capacity);
 
+        // Reusable buffer for simd-json to avoid per-line allocation.
+        #[cfg(feature = "simd-json")]
+        let mut simd_buf = Vec::with_capacity(4096);
+
         frames_reader
             .into_stream()
-            .map(|frame_res| match frame_res {
-                Ok(frame_str) => parse_json_line(frame_str.as_str()),
+            .map(move |frame_res| match frame_res {
+                Ok(frame_str) => parse_json_line(
+                    frame_str.as_str(),
+                    #[cfg(feature = "simd-json")]
+                    &mut simd_buf,
+                ),
                 Err(err) => Err(StreamBodyError::new(
                     StreamBodyKind::CodecError,
                     Some(Box::new(err)),
@@ -153,30 +161,153 @@ impl JsonStreamResponse for hpx::Response {
 ///
 /// Uses SIMD-accelerated parsing when the `simd-json` feature is enabled, falling back to
 /// `serde_json` otherwise.
-#[cfg(not(feature = "simd-json"))]
-fn parse_json_line<T>(s: &str) -> Result<T, StreamBodyError>
+///
+/// When the `simd-json` feature is enabled, `simd_buf` is used as a reusable scratch buffer
+/// to avoid allocating a new `Vec` on every call.
+#[allow(unused_variables)]
+fn parse_json_line<T>(
+    s: &str,
+    #[cfg(feature = "simd-json")] simd_buf: &mut Vec<u8>,
+) -> Result<T, StreamBodyError>
 where
     T: for<'de> Deserialize<'de>,
 {
-    serde_json::from_str(s)
-        .map_err(|err| StreamBodyError::new(StreamBodyKind::CodecError, Some(Box::new(err)), None))
-}
-
-/// Deserialize a JSON value from a line of text using SIMD-accelerated parsing.
-#[cfg(feature = "simd-json")]
-fn parse_json_line<T>(s: &str) -> Result<T, StreamBodyError>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    // simd-json requires a mutable buffer; copy the line's bytes into an owned Vec.
-    let mut bytes = s.as_bytes().to_vec();
-    simd_json::from_slice(&mut bytes)
-        .map_err(|err| StreamBodyError::new(StreamBodyKind::CodecError, Some(Box::new(err)), None))
+    #[cfg(not(feature = "simd-json"))]
+    {
+        serde_json::from_str(s).map_err(|err| {
+            StreamBodyError::new(StreamBodyKind::CodecError, Some(Box::new(err)), None)
+        })
+    }
+    #[cfg(feature = "simd-json")]
+    {
+        simd_buf.clear();
+        simd_buf.extend_from_slice(s.as_bytes());
+        simd_json::from_slice(simd_buf).map_err(|err| {
+            StreamBodyError::new(StreamBodyKind::CodecError, Some(Box::new(err)), None)
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    // JsonStreamResponse is an extension trait on hpx::Response.
-    // The codec logic (JsonArrayCodec) is tested in json_array_codec.rs.
-    // Integration tests with a live HTTP server are needed to test this module directly.
+    use super::*;
+
+    #[derive(Debug, serde::Deserialize, PartialEq)]
+    struct Item {
+        name: String,
+        value: u32,
+    }
+
+    /// Helper that works with both the `simd-json` and non-simd-json features.
+    #[allow(unused_variables)]
+    fn test_parse<T: for<'de> serde::Deserialize<'de>>(s: &str) -> Result<T, StreamBodyError> {
+        #[cfg(not(feature = "simd-json"))]
+        {
+            parse_json_line(s)
+        }
+        #[cfg(feature = "simd-json")]
+        {
+            let mut buf = Vec::with_capacity(4096);
+            parse_json_line(s, &mut buf)
+        }
+    }
+
+    #[test]
+    fn parse_json_line_valid_object() {
+        let line = r#"{"name":"alice","value":1}"#;
+        let result: Item = test_parse(line).unwrap();
+        assert_eq!(result.name, "alice");
+        assert_eq!(result.value, 1);
+    }
+
+    #[test]
+    fn parse_json_line_invalid_json() {
+        let line = "not json at all";
+        let result: Result<Item, _> = test_parse(line);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_json_line_empty_object() {
+        let line = "{}";
+        let result: serde_json::Value = test_parse(line).unwrap();
+        assert_eq!(result, serde_json::json!({}));
+    }
+
+    #[test]
+    fn parse_json_line_nested_object() {
+        let line = r#"{"name":"nested","value":42,"extra":{"key":"val"}}"#;
+        let result: serde_json::Value = test_parse(line).unwrap();
+        assert_eq!(result["name"], "nested");
+        assert_eq!(result["extra"]["key"], "val");
+    }
+
+    #[test]
+    fn parse_json_line_array_value() {
+        let line = r#"[1, 2, 3]"#;
+        let result: Vec<u32> = test_parse(line).unwrap();
+        assert_eq!(result, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn parse_json_line_string_value() {
+        let line = r#""hello""#;
+        let result: String = test_parse(line).unwrap();
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn parse_json_line_number_value() {
+        let line = "12345";
+        let result: i64 = test_parse(line).unwrap();
+        assert_eq!(result, 12345);
+    }
+
+    #[test]
+    fn parse_json_line_boolean_value() {
+        let line = "true";
+        let result: bool = test_parse(line).unwrap();
+        assert!(result);
+    }
+
+    #[test]
+    fn parse_json_line_null_value() {
+        let line = "null";
+        let result: Option<String> = test_parse(line).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_json_line_empty_string_returns_error() {
+        let result: Result<Item, _> = test_parse("");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_json_line_type_mismatch_returns_error() {
+        let result: Result<Item, _> = test_parse("123");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_json_line_string_with_escapes() {
+        let line = r#""hello\nworld""#;
+        let result: String = test_parse(line).unwrap();
+        assert_eq!(result, "hello\nworld");
+    }
+
+    #[test]
+    fn error_display_shows_kind() {
+        let result: Result<Item, _> = test_parse("bad");
+        let err = result.unwrap_err();
+        let display = format!("{err}");
+        assert!(display.contains("Frame/codec error"));
+    }
+
+    #[test]
+    fn error_kind_accessor() {
+        let result: Result<Item, _> = test_parse("bad");
+        let err = result.unwrap_err();
+        assert!(matches!(err.kind(), StreamBodyKind::CodecError));
+    }
 }

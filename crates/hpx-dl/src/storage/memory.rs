@@ -136,7 +136,8 @@ mod tests {
         let now = 1_700_000_000;
         let request = DownloadRequest::builder("https://example.com/file.bin", "/tmp/file.bin")
             .priority(DownloadPriority::Normal)
-            .build();
+            .build()
+            .unwrap();
         DownloadRecord {
             id,
             request: request.clone(),
@@ -194,7 +195,8 @@ mod tests {
         r2.id = DownloadId::new();
         r2.request = DownloadRequest::builder("https://example.org/other.bin", "/tmp/file.bin")
             .priority(DownloadPriority::Normal)
-            .build();
+            .build()
+            .unwrap();
 
         storage.save(&r1).await.unwrap();
         storage.save(&r2).await.unwrap();
@@ -273,7 +275,8 @@ mod tests {
         record.request =
             DownloadRequest::builder("https://example.org/other.bin", "/tmp/other.bin")
                 .priority(DownloadPriority::High)
-                .build();
+                .build()
+                .unwrap();
         record.state = DownloadState::Paused;
 
         storage.upsert(&record).await.unwrap();

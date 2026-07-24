@@ -10,7 +10,7 @@ pub fn header_initializer(
     header_chrome_sec_ch_ua!(
         headers,
         sec_ch_ua,
-        emulation_os.platform(),
+        emulation_os.sec_ch_ua_platform(),
         emulation_os.is_mobile()
     );
     header_chrome_ua!(headers, ua);
@@ -29,7 +29,7 @@ pub fn header_initializer_with_zstd(
     header_chrome_sec_ch_ua!(
         headers,
         sec_ch_ua,
-        emulation_os.platform(),
+        emulation_os.sec_ch_ua_platform(),
         emulation_os.is_mobile()
     );
     header_chrome_ua!(headers, ua);
@@ -48,7 +48,7 @@ pub fn header_initializer_with_zstd_priority(
     header_chrome_sec_ch_ua!(
         headers,
         sec_ch_ua,
-        emulation_os.platform(),
+        emulation_os.sec_ch_ua_platform(),
         emulation_os.is_mobile()
     );
     header_chrome_ua!(headers, ua);

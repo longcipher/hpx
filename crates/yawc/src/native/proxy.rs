@@ -45,11 +45,13 @@ pub async fn connect_through_proxy(
 ) -> io::Result<ProxyStream> {
     match proxy {
         ProxyConfig::Http(proxy_url) => {
-            let proxy_addr = format!(
-                "{}:{}",
-                proxy_url.host_str().unwrap_or("127.0.0.1"),
-                proxy_url.port().unwrap_or(8080)
-            );
+            let host = proxy_url.host_str().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "proxy URL has no host")
+            })?;
+            let port = proxy_url.port().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "proxy URL has no port")
+            })?;
+            let proxy_addr = format!("{host}:{port}");
             let proxy_stream = TcpStream::connect(&proxy_addr).await?;
             let auth_header = extract_proxy_auth(proxy_url);
             http_connect_tunnel(
@@ -62,11 +64,13 @@ pub async fn connect_through_proxy(
         }
         #[cfg(feature = "socks")]
         ProxyConfig::Socks5(proxy_url) => {
-            let proxy_addr = format!(
-                "{}:{}",
-                proxy_url.host_str().unwrap_or("127.0.0.1"),
-                proxy_url.port().unwrap_or(1080)
-            );
+            let host = proxy_url.host_str().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "SOCKS5 proxy URL has no host")
+            })?;
+            let port = proxy_url.port().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "SOCKS5 proxy URL has no port")
+            })?;
+            let proxy_addr = format!("{host}:{port}");
             let target = format!("{target_host}:{target_port}");
 
             let stream = if !proxy_url.username().is_empty() {

@@ -3,28 +3,7 @@
 //! This module implements QUIC traits with Quinn. It was merged into `hpx-h3`
 //! from the former standalone `hpx-h3-quinn` crate, which was a fork of
 //! [`hyperium/h3-quinn`](https://github.com/hyperium/h3) vendored into the hpx
-//! workspace. Lint suppressions below keep the upstream source tractable while
-//! still inheriting the workspace lint baseline.
-
-// Vendored third-party module: suppress noisy lints that would require
-// invasive changes to upstream code.
-#![allow(
-    unreachable_pub,
-    missing_debug_implementations,
-    clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
-    clippy::needless_pass_by_value,
-    clippy::trivially_copy_pass_by_ref,
-    clippy::redundant_closure_for_method_calls,
-    clippy::module_name_repetitions,
-    clippy::future_not_send,
-    clippy::needless_pass_by_ref_mut,
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::missing_panics_doc,
-    clippy::return_self_not_must_use
-)]
+//! workspace. Lint configuration lives in the crate's `Cargo.toml`.
 
 use std::{
     convert::TryInto,

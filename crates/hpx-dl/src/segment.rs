@@ -333,7 +333,10 @@ where
         }
     }
 
-    Err(last_err.unwrap_or(DownloadError::NoSegments))
+    // SAFETY: `last_err` is always `Some` because the loop runs at least once
+    // (total_tries = max_attempts + 1 >= 1) and every failed attempt sets it.
+    #[expect(clippy::expect_used, reason = "retry loop always produces an error")]
+    Err(last_err.expect("retry loop always produces an error"))
 }
 
 /// Manages concurrent download of multiple segments to a single destination file.

@@ -655,6 +655,9 @@ impl ClientBuilder {
     /// Set a `RedirectPolicy` for this client.
     ///
     /// Default will follow redirects up to a maximum of 10.
+    ///
+    /// This is a convenience method. For batch protocol configuration, see
+    /// [`ProtocolConfigOptions`].
     #[inline]
     pub fn redirect(mut self, policy: redirect::Policy) -> ClientBuilder {
         self.config.protocol.redirect_policy = policy;
@@ -664,6 +667,9 @@ impl ClientBuilder {
     /// Enable or disable automatic setting of the `Referer` header.
     ///
     /// Default is `true`.
+    ///
+    /// This is a convenience method. For batch protocol configuration, see
+    /// [`ProtocolConfigOptions`].
     #[inline]
     pub fn referer(mut self, enable: bool) -> ClientBuilder {
         self.config.protocol.referer = enable;
@@ -673,6 +679,9 @@ impl ClientBuilder {
     // Retry options
 
     /// Set a request retry policy.
+    ///
+    /// This is a convenience method. For batch protocol configuration, see
+    /// [`ProtocolConfigOptions`].
     pub fn retry(mut self, policy: retry::Policy) -> ClientBuilder {
         self.config.protocol.retry_policy = policy;
         self
@@ -683,6 +692,9 @@ impl ClientBuilder {
     /// This is a convenience wrapper around
     /// [`retry::Policy::max_retries_per_request`] that preserves the rest of
     /// the currently configured retry policy.
+    ///
+    /// This is a convenience method. For batch protocol configuration, see
+    /// [`ProtocolConfigOptions`].
     pub fn max_retries_per_request(mut self, max: u32) -> ClientBuilder {
         self.config.protocol.retry_policy = self
             .config
@@ -701,6 +713,9 @@ impl ClientBuilder {
     /// System proxy detection is **enabled by default**. Call this method to
     /// explicitly opt in (no-op if already enabled).
     ///
+    /// This is a convenience method. For batch proxy configuration, see
+    /// [`ProxyConfigOptions`].
+    ///
     /// # Example
     /// ```
     /// let client = hpx::Client::builder().system_proxy().build().unwrap();
@@ -716,6 +731,9 @@ impl ClientBuilder {
     /// # Note
     ///
     /// Adding a proxy will disable the automatic usage of the "system" proxy.
+    ///
+    /// This is a convenience method. For batch proxy configuration, see
+    /// [`ProxyConfigOptions`].
     ///
     /// # Example
     /// ```
@@ -753,6 +771,9 @@ impl ClientBuilder {
     /// on all desired proxies instead.
     ///
     /// This also disables the automatic usage of the "system" proxy.
+    ///
+    /// This is a convenience method. For batch proxy configuration, see
+    /// [`ProxyConfigOptions`].
     #[inline]
     pub fn no_proxy(mut self) -> ClientBuilder {
         self.config.proxy.proxies.clear();
@@ -786,6 +807,9 @@ impl ClientBuilder {
     /// Set a timeout for only the connect phase of a `Client`.
     ///
     /// Default is `None`.
+    ///
+    /// This is a convenience method. For batch transport configuration, see
+    /// [`TransportConfigOptions`].
     ///
     /// # Note
     ///
@@ -914,6 +938,9 @@ impl ClientBuilder {
     /// Enabling this option will emit [log][] messages at the `TRACE` level
     /// for read and write operations on connections.
     ///
+    /// This is a convenience method. For batch transport configuration, see
+    /// [`TransportConfigOptions`].
+    ///
     /// [log]: https://crates.io/crates/log
     #[inline]
     pub fn connection_verbose(mut self, verbose: bool) -> ClientBuilder {
@@ -928,6 +955,9 @@ impl ClientBuilder {
     /// Pass `None` to disable timeout.
     ///
     /// Default is 90 seconds.
+    ///
+    /// This is a convenience method. For batch pool configuration, see
+    /// [`PoolConfigOptions`].
     #[inline]
     pub fn pool_idle_timeout<D>(mut self, val: D) -> ClientBuilder
     where
@@ -938,6 +968,9 @@ impl ClientBuilder {
     }
 
     /// Sets the maximum idle connection per host allowed in the pool.
+    ///
+    /// This is a convenience method. For batch pool configuration, see
+    /// [`PoolConfigOptions`].
     #[inline]
     pub fn pool_max_idle_per_host(mut self, max: usize) -> ClientBuilder {
         self.config.pool.max_idle_per_host = max;
@@ -945,6 +978,9 @@ impl ClientBuilder {
     }
 
     /// Sets the maximum number of connections in the pool.
+    ///
+    /// This is a convenience method. For batch pool configuration, see
+    /// [`PoolConfigOptions`].
     #[inline]
     pub fn pool_max_size(mut self, max: u32) -> ClientBuilder {
         self.config.pool.max_size = NonZeroU32::new(max);
@@ -954,6 +990,9 @@ impl ClientBuilder {
     /// Restrict the Client to be used with HTTPS only requests.
     ///
     /// Defaults to false.
+    ///
+    /// This is a convenience method. For batch protocol configuration, see
+    /// [`ProtocolConfigOptions`].
     #[inline]
     pub fn https_only(mut self, enabled: bool) -> ClientBuilder {
         self.config.protocol.https_only = enabled;
@@ -1019,17 +1058,23 @@ impl ClientBuilder {
     /// Set whether sockets have `TCP_NODELAY` enabled.
     ///
     /// Default is `true`.
+    ///
+    /// This is a convenience method. For batch transport configuration, see
+    /// [`TransportConfigOptions`].
     #[inline]
     pub fn tcp_nodelay(mut self, enabled: bool) -> ClientBuilder {
         self.config.transport.tcp_nodelay = enabled;
         self
     }
 
-    /// Set that all sockets have `SO_KEEPALIVE` set with the supplied duration.
+    /// Set whether sockets have `SO_KEEPALIVE` set with the supplied duration.
     ///
     /// If `None`, the option will not be set.
     ///
     /// Default is 15 seconds.
+    ///
+    /// This is a convenience method. For batch transport configuration, see
+    /// [`TransportConfigOptions`].
     #[inline]
     pub fn tcp_keepalive<D>(mut self, val: D) -> ClientBuilder
     where
@@ -1044,6 +1089,9 @@ impl ClientBuilder {
     /// If `None`, the option will not be set.
     ///
     /// Default is 15 seconds.
+    ///
+    /// This is a convenience method. For batch transport configuration, see
+    /// [`TransportConfigOptions`].
     #[inline]
     pub fn tcp_keepalive_interval<D>(mut self, val: D) -> ClientBuilder
     where
@@ -1058,6 +1106,9 @@ impl ClientBuilder {
     /// If `None`, the option will not be set.
     ///
     /// Default is 3 retries.
+    ///
+    /// This is a convenience method. For batch transport configuration, see
+    /// [`TransportConfigOptions`].
     #[inline]
     pub fn tcp_keepalive_retries<C>(mut self, retries: C) -> ClientBuilder
     where
@@ -1075,6 +1126,9 @@ impl ClientBuilder {
     /// If `None`, the option will not be set.
     ///
     /// Default is 30 seconds.
+    ///
+    /// This is a convenience method. For batch transport configuration, see
+    /// [`TransportConfigOptions`].
     #[inline]
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
     #[cfg_attr(
@@ -1090,6 +1144,9 @@ impl ClientBuilder {
     }
 
     /// Set whether sockets have `SO_REUSEADDR` enabled.
+    ///
+    /// This is a convenience method. For batch transport configuration, see
+    /// [`TransportConfigOptions`].
     #[inline]
     pub fn tcp_reuse_address(mut self, enabled: bool) -> ClientBuilder {
         self.config.transport.tcp_reuse_address = enabled;
@@ -1099,6 +1156,9 @@ impl ClientBuilder {
     /// Sets the size of the TCP send buffer on this client socket.
     ///
     /// On most operating systems, this sets the `SO_SNDBUF` socket option.
+    ///
+    /// This is a convenience method. For batch transport configuration, see
+    /// [`TransportConfigOptions`].
     #[inline]
     pub fn tcp_send_buffer_size<S>(mut self, size: S) -> ClientBuilder
     where
@@ -1111,6 +1171,9 @@ impl ClientBuilder {
     /// Sets the size of the TCP receive buffer on this client socket.
     ///
     /// On most operating systems, this sets the `SO_RCVBUF` socket option.
+    ///
+    /// This is a convenience method. For batch transport configuration, see
+    /// [`TransportConfigOptions`].
     #[inline]
     pub fn tcp_recv_buffer_size<S>(mut self, size: S) -> ClientBuilder
     where
@@ -1130,6 +1193,9 @@ impl ClientBuilder {
     /// If `None`, parallel connection attempts are disabled.
     ///
     /// Default is 300 milliseconds.
+    ///
+    /// This is a convenience method. For batch transport configuration, see
+    /// [`TransportConfigOptions`].
     ///
     /// [RFC 6555]: https://tools.ietf.org/html/rfc6555
     #[inline]
@@ -1264,6 +1330,9 @@ impl ClientBuilder {
     // TLS options
 
     /// Sets the identity to be used for client certificate authentication.
+    ///
+    /// This is a convenience method. For batch TLS configuration, see
+    /// [`TlsConfigOptions`].
     #[inline]
     pub fn identity(mut self, identity: Identity) -> ClientBuilder {
         self.config.tls.identity = Some(identity);
@@ -1274,6 +1343,9 @@ impl ClientBuilder {
     ///
     /// This method allows you to specify a custom verify certificate store to be used
     /// for TLS connections. By default, the system's verify certificate store is used.
+    ///
+    /// This is a convenience method. For batch TLS configuration, see
+    /// [`TlsConfigOptions`].
     #[inline]
     pub fn cert_store(mut self, store: CertStore) -> ClientBuilder {
         self.config.tls.cert_store = store;
@@ -1291,6 +1363,9 @@ impl ClientBuilder {
     /// will be trusted for use. This includes expired certificates. This
     /// introduces significant vulnerabilities, and should only be used
     /// as a last resort.
+    ///
+    /// This is a convenience method. For batch TLS configuration, see
+    /// [`TlsConfigOptions`].
     #[inline]
     pub fn cert_verification(mut self, cert_verification: bool) -> ClientBuilder {
         self.config.tls.cert_verification = cert_verification;
@@ -1305,6 +1380,9 @@ impl ClientBuilder {
     /// You should think very carefully before you use this method. If hostname verification is not
     /// used, *any* valid certificate for *any* site will be trusted for use from any other. This
     /// introduces a significant vulnerability to man-in-the-middle attacks.
+    ///
+    /// This is a convenience method. For batch TLS configuration, see
+    /// [`TlsConfigOptions`].
     #[inline]
     pub fn verify_hostname(mut self, verify_hostname: bool) -> ClientBuilder {
         self.config.tls.verify_hostname = verify_hostname;
@@ -1314,6 +1392,9 @@ impl ClientBuilder {
     /// Configures the use of Server Name Indication (SNI) when connecting.
     ///
     /// Defaults to `true`.
+    ///
+    /// This is a convenience method. For batch TLS configuration, see
+    /// [`TlsConfigOptions`].
     #[inline]
     pub fn tls_sni(mut self, tls_sni: bool) -> ClientBuilder {
         self.config.tls.tls_sni = tls_sni;
@@ -1321,6 +1402,9 @@ impl ClientBuilder {
     }
 
     /// Configures TLS key logging for the client.
+    ///
+    /// This is a convenience method. For batch TLS configuration, see
+    /// [`TlsConfigOptions`].
     #[inline]
     pub fn keylog(mut self, keylog: KeyLog) -> ClientBuilder {
         self.config.tls.keylog = Some(keylog);
@@ -1330,6 +1414,9 @@ impl ClientBuilder {
     /// Set the minimum required TLS version for connections.
     ///
     /// By default the TLS backend's own default is used.
+    ///
+    /// This is a convenience method. For batch TLS configuration, see
+    /// [`TlsConfigOptions`].
     #[inline]
     pub fn min_tls_version(mut self, version: TlsVersion) -> ClientBuilder {
         self.config.tls.min_version = Some(version);
@@ -1339,6 +1426,9 @@ impl ClientBuilder {
     /// Set the maximum allowed TLS version for connections.
     ///
     /// By default there's no maximum.
+    ///
+    /// This is a convenience method. For batch TLS configuration, see
+    /// [`TlsConfigOptions`].
     #[inline]
     pub fn max_tls_version(mut self, version: TlsVersion) -> ClientBuilder {
         self.config.tls.max_version = Some(version);
@@ -1350,6 +1440,9 @@ impl ClientBuilder {
     /// # Optional
     ///
     /// feature to be enabled.
+    ///
+    /// This is a convenience method. For batch TLS configuration, see
+    /// [`TlsConfigOptions`].
     #[inline]
     pub fn tls_info(mut self, tls_info: bool) -> ClientBuilder {
         self.config.tls.tls_info = tls_info;

@@ -136,4 +136,104 @@ mod tests {
         let result = codec.decode(&mut buf).unwrap();
         assert!(result.is_none());
     }
+
+    #[test]
+    fn decode_eof_returns_none_on_empty() {
+        let mut codec = ArrowIpcCodec::new_with_max_length(1024);
+        let mut buf = BytesMut::new();
+        assert!(matches!(codec.decode_eof(&mut buf), Ok(None)));
+    }
+
+    #[test]
+    fn single_column_batch() {
+        let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Int32, false)]));
+        let values = Arc::new(Int32Array::from(vec![10, 20, 30]));
+        let batch = RecordBatch::try_new(schema, vec![values]).unwrap();
+
+        let data = encode_ipc(&batch);
+        let mut codec = ArrowIpcCodec::new_with_max_length(1024 * 1024);
+        let mut buf = BytesMut::from(&data[..]);
+        let result = codec.decode(&mut buf).unwrap().unwrap();
+        assert_eq!(result.num_rows(), 3);
+        assert_eq!(result.num_columns(), 1);
+    }
+
+    #[test]
+    fn empty_batch() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("name", DataType::Utf8, false),
+            Field::new("value", DataType::Int32, false),
+        ]));
+        let names = Arc::new(StringArray::from(Vec::<&str>::new()));
+        let values = Arc::new(Int32Array::from(Vec::<i32>::new()));
+        let batch = RecordBatch::try_new(schema, vec![names, values]).unwrap();
+
+        let data = encode_ipc(&batch);
+        let mut codec = ArrowIpcCodec::new_with_max_length(1024 * 1024);
+        let mut buf = BytesMut::from(&data[..]);
+        let result = codec.decode(&mut buf).unwrap().unwrap();
+        assert_eq!(result.num_rows(), 0);
+        assert_eq!(result.num_columns(), 2);
+    }
+
+    #[test]
+    fn large_batch() {
+        let schema = Arc::new(Schema::new(vec![Field::new("v", DataType::Int64, false)]));
+        let values: Vec<i64> = (0..1000).collect();
+        let array = Arc::new(arrow::array::Int64Array::from(values));
+        let batch = RecordBatch::try_new(schema, vec![array]).unwrap();
+
+        let data = encode_ipc(&batch);
+        let mut codec = ArrowIpcCodec::new_with_max_length(1024 * 1024);
+        let mut buf = BytesMut::from(&data[..]);
+        let result = codec.decode(&mut buf).unwrap().unwrap();
+        assert_eq!(result.num_rows(), 1000);
+    }
+
+    #[test]
+    fn incremental_feed_partial_data() {
+        let batch = make_batch();
+        let data = encode_ipc(&batch);
+
+        let mut codec = ArrowIpcCodec::new_with_max_length(1024 * 1024);
+
+        // Feed half the data
+        let half = data.len() / 2;
+        let mut buf = BytesMut::from(&data[..half]);
+        let result = codec.decode(&mut buf).unwrap();
+        assert!(result.is_none());
+
+        // Feed the rest
+        buf.extend_from_slice(&data[half..]);
+        let result = codec.decode(&mut buf).unwrap().unwrap();
+        assert_eq!(result.num_rows(), 2);
+    }
+
+    #[test]
+    fn multi_column_batch_preserves_data() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("name", DataType::Utf8, false),
+            Field::new("value", DataType::Int32, false),
+        ]));
+        let names = Arc::new(StringArray::from(vec!["alice", "bob", "charlie"]));
+        let values = Arc::new(Int32Array::from(vec![100, 200, 300]));
+        let batch = RecordBatch::try_new(schema, vec![names, values]).unwrap();
+
+        let data = encode_ipc(&batch);
+        let mut codec = ArrowIpcCodec::new_with_max_length(1024 * 1024);
+        let mut buf = BytesMut::from(&data[..]);
+        let result = codec.decode(&mut buf).unwrap().unwrap();
+
+        assert_eq!(result.num_rows(), 3);
+        assert_eq!(result.num_columns(), 2);
+
+        let name_col = result
+            .column_by_name("name")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert_eq!(name_col.value(0), "alice");
+        assert_eq!(name_col.value(2), "charlie");
+    }
 }

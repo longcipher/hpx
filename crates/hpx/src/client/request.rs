@@ -47,6 +47,13 @@ pub struct Request(http::Request<Option<Body>>);
 /// A builder to construct the properties of a [`Request`].
 ///
 /// To construct a [`RequestBuilder`], refer to the [`Client`] documentation.
+///
+/// # Error Deferral
+///
+/// All setter methods follow a consistent "first-error-wins" pattern: if the
+/// builder is already in an error state (e.g. from a failed header conversion),
+/// subsequent setters silently skip their operation. The stored error is
+/// surfaced at [`send()`](Self::send) or [`build()`](Self::build) time.
 #[must_use = "RequestBuilder does nothing until you 'send' it"]
 pub struct RequestBuilder {
     client: Client,
@@ -201,6 +208,16 @@ impl RequestBuilder {
         }
     }
 
+    /// Record an error in the builder if not already in an error state.
+    ///
+    /// This enforces the "first-error-wins" invariant: only the earliest
+    /// error is preserved; subsequent calls are no-ops.
+    fn set_error(&mut self, err: crate::Error) {
+        if self.request.is_ok() {
+            self.request = Err(err);
+        }
+    }
+
     /// Assemble a builder starting from an existing `Client` and a `Request`.
     pub fn from_parts(client: Client, request: Request) -> RequestBuilder {
         RequestBuilder {
@@ -236,7 +253,7 @@ impl RequestBuilder {
             };
         }
         if let Some(err) = error {
-            self.request = Err(err);
+            self.set_error(err);
         }
         self
     }
@@ -497,6 +514,7 @@ impl RequestBuilder {
     #[cfg(feature = "multipart")]
     #[cfg_attr(docsrs, doc(cfg(feature = "multipart")))]
     pub fn multipart(mut self, mut multipart: multipart::Form) -> RequestBuilder {
+        let mut error = None;
         if let Ok(ref mut req) = self.request {
             match HeaderValue::from_maybe_shared(Bytes::from(format!(
                 "multipart/form-data; boundary={}",
@@ -516,9 +534,12 @@ impl RequestBuilder {
                     *req.body_mut() = Some(multipart.stream())
                 }
                 Err(err) => {
-                    self.request = Err(Error::builder(err));
+                    error = Some(Error::builder(err));
                 }
             };
+        }
+        if let Some(err) = error {
+            self.set_error(err);
         }
 
         self
@@ -556,7 +577,7 @@ impl RequestBuilder {
             }
         }
         if let Some(err) = error {
-            self.request = Err(err);
+            self.set_error(err);
         }
         self
     }
@@ -592,6 +613,7 @@ impl RequestBuilder {
     #[cfg(feature = "form")]
     #[cfg_attr(docsrs, doc(cfg(feature = "form")))]
     pub fn form<T: Serialize + ?Sized>(mut self, form: &T) -> RequestBuilder {
+        let mut error = None;
         if let Ok(ref mut req) = self.request {
             match serde_urlencoded::to_string(form) {
                 Ok(body) => {
@@ -602,8 +624,11 @@ impl RequestBuilder {
                         ));
                     *req.body_mut() = Some(body.into());
                 }
-                Err(err) => self.request = Err(Error::builder(err)),
+                Err(err) => error = Some(Error::builder(err)),
             }
+        }
+        if let Some(err) = error {
+            self.set_error(err);
         }
         self
     }
@@ -621,6 +646,7 @@ impl RequestBuilder {
     #[cfg(feature = "json")]
     #[cfg_attr(docsrs, doc(cfg(feature = "json")))]
     pub fn json<T: Serialize + ?Sized>(mut self, json: &T) -> RequestBuilder {
+        let mut error = None;
         if let Ok(ref mut req) = self.request {
             match serde_json::to_vec(json) {
                 Ok(body) => {
@@ -629,8 +655,11 @@ impl RequestBuilder {
                         .or_insert(HeaderValue::from_static("application/json"));
                     *req.body_mut() = Some(body.into());
                 }
-                Err(err) => self.request = Err(Error::builder(err)),
+                Err(err) => error = Some(Error::builder(err)),
             }
+        }
+        if let Some(err) = error {
+            self.set_error(err);
         }
 
         self

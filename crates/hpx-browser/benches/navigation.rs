@@ -19,8 +19,7 @@ fn bench_reload_html(c: &mut Criterion) {
     ] {
         group.bench_with_input(BenchmarkId::from_parameter(name), html, |b, html| {
             b.iter(|| {
-                let engine = hpx_browser::host::EngineHandle::new();
-                let mut page = hpx_browser::page::Page::new(engine);
+                let mut page = hpx_browser::page::Page::new();
                 page.reload_html(html, "http://example.com");
                 page
             });
@@ -62,8 +61,7 @@ fn bench_navigate_to_local(c: &mut Criterion) {
     c.bench_function("navigate_to_local", |b| {
         b.iter(|| {
             runtime.block_on(async {
-                let engine = hpx_browser::host::EngineHandle::new();
-                let mut page = hpx_browser::page::Page::new(engine);
+                let mut page = hpx_browser::page::Page::new();
                 let _ = page.navigate(&url).await;
                 page
             })

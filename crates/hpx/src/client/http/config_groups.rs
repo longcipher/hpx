@@ -11,6 +11,11 @@ use crate::{
 };
 
 /// HTTP protocol preference for grouped client configuration.
+///
+/// This is the public-facing enum used in [`ProtocolConfigOptions`]. Internally,
+/// the client converts it to the richer [`HttpVersionPref`](super::HttpVersionPref)
+/// which additionally carries an `Http3` variant (set via
+/// [`ClientBuilder::http3_only()`](crate::ClientBuilder::http3_only)).
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
 pub enum HttpVersionPreference {
     /// Only negotiate HTTP/1.

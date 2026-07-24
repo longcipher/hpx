@@ -189,6 +189,13 @@ pub enum WebSocketError {
     #[cfg(not(target_arch = "wasm32"))]
     MissingSecWebSocketKey,
 
+    /// Manual fragmentation sent while auto-fragmentation is enabled.
+    #[error(
+        "Cannot send manual fragments (FIN=0) while auto-fragmentation (fragment_size) is enabled; use Streaming for manual control"
+    )]
+    #[cfg(not(target_arch = "wasm32"))]
+    ConflictingFragmentation,
+
     /// URL scheme is not ws:// or wss://.
     #[error("Invalid http scheme")]
     InvalidHttpScheme,

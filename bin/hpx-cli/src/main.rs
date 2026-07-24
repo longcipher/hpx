@@ -16,6 +16,13 @@ mod ws;
 use clap::{CommandFactory, Parser};
 use cli::Cli;
 
+fn build_runtime() -> eyre::Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(Into::into)
+}
+
 fn main() -> eyre::Result<()> {
     tracing_subscriber::fmt::init();
 
@@ -40,9 +47,7 @@ fn main() -> eyre::Result<()> {
 
     // Handle dl subcommand
     if let Some(cli::Commands::Dl(dl_cmd)) = cli.command {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()?;
+        let runtime = build_runtime()?;
         return runtime.block_on(handle_dl_command(
             dl_cmd,
             cli.retry,
@@ -65,10 +70,8 @@ fn main() -> eyre::Result<()> {
             quiet,
             block: _,
         }) => {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()?;
-            return runtime.block_on(browser::handle_fetch(
+            let runtime = build_runtime()?;
+            let config = browser::FetchConfig {
                 url,
                 dump,
                 selector,
@@ -78,11 +81,9 @@ fn main() -> eyre::Result<()> {
                 eval,
                 output,
                 quiet,
-                cli.obey_robots,
-                cli.allow_private_network,
-                cli.v8_flags,
-                cli.storage_dir,
-            ));
+                allow_private_network: cli.allow_private_network,
+            };
+            return runtime.block_on(browser::handle_fetch(config));
         }
         Some(cli::Commands::Scrape {
             urls,
@@ -92,68 +93,46 @@ fn main() -> eyre::Result<()> {
             timeout,
             quiet,
         }) => {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()?;
-            return runtime.block_on(browser::handle_scrape(
+            let runtime = build_runtime()?;
+            let config = browser::ScrapeConfig {
                 urls,
                 eval,
                 concurrency,
                 format,
                 timeout,
                 quiet,
-                cli.obey_robots,
-                cli.allow_private_network,
-                cli.v8_flags,
-                cli.storage_dir,
-            ));
+                allow_private_network: cli.allow_private_network,
+            };
+            return runtime.block_on(browser::handle_scrape(config));
         }
         Some(cli::Commands::Serve {
             port,
             host,
             stealth,
             workers,
-            allow_file_access,
-            storage_dir,
+            allow_file_access: _,
+            storage_dir: _,
             quiet,
         }) => {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()?;
-            return runtime.block_on(browser::handle_serve(
+            let runtime = build_runtime()?;
+            let config = browser::ServeConfig {
                 port,
                 host,
                 stealth,
                 workers,
-                allow_file_access,
-                storage_dir,
                 quiet,
-                cli.obey_robots,
-                cli.allow_private_network,
-                cli.v8_flags,
-            ));
+            };
+            return runtime.block_on(browser::handle_serve(config));
         }
         Some(cli::Commands::Dl(_)) => unreachable!(),
         Some(cli::Commands::ProxyTest { proxy }) => {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()?;
+            let runtime = build_runtime()?;
             return runtime.block_on(proxy_test::run(&proxy));
         }
         None => {}
     }
 
-    // Validate URL is provided for HTTP/WS
-    if cli.url.is_none() {
-        let mut cmd = Cli::command();
-        cmd.print_help()?;
-        eprintln!("\nError: URL is required");
-        std::process::exit(1);
-    }
-
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
+    let runtime = build_runtime()?;
 
     let Some(url) = cli.url.as_deref() else {
         let mut cmd = Cli::command();
@@ -231,7 +210,7 @@ async fn handle_dl_command(
                 let config = cli::parse_proxy_config(&proxy_url)?;
                 builder = builder.proxy(config);
             }
-            let request = builder.build();
+            let request = builder.build()?;
             let id = engine.add(request)?;
             println!("Added download {id}");
 

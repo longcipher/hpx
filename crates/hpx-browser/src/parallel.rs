@@ -144,7 +144,7 @@ fn worker_main(rx: mpsc::Receiver<Job>) {
             {
                 Ok(mut page) => match page.navigate(&url).await {
                     Ok(()) => NavigateResult {
-                        html: page.content(),
+                        html: page.content().to_string(),
                         elapsed: begin.elapsed(),
                         error: None,
                     },

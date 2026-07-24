@@ -171,6 +171,17 @@ unreadable_literal = "allow"
 unused_self = "allow"
 clear_with_drain = "allow"
 collection_is_never_read = "allow"
+collapsible_else_if = "allow"
+collapsible_if = "allow"
+derivable_impls = "allow"
+inline_always = "allow"
+len_without_is_empty = "allow"
+map_unwrap_or = "allow"
+needless_borrow = "allow"
+option_option = "allow"
+question_mark = "allow"
+should_implement_trait = "allow"
+single_match_else = "allow"
 
 [lints.rust]
 # Vendored third-party crate: allow missing docs and debug implementations.

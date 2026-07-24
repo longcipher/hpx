@@ -194,4 +194,143 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn test_csv_quoted_field_with_commas() {
+        let mut builder = csv::ReaderBuilder::new();
+        builder.delimiter(b',');
+        builder.has_headers(false);
+
+        let row = "\"Smith, Jr.\",42,\"New York, NY\"";
+        let result = deserialize_row(&mut builder, row);
+        assert!(result.is_some());
+        let record = result.unwrap();
+        assert_eq!(record.name, "Smith, Jr.");
+        assert_eq!(record.age, 42);
+        assert_eq!(record.city, "New York, NY");
+    }
+
+    #[test]
+    fn test_csv_quoted_field_with_newlines() {
+        let mut builder = csv::ReaderBuilder::new();
+        builder.delimiter(b',');
+        builder.has_headers(false);
+
+        // CSV reader needs the full quoted field including the newline
+        let row = "\"Alice\nSmith\",30,NYC";
+        let result = deserialize_row(&mut builder, row);
+        assert!(result.is_some());
+        let record = result.unwrap();
+        assert_eq!(record.name, "Alice\nSmith");
+    }
+
+    #[test]
+    fn test_csv_empty_fields() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct SparseRecord {
+            name: String,
+            value: String,
+        }
+
+        let mut builder = csv::ReaderBuilder::new();
+        builder.delimiter(b',');
+        builder.has_headers(false);
+
+        let row = "hello,";
+        let mut csv_reader = builder.from_reader(row.as_bytes());
+        let mut iter = csv_reader.deserialize::<SparseRecord>();
+        let result = iter.next().unwrap().unwrap();
+        assert_eq!(result.name, "hello");
+        assert_eq!(result.value, "");
+    }
+
+    #[test]
+    fn test_csv_invalid_row_returns_none() {
+        let mut builder = csv::ReaderBuilder::new();
+        builder.delimiter(b',');
+        builder.has_headers(false);
+
+        // Empty string - no fields to deserialize
+        let row = "";
+        let result = deserialize_row(&mut builder, row);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_csv_type_mismatch_fails_gracefully() {
+        let mut builder = csv::ReaderBuilder::new();
+        builder.delimiter(b',');
+        builder.has_headers(false);
+
+        // "not_a_number" can't be parsed as u32
+        let row = "Alice,not_a_number,NYC";
+        let mut csv_reader = builder.from_reader(row.as_bytes());
+        let mut iter = csv_reader.deserialize::<Record>();
+        let result = iter.next().unwrap();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_csv_single_row() {
+        let mut builder = csv::ReaderBuilder::new();
+        builder.delimiter(b',');
+        builder.has_headers(false);
+
+        let result = deserialize_row(&mut builder, "Solo,42,OnlyTown");
+        assert!(result.is_some());
+        let r = result.unwrap();
+        assert_eq!(r.name, "Solo");
+        assert_eq!(r.age, 42);
+        assert_eq!(r.city, "OnlyTown");
+    }
+
+    #[test]
+    fn test_csv_semicolon_delimiter() {
+        let mut builder = csv::ReaderBuilder::new();
+        builder.delimiter(b';');
+        builder.has_headers(false);
+
+        let result = deserialize_row(&mut builder, "Alice;30;NYC");
+        assert!(result.is_some());
+        let r = result.unwrap();
+        assert_eq!(r.name, "Alice");
+        assert_eq!(r.age, 30);
+        assert_eq!(r.city, "NYC");
+    }
+
+    #[test]
+    fn test_csv_many_rows() {
+        let mut builder = csv::ReaderBuilder::new();
+        builder.delimiter(b',');
+        builder.has_headers(false);
+
+        let mut rows = Vec::new();
+        for i in 0..50 {
+            rows.push(format!("user{i},{i},city{i}"));
+        }
+
+        let results: Vec<Record> = rows
+            .iter()
+            .filter_map(|row| deserialize_row(&mut builder, row))
+            .collect();
+
+        assert_eq!(results.len(), 50);
+        assert_eq!(results[0].name, "user0");
+        assert_eq!(results[49].city, "city49");
+    }
+
+    #[test]
+    fn test_csv_field_count_extra_columns_ignored() {
+        let mut builder = csv::ReaderBuilder::new();
+        builder.delimiter(b',');
+        builder.has_headers(false);
+        builder.flexible(true);
+
+        let result = deserialize_row(&mut builder, "Alice,30,NYC,extra,data");
+        assert!(result.is_some());
+        let r = result.unwrap();
+        assert_eq!(r.name, "Alice");
+        assert_eq!(r.age, 30);
+        assert_eq!(r.city, "NYC");
+    }
 }

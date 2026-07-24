@@ -77,7 +77,7 @@ where
         return Ok(None);
     }
 
-    trace_span!("parse_headers");
+    let _span = trace_span!("parse_headers");
 
     if let Some(prev_len) = prev_len
         && !is_complete_fast(bytes, prev_len)
@@ -115,7 +115,7 @@ pub(super) fn encode_headers<T>(
 where
     T: Http1Transaction,
 {
-    trace_span!("encode_headers");
+    let _span = trace_span!("encode_headers");
     T::encode(enc, dst)
 }
 

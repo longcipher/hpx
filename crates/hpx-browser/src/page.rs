@@ -9,8 +9,7 @@ use std::{
 use crate::js_runtime::runtime::BrowserJsRuntime;
 use crate::{
     challenge::{ChallengeVerdict, EngineClass, engine_classify, engine_classify_lower},
-    dom::Dom,
-    host::EngineHandle,
+    dom::{Dom, NodeId},
     net::{HttpClient, RedirectPolicy},
     resource_loader::{
         ResourceType, extract_resource_urls, fetch_resources, filter_by_block_types,
@@ -23,9 +22,22 @@ const DEFAULT_NAV_BUDGET: Duration = Duration::from_secs(15);
 /// Default max iterations for challenge retry loops.
 const DEFAULT_MAX_ITERATIONS: u8 = 3;
 
+/// Common interface for browser page types.
+///
+/// This trait provides synchronous accessors for page metadata.
+/// For `CdpPage` (which is async-native), consider an async variant
+/// or snapshot-based access in the future.
+pub trait PageLike {
+    /// The page title.
+    fn title(&self) -> &str;
+    /// The page HTML content.
+    fn content(&self) -> &str;
+    /// The current URL.
+    fn url(&self) -> &str;
+}
+
 /// A browser page/tab.
 pub struct Page {
-    engine: EngineHandle,
     dom: Dom,
     url: String,
     title: String,
@@ -51,9 +63,8 @@ impl std::fmt::Debug for Page {
 }
 
 impl Page {
-    pub fn new(engine: EngineHandle) -> Self {
+    pub fn new() -> Self {
         Self {
-            engine,
             dom: Dom::new(),
             url: "about:blank".to_string(),
             title: String::new(),
@@ -70,14 +81,21 @@ impl Page {
             js_runtime: None,
         }
     }
+}
 
+impl Default for Page {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Page {
     /// Create a page from raw HTML (no network).
     pub async fn from_html(html: &str, stealth: bool) -> Result<Self, PageError> {
         let dom = crate::html_parser::parse_html(html);
         let title = extract_title(html);
         let challenge_class = engine_classify(html);
         Ok(Self {
-            engine: EngineHandle::new(),
             dom,
             url: "about:blank".to_string(),
             title,
@@ -95,24 +113,32 @@ impl Page {
     pub async fn with_profile(
         html: &str,
         url: &str,
-        _profile: StealthProfile,
+        profile: StealthProfile,
     ) -> Result<Self, PageError> {
         let dom = crate::html_parser::parse_html(html);
         let title = extract_title(html);
         let challenge_class = engine_classify(html);
-        Ok(Self {
-            engine: EngineHandle::new(),
+        #[allow(unused_mut)] // mut needed for v8 feature path below
+        let mut page = Self {
             dom,
             url: url.to_string(),
             title,
             html: html.to_string(),
             challenge_class,
-            profile: None,
+            profile: Some(profile),
             stealth: true,
             subresource_block_types: HashSet::new(),
             #[cfg(feature = "v8")]
             js_runtime: None,
-        })
+        };
+        // Apply profile to V8 runtime when the feature is enabled.
+        #[cfg(feature = "v8")]
+        {
+            if let Some(ref profile) = page.profile.clone() {
+                page.set_profile(profile.clone());
+            }
+        }
+        Ok(page)
     }
 
     /// Reload the page with new HTML (reuses V8 isolate in v8 mode).
@@ -430,8 +456,8 @@ impl Page {
     }
 
     /// Synchronous title.
-    pub fn title(&self) -> String {
-        self.title.clone()
+    pub fn title(&self) -> &str {
+        &self.title
     }
 
     /// Current URL.
@@ -463,21 +489,25 @@ impl Page {
     }
 
     /// Page HTML content.
-    pub fn content(&self) -> String {
-        self.html.clone()
+    pub fn content(&self) -> &str {
+        &self.html
     }
 
     pub async fn text_content(&self) -> Result<String, PageError> {
         Ok(self.dom.text_content(crate::dom::NodeId::DOCUMENT))
     }
 
-    pub async fn text_of(&self, _selector: &str) -> Result<String, PageError> {
-        Ok(String::new())
+    pub async fn text_of(&self, selector: &str) -> Result<String, PageError> {
+        if let Some(id) = query_selector(&self.dom, selector) {
+            Ok(self.dom.text_content(id))
+        } else {
+            Err(PageError::ElementNotFound)
+        }
     }
 
     /// Synchronous element check.
-    pub fn has_element(&self, _selector: &str) -> bool {
-        false
+    pub fn has_element(&self, selector: &str) -> bool {
+        query_selector(&self.dom, selector).is_some()
     }
 
     /// Challenge classification result.
@@ -562,6 +592,77 @@ impl Page {
         self.html = self.dom.serialize_html(crate::dom::NodeId::DOCUMENT);
 
         Ok(())
+    }
+}
+
+impl PageLike for Page {
+    fn title(&self) -> &str {
+        &self.title
+    }
+
+    fn content(&self) -> &str {
+        &self.html
+    }
+
+    fn url(&self) -> &str {
+        &self.url
+    }
+}
+
+// TODO: Implement PageLike for CdpPage. CdpPage's accessors are async (return
+// `Result<String>` via CDP evaluation), so an `AsyncPageLike` trait or a
+// snapshot-based approach may be more appropriate.
+
+/// Basic CSS selector query against the DOM.
+///
+/// Supports `#id`, `.class`, `tag`, `tag.class`, and `tag#id` selectors.
+/// Returns the first matching `NodeId` in document order.
+fn query_selector(dom: &Dom, selector: &str) -> Option<NodeId> {
+    let sel = selector.trim();
+    if sel.is_empty() {
+        return None;
+    }
+
+    if let Some(id_val) = sel.strip_prefix('#') {
+        return dom.get_element_by_id(id_val);
+    }
+
+    if let Some(class_val) = sel.strip_prefix('.') {
+        return dom
+            .get_elements_by_class_name(NodeId::DOCUMENT, class_val)
+            .into_iter()
+            .next();
+    }
+
+    // Compound selector: tag, tag#id, tag.class
+    let (tag, rest) = match sel.find(|c: char| c == '#' || c == '.') {
+        Some(pos) => (&sel[..pos], Some(&sel[pos..])),
+        None => (sel, None),
+    };
+
+    if tag.is_empty() {
+        return None;
+    }
+
+    let candidates = dom.get_elements_by_tag_name(NodeId::DOCUMENT, tag);
+    match rest {
+        Some(r) if r.starts_with('#') => {
+            let id_val = &r[1..];
+            candidates.into_iter().find(|&id| {
+                crate::dom::DomElement::new(dom, id)
+                    .and_then(|e| e.id().map(|v| v == id_val))
+                    .unwrap_or(false)
+            })
+        }
+        Some(r) if r.starts_with('.') => {
+            let class_val = &r[1..];
+            candidates.into_iter().find(|&id| {
+                crate::dom::DomElement::new(dom, id)
+                    .map(|e| e.has_class(class_val))
+                    .unwrap_or(false)
+            })
+        }
+        _ => candidates.into_iter().next(),
     }
 }
 

@@ -242,6 +242,12 @@ pub struct ClientBuilder {
 }
 
 /// The HTTP version preference for the client.
+///
+/// This is the internal representation used by [`CoreConfig`]. The public-facing
+/// counterpart is [`HttpVersionPreference`] (re-exported from
+/// [`config_groups::HttpVersionPreference`]). The `From<HttpVersionPreference>`
+/// impl bridges the two; the internal enum carries an extra `Http3` variant not
+/// exposed in the public config group API.
 #[repr(u8)]
 #[derive(Clone, Debug)]
 enum HttpVersionPref {
@@ -264,6 +270,10 @@ enum HttpVersionPref {
 }
 
 /// Transport-layer configuration.
+///
+/// This mirrors the public [`TransportConfigOptions`] fields. The `From<TransportConfigOptions>`
+/// impl copies each field 1:1; additional internal state (`transport_options`) is not exposed
+/// through the public config group.
 #[derive(Clone)]
 struct TransportConfig {
     connect_timeout: Option<Duration>,

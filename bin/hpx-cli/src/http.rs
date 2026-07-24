@@ -91,8 +91,7 @@ pub(crate) async fn execute(cli: &Cli) -> Result<()> {
                         form = form.text(key, text);
                     }
                     FormValue::File(path) => {
-                        let static_key: &'static str = Box::leak(key.into_boxed_str());
-                        form = form.file(static_key, &path).await.wrap_err_with(|| {
+                        form = form.file(key, &path).await.wrap_err_with(|| {
                             format!("failed to read file {path} for form field")
                         })?;
                     }
@@ -113,10 +112,8 @@ pub(crate) async fn execute(cli: &Cli) -> Result<()> {
             form = form.text(key, value);
         }
         for (key, path) in cli.parsed_multipart_files() {
-            // Leak the key to get 'static str for hpx multipart API
-            let static_key: &'static str = Box::leak(key.into_boxed_str());
             form = form
-                .file(static_key, &path)
+                .file(key, &path)
                 .await
                 .wrap_err_with(|| format!("failed to add file {path} to multipart form"))?;
         }
