@@ -67,15 +67,15 @@ impl<'a> Drop for DynamicTableEncoder<'a> {
 }
 
 impl<'a> DynamicTableEncoder<'a> {
-    pub(super) fn max_size(&self) -> usize {
+    pub(super) const fn max_size(&self) -> usize {
         self.table.max_size
     }
 
-    pub(super) fn base(&self) -> usize {
+    pub(super) const fn base(&self) -> usize {
         self.base
     }
 
-    pub(super) fn total_inserted(&self) -> usize {
+    pub(super) const fn total_inserted(&self) -> usize {
         self.table.total_inserted()
     }
 
@@ -256,7 +256,7 @@ impl DynamicTable {
         DynamicTable::default()
     }
 
-    pub fn decoder(&self, base: usize) -> DynamicTableDecoder<'_> {
+    pub const fn decoder(&self, base: usize) -> DynamicTableDecoder<'_> {
         DynamicTableDecoder { table: self, base }
     }
 
@@ -277,7 +277,7 @@ impl DynamicTable {
         }
     }
 
-    pub fn set_max_blocked(&mut self, max: usize) -> Result<(), Error> {
+    pub const fn set_max_blocked(&mut self, max: usize) -> Result<(), Error> {
         // TODO handle existing data
         if max >= SETTINGS_MAX_BLOCKED_STREAMS_MAX {
             return Err(Error::MaxBlockedStreamsTooLarge);
@@ -335,7 +335,7 @@ impl DynamicTable {
             .ok_or(Error::BadIndex(real_index))
     }
 
-    pub(super) fn total_inserted(&self) -> usize {
+    pub(super) const fn total_inserted(&self) -> usize {
         self.vas.total_inserted()
     }
 
@@ -514,7 +514,7 @@ impl DynamicTable {
         }
     }
 
-    pub(super) fn max_mem_size(&self) -> usize {
+    pub(super) const fn max_mem_size(&self) -> usize {
         self.max_size
     }
 }

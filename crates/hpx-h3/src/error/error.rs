@@ -36,7 +36,7 @@ pub enum ConnectionError {
 
 impl ConnectionError {
     /// Returns if the error is H3_NO_ERROR local or remote
-    pub fn is_h3_no_error(&self) -> bool {
+    pub const fn is_h3_no_error(&self) -> bool {
         match self {
             ConnectionError::Local {
                 error:
@@ -137,7 +137,7 @@ pub enum StreamError {
 
 impl StreamError {
     /// Returns if the error is H3_NO_ERROR
-    pub fn is_h3_no_error(&self) -> bool {
+    pub const fn is_h3_no_error(&self) -> bool {
         match self {
             StreamError::StreamError {
                 code: Code::H3_NO_ERROR,

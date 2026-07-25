@@ -136,7 +136,7 @@ impl OpCode {
     /// - Cannot be fragmented (the FIN bit must be set)
     /// - Payload must not exceed 125 bytes
     /// - Must be processed immediately rather than queued with data frames
-    pub fn is_control(&self) -> bool {
+    pub const fn is_control(&self) -> bool {
         matches!(*self, OpCode::Close | OpCode::Ping | OpCode::Pong)
     }
 }
@@ -371,7 +371,7 @@ impl Frame {
     /// let fragment = Frame::text("partial data").with_fin(false);
     /// assert!(!fragment.is_fin());
     /// ```
-    pub fn with_fin(mut self, fin: bool) -> Self {
+    pub const fn with_fin(mut self, fin: bool) -> Self {
         self.fin = fin;
         self
     }
@@ -492,7 +492,7 @@ impl Frame {
     /// assert_eq!(frame.opcode(), OpCode::Text);
     /// ```
     #[inline(always)]
-    pub fn opcode(&self) -> OpCode {
+    pub const fn opcode(&self) -> OpCode {
         self.opcode
     }
 
@@ -506,7 +506,7 @@ impl Frame {
     /// assert_eq!(frame.payload().as_ref(), &[1, 2, 3]);
     /// ```
     #[inline(always)]
-    pub fn payload(&self) -> &Bytes {
+    pub const fn payload(&self) -> &Bytes {
         &self.payload
     }
 
@@ -521,7 +521,7 @@ impl Frame {
     /// // Modify payload if needed
     /// ```
     #[inline(always)]
-    pub fn payload_mut(&mut self) -> &mut Bytes {
+    pub const fn payload_mut(&mut self) -> &mut Bytes {
         &mut self.payload
     }
 
@@ -584,7 +584,7 @@ impl Frame {
     /// assert!(frame.is_fin());
     /// ```
     #[inline(always)]
-    pub fn is_fin(&self) -> bool {
+    pub const fn is_fin(&self) -> bool {
         self.fin
     }
 
@@ -600,7 +600,7 @@ impl Frame {
     /// frame.set_fin(false); // Mark as non-final for fragmentation
     /// ```
     #[inline(always)]
-    pub fn set_fin(&mut self, fin: bool) {
+    pub const fn set_fin(&mut self, fin: bool) {
         self.fin = fin;
     }
 
@@ -621,7 +621,7 @@ impl Frame {
     /// frame.set_mask(Some([0x12, 0x34, 0x56, 0x78]));
     /// ```
     #[inline(always)]
-    pub fn set_mask(&mut self, mask: Option<[u8; 4]>) {
+    pub const fn set_mask(&mut self, mask: Option<[u8; 4]>) {
         self.mask = mask;
     }
 
@@ -636,7 +636,7 @@ impl Frame {
     /// let frame = Frame::text("Hello").with_mask([0x12, 0x34, 0x56, 0x78]);
     /// ```
     #[inline(always)]
-    pub fn with_mask(mut self, mask: [u8; 4]) -> Self {
+    pub const fn with_mask(mut self, mask: [u8; 4]) -> Self {
         self.mask = Some(mask);
         self
     }

@@ -402,7 +402,7 @@ impl SettingId {
         SettingId(fastrand::u64(0..0x210842108421083) * 0x1f + 0x21)
     }
 
-    fn is_supported(self) -> bool {
+    const fn is_supported(self) -> bool {
         matches!(
             self,
             SettingId::MAX_HEADER_LIST_SIZE
@@ -416,7 +416,7 @@ impl SettingId {
     }
 
     /// Returns if a Settings Identifier is forbidden
-    fn is_forbidden(&self) -> bool {
+    const fn is_forbidden(&self) -> bool {
         //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
         //# Setting identifiers that were defined in [HTTP/2] where there is no
         //# corresponding HTTP/3 setting have also been reserved

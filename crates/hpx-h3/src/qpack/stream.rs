@@ -55,7 +55,7 @@ pub enum EncoderInstruction {
 }
 
 impl EncoderInstruction {
-    pub fn decode(first: u8) -> Self {
+    pub const fn decode(first: u8) -> Self {
         if first & 0b1000_0000 != 0 {
             EncoderInstruction::InsertWithNameRef
         } else if first & 0b0100_0000 == 0b0100_0000 {
@@ -250,7 +250,7 @@ pub enum DecoderInstruction {
 }
 
 impl DecoderInstruction {
-    pub fn decode(first: u8) -> Self {
+    pub const fn decode(first: u8) -> Self {
         if first & 0b1100_0000 == 0 {
             DecoderInstruction::InsertCountIncrement
         } else if first & 0b1000_0000 != 0 {

@@ -127,7 +127,7 @@ impl StaticTable {
         }
     }
 
-    pub fn find_name(name: &[u8]) -> Option<usize> {
+    pub const fn find_name(name: &[u8]) -> Option<usize> {
         match name {
             b":authority" => Some(0),
             b":path" => Some(1),

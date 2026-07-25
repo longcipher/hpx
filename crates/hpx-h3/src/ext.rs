@@ -20,7 +20,7 @@ impl Protocol {
 
     /// Return a &str representation of the `:protocol` pseudo-header value
     #[inline]
-    pub fn as_str(&self) -> &str {
+    pub const fn as_str(&self) -> &str {
         match self.0 {
             ProtocolInner::WebTransport => "webtransport",
             ProtocolInner::ConnectUdp => "connect-udp",

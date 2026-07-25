@@ -1405,7 +1405,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch TLS configuration, see
     /// [`TlsConfigOptions`].
     #[inline]
-    pub fn keylog(mut self, keylog: KeyLog) -> Self {
+    pub const fn keylog(mut self, keylog: KeyLog) -> Self {
         self.config.tls.keylog = Some(keylog);
         self
     }

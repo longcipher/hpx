@@ -828,7 +828,7 @@ pub struct RequestStream<S, B> {
 
 impl<S, B> RequestStream<S, B> {
     #[allow(missing_docs)]
-    pub fn new(
+    pub const fn new(
         stream: FrameStream<S, B>,
         max_field_section_size: u64,
         conn_state: Arc<SharedState>,

@@ -193,7 +193,7 @@ pub struct ReadHalf {
 }
 
 impl ReadHalf {
-    pub(super) fn new() -> Self {
+    pub(super) const fn new() -> Self {
         Self {
             compressed_stream: false,
             is_closed: false,
@@ -354,7 +354,7 @@ enum CloseState {
 }
 
 impl WriteHalf {
-    pub(super) fn new() -> Self {
+    pub(super) const fn new() -> Self {
         Self {
             streaming: false,
             close_state: None,

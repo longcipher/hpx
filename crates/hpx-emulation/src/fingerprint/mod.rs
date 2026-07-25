@@ -389,7 +389,7 @@ impl serde::Serialize for BrowserFingerprint {
 
 impl BrowserFingerprint {
     /// Creates a new `BrowserFingerprint`.
-    pub fn new(
+    pub const fn new(
         name: &'static str,
         version: &'static str,
         tls: TlsFingerprint,

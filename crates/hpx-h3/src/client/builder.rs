@@ -82,7 +82,7 @@ impl Builder {
     /// See [header size constraints] section of the specification for details.
     ///
     /// [header size constraints]: https://www.rfc-editor.org/rfc/rfc9114.html#name-header-size-constraints
-    pub fn max_field_section_size(&mut self, value: u64) -> &mut Self {
+    pub const fn max_field_section_size(&mut self, value: u64) -> &mut Self {
         self.config.settings.max_field_section_size = value;
         self
     }
@@ -91,7 +91,7 @@ impl Builder {
     /// to prevent potential interoperability issues in the future.
     /// In HTTP/3, the concept of grease is used to ensure that the protocol can evolve
     /// and accommodate future changes without breaking existing implementations.
-    pub fn send_grease(&mut self, enabled: bool) -> &mut Self {
+    pub const fn send_grease(&mut self, enabled: bool) -> &mut Self {
         self.config.send_grease = enabled;
         self
     }
@@ -99,13 +99,13 @@ impl Builder {
     /// Indicates that the client supports HTTP/3 datagrams
     ///
     /// See: <https://www.rfc-editor.org/rfc/rfc9297#section-2.1.1>
-    pub fn enable_datagram(&mut self, enabled: bool) -> &mut Self {
+    pub const fn enable_datagram(&mut self, enabled: bool) -> &mut Self {
         self.config.settings.enable_datagram = enabled;
         self
     }
 
     /// Enables the extended CONNECT protocol required for various HTTP/3 extensions.
-    pub fn enable_extended_connect(&mut self, value: bool) -> &mut Self {
+    pub const fn enable_extended_connect(&mut self, value: bool) -> &mut Self {
         self.config.settings.enable_extended_connect = value;
         self
     }

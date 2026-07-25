@@ -21,7 +21,7 @@ pub struct InternalConnectionError {
 
 impl InternalConnectionError {
     /// Create a new internal connection error
-    pub fn new(code: Code, message: String) -> Self {
+    pub const fn new(code: Code, message: String) -> Self {
         Self { code, message }
     }
     /// Creates a new internal connection error from a frame error

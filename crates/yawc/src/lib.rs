@@ -227,7 +227,7 @@ pub enum WebSocketError {
 impl WebSocketError {
     /// Returns `true` if this is a protocol-level error (RFC 6455 violation).
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn is_protocol_error(&self) -> bool {
+    pub const fn is_protocol_error(&self) -> bool {
         matches!(
             self,
             Self::InvalidFragment
@@ -245,7 +245,7 @@ impl WebSocketError {
 
     /// Returns `true` if this is a handshake error.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn is_handshake_error(&self) -> bool {
+    pub const fn is_handshake_error(&self) -> bool {
         matches!(
             self,
             Self::InvalidStatusCode(_)
@@ -258,25 +258,25 @@ impl WebSocketError {
     }
 
     /// Returns `true` if the connection is closed.
-    pub fn is_closed(&self) -> bool {
+    pub const fn is_closed(&self) -> bool {
         matches!(self, Self::ConnectionClosed)
     }
 
     /// Returns `true` if this is a data validation error (invalid UTF-8 or size limit).
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn is_data_error(&self) -> bool {
+    pub const fn is_data_error(&self) -> bool {
         matches!(self, Self::InvalidUTF8 | Self::FrameTooLarge)
     }
 
     /// Returns `true` if this wraps an I/O error.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn is_io_error(&self) -> bool {
+    pub const fn is_io_error(&self) -> bool {
         matches!(self, Self::IoError(_))
     }
 
     /// Returns the underlying I/O error, if any.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn as_io_error(&self) -> Option<&std::io::Error> {
+    pub const fn as_io_error(&self) -> Option<&std::io::Error> {
         match self {
             Self::IoError(e) => Some(e),
             _ => None,

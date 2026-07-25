@@ -32,7 +32,7 @@ impl VarInt {
     }
 
     /// Succeeds iff `x` < 2^62
-    pub fn from_u64(x: u64) -> Result<Self, VarIntBoundsExceeded> {
+    pub const fn from_u64(x: u64) -> Result<Self, VarIntBoundsExceeded> {
         if x < 2u64.pow(62) {
             Ok(VarInt(x))
         } else {
@@ -55,7 +55,7 @@ impl VarInt {
     }
 
     /// Compute the number of bytes needed to encode this value
-    pub fn size(self) -> usize {
+    pub const fn size(self) -> usize {
         let x = self.0;
         if x < 2u64.pow(6) {
             1
@@ -73,7 +73,7 @@ impl VarInt {
     }
 
     /// Length of an encoded value from its first byte
-    pub fn encoded_size(first: u8) -> usize {
+    pub const fn encoded_size(first: u8) -> usize {
         2usize.pow((first >> 6) as u32)
     }
 

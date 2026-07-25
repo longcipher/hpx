@@ -79,7 +79,12 @@ impl HuffmanDecoder {
 /// Read `len` bits from the `src` slice at the specified position
 ///
 /// Never read more than 8 bits at a time. `bit_offset` may be larger than 8.
-fn read_bits(src: &[u8], mut byte_offset: u32, mut bit_offset: u32, len: u32) -> Result<u8, ()> {
+const fn read_bits(
+    src: &[u8],
+    mut byte_offset: u32,
+    mut bit_offset: u32,
+    len: u32,
+) -> Result<u8, ()> {
     if len == 0 || len > 8 || src.len() as u32 * 8 < (byte_offset * 8) + bit_offset + len {
         return Err(());
     }

@@ -200,7 +200,7 @@ impl Options {
     /// let options = Options::default()
     ///     .with_limits(2 * 1024 * 1024, 4 * 1024 * 1024); // 2MB payload, 4MB buffer
     /// ```
-    pub fn with_limits(self, max_payload: usize, max_buffer: usize) -> Self {
+    pub const fn with_limits(self, max_payload: usize, max_buffer: usize) -> Self {
         Self {
             max_payload_read: Some(max_payload),
             max_read_buffer: Some(max_buffer),
@@ -315,7 +315,7 @@ impl Options {
     ///
     /// # Returns
     /// A modified `Options` instance with compression disabled.
-    pub fn without_compression(self) -> Self {
+    pub const fn without_compression(self) -> Self {
         Self {
             compression: None,
             ..self
@@ -333,7 +333,7 @@ impl Options {
     ///
     /// # Returns
     /// A modified `Options` instance with the specified payload size limit.
-    pub fn with_max_payload_read(self, size: usize) -> Self {
+    pub const fn with_max_payload_read(self, size: usize) -> Self {
         Self {
             max_payload_read: Some(size),
             ..self
@@ -352,7 +352,7 @@ impl Options {
     ///
     /// # Returns
     /// A modified `Options` instance with the specified read buffer size limit.
-    pub fn with_max_read_buffer(self, size: usize) -> Self {
+    pub const fn with_max_read_buffer(self, size: usize) -> Self {
         Self {
             max_read_buffer: Some(size),
             ..self
@@ -367,7 +367,7 @@ impl Options {
     ///
     /// # Returns
     /// A modified `Options` instance with UTF-8 validation enabled.
-    pub fn with_utf8(self) -> Self {
+    pub const fn with_utf8(self) -> Self {
         Self {
             check_utf8: true,
             ..self
@@ -382,7 +382,7 @@ impl Options {
     ///
     /// # Returns
     /// A modified `Options` instance with TCP_NODELAY enabled.
-    pub fn with_no_delay(self) -> Self {
+    pub const fn with_no_delay(self) -> Self {
         Self {
             no_delay: true,
             ..self
@@ -462,7 +462,7 @@ impl Options {
     ///
     /// let options = Options::default().with_backpressure_boundary(128 * 1024); // 128 KiB boundary
     /// ```
-    pub fn with_backpressure_boundary(self, size: usize) -> Self {
+    pub const fn with_backpressure_boundary(self, size: usize) -> Self {
         Self {
             max_backpressure_write_boundary: Some(size),
             ..self

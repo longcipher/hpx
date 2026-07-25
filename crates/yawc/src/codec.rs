@@ -133,17 +133,17 @@ impl ReadState {
     }
 
     #[inline(always)]
-    fn fin(&self) -> bool {
+    const fn fin(&self) -> bool {
         self.flags & 0x80 != 0
     }
 
     #[inline(always)]
-    fn rsv1(&self) -> bool {
+    const fn rsv1(&self) -> bool {
         self.flags & 0x40 != 0
     }
 
     #[inline(always)]
-    fn opcode(&self) -> OpCode {
+    const fn opcode(&self) -> OpCode {
         // The opcode bits are set from a valid OpCode in ReadState::new,
         // which only stores values from OpCode's u8 representation.
         match self.flags & 0x0F {
@@ -160,7 +160,7 @@ impl ReadState {
     }
 
     #[inline(always)]
-    fn mask(&self) -> Option<[u8; 4]> {
+    const fn mask(&self) -> Option<[u8; 4]> {
         if self.flags & 0x10 != 0 {
             Some(self.mask)
         } else {
@@ -228,7 +228,7 @@ impl Decoder {
     ///
     /// # Returns
     /// A `Decoder` instance configured to limit payloads to `max_payload_size`.
-    pub fn new(role: Role, max_payload_size: usize) -> Self {
+    pub const fn new(role: Role, max_payload_size: usize) -> Self {
         Self {
             role,
             state: None,
@@ -380,7 +380,7 @@ pub struct Encoder {
 }
 
 impl Encoder {
-    pub fn new(role: Role) -> Self {
+    pub const fn new(role: Role) -> Self {
         Self { role }
     }
 }

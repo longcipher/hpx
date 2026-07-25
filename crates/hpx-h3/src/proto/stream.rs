@@ -35,7 +35,7 @@ stream_types! {
 impl StreamType {
     pub const MAX_ENCODED_SIZE: usize = VarInt::MAX_SIZE;
 
-    pub fn value(&self) -> u64 {
+    pub const fn value(&self) -> u64 {
         self.0
     }
     /// returns a StreamType type with random number of the 0x1f * N + 0x21
@@ -44,7 +44,7 @@ impl StreamType {
         StreamType(fastrand::u64(0..0x210842108421083) * 0x1f + 0x21)
     }
 
-    pub fn from_value(value: u64) -> Self {
+    pub const fn from_value(value: u64) -> Self {
         StreamType(value)
     }
 }
@@ -111,7 +111,7 @@ impl StreamId {
     }
 
     /// Which side of a connection initiated the stream
-    pub(crate) fn initiator(self) -> Side {
+    pub(crate) const fn initiator(self) -> Side {
         if self.0 & 0x1 == 0 {
             Side::Client
         } else {
@@ -125,17 +125,17 @@ impl StreamId {
     }
 
     /// Distinguishes streams of the same initiator and directionality
-    pub fn index(self) -> u64 {
+    pub const fn index(self) -> u64 {
         self.0 >> 2
     }
 
     /// Which directions data flows in
-    fn dir(self) -> Dir {
+    const fn dir(self) -> Dir {
         if self.0 & 0x2 == 0 { Dir::Bi } else { Dir::Uni }
     }
 
     #[allow(missing_docs)]
-    pub fn into_inner(self) -> u64 {
+    pub const fn into_inner(self) -> u64 {
         self.0
     }
 }

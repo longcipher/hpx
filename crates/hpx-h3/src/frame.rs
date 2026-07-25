@@ -138,7 +138,7 @@ where
         self.stream.stop_sending(error_code.into());
     }
 
-    pub(crate) fn has_data(&self) -> bool {
+    pub(crate) const fn has_data(&self) -> bool {
         self.remaining_data != 0
     }
 

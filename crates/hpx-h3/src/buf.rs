@@ -8,7 +8,7 @@ pub(crate) struct BufList<T> {
 }
 
 impl<T: Buf> BufList<T> {
-    pub(crate) fn new() -> BufList<T> {
+    pub(crate) const fn new() -> BufList<T> {
         BufList {
             bufs: VecDeque::new(),
         }
@@ -21,7 +21,7 @@ impl<T: Buf> BufList<T> {
         self.bufs.push_back(buf);
     }
 
-    pub fn cursor(&self) -> Cursor<'_, T> {
+    pub const fn cursor(&self) -> Cursor<'_, T> {
         Cursor {
             buf: self,
             pos_total: 0,
@@ -121,7 +121,7 @@ pub struct Cursor<'a, B> {
 }
 
 impl<'a, B: Buf> Cursor<'a, B> {
-    pub fn position(&self) -> usize {
+    pub const fn position(&self) -> usize {
         self.pos_total
     }
 }

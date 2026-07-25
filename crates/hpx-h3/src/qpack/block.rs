@@ -64,7 +64,7 @@ pub enum HeaderBlockField {
 
 impl HeaderBlockField {
     // Check how the next field is encoded according its first byte
-    pub fn decode(first: u8) -> Self {
+    pub const fn decode(first: u8) -> Self {
         if first & 0b1000_0000 != 0 {
             HeaderBlockField::Indexed
         } else if first & 0b1111_0000 == 0b0001_0000 {
@@ -123,7 +123,7 @@ impl HeaderPrefix {
         }
     }
 
-    pub fn get(
+    pub const fn get(
         self,
         total_inserted: usize,
         max_table_size: usize,

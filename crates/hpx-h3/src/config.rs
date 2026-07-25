@@ -149,12 +149,12 @@ impl Default for Settings {
 impl Settings {
     /// <https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.1>
     /// Sets `SETTINGS_ENABLE_WEBTRANSPORT` if enabled
-    pub fn enable_webtransport(&self) -> bool {
+    pub const fn enable_webtransport(&self) -> bool {
         self.enable_webtransport
     }
 
     /// Enable HTTP Datagrams, see <https://datatracker.ietf.org/doc/rfc9297/> for details
-    pub fn enable_datagram(&self) -> bool {
+    pub const fn enable_datagram(&self) -> bool {
         self.enable_datagram
     }
 
@@ -162,7 +162,7 @@ impl Settings {
     /// enabled by the SETTINGS_ENABLE_CONNECT_PROTOCOL parameter.
     /// That parameter is only defined for HTTP/2.
     /// for extended CONNECT in HTTP/3; instead, the SETTINGS_ENABLE_WEBTRANSPORT setting implies that an endpoint supports extended CONNECT.
-    pub fn enable_extended_connect(&self) -> bool {
+    pub const fn enable_extended_connect(&self) -> bool {
         self.enable_extended_connect
     }
 }

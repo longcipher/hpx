@@ -177,7 +177,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    pub fn new(
+    pub const fn new(
         request_stream: RequestStream<C::BidiStream, B>,
         decoded: Result<qpack::Decoded, u64>,
         max_field_section_size: u64,

@@ -82,18 +82,18 @@ pub struct VirtualAddressSpace {
 }
 
 impl VirtualAddressSpace {
-    pub fn add(&mut self) -> AbsoluteIndex {
+    pub const fn add(&mut self) -> AbsoluteIndex {
         self.inserted += 1;
         self.delta += 1;
         self.inserted
     }
 
-    pub fn drop(&mut self) {
+    pub const fn drop(&mut self) {
         self.dropped += 1;
         self.delta -= 1;
     }
 
-    pub fn relative(&self, index: RelativeIndex) -> Result<usize, Error> {
+    pub const fn relative(&self, index: RelativeIndex) -> Result<usize, Error> {
         if self.inserted < index || self.delta == 0 || self.inserted - index <= self.dropped {
             Err(Error::RelativeIndex(index))
         } else {
@@ -101,11 +101,11 @@ impl VirtualAddressSpace {
         }
     }
 
-    pub fn evicted(&self, index: AbsoluteIndex) -> bool {
+    pub const fn evicted(&self, index: AbsoluteIndex) -> bool {
         index != 0 && index <= self.dropped
     }
 
-    pub fn relative_base(&self, base: usize, index: RelativeIndex) -> Result<usize, Error> {
+    pub const fn relative_base(&self, base: usize, index: RelativeIndex) -> Result<usize, Error> {
         if self.delta == 0 || index > base || base - index <= self.dropped {
             Err(Error::RelativeIndex(index))
         } else {
@@ -113,7 +113,7 @@ impl VirtualAddressSpace {
         }
     }
 
-    pub fn post_base(&self, base: usize, index: RelativeIndex) -> Result<usize, Error> {
+    pub const fn post_base(&self, base: usize, index: RelativeIndex) -> Result<usize, Error> {
         if self.delta == 0 || base + index >= self.inserted || base + index < self.dropped {
             Err(Error::PostbaseIndex(index))
         } else {
@@ -121,7 +121,7 @@ impl VirtualAddressSpace {
         }
     }
 
-    pub fn index(&self, index: usize) -> Result<usize, Error> {
+    pub const fn index(&self, index: usize) -> Result<usize, Error> {
         if index >= self.delta {
             Err(Error::Index(index))
         } else {
@@ -129,11 +129,11 @@ impl VirtualAddressSpace {
         }
     }
 
-    pub fn largest_ref(&self) -> usize {
+    pub const fn largest_ref(&self) -> usize {
         self.inserted - self.dropped
     }
 
-    pub fn total_inserted(&self) -> usize {
+    pub const fn total_inserted(&self) -> usize {
         self.inserted
     }
 }

@@ -12,11 +12,11 @@ use crate::proto::{
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct SessionId(u64);
 impl SessionId {
-    pub(crate) fn from_varint(id: VarInt) -> SessionId {
+    pub(crate) const fn from_varint(id: VarInt) -> SessionId {
         Self(id.0)
     }
 
-    pub(crate) fn into_inner(self) -> u64 {
+    pub(crate) const fn into_inner(self) -> u64 {
         self.0
     }
 }

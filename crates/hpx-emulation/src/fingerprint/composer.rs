@@ -28,7 +28,7 @@ pub struct HeaderComposer {
 
 impl HeaderComposer {
     /// Creates a new empty `HeaderComposer`.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             fingerprint_headers: Vec::new(),
             custom_headers: Vec::new(),

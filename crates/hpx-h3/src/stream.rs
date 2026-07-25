@@ -276,7 +276,7 @@ where
     S: RecvStream,
     B: Buf,
 {
-    pub fn new(stream: S) -> Self {
+    pub const fn new(stream: S) -> Self {
         Self {
             stream: BufRecvStream::new(stream),
             ty: None,
@@ -444,7 +444,7 @@ impl<S, B> std::fmt::Debug for BufRecvStream<S, B> {
 }
 
 impl<S, B> BufRecvStream<S, B> {
-    pub fn new(stream: S) -> Self {
+    pub const fn new(stream: S) -> Self {
         Self {
             buf: BufList::new(),
             eos: false,
@@ -482,7 +482,7 @@ impl<B, S: RecvStream> BufRecvStream<S, B> {
 
     /// Returns the currently buffered data, allowing it to be partially read
     #[inline]
-    pub(crate) fn buf_mut(&mut self) -> &mut BufList<Bytes> {
+    pub(crate) const fn buf_mut(&mut self) -> &mut BufList<Bytes> {
         &mut self.buf
     }
 
@@ -499,11 +499,11 @@ impl<B, S: RecvStream> BufRecvStream<S, B> {
     }
 
     #[inline]
-    pub(crate) fn buf(&self) -> &BufList<Bytes> {
+    pub(crate) const fn buf(&self) -> &BufList<Bytes> {
         &self.buf
     }
 
-    pub fn is_eos(&self) -> bool {
+    pub const fn is_eos(&self) -> bool {
         self.eos
     }
 }

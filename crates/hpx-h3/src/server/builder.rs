@@ -69,7 +69,7 @@ impl Builder {
     /// See [header size constraints] section of the specification for details.
     ///
     /// [header size constraints]: https://www.rfc-editor.org/rfc/rfc9114.html#name-header-size-constraints
-    pub fn max_field_section_size(&mut self, value: u64) -> &mut Self {
+    pub const fn max_field_section_size(&mut self, value: u64) -> &mut Self {
         self.config.settings.max_field_section_size = value;
         self
     }
@@ -77,7 +77,7 @@ impl Builder {
     /// Send grease values to the Client.
     /// See [setting](https://www.rfc-editor.org/rfc/rfc9114.html#settings-parameters), [frame](https://www.rfc-editor.org/rfc/rfc9114.html#frame-reserved) and [stream](https://www.rfc-editor.org/rfc/rfc9114.html#stream-grease) for more information.
     #[inline]
-    pub fn send_grease(&mut self, value: bool) -> &mut Self {
+    pub const fn send_grease(&mut self, value: bool) -> &mut Self {
         self.config.send_grease = value;
         self
     }
@@ -91,19 +91,19 @@ impl Builder {
     /// Supporting for webtransport also requires setting `enable_extended_connect` `enable_datagram`
     /// and `max_webtransport_sessions`.
     #[inline]
-    pub fn enable_webtransport(&mut self, value: bool) -> &mut Self {
+    pub const fn enable_webtransport(&mut self, value: bool) -> &mut Self {
         self.config.settings.enable_webtransport = value;
         self
     }
 
     /// Enables the extended CONNECT protocol required for various HTTP/3 extensions.
-    pub fn enable_extended_connect(&mut self, value: bool) -> &mut Self {
+    pub const fn enable_extended_connect(&mut self, value: bool) -> &mut Self {
         self.config.settings.enable_extended_connect = value;
         self
     }
 
     /// Limits the maximum number of WebTransport sessions
-    pub fn max_webtransport_sessions(&mut self, value: u64) -> &mut Self {
+    pub const fn max_webtransport_sessions(&mut self, value: u64) -> &mut Self {
         self.config.settings.max_webtransport_sessions = value;
         self
     }
@@ -111,7 +111,7 @@ impl Builder {
     /// Indicates that the client or server supports HTTP/3 datagrams
     ///
     /// See: <https://www.rfc-editor.org/rfc/rfc9297#section-2.1.1>
-    pub fn enable_datagram(&mut self, value: bool) -> &mut Self {
+    pub const fn enable_datagram(&mut self, value: bool) -> &mut Self {
         self.config.settings.enable_datagram = value;
         self
     }

@@ -39,7 +39,7 @@ impl Header {
         }
     }
 
-    pub fn response(status: StatusCode, fields: HeaderMap) -> Self {
+    pub const fn response(status: StatusCode, fields: HeaderMap) -> Self {
         Self {
             pseudo: Pseudo::response(status),
             fields,
@@ -415,7 +415,7 @@ impl Pseudo {
         }
     }
 
-    fn response(status: StatusCode) -> Self {
+    const fn response(status: StatusCode) -> Self {
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3
         //= type=implication
         //# Pseudo-header fields defined for requests MUST NOT appear
@@ -432,7 +432,7 @@ impl Pseudo {
         }
     }
 
-    fn len(&self) -> usize {
+    const fn len(&self) -> usize {
         self.len
     }
 }

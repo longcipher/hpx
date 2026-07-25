@@ -476,7 +476,7 @@ struct FragmentLayer {
 
 impl FragmentLayer {
     /// Creates a new FragmentLayer with the given configuration.
-    fn new(
+    const fn new(
         fragment_size: Option<usize>,
         max_read_buffer: usize,
         fragment_timeout: Option<Duration>,
@@ -1217,7 +1217,7 @@ where
     ///
     /// Returns `false` if compression was not requested or the server did not accept it.
     #[inline]
-    pub fn compression_accepted(&self) -> bool {
+    pub const fn compression_accepted(&self) -> bool {
         self.negotiated_extensions.is_some()
     }
 
