@@ -299,7 +299,7 @@ impl TlsConfigOptions {
     }
 
     /// Configure TLS key logging.
-    pub const fn keylog(mut self, keylog: KeyLog) -> Self {
+    pub fn keylog(mut self, keylog: KeyLog) -> Self {
         self.keylog = Some(keylog);
         self
     }

@@ -303,7 +303,7 @@ impl TlsConnectorBuilder {
 
     /// Sets the TLS keylog policy.
     #[inline]
-    pub(crate) const fn keylog(mut self, keylog: Option<KeyLog>) -> Self {
+    pub(crate) fn keylog(mut self, keylog: Option<KeyLog>) -> Self {
         self.keylog = keylog;
         self
     }
