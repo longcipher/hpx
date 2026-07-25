@@ -116,7 +116,7 @@ enum ValueMode {
 }
 
 impl ValueMode {
-    pub const fn field_name(self) -> &'static str {
+    pub(crate) const fn field_name(self) -> &'static str {
         match self {
             Self::Data => "data",
             Self::Event => "event",

@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use futures_util::TryStreamExt;
 use hpx::{header, ws::message::Message};
 

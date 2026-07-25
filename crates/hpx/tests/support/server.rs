@@ -5,7 +5,7 @@ use std::{
 use hpx::Body;
 use tokio::{io::AsyncReadExt, net::TcpStream, runtime, sync::oneshot};
 
-pub struct Server {
+pub(crate) struct Server {
     addr: net::SocketAddr,
     panic_rx: std_mpsc::Receiver<()>,
     events_rx: std_mpsc::Receiver<Event>,
@@ -13,17 +13,17 @@ pub struct Server {
 }
 
 #[non_exhaustive]
-pub enum Event {
+pub(crate) enum Event {
     ConnectionClosed,
 }
 
 impl Server {
-    pub fn addr(&self) -> net::SocketAddr {
+    pub(crate) fn addr(&self) -> net::SocketAddr {
         self.addr
     }
 
     #[allow(unused)]
-    pub fn events(&mut self) -> Vec<Event> {
+    pub(crate) fn events(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
         while let Ok(event) = self.events_rx.try_recv() {
             events.push(event);
@@ -47,7 +47,7 @@ impl Drop for Server {
 }
 
 #[allow(unused)]
-pub fn http<F, Fut>(func: F) -> Server
+pub(crate) fn http<F, Fut>(func: F) -> Server
 where
     F: Fn(http::Request<hyper::body::Incoming>) -> Fut + Clone + Send + 'static,
     Fut: Future<Output = http::Response<Body>> + Send + 'static,
@@ -61,7 +61,7 @@ where
 
 type Builder = hyper_util::server::conn::auto::Builder<hyper_util::rt::TokioExecutor>;
 
-pub fn http_with_config<F1, Fut, E, F2, Bu>(func: F1, apply_config: F2) -> Server
+pub(crate) fn http_with_config<F1, Fut, E, F2, Bu>(func: F1, apply_config: F2) -> Server
 where
     F1: Fn(http::Request<hyper::body::Incoming>) -> Fut + Clone + Send + 'static,
     Fut: Future<Output = Result<http::Response<Body>, E>> + Send + 'static,
@@ -130,7 +130,7 @@ where
 }
 
 #[allow(unused)]
-pub fn low_level_with_response<F>(do_response: F) -> Server
+pub(crate) fn low_level_with_response<F>(do_response: F) -> Server
 where
     for<'c> F: Fn(&'c [u8], &'c mut TcpStream) -> Box<dyn Future<Output = ()> + Send + 'c>
         + Clone

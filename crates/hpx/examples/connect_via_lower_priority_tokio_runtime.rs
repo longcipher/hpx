@@ -1,3 +1,4 @@
+#![allow(missing_docs, unreachable_pub)]
 // This example demonstrates how to delegate the connect calls, which contain TLS handshakes,
 // to a secondary tokio runtime of lower OS thread priority using a custom tower layer.
 // This helps to ensure that long-running futures during handshake crypto operations don't block

@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 #[cfg(any(
     target_os = "android",
     target_os = "fuchsia",

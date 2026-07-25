@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 #[cfg(unix)]
 #[tokio::main]
 async fn main() -> hpx::Result<()> {

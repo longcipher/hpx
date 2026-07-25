@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use hpx::tls::KeyLog;
 
 #[tokio::main]

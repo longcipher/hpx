@@ -12,13 +12,13 @@ use tower::{BoxError, Layer, Service};
 
 /// This tower layer injects an arbitrary delay before calling downstream layers.
 #[derive(Clone)]
-pub struct DelayLayer {
+pub(crate) struct DelayLayer {
     delay: Duration,
 }
 
 impl DelayLayer {
     #[allow(unused)]
-    pub const fn new(delay: Duration) -> Self {
+    pub(crate) const fn new(delay: Duration) -> Self {
         DelayLayer { delay }
     }
 }
@@ -40,12 +40,12 @@ impl std::fmt::Debug for DelayLayer {
 
 /// This tower service injects an arbitrary delay before calling downstream layers.
 #[derive(Debug, Clone)]
-pub struct Delay<S> {
+pub(crate) struct Delay<S> {
     inner: S,
     delay: Duration,
 }
 impl<S> Delay<S> {
-    pub fn new(inner: S, delay: Duration) -> Self {
+    pub(crate) fn new(inner: S, delay: Duration) -> Self {
         Delay { inner, delay }
     }
 }
@@ -123,13 +123,13 @@ where
 }
 
 #[derive(Clone)]
-pub struct SharedConcurrencyLimitLayer {
+pub(crate) struct SharedConcurrencyLimitLayer {
     semaphore: std::sync::Arc<tokio::sync::Semaphore>,
 }
 
 impl SharedConcurrencyLimitLayer {
     #[allow(unused)]
-    pub fn new(limit: usize) -> Self {
+    pub(crate) fn new(limit: usize) -> Self {
         Self {
             semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(limit)),
         }
@@ -148,7 +148,7 @@ impl<S> tower::Layer<S> for SharedConcurrencyLimitLayer {
 }
 
 #[derive(Clone)]
-pub struct SharedConcurrencyLimit<S> {
+pub(crate) struct SharedConcurrencyLimit<S> {
     inner: S,
     semaphore: std::sync::Arc<tokio::sync::Semaphore>,
 }

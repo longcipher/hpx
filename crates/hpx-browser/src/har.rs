@@ -1448,7 +1448,7 @@ mod proptests {
             prop_assert_eq!(&ts[23..24], "Z");
 
             // Parse numeric parts
-            let year: i64 = ts[0..4].parse()?;
+            let _year: i64 = ts[0..4].parse()?;
             let month: i64 = ts[5..7].parse()?;
             let day: i64 = ts[8..10].parse()?;
             let hour: i64 = ts[11..13].parse()?;

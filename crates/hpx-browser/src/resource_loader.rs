@@ -405,7 +405,7 @@ mod tests {
 
         let server_resources = resources.clone();
         let server = tokio::spawn(async move {
-            for (path, ct, body) in &server_resources {
+            for (_path, ct, body) in &server_resources {
                 let (mut stream, _) = listener.accept().await.unwrap();
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: {ct}\r\nContent-Length: {}\r\n\r\n{body}",
@@ -446,7 +446,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let base = format!("http://{addr}");
 
-        let server = tokio::spawn(async move {
+        let _server = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let body = "body{}";
             let response = format!(

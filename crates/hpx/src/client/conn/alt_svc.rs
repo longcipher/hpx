@@ -140,7 +140,6 @@ impl AltSvcCache {
     }
 
     /// Remove all entries for an authority.
-    #[expect(dead_code)] // HTTP/3 alt-svc invalidation API; reserved for future use.
     pub(crate) fn invalidate(&self, authority: &(String, u16)) {
         self.entries.remove_sync(authority);
     }

@@ -16,7 +16,7 @@ use tokio::{net::TcpListener, select, sync::oneshot};
 /// whatever reason? This server allows for testing such scenarios.
 ///
 /// [RFC9113 3.4]: https://www.rfc-editor.org/rfc/rfc9113.html#name-http-2-connection-preface
-pub struct Server {
+pub(crate) struct Server {
     addr: net::SocketAddr,
     shutdown_tx: Option<oneshot::Sender<()>>,
     server_terminated_rx: oneshot::Receiver<()>,
@@ -25,7 +25,7 @@ pub struct Server {
 type Builder = hyper_util::server::conn::auto::Builder<hyper_util::rt::TokioExecutor>;
 
 impl Server {
-    pub async fn new<F1, Fut, F2, Bu>(func: F1, apply_config: F2, delay: Duration) -> Self
+    pub(crate) async fn new<F1, Fut, F2, Bu>(func: F1, apply_config: F2, delay: Duration) -> Self
     where
         F1: Fn(Request<hyper::body::Incoming>) -> Fut + Clone + Send + 'static,
         Fut: Future<Output = Response<hpx::Body>> + Send + 'static,
@@ -103,7 +103,7 @@ impl Server {
         }
     }
 
-    pub async fn shutdown(mut self) {
+    pub(crate) async fn shutdown(mut self) {
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
         }
@@ -111,7 +111,7 @@ impl Server {
         self.server_terminated_rx.await.unwrap();
     }
 
-    pub fn addr(&self) -> net::SocketAddr {
+    pub(crate) fn addr(&self) -> net::SocketAddr {
         self.addr
     }
 }

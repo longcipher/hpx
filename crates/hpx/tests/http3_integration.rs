@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 #![cfg(feature = "http3")]
 
 use hpx::Client;

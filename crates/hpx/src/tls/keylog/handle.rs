@@ -10,15 +10,14 @@ use std::{
 
 /// Handle for writing to a key log file.
 #[derive(Debug, Clone)]
-pub struct Handle {
-    #[expect(unused)]
+pub(crate) struct Handle {
     filepath: Arc<Path>,
     sender: Sender<String>,
 }
 
 impl Handle {
     /// Create a new [`Handle`] with the specified path and sender.
-    pub fn new(filepath: Arc<Path>) -> Result<Self> {
+    pub(crate) fn new(filepath: Arc<Path>) -> Result<Self> {
         if let Some(parent) = filepath.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -51,7 +50,7 @@ impl Handle {
     }
 
     /// Write a line to the keylogger.
-    pub fn write(&self, line: &str) {
+    pub(crate) fn write(&self, line: &str) {
         let line = format!("{line}\n");
         if let Err(_err) = self.sender.send(line) {
             error!(

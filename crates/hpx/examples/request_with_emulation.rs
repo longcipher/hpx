@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use hpx::{
     Emulation,
     header::{self, HeaderMap, HeaderValue, OrigHeaderMap},

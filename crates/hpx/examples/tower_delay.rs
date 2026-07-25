@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use std::time::{Duration, Instant};
 
 use hpx::{Client, delay::DelayLayer};

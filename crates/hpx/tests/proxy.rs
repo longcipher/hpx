@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 mod support;
 #[cfg(any(feature = "boring-tls", feature = "rustls-tls"))]
 use std::sync::Arc;

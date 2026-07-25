@@ -1,7 +1,7 @@
 use std::error::Error as StdError;
 
 #[allow(unused)]
-pub fn inspect<E>(err: E) -> Vec<String>
+pub(crate) fn inspect<E>(err: E) -> Vec<String>
 where
     E: Into<Box<dyn StdError + Send + Sync>>,
 {

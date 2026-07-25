@@ -31,7 +31,6 @@ use crate::{
 /// Dispatch channel receiver type for h3.
 ///
 /// Mirrors `proto::h2::client::ClientRx<B>` but lives under the h3 module.
-#[expect(dead_code)] // HTTP/3 dispatch scaffolding; wired in by future tasks.
 pub(crate) type ClientRx<B> = dispatch::Receiver<Request<B>, Response<IncomingBody>>;
 
 /// HTTP/3 connection dispatch task.
@@ -52,7 +51,6 @@ pub(crate) type ClientRx<B> = dispatch::Receiver<Request<B>, Response<IncomingBo
 /// `send_request` is an `async fn` (not a sync `poll_ready` + `send_request`
 /// pair like h2). Each spawned task owns a `Clone` of the `SendRequest` and
 /// runs the full request lifecycle independently.
-#[expect(dead_code)] // HTTP/3 dispatch scaffolding; wired in by future tasks.
 pub(crate) struct ConnTask<B>
 where
     B: Body,
@@ -82,7 +80,6 @@ where
     /// The caller is responsible for spawning this future (typically via
     /// `tokio::spawn`) so it runs concurrently with the connection-driver
     /// task that feeds `close_rx`.
-    #[expect(dead_code)] // HTTP/3 dispatch scaffolding; wired in by future tasks.
     pub(crate) const fn new(
         send_request: hpx_h3::client::SendRequest<hpx_h3::quinn::OpenStreams, Bytes>,
         req_rx: ClientRx<B>,

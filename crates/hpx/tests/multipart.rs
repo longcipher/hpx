@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 mod support;
 use http_body_util::BodyExt;
 use support::server;

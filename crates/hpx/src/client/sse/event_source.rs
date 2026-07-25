@@ -176,6 +176,7 @@ impl From<MessageEvent> for SseEvent {
 }
 
 /// A builder for configuring an [`EventSource`] connection.
+#[derive(Debug)]
 pub struct EventSourceBuilder {
     req: RequestBuilder,
     retry_config: SseRetryConfig,
