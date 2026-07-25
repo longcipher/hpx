@@ -20,7 +20,7 @@ use crate::{Body, error::BoxError, retry};
 
 /// A retry policy for HTTP requests.
 #[derive(Clone)]
-pub struct RetryPolicy {
+pub(crate) struct RetryPolicy {
     budget: Option<Arc<TpsBudget>>,
     classifier: Classifier,
     max_retries_per_request: u32,
@@ -31,7 +31,7 @@ pub struct RetryPolicy {
 impl RetryPolicy {
     /// Create a new `RetryPolicy`.
     #[inline]
-    pub fn new(policy: retry::Policy) -> Self {
+    pub(crate) fn new(policy: retry::Policy) -> Self {
         Self {
             budget: policy
                 .budget
@@ -106,7 +106,7 @@ impl Policy<Req, Res, BoxError> for RetryPolicy {
         }
 
         // Withdraw budget token only when we're about to actually retry.
-        if !self.budget.as_ref().map(|b| b.withdraw()).unwrap_or(true) {
+        if !self.budget.as_ref().is_none_or(|b| b.withdraw()) {
             debug!(
                 "Request is retryable but retry budget exhausted: {} {}",
                 req.method(),
@@ -116,15 +116,14 @@ impl Policy<Req, Res, BoxError> for RetryPolicy {
         }
 
         self.retry_cnt += 1;
-        match clone_http_request(req) {
-            Some(cloned) => Some(cloned),
-            None => {
-                // Clone failed — deposit the token back.
-                if let Some(ref budget) = self.budget {
-                    budget.deposit();
-                }
-                None
+        if let Some(cloned) = clone_http_request(req) {
+            Some(cloned)
+        } else {
+            // Clone failed — deposit the token back.
+            if let Some(ref budget) = self.budget {
+                budget.deposit();
             }
+            None
         }
     }
 }

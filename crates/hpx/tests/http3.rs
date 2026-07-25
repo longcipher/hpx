@@ -2320,7 +2320,7 @@ async fn alt_svc_captured_from_h2_response() -> TestResult<()> {
     let host = addr.ip().to_string();
     let port = addr.port();
     assert!(
-        client.__test_alt_svc_cache_has_entry(&host, port).await,
+        client.__test_alt_svc_cache_has_entry(&host, port),
         "Alt-Svc cache should have an entry for {host}:{port}"
     );
 
@@ -2516,9 +2516,7 @@ async fn client_upgrades_to_h3_after_alt_svc() -> TestResult<()> {
     //     authority (host + port). This confirms T2.3 cache population.
     let h2_host = h2_addr.ip().to_string();
     let h2_port = h2_addr.port();
-    let has_entry = client
-        .__test_alt_svc_cache_has_entry(&h2_host, h2_port)
-        .await;
+    let has_entry = client.__test_alt_svc_cache_has_entry(&h2_host, h2_port);
     assert!(
         has_entry,
         "Alt-Svc cache should have an h3 entry for {h2_host}:{h2_port}"
@@ -2754,9 +2752,7 @@ async fn prefer_http3_prefers_h3_with_fallback() -> TestResult<()> {
     //     authority (host + port). This confirms T2.3 cache population.
     let h2_host = h2_addr.ip().to_string();
     let h2_port = h2_addr.port();
-    let has_entry = client
-        .__test_alt_svc_cache_has_entry(&h2_host, h2_port)
-        .await;
+    let has_entry = client.__test_alt_svc_cache_has_entry(&h2_host, h2_port);
     assert!(
         has_entry,
         "Alt-Svc cache should have an h3 entry for {h2_host}:{h2_port}"
@@ -2921,18 +2917,14 @@ async fn quic_unreachable_triggers_fallback() -> TestResult<()> {
     );
 
     // 8. Verify the alt-svc cache has an entry for the h2 server's authority.
-    let has_entry = client
-        .__test_alt_svc_cache_has_entry(&h2_host, h2_port)
-        .await;
+    let has_entry = client.__test_alt_svc_cache_has_entry(&h2_host, h2_port);
     assert!(
         has_entry,
         "Alt-Svc cache should have an h3 entry for {h2_host}:{h2_port}"
     );
 
     // 9. Verify the circuit breaker is NOT yet blocking the authority.
-    let is_blocked_before = client
-        .__test_h3_failure_tracker_is_blocked(&h2_host, h2_port)
-        .await;
+    let is_blocked_before = client.__test_h3_failure_tracker_is_blocked(&h2_host, h2_port);
     assert!(
         !is_blocked_before,
         "circuit breaker should not be blocking before any h3 failure"
@@ -2968,9 +2960,7 @@ async fn quic_unreachable_triggers_fallback() -> TestResult<()> {
     );
 
     // 12. Verify the circuit breaker is now blocking the authority.
-    let is_blocked_after = client
-        .__test_h3_failure_tracker_is_blocked(&h2_host, h2_port)
-        .await;
+    let is_blocked_after = client.__test_h3_failure_tracker_is_blocked(&h2_host, h2_port);
     assert!(
         is_blocked_after,
         "circuit breaker should block {h2_host}:{h2_port} after h3 failure"

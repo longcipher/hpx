@@ -1,5 +1,3 @@
-#![allow(clippy::items_after_test_module)]
-
 use std::{
     fmt,
     pin::Pin,
@@ -74,7 +72,7 @@ macro_rules! impl_body_common {
         impl $ty {
             /// Returns the reusable bytes if the body is an in-memory buffer.
             #[inline]
-            fn reusable_bytes(&self) -> Option<&Bytes> {
+            const fn reusable_bytes(&self) -> Option<&Bytes> {
                 match &self.inner {
                     $inner::Reusable { bytes } => Some(bytes),
                     _ => None,
@@ -96,7 +94,7 @@ impl_body_common!(ClientResponseBody, ClientResponseBodyInner);
 // Body::as_bytes also checks the Client variant, which wraps a
 // ClientResponseBody that may itself hold reusable bytes.
 impl Body {
-    #[allow(dead_code)] // used in tests
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn as_bytes(&self) -> Option<&[u8]> {
         if let Some(bytes) = self.reusable_bytes() {
             return Some(bytes.as_ref());
@@ -110,7 +108,7 @@ impl Body {
 
 // ClientResponseBody::as_bytes only needs to check the reusable variant.
 impl ClientResponseBody {
-    #[allow(dead_code)] // used in tests
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn as_bytes(&self) -> Option<&[u8]> {
         self.reusable_bytes().map(Bytes::as_ref)
     }
@@ -141,13 +139,13 @@ impl Body {
     /// let body = Body::wrap(content);
     /// # }
     /// ```
-    pub fn wrap<B>(inner: B) -> Body
+    pub fn wrap<B>(inner: B) -> Self
     where
         B: HttpBody + Send + Sync + 'static,
         B::Data: Into<Bytes>,
         B::Error: Into<BoxError>,
     {
-        Body::boxed(IntoBytesBody { inner }.map_err(Into::into).boxed())
+        Self::boxed(IntoBytesBody { inner }.map_err(Into::into).boxed())
     }
 
     /// Wrap a futures `Stream` in a box inside `Body`.
@@ -171,17 +169,17 @@ impl Body {
     /// This requires the `stream` feature to be enabled.
     #[cfg(feature = "stream")]
     #[cfg_attr(docsrs, doc(cfg(feature = "stream")))]
-    pub fn wrap_stream<S>(stream: S) -> Body
+    pub fn wrap_stream<S>(stream: S) -> Self
     where
         S: futures_util::stream::TryStream + Send + 'static,
         S::Error: Into<BoxError>,
         Bytes: From<S::Ok>,
     {
-        Body::stream(stream)
+        Self::stream(stream)
     }
 
     #[cfg(any(feature = "stream", feature = "multipart"))]
-    pub(crate) fn stream<S>(stream: S) -> Body
+    pub(crate) fn stream<S>(stream: S) -> Self
     where
         S: futures_util::stream::TryStream + Send + 'static,
         S::Error: Into<BoxError>,
@@ -198,24 +196,24 @@ impl Body {
                 .map_ok(Frame::data)
                 .map_err(Into::into),
         ));
-        Body::boxed(body.boxed())
+        Self::boxed(body.boxed())
     }
 
     #[inline]
-    pub(crate) fn empty() -> Body {
-        Body::reusable(Bytes::new())
+    pub(crate) const fn empty() -> Self {
+        Self::reusable(Bytes::new())
     }
 
     #[inline]
-    pub(crate) fn reusable(chunk: Bytes) -> Body {
-        Body {
+    pub(crate) const fn reusable(chunk: Bytes) -> Self {
+        Self {
             inner: BodyInner::Reusable { bytes: chunk },
         }
     }
 
     #[inline]
-    fn boxed(body: BoxBody<Bytes, BoxError>) -> Body {
-        Body {
+    fn boxed(body: BoxBody<Bytes, BoxError>) -> Self {
+        Self {
             inner: BodyInner::Boxed { body },
         }
     }
@@ -229,12 +227,12 @@ impl Body {
         }
     }
 
-    pub(crate) fn try_clone(&self) -> Option<Body> {
+    pub(crate) fn try_clone(&self) -> Option<Self> {
         if let Some(bytes) = self.try_clone_inner() {
-            return Some(Body::reusable(bytes));
+            return Some(Self::reusable(bytes));
         }
         match &self.inner {
-            BodyInner::Client { body } => body.as_ref().get_ref().try_clone().map(Body::from),
+            BodyInner::Client { body } => body.as_ref().get_ref().try_clone().map(Self::from),
             _ => None,
         }
     }
@@ -275,8 +273,8 @@ impl Body {
 
 impl Default for Body {
     #[inline]
-    fn default() -> Body {
-        Body::empty()
+    fn default() -> Self {
+        Self::empty()
     }
 }
 
@@ -302,7 +300,7 @@ impl ClientResponseBody {
     }
 
     #[inline]
-    pub(crate) fn from_inner_response(body: InnerResponseBody) -> Self {
+    pub(crate) const fn from_inner_response(body: InnerResponseBody) -> Self {
         Self {
             inner: ClientResponseBodyInner::Inner { body },
         }
@@ -316,7 +314,7 @@ impl ClientResponseBody {
     }
 
     #[inline]
-    fn reusable(bytes: Bytes) -> Self {
+    const fn reusable(bytes: Bytes) -> Self {
         Self {
             inner: ClientResponseBodyInner::Reusable { bytes },
         }
@@ -396,35 +394,35 @@ impl From<ClientResponseBody> for Body {
 
 impl From<Bytes> for Body {
     #[inline]
-    fn from(bytes: Bytes) -> Body {
-        Body::reusable(bytes)
+    fn from(bytes: Bytes) -> Self {
+        Self::reusable(bytes)
     }
 }
 
 impl From<Vec<u8>> for Body {
     #[inline]
-    fn from(vec: Vec<u8>) -> Body {
-        Body::reusable(vec.into())
+    fn from(vec: Vec<u8>) -> Self {
+        Self::reusable(vec.into())
     }
 }
 
 impl From<&'static [u8]> for Body {
     #[inline]
-    fn from(s: &'static [u8]) -> Body {
-        Body::reusable(Bytes::from_static(s))
+    fn from(s: &'static [u8]) -> Self {
+        Self::reusable(Bytes::from_static(s))
     }
 }
 
 impl From<String> for Body {
     #[inline]
-    fn from(s: String) -> Body {
-        Body::reusable(s.into())
+    fn from(s: String) -> Self {
+        Self::reusable(s.into())
     }
 }
 
 impl From<&'static str> for Body {
     #[inline]
-    fn from(s: &'static str) -> Body {
+    fn from(s: &'static str) -> Self {
         s.as_bytes().into()
     }
 }
@@ -432,8 +430,8 @@ impl From<&'static str> for Body {
 #[cfg(feature = "stream")]
 impl From<File> for Body {
     #[inline]
-    fn from(file: File) -> Body {
-        Body::wrap_stream(ReaderStream::new(file))
+    fn from(file: File) -> Self {
+        Self::wrap_stream(ReaderStream::new(file))
     }
 }
 
@@ -443,7 +441,7 @@ impl HttpBody for Body {
 
     fn poll_frame(
         mut self: Pin<&mut Self>,
-        cx: &mut Context,
+        cx: &mut Context<'_>,
     ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
         match self.as_mut().project().inner.project() {
             BodyInnerProj::Reusable { bytes } => {
@@ -499,7 +497,7 @@ impl HttpBody for ClientResponseBody {
 
     fn poll_frame(
         mut self: Pin<&mut Self>,
-        cx: &mut Context,
+        cx: &mut Context<'_>,
     ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
         match self.as_mut().project().inner.project() {
             ClientResponseBodyInnerProj::Reusable { bytes } => {
@@ -544,7 +542,7 @@ where
 
     fn poll_frame(
         self: Pin<&mut Self>,
-        cx: &mut Context,
+        cx: &mut Context<'_>,
     ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
         match ready!(self.project().inner.poll_frame(cx)) {
             Some(Ok(f)) => Poll::Ready(Some(Ok(f.map_data(Into::into)))),

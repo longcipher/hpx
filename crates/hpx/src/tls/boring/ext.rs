@@ -10,7 +10,7 @@ use crate::{
 };
 
 /// SslConnectorBuilderExt trait for `SslConnectorBuilder`.
-pub trait SslConnectorBuilderExt {
+pub(super) trait SslConnectorBuilderExt {
     /// Configure the CertStore for the given `SslConnectorBuilder`.
     fn configure_cert_store(self, store: Option<&CertStore>) -> crate::Result<SslConnectorBuilder>;
 
@@ -55,7 +55,7 @@ impl SslConnectorBuilderExt for SslConnectorBuilder {
         algs: Option<&[CertificateCompressionAlgorithm]>,
     ) -> crate::Result<SslConnectorBuilder> {
         if let Some(algs) = algs {
-            for algorithm in algs.iter() {
+            for algorithm in algs {
                 let res = match *algorithm {
                     CertificateCompressionAlgorithm::ZLIB => {
                         self.add_certificate_compression_algorithm(

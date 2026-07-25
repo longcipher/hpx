@@ -5,10 +5,10 @@ use super::AsyncConnWithInfo;
 /// When enabled (with the `tracing` feature), connections are wrapped to log I/O operations for
 /// debugging.
 #[derive(Clone, Copy)]
-pub struct Verbose(pub(super) bool);
+pub(super) struct Verbose(pub(super) bool);
 
 impl Verbose {
-    pub const OFF: Verbose = Verbose(false);
+    pub(super) const OFF: Self = Self(false);
 
     #[cfg_attr(not(feature = "tracing"), inline(always))]
     pub(super) fn wrap<T>(&self, conn: T) -> Box<dyn AsyncConnWithInfo>
@@ -55,7 +55,7 @@ mod sealed {
     impl<T: AsyncRead + AsyncWrite + Unpin> AsyncRead for Wrapper<T> {
         fn poll_read(
             mut self: Pin<&mut Self>,
-            cx: &mut Context,
+            cx: &mut Context<'_>,
             buf: &mut ReadBuf<'_>,
         ) -> Poll<std::io::Result<()>> {
             // TODO: This _does_ forget the `init` len, so it could result in
@@ -79,7 +79,7 @@ mod sealed {
     impl<T: AsyncRead + AsyncWrite + Unpin> AsyncWrite for Wrapper<T> {
         fn poll_write(
             mut self: Pin<&mut Self>,
-            cx: &mut Context,
+            cx: &mut Context<'_>,
             buf: &[u8],
         ) -> Poll<io::Result<usize>> {
             match Pin::new(&mut self.inner).poll_write(cx, buf) {
@@ -115,11 +115,11 @@ mod sealed {
             self.inner.is_write_vectored()
         }
 
-        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
+        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
             Pin::new(&mut self.inner).poll_flush(cx)
         }
 
-        fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
+        fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
             Pin::new(&mut self.inner).poll_shutdown(cx)
         }
     }
@@ -136,9 +136,9 @@ mod sealed {
     }
 
     impl fmt::Debug for Vectored<'_, '_> {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             let mut left = self.nwritten;
-            for buf in self.bufs.iter() {
+            for buf in self.bufs {
                 if left == 0 {
                     break;
                 }

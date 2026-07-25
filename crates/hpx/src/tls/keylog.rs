@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! TLS Key Log Management
 //!
 //! This module provides utilities for managing TLS key logging, allowing session keys to be
@@ -19,12 +18,14 @@
 #[cfg(feature = "keylog")]
 mod handle;
 
+#[cfg(feature = "keylog")]
 use std::{
     borrow::Cow,
-    io::{Error, ErrorKind, Result},
-    path::{Component, Path, PathBuf},
+    io::{Error, ErrorKind},
+    path::{Component, PathBuf},
     sync::{Arc, OnceLock},
 };
+use std::{io::Result, path::Path};
 
 #[cfg(feature = "keylog")]
 pub(crate) use handle::Handle;
@@ -91,17 +92,21 @@ pub struct KeyLog;
 #[cfg(not(feature = "keylog"))]
 impl KeyLog {
     /// Returns a no-op [`KeyLog`]. Does not read `SSLKEYLOGFILE`.
-    pub fn from_env() -> KeyLog {
-        KeyLog
+    pub const fn from_env() -> Self {
+        Self
     }
 
     /// Returns a no-op [`KeyLog`]. The path is ignored.
-    pub fn from_file<P: AsRef<Path>>(_path: P) -> KeyLog {
-        KeyLog
+    pub fn from_file<P: AsRef<Path>>(_path: P) -> Self {
+        Self
     }
 
     /// Returns a no-op [`Handle`].
-    pub(crate) fn handle(self) -> Result<Handle> {
+    #[expect(
+        clippy::unused_self,
+        reason = "no-op stub mirrors the keylog-enabled API which consumes self"
+    )]
+    pub(crate) const fn handle(self) -> Result<Handle> {
         Ok(Handle)
     }
 }
@@ -116,7 +121,11 @@ pub(crate) struct Handle;
 #[cfg(not(feature = "keylog"))]
 impl Handle {
     /// No-op: discards the line.
-    pub(crate) fn write(&self, _line: &str) {}
+    #[expect(
+        clippy::unused_self,
+        reason = "no-op stub mirrors the keylog-enabled API which reads self"
+    )]
+    pub(crate) const fn write(&self, _line: &str) {}
 }
 
 #[cfg(feature = "keylog")]

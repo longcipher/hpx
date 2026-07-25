@@ -66,7 +66,9 @@ impl VarInt {
         } else if x < 2u64.pow(62) {
             8
         } else {
-            unreachable!("malformed VarInt");
+            // Defensive: value is out of representable range. Return the max
+            // encoded size instead of panicking.
+            8
         }
     }
 
@@ -107,7 +109,10 @@ impl VarInt {
                 r.copy_to_slice(&mut buf[1..8]);
                 u64::from_be_bytes(buf)
             }
-            _ => unreachable!(),
+            // Defensive: `tag` is `buf[0] >> 6` and can only be 0..=3, so this
+            // arm is unreachable in practice. Return an error instead of
+            // panicking so a vendored fork cannot crash on malformed input.
+            _ => return Err(UnexpectedEnd(0)),
         };
         Ok(VarInt(x))
     }
@@ -124,7 +129,9 @@ impl VarInt {
         } else if x < 2u64.pow(62) {
             w.put_u64(0b11 << 62 | x);
         } else {
-            unreachable!("malformed VarInt")
+            // Defensive: value is out of representable range. Encode the
+            // largest representable value (VarInt::MAX) instead of panicking.
+            w.put_u64(0b11 << 62 | VarInt::MAX.0);
         }
     }
 }
@@ -199,7 +206,12 @@ pub trait BufMutExt {
 
 impl<T: BufMut> BufMutExt for T {
     fn write_var(&mut self, x: u64) {
-        VarInt::from_u64(x).unwrap().encode(self);
+        // Defensive: `from_u64` fails only for values >= 2^62. Encode
+        // `VarInt::MAX` instead of panicking so a vendored fork cannot crash.
+        match VarInt::from_u64(x) {
+            Ok(v) => v.encode(self),
+            Err(_) => VarInt::MAX.encode(self),
+        }
     }
 }
 /// Error returned when constructing a `VarInt` from a value >= 2^62

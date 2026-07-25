@@ -7,7 +7,7 @@ use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
-pub struct BrotliCertificateCompressor;
+pub(super) struct BrotliCertificateCompressor;
 
 impl CertificateCompressor for BrotliCertificateCompressor {
     const ALGORITHM: CertificateCompressionAlgorithm = CertificateCompressionAlgorithm::BROTLI;
@@ -33,7 +33,7 @@ impl CertificateCompressor for BrotliCertificateCompressor {
         loop {
             match reader.read(&mut buf[..]) {
                 Err(e) => {
-                    if let io::ErrorKind::Interrupted = e.kind() {
+                    if e.kind() == io::ErrorKind::Interrupted {
                         continue;
                     }
                     return Err(e);
@@ -52,7 +52,7 @@ impl CertificateCompressor for BrotliCertificateCompressor {
 
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
-pub struct ZlibCertificateCompressor;
+pub(super) struct ZlibCertificateCompressor;
 
 impl CertificateCompressor for ZlibCertificateCompressor {
     const ALGORITHM: CertificateCompressionAlgorithm = CertificateCompressionAlgorithm::ZLIB;

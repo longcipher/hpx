@@ -45,8 +45,8 @@ where
     B: Buf,
     T: Http1Transaction,
 {
-    pub(crate) fn new(io: I) -> Conn<I, B, T> {
-        Conn {
+    pub(crate) fn new(io: I) -> Self {
+        Self {
             io: Buffered::new(io),
             state: State {
                 allow_half_close: false,
@@ -78,7 +78,7 @@ where
         self.io.set_max_buf_size(max);
     }
 
-    pub(crate) fn set_read_buf_exact_size(&mut self, sz: usize) {
+    pub(crate) const fn set_read_buf_exact_size(&mut self, sz: usize) {
         self.io.set_read_buf_exact_size(sz);
     }
 
@@ -86,15 +86,15 @@ where
         self.io.set_write_strategy_flatten();
     }
 
-    pub(crate) fn set_h1_parser_config(&mut self, parser_config: ParserConfig) {
+    pub(crate) const fn set_h1_parser_config(&mut self, parser_config: ParserConfig) {
         self.state.h1_parser_config = parser_config;
     }
 
-    pub(crate) fn set_h09_responses(&mut self) {
+    pub(crate) const fn set_h09_responses(&mut self) {
         self.state.h09_responses = true;
     }
 
-    pub(crate) fn set_http1_max_headers(&mut self, val: usize) {
+    pub(crate) const fn set_http1_max_headers(&mut self, val: usize) {
         self.state.h1_max_headers = Some(val);
     }
 
@@ -102,15 +102,15 @@ where
         self.io.into_inner()
     }
 
-    pub(crate) fn pending_upgrade(&mut self) -> Option<upgrade::Pending> {
+    pub(crate) const fn pending_upgrade(&mut self) -> Option<upgrade::Pending> {
         self.state.upgrade.take()
     }
 
-    pub(crate) fn is_read_closed(&self) -> bool {
+    pub(crate) const fn is_read_closed(&self) -> bool {
         self.state.is_read_closed()
     }
 
-    pub(crate) fn is_write_closed(&self) -> bool {
+    pub(crate) const fn is_write_closed(&self) -> bool {
         self.state.is_write_closed()
     }
 
@@ -126,7 +126,7 @@ where
         !matches!(self.state.writing, Writing::Init)
     }
 
-    pub(crate) fn can_read_body(&self) -> bool {
+    pub(crate) const fn can_read_body(&self) -> bool {
         matches!(
             self.state.reading,
             Reading::Body(..) | Reading::Continue(..)
@@ -143,7 +143,7 @@ where
         read_buf.len() >= 24 && read_buf[..24] == *H2_PREFACE
     }
 
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     pub(super) fn poll_read_head(
         &mut self,
         cx: &mut Context<'_>,
@@ -279,14 +279,7 @@ where
                             let slice = frame.data_ref().unwrap_or_else(|| unreachable!());
                             let (reading, maybe_frame) = if decoder.is_eof() {
                                 debug!("incoming body completed");
-                                (
-                                    Reading::KeepAlive,
-                                    if !slice.is_empty() {
-                                        Some(Ok(frame))
-                                    } else {
-                                        None
-                                    },
-                                )
+                                (Reading::KeepAlive, (!slice.is_empty()).then(|| Ok(frame)))
                             } else if slice.is_empty() {
                                 error!("incoming body unexpectedly ended");
                                 // This should be unreachable, since all 3 decoders
@@ -312,7 +305,7 @@ where
             }
             Reading::Continue(ref decoder) => {
                 // Write the 100 Continue if not already responded...
-                if let Writing::Init = self.state.writing {
+                if matches!(self.state.writing, Writing::Init) {
                     trace!("automatically sending 100 Continue");
                     let cont = b"HTTP/1.1 100 Continue\r\n\r\n";
                     self.io.headers_buf().extend_from_slice(cont);
@@ -330,7 +323,7 @@ where
         ret
     }
 
-    pub(crate) fn wants_read_again(&mut self) -> bool {
+    pub(crate) const fn wants_read_again(&mut self) -> bool {
         let ret = self.state.notify_read;
         self.state.notify_read = false;
         ret
@@ -348,7 +341,7 @@ where
         }
     }
 
-    fn is_mid_message(&self) -> bool {
+    const fn is_mid_message(&self) -> bool {
         !matches!(
             (&self.state.reading, &self.state.writing),
             (&Reading::Init, &Writing::Init)
@@ -415,7 +408,6 @@ where
         debug_assert!(!self.state.is_read_closed());
 
         let result = ready!(self.io.poll_read_from_io(cx));
-        #[allow(clippy::manual_inspect)]
         Poll::Ready(result.map_err(|e| {
             trace!(error = %e, "force_io_read; io error");
             self.state.close();
@@ -434,7 +426,7 @@ where
                 return;
             }
             Reading::Init => (),
-        };
+        }
 
         match self.state.writing {
             Writing::Body(..) => return,
@@ -451,7 +443,7 @@ where
                             if self.state.is_idle() {
                                 self.state.close();
                             } else {
-                                self.close_read()
+                                self.close_read();
                             }
                             return;
                         }
@@ -488,7 +480,7 @@ where
         }
     }
 
-    pub(crate) fn can_write_body(&self) -> bool {
+    pub(crate) const fn can_write_body(&self) -> bool {
         match self.state.writing {
             Writing::Body(..) => true,
             Writing::Init | Writing::WaitingContinue(..) | Writing::KeepAlive | Writing::Closed => {
@@ -497,7 +489,7 @@ where
         }
     }
 
-    pub(crate) fn is_waiting_for_continue(&self) -> bool {
+    pub(crate) const fn is_waiting_for_continue(&self) -> bool {
         matches!(self.state.writing, Writing::WaitingContinue(..))
     }
 
@@ -598,7 +590,7 @@ where
                 head.version = Version::HTTP_10;
             }
             Version::HTTP_11 => {
-                if let KA::Disabled = self.state.keep_alive.status() {
+                if matches!(self.state.keep_alive.status(), KA::Disabled) {
                     head.headers
                         .insert(CONNECTION, HeaderValue::from_static("close"));
                 }
@@ -727,7 +719,7 @@ where
     // - Client: there is nothing we can do
     // - Server: if Response hasn't been written yet, we can send a 4xx response
     fn on_parse_error(&mut self, err: Error) -> Result<()> {
-        if let Writing::Init = self.state.writing {
+        if matches!(self.state.writing, Writing::Init) {
             if self.has_h2_prefix() {
                 return Err(Error::new_version_h2());
             }
@@ -778,7 +770,7 @@ where
         // If still in Reading::Body, just give up
         match self.state.reading {
             Reading::Init | Reading::KeepAlive => {
-                trace!("body drained")
+                trace!("body drained");
             }
             _ => self.close_read(),
         }
@@ -888,20 +880,18 @@ impl fmt::Debug for State {
 
         // Purposefully leaving off other fields..
 
-        builder.finish()
+        builder.finish_non_exhaustive()
     }
 }
 
 impl fmt::Debug for Writing {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            Writing::Init => f.write_str("Init"),
-            Writing::Body(ref enc) => f.debug_tuple("Body").field(enc).finish(),
-            Writing::WaitingContinue(ref enc) => {
-                f.debug_tuple("WaitingContinue").field(enc).finish()
-            }
-            Writing::KeepAlive => f.write_str("KeepAlive"),
-            Writing::Closed => f.write_str("Closed"),
+            Self::Init => f.write_str("Init"),
+            Self::Body(ref enc) => f.debug_tuple("Body").field(enc).finish(),
+            Self::WaitingContinue(ref enc) => f.debug_tuple("WaitingContinue").field(enc).finish(),
+            Self::KeepAlive => f.write_str("KeepAlive"),
+            Self::Closed => f.write_str("Closed"),
         }
     }
 }
@@ -910,7 +900,7 @@ impl std::ops::BitAndAssign<bool> for KA {
     fn bitand_assign(&mut self, enabled: bool) {
         if !enabled {
             trace!("remote disabling keep-alive");
-            *self = KA::Disabled;
+            *self = Self::Disabled;
         }
     }
 }
@@ -924,19 +914,19 @@ enum KA {
 }
 
 impl KA {
-    fn idle(&mut self) {
-        *self = KA::Idle;
+    const fn idle(&mut self) {
+        *self = Self::Idle;
     }
 
-    fn busy(&mut self) {
-        *self = KA::Busy;
+    const fn busy(&mut self) {
+        *self = Self::Busy;
     }
 
-    fn disable(&mut self) {
-        *self = KA::Disabled;
+    const fn disable(&mut self) {
+        *self = Self::Disabled;
     }
 
-    fn status(&self) -> KA {
+    const fn status(&self) -> Self {
         *self
     }
 }
@@ -961,14 +951,14 @@ impl State {
         self.keep_alive.disable();
     }
 
-    fn wants_keep_alive(&self) -> bool {
+    const fn wants_keep_alive(&self) -> bool {
         !matches!(self.keep_alive.status(), KA::Disabled)
     }
 
     fn try_keep_alive<T: Http1Transaction>(&mut self) {
         match (&self.reading, &self.writing) {
             (&Reading::KeepAlive, &Writing::KeepAlive) => {
-                if let KA::Busy = self.keep_alive.status() {
+                if matches!(self.keep_alive.status(), KA::Busy) {
                     self.idle::<T>();
                 } else {
                     trace!(
@@ -980,18 +970,18 @@ impl State {
                 }
             }
             (&Reading::Closed, &Writing::KeepAlive) | (&Reading::KeepAlive, &Writing::Closed) => {
-                self.close()
+                self.close();
             }
             _ => (),
         }
     }
 
-    fn disable_keep_alive(&mut self) {
-        self.keep_alive.disable()
+    const fn disable_keep_alive(&mut self) {
+        self.keep_alive.disable();
     }
 
-    fn busy(&mut self) {
-        if let KA::Disabled = self.keep_alive.status() {
+    const fn busy(&mut self) {
+        if matches!(self.keep_alive.status(), KA::Disabled) {
             return;
         }
         self.keep_alive.busy();
@@ -1021,15 +1011,15 @@ impl State {
         }
     }
 
-    fn is_idle(&self) -> bool {
+    const fn is_idle(&self) -> bool {
         matches!(self.keep_alive.status(), KA::Idle)
     }
 
-    fn is_read_closed(&self) -> bool {
+    const fn is_read_closed(&self) -> bool {
         matches!(self.reading, Reading::Closed)
     }
 
-    fn is_write_closed(&self) -> bool {
+    const fn is_write_closed(&self) -> bool {
         matches!(self.writing, Writing::Closed)
     }
 

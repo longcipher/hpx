@@ -51,7 +51,7 @@ struct Shared {
 }
 
 impl Sender {
-    pub(crate) fn send(&mut self, value: Value) {
+    pub(crate) fn send(&self, value: Value) {
         if self.shared.value.swap(value, Ordering::SeqCst) != value {
             self.shared.waker.wake();
         }
@@ -65,7 +65,7 @@ impl Drop for Sender {
 }
 
 impl Receiver {
-    pub(crate) fn load(&mut self, cx: &mut task::Context<'_>) -> Value {
+    pub(crate) fn load(&self, cx: &task::Context<'_>) -> Value {
         self.shared.waker.register(cx.waker());
         self.shared.value.load(Ordering::SeqCst)
     }

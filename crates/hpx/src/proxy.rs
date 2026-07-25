@@ -62,7 +62,7 @@ use crate::{IntoUri, ext::UriExt};
 pub struct Proxy {
     extra: Extra,
     scheme: ProxyScheme,
-    no_proxy: Option<NoProxy>,
+    exclusions: Option<NoProxy>,
 }
 
 /// A configuration for filtering out requests that shouldn't be proxied
@@ -73,7 +73,7 @@ pub struct NoProxy {
 
 // ===== Internal =====
 
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) enum Intercepted {
     Proxy(matcher::Intercept),
@@ -118,8 +118,8 @@ impl Proxy {
     /// # }
     /// # fn main() {}
     /// ```
-    pub fn http<U: IntoUri>(uri: U) -> crate::Result<Proxy> {
-        uri.into_uri().map(ProxyScheme::Http).map(Proxy::new)
+    pub fn http<U: IntoUri>(uri: U) -> crate::Result<Self> {
+        uri.into_uri().map(ProxyScheme::Http).map(Self::new)
     }
 
     /// Proxy all HTTPS traffic to the passed URI.
@@ -136,8 +136,8 @@ impl Proxy {
     /// # }
     /// # fn main() {}
     /// ```
-    pub fn https<U: IntoUri>(uri: U) -> crate::Result<Proxy> {
-        uri.into_uri().map(ProxyScheme::Https).map(Proxy::new)
+    pub fn https<U: IntoUri>(uri: U) -> crate::Result<Self> {
+        uri.into_uri().map(ProxyScheme::Https).map(Self::new)
     }
 
     /// Proxy **all** traffic to the passed URI.
@@ -157,8 +157,8 @@ impl Proxy {
     /// # }
     /// # fn main() {}
     /// ```
-    pub fn all<U: IntoUri>(uri: U) -> crate::Result<Proxy> {
-        uri.into_uri().map(ProxyScheme::All).map(Proxy::new)
+    pub fn all<U: IntoUri>(uri: U) -> crate::Result<Self> {
+        uri.into_uri().map(ProxyScheme::All).map(Self::new)
     }
 
     /// Proxy all traffic to the passed Unix Domain Socket path.
@@ -176,18 +176,18 @@ impl Proxy {
     /// # fn main() {}
     /// ```
     #[cfg(unix)]
-    pub fn unix<P: uds::IntoUnixSocket>(unix: P) -> crate::Result<Proxy> {
-        Ok(Proxy::new(ProxyScheme::Unix(unix.unix_socket())))
+    pub fn unix<P: uds::IntoUnixSocket>(unix: P) -> crate::Result<Self> {
+        Ok(Self::new(ProxyScheme::Unix(unix.unix_socket())))
     }
 
-    fn new(scheme: ProxyScheme) -> Proxy {
-        Proxy {
+    const fn new(scheme: ProxyScheme) -> Self {
+        Self {
             extra: Extra {
                 auth: None,
                 misc: None,
             },
             scheme,
-            no_proxy: None,
+            exclusions: None,
         }
     }
 
@@ -203,7 +203,7 @@ impl Proxy {
     /// # }
     /// # fn main() {}
     /// ```
-    pub fn basic_auth(mut self, username: &str, password: &str) -> Proxy {
+    pub fn basic_auth(mut self, username: &str, password: &str) -> Self {
         match self.scheme {
             ProxyScheme::All(ref mut uri)
             | ProxyScheme::Http(ref mut uri)
@@ -236,7 +236,7 @@ impl Proxy {
     /// # }
     /// # fn main() {}
     /// ```
-    pub fn custom_http_auth(mut self, header_value: HeaderValue) -> Proxy {
+    pub fn custom_http_auth(mut self, header_value: HeaderValue) -> Self {
         self.extra.auth = Some(header_value);
         self
     }
@@ -256,7 +256,7 @@ impl Proxy {
     /// # }
     /// # fn main() {}
     /// ```
-    pub fn custom_http_headers(mut self, headers: HeaderMap) -> Proxy {
+    pub fn custom_http_headers(mut self, headers: HeaderMap) -> Self {
         match self.scheme {
             ProxyScheme::All(_) | ProxyScheme::Http(_) | ProxyScheme::Https(_) => {
                 self.extra.misc = Some(headers);
@@ -284,19 +284,19 @@ impl Proxy {
     /// # }
     /// # fn main() {}
     /// ```
-    pub fn no_proxy(mut self, no_proxy: Option<NoProxy>) -> Proxy {
-        self.no_proxy = no_proxy;
+    pub fn no_proxy(mut self, no_proxy: Option<NoProxy>) -> Self {
+        self.exclusions = no_proxy;
         self
     }
 
     pub(crate) fn into_matcher(self) -> Matcher {
-        let Proxy {
+        let Self {
             scheme,
             extra,
-            no_proxy,
+            exclusions,
         } = self;
 
-        let no_proxy = no_proxy.as_ref().map_or("", |n| n.inner.as_ref());
+        let no_proxy = exclusions.as_ref().map_or("", |n| n.inner.as_ref());
 
         let inner = match scheme {
             ProxyScheme::All(uri) => matcher::Matcher::builder()
@@ -329,7 +329,7 @@ impl Proxy {
 impl NoProxy {
     /// Returns a new no-proxy configuration based on environment variables (or `None` if no
     /// variables are set) see [self::NoProxy::from_string()] for the string format
-    pub fn from_env() -> Option<NoProxy> {
+    pub fn from_env() -> Option<Self> {
         let raw = std::env::var("NO_PROXY")
             .or_else(|_| std::env::var("no_proxy"))
             .ok()?;
@@ -361,7 +361,7 @@ impl NoProxy {
     ///
     /// The URI `http://notgoogle.com/` would not match.
     pub fn from_string(no_proxy_list: &str) -> Option<Self> {
-        Some(NoProxy {
+        Some(Self {
             inner: no_proxy_list.into(),
         })
     }
@@ -390,7 +390,7 @@ impl Hash for Extra {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.auth.hash(state);
         if let Some(ref misc) = self.misc {
-            for (k, v) in misc.iter() {
+            for (k, v) in misc {
                 k.as_str().hash(state);
                 v.as_bytes().hash(state);
             }

@@ -38,8 +38,8 @@ impl<S> PipeToSendStream<S>
 where
     S: Body,
 {
-    fn new(stream: S, tx: SendStream<SendBuf<S::Data>>) -> PipeToSendStream<S> {
-        PipeToSendStream {
+    const fn new(stream: S, tx: SendStream<SendBuf<S::Data>>) -> Self {
+        Self {
             body_tx: tx,
             data_done: false,
             stream,
@@ -222,16 +222,14 @@ where
             self.buf = loop {
                 match ready!(self.recv_stream.poll_data(cx)) {
                     None => return Poll::Ready(Ok(())),
-                    Some(Ok(buf)) if buf.is_empty() && !self.recv_stream.is_end_stream() => {
-                        continue;
-                    }
+                    Some(Ok(buf)) if buf.is_empty() && !self.recv_stream.is_end_stream() => {}
                     Some(Ok(buf)) => {
                         self.ping.record_data(buf.len());
                         break buf;
                     }
                     Some(Err(e)) => {
                         return Poll::Ready(match e.reason() {
-                            Some(Reason::NO_ERROR) | Some(Reason::CANCEL) => Ok(()),
+                            Some(Reason::NO_ERROR | Reason::CANCEL) => Ok(()),
                             Some(Reason::STREAM_CLOSED) => {
                                 Err(io::Error::new(io::ErrorKind::BrokenPipe, e))
                             }
@@ -281,7 +279,7 @@ where
 
         Poll::Ready(Err(h2_to_io_error(
             match ready!(self.send_stream.poll_reset(cx)) {
-                Ok(Reason::NO_ERROR) | Ok(Reason::CANCEL) | Ok(Reason::STREAM_CLOSED) => {
+                Ok(Reason::NO_ERROR | Reason::CANCEL | Reason::STREAM_CLOSED) => {
                     return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
                 }
                 Ok(reason) => reason.into(),
@@ -306,7 +304,7 @@ where
         Poll::Ready(Err(h2_to_io_error(
             match ready!(self.send_stream.poll_reset(cx)) {
                 Ok(Reason::NO_ERROR) => return Poll::Ready(Ok(())),
-                Ok(Reason::CANCEL) | Ok(Reason::STREAM_CLOSED) => {
+                Ok(Reason::CANCEL | Reason::STREAM_CLOSED) => {
                     return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
                 }
                 Ok(reason) => reason.into(),
@@ -316,6 +314,10 @@ where
     }
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "into_io() returns Some when is_io() is true (h2 invariant)"
+)]
 fn h2_to_io_error(e: http2::Error) -> std::io::Error {
     if e.is_io() {
         e.into_io().unwrap()

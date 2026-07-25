@@ -57,8 +57,8 @@ impl Default for Form {
 
 impl Form {
     /// Creates a new async Form without any content.
-    pub fn new() -> Form {
-        Form {
+    pub fn new() -> Self {
+        Self {
             inner: FormParts::new(),
         }
     }
@@ -78,7 +78,7 @@ impl Form {
     ///     .text("username", "seanmonstar")
     ///     .text("password", "secret");
     /// ```
-    pub fn text<T, U>(self, name: T, value: U) -> Form
+    pub fn text<T, U>(self, name: T, value: U) -> Self
     where
         T: Into<Cow<'static, str>>,
         U: Into<Cow<'static, str>>,
@@ -106,7 +106,7 @@ impl Form {
     /// Errors when the file cannot be opened.
     #[cfg(feature = "stream")]
     #[cfg_attr(docsrs, doc(cfg(feature = "stream")))]
-    pub async fn file<T, U>(self, name: T, path: U) -> io::Result<Form>
+    pub async fn file<T, U>(self, name: T, path: U) -> io::Result<Self>
     where
         T: Into<Cow<'static, str>>,
         U: AsRef<Path>,
@@ -115,7 +115,7 @@ impl Form {
     }
 
     /// Adds a customized Part.
-    pub fn part<T>(self, name: T, part: Part) -> Form
+    pub fn part<T>(self, name: T, part: Part) -> Self
     where
         T: Into<Cow<'static, str>>,
     {
@@ -123,17 +123,17 @@ impl Form {
     }
 
     /// Configure this `Form` to percent-encode using the `path-segment` rules.
-    pub fn percent_encode_path_segment(self) -> Form {
+    pub fn percent_encode_path_segment(self) -> Self {
         self.with_inner(|inner| inner.percent_encode_path_segment())
     }
 
     /// Configure this `Form` to percent-encode using the `attr-char` rules.
-    pub fn percent_encode_attr_chars(self) -> Form {
+    pub fn percent_encode_attr_chars(self) -> Self {
         self.with_inner(|inner| inner.percent_encode_attr_chars())
     }
 
     /// Configure this `Form` to skip percent-encoding
-    pub fn percent_encode_noop(self) -> Form {
+    pub fn percent_encode_noop(self) -> Self {
         self.with_inner(|inner| inner.percent_encode_noop())
     }
 
@@ -176,7 +176,7 @@ impl Form {
 
     /// Generate a crate::core::Body stream for a single Part instance of a Form request.
     pub(crate) fn part_stream<T>(
-        &mut self,
+        &self,
         name: T,
         part: Part,
     ) -> impl Stream<Item = Result<Bytes, crate::Error>> + use<T>
@@ -211,7 +211,7 @@ impl Form {
     where
         F: FnOnce(FormParts<Part>) -> FormParts<Part>,
     {
-        Form {
+        Self {
             inner: func(self.inner),
         }
     }
@@ -221,7 +221,7 @@ impl Form {
 
 impl Part {
     /// Makes a text parameter.
-    pub fn text<T>(value: T) -> Part
+    pub fn text<T>(value: T) -> Self
     where
         T: Into<Cow<'static, str>>,
     {
@@ -229,11 +229,11 @@ impl Part {
             Cow::Borrowed(slice) => Body::from(slice),
             Cow::Owned(string) => Body::from(string),
         };
-        Part::new(body, None)
+        Self::new(body, None)
     }
 
     /// Makes a new parameter from arbitrary bytes.
-    pub fn bytes<T>(value: T) -> Part
+    pub fn bytes<T>(value: T) -> Self
     where
         T: Into<Cow<'static, [u8]>>,
     {
@@ -241,19 +241,19 @@ impl Part {
             Cow::Borrowed(slice) => Body::from(slice),
             Cow::Owned(vec) => Body::from(vec),
         };
-        Part::new(body, None)
+        Self::new(body, None)
     }
 
     /// Makes a new parameter from an arbitrary stream.
-    pub fn stream<T: Into<Body>>(value: T) -> Part {
-        Part::new(value.into(), None)
+    pub fn stream<T: Into<Body>>(value: T) -> Self {
+        Self::new(value.into(), None)
     }
 
     /// Makes a new parameter from an arbitrary stream with a known length. This is particularly
     /// useful when adding something like file contents as a stream, where you can know the content
     /// length beforehand.
-    pub fn stream_with_length<T: Into<Body>>(value: T, length: u64) -> Part {
-        Part::new(value.into(), Some(length))
+    pub fn stream_with_length<T: Into<Body>>(value: T, length: u64) -> Self {
+        Self::new(value.into(), Some(length))
     }
 
     /// Makes a file parameter.
@@ -263,7 +263,7 @@ impl Part {
     /// Errors when the file cannot be opened.
     #[cfg(feature = "stream")]
     #[cfg_attr(docsrs, doc(cfg(feature = "stream")))]
-    pub async fn file<T: AsRef<Path>>(path: T) -> io::Result<Part> {
+    pub async fn file<T: AsRef<Path>>(path: T) -> io::Result<Self> {
         let path = path.as_ref();
         let file_name = path
             .file_name()
@@ -273,8 +273,8 @@ impl Part {
         let file = File::open(path).await?;
         let len = file.metadata().await.map(|m| m.len()).ok();
         let field = match len {
-            Some(len) => Part::stream_with_length(file, len),
-            None => Part::stream(file),
+            Some(len) => Self::stream_with_length(file, len),
+            None => Self::stream(file),
         }
         .mime(mime);
 
@@ -285,8 +285,8 @@ impl Part {
         })
     }
 
-    fn new(value: Body, body_length: Option<u64>) -> Part {
-        Part {
+    fn new(value: Body, body_length: Option<u64>) -> Self {
+        Self {
             meta: PartMetadata::new(),
             value,
             body_length,
@@ -294,17 +294,17 @@ impl Part {
     }
 
     /// Tries to set the mime of this part.
-    pub fn mime_str(self, mime: &str) -> crate::Result<Part> {
+    pub fn mime_str(self, mime: &str) -> crate::Result<Self> {
         Ok(self.mime(mime.parse().map_err(crate::Error::builder)?))
     }
 
     // Re-export when mime 0.4 is available, with split MediaType/MediaRange.
-    fn mime(self, mime: Mime) -> Part {
+    fn mime(self, mime: Mime) -> Self {
         self.with_inner(move |inner| inner.mime(mime))
     }
 
     /// Sets the filename, builder style.
-    pub fn file_name<T>(self, filename: T) -> Part
+    pub fn file_name<T>(self, filename: T) -> Self
     where
         T: Into<Cow<'static, str>>,
     {
@@ -312,7 +312,7 @@ impl Part {
     }
 
     /// Sets custom headers for the part.
-    pub fn headers(self, headers: HeaderMap) -> Part {
+    pub fn headers(self, headers: HeaderMap) -> Self {
         self.with_inner(move |inner| inner.headers(headers))
     }
 
@@ -320,7 +320,7 @@ impl Part {
     where
         F: FnOnce(PartMetadata) -> PartMetadata,
     {
-        Part {
+        Self {
             meta: func(self.meta),
             ..self
         }
@@ -345,7 +345,7 @@ impl PartProps for Part {
 
 impl<P: PartProps> FormParts<P> {
     pub(crate) fn new() -> Self {
-        FormParts {
+        Self {
             boundary: gen_boundary(),
             computed_headers: Vec::new(),
             fields: Vec::new(),
@@ -367,19 +367,19 @@ impl<P: PartProps> FormParts<P> {
     }
 
     /// Configure this `Form` to percent-encode using the `path-segment` rules.
-    pub(crate) fn percent_encode_path_segment(mut self) -> Self {
+    pub(crate) const fn percent_encode_path_segment(mut self) -> Self {
         self.percent_encoding = PercentEncoding::PathSegment;
         self
     }
 
     /// Configure this `Form` to percent-encode using the `attr-char` rules.
-    pub(crate) fn percent_encode_attr_chars(mut self) -> Self {
+    pub(crate) const fn percent_encode_attr_chars(mut self) -> Self {
         self.percent_encoding = PercentEncoding::AttrChar;
         self
     }
 
     /// Configure this `Form` to skip percent-encoding
-    pub(crate) fn percent_encode_noop(mut self) -> Self {
+    pub(crate) const fn percent_encode_noop(mut self) -> Self {
         self.percent_encoding = PercentEncoding::NoOp;
         self
     }
@@ -389,7 +389,7 @@ impl<P: PartProps> FormParts<P> {
     // but not if a generic reader has been added;
     pub(crate) fn compute_length(&mut self) -> Option<u64> {
         let mut length = 0u64;
-        for (name, field) in self.fields.iter() {
+        for (name, field) in &self.fields {
             match field.value_len() {
                 Some(value_length) => {
                     // We are constructing the header just to get its length. To not have to
@@ -407,14 +407,14 @@ impl<P: PartProps> FormParts<P> {
                         + header_length as u64
                         + 4
                         + value_length
-                        + 2
+                        + 2;
                 }
                 _ => return None,
             }
         }
         // If there is at least one field there is a special boundary for the very last field.
         if !self.fields.is_empty() {
-            length += 2 + self.boundary().len() as u64 + 4
+            length += 2 + self.boundary().len() as u64 + 4;
         }
         Some(length)
     }
@@ -429,7 +429,7 @@ impl<P: PartProps> FormParts<P> {
 
 impl PartMetadata {
     pub(crate) fn new() -> Self {
-        PartMetadata {
+        Self {
             mime: None,
             file_name: None,
             headers: HeaderMap::default(),
@@ -530,7 +530,7 @@ impl PercentEncoding {
             buf.extend_from_slice(mime.as_ref().as_bytes());
         }
 
-        for (k, v) in field.headers.iter() {
+        for (k, v) in &field.headers {
             buf.extend_from_slice(b"\r\n");
             buf.extend_from_slice(k.as_str().as_bytes());
             buf.extend_from_slice(b": ");

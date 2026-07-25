@@ -174,7 +174,7 @@ impl Http2OptionsBuilder {
     /// `initial_stream_window_size` and
     /// `initial_connection_window_size`.
     #[inline]
-    pub fn adaptive_window(mut self, enabled: bool) -> Self {
+    pub const fn adaptive_window(mut self, enabled: bool) -> Self {
         use proto::h2::SPEC_WINDOW_SIZE;
 
         self.opts.adaptive_window = enabled;
@@ -200,7 +200,7 @@ impl Http2OptionsBuilder {
     ///
     /// Default is currently 16KB, but can change.
     #[inline]
-    pub fn max_header_list_size(mut self, max: u32) -> Self {
+    pub const fn max_header_list_size(mut self, max: u32) -> Self {
         self.opts.max_header_list_size = Some(max);
         self
     }
@@ -270,7 +270,7 @@ impl Http2OptionsBuilder {
     ///
     /// Default is 20 seconds.
     #[inline]
-    pub fn keep_alive_timeout(mut self, timeout: Duration) -> Self {
+    pub const fn keep_alive_timeout(mut self, timeout: Duration) -> Self {
         self.opts.keep_alive_timeout = timeout;
         self
     }
@@ -284,7 +284,7 @@ impl Http2OptionsBuilder {
     ///
     /// Default is `false`.
     #[inline]
-    pub fn keep_alive_while_idle(mut self, enabled: bool) -> Self {
+    pub const fn keep_alive_while_idle(mut self, enabled: bool) -> Self {
         self.opts.keep_alive_while_idle = enabled;
         self
     }
@@ -293,14 +293,14 @@ impl Http2OptionsBuilder {
     ///
     /// Passing `None` will do nothing.
     #[inline]
-    pub fn enable_push(mut self, opt: bool) -> Self {
+    pub const fn enable_push(mut self, opt: bool) -> Self {
         self.opts.enable_push = Some(opt);
         self
     }
 
     /// Sets the enable connect protocol.
     #[inline]
-    pub fn enable_connect_protocol(mut self, opt: bool) -> Self {
+    pub const fn enable_connect_protocol(mut self, opt: bool) -> Self {
         self.opts.enable_connect_protocol = Some(opt);
         self
     }
@@ -308,7 +308,7 @@ impl Http2OptionsBuilder {
     /// Disable RFC 7540 Stream Priorities (set to `true` to disable).
     /// [RFC 9218]: <https://www.rfc-editor.org/rfc/rfc9218.html#section-2.1>
     #[inline]
-    pub fn no_rfc7540_priorities(mut self, opt: bool) -> Self {
+    pub const fn no_rfc7540_priorities(mut self, opt: bool) -> Self {
         self.opts.no_rfc7540_priorities = Some(opt);
         self
     }
@@ -322,7 +322,7 @@ impl Http2OptionsBuilder {
     ///
     /// [`http2::client::Builder::max_concurrent_reset_streams`]: https://docs.rs/h2/client/struct.Builder.html#method.max_concurrent_reset_streams
     #[inline]
-    pub fn max_concurrent_reset_streams(mut self, max: usize) -> Self {
+    pub const fn max_concurrent_reset_streams(mut self, max: usize) -> Self {
         self.opts.max_concurrent_reset_streams = Some(max);
         self
     }
@@ -336,7 +336,7 @@ impl Http2OptionsBuilder {
     /// The value must be no larger than `u32::MAX`.
     #[inline]
     pub fn max_send_buf_size(mut self, max: usize) -> Self {
-        assert!(max <= u32::MAX as usize);
+        assert!(u32::try_from(max).is_ok());
         self.opts.max_send_buffer_size = max;
         self
     }
@@ -446,7 +446,7 @@ impl Http2Options {
     /// Creates a new `Http2OptionsBuilder` instance.
     pub fn builder() -> Http2OptionsBuilder {
         Http2OptionsBuilder {
-            opts: Http2Options::default(),
+            opts: Self::default(),
         }
     }
 }
@@ -454,7 +454,7 @@ impl Http2Options {
 impl Default for Http2Options {
     #[inline]
     fn default() -> Self {
-        Http2Options {
+        Self {
             adaptive_window: false,
             initial_stream_id: None,
             initial_conn_window_size: DEFAULT_CONN_WINDOW_SIZE,

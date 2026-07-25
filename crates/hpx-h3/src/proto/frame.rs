@@ -126,7 +126,10 @@ impl Frame<PayloadLen> {
             | FrameType::H2_PING
             | FrameType::H2_WINDOW_UPDATE
             | FrameType::H2_CONTINUATION => Err(FrameError::UnsupportedFrame(ty.0)),
-            FrameType::WEBTRANSPORT_BI_STREAM | FrameType::DATA => unreachable!(),
+            // Defensive: `WEBTRANSPORT_BI_STREAM` and `DATA` are handled above
+            // before this match (they early-return). Reaching this arm indicates
+            // a logic bug; return a malformed error instead of panicking.
+            FrameType::WEBTRANSPORT_BI_STREAM | FrameType::DATA => Err(FrameError::Malformed),
             _ => {
                 buf.advance(len as usize);
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
@@ -361,10 +364,10 @@ impl FrameHeader for PushPromise {
     }
 
     fn len(&self) -> usize {
-        VarInt::from_u64(self.id)
-            .expect("PushPromise id varint overflow")
-            .size()
-            + self.encoded.as_ref().len()
+        // Defensive: `from_u64` only fails for values >= 2^62. Fall back to
+        // the maximum encoded size instead of panicking.
+        let id_size = VarInt::from_u64(self.id).map_or(VarInt::MAX_SIZE, |v| v.size());
+        id_size + self.encoded.as_ref().len()
     }
 }
 
@@ -480,7 +483,11 @@ impl FrameHeader for Settings {
     const TYPE: FrameType = FrameType::SETTINGS;
     fn len(&self) -> usize {
         self.entries[..self.len].iter().fold(0, |len, (id, val)| {
-            len + VarInt::from_u64(id.0).unwrap().size() + VarInt::from_u64(*val).unwrap().size()
+            // Defensive: `from_u64` only fails for values >= 2^62. Fall back to
+            // the maximum encoded size instead of panicking.
+            let id_size = VarInt::from_u64(id.0).map_or(VarInt::MAX_SIZE, |v| v.size());
+            let val_size = VarInt::from_u64(*val).map_or(VarInt::MAX_SIZE, |v| v.size());
+            len + id_size + val_size
         })
     }
 }

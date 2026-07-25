@@ -50,11 +50,11 @@ pub trait Sleep: Send + Sync + Future<Output = ()> {
 /// This is typically used to abstract over different timer backends and to provide a unified
 /// interface for spawning sleep futures or scheduling timeouts.
 #[derive(Clone)]
-pub struct ArcTimer(Arc<dyn Timer + Send + Sync>);
+pub(crate) struct ArcTimer(Arc<dyn Timer + Send + Sync>);
 
 /// A user-provided timer to time background tasks.
 #[derive(Clone)]
-pub enum Time {
+pub(crate) enum Time {
     Timer(ArcTimer),
     Empty,
 }
@@ -78,11 +78,18 @@ impl dyn Sleep {
         T: Sleep + 'static,
     {
         if self.is::<T>() {
-            #[allow(unsafe_code)]
+            #[expect(unsafe_code)]
             unsafe {
+                // SAFETY: `Pin::into_inner_unchecked` is sound here because the
+                // `is::<T>()` check above proves the concrete type behind the
+                // `dyn Sleep` trait object is exactly `T`. The subsequent raw
+                // pointer cast `*mut dyn Sleep as *mut T` is therefore a valid
+                // type-correct projection. `Pin::new_unchecked` is sound because
+                // the original `Pin<&mut Self>` was already pinned, and we only
+                // rebind the same storage to its concrete type without moving it.
                 let inner = Pin::into_inner_unchecked(self);
                 Some(Pin::new_unchecked(
-                    &mut *(&mut *inner as *mut dyn Sleep as *mut T),
+                    &mut *std::ptr::from_mut::<dyn Sleep>(&mut *inner).cast::<T>(),
                 ))
             }
         } else {
@@ -119,32 +126,41 @@ impl Timer for ArcTimer {
 // =====impl Time =====
 
 impl Time {
+    #[expect(
+        clippy::panic,
+        reason = "Empty variant requires the caller to install a timer via Builder"
+    )]
     pub(crate) fn sleep(&self, duration: Duration) -> Pin<Box<dyn Sleep>> {
         match *self {
-            Time::Empty => {
+            Self::Empty => {
                 panic!("You must supply a timer.")
             }
-            Time::Timer(ref t) => t.sleep(duration),
+            Self::Timer(ref t) => t.sleep(duration),
         }
     }
 
     pub(crate) fn now(&self) -> Instant {
         match *self {
-            Time::Empty => Instant::now(),
-            Time::Timer(ref t) => t.now(),
+            Self::Empty => Instant::now(),
+            Self::Timer(ref t) => t.now(),
         }
     }
 
+    #[expect(
+        clippy::panic,
+        reason = "Empty variant requires the caller to install a timer via Builder"
+    )]
     pub(crate) fn reset(&self, sleep: &mut Pin<Box<dyn Sleep>>, new_deadline: Instant) {
         match *self {
-            Time::Empty => {
+            Self::Empty => {
                 panic!("You must supply a timer.")
             }
-            Time::Timer(ref t) => t.reset(sleep, new_deadline),
+            Self::Timer(ref t) => t.reset(sleep, new_deadline),
         }
     }
 }
 
 mod private {
+    #[derive(Debug)]
     pub struct Sealed {}
 }

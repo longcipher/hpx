@@ -14,7 +14,7 @@ use http_body::Body;
 use tower::{Layer, Service};
 
 use self::future::ResponseFuture;
-pub use self::policy::{Action, Attempt, Policy};
+pub(crate) use self::policy::{Action, Attempt, Policy};
 use crate::error::BoxError;
 
 enum BodyRepr<B> {
@@ -28,13 +28,13 @@ where
     B: Body + Default,
 {
     fn take(&mut self) -> Option<B> {
-        match mem::replace(self, BodyRepr::None) {
-            BodyRepr::Some(body) => Some(body),
-            BodyRepr::Empty => {
-                *self = BodyRepr::Empty;
+        match mem::replace(self, Self::None) {
+            Self::Some(body) => Some(body),
+            Self::Empty => {
+                *self = Self::Empty;
                 Some(B::default())
             }
-            BodyRepr::None => None,
+            Self::None => None,
         }
     }
 
@@ -43,12 +43,12 @@ where
         P: Policy<B, E>,
     {
         match self {
-            BodyRepr::Some(_) | BodyRepr::Empty => {}
-            BodyRepr::None => {
+            Self::Some(_) | Self::Empty => {}
+            Self::None => {
                 if body.size_hint().exact() == Some(0) {
-                    *self = BodyRepr::Some(B::default());
+                    *self = Self::Some(B::default());
                 } else if let Some(cloned) = policy.clone_body(body) {
-                    *self = BodyRepr::Some(cloned);
+                    *self = Self::Some(cloned);
                 }
             }
         }
@@ -57,15 +57,15 @@ where
 
 /// [`Layer`] for retrying requests with a [`Service`] to follow redirection responses.
 #[derive(Clone, Copy, Default)]
-pub struct FollowRedirectLayer<P> {
+pub(crate) struct FollowRedirectLayer<P> {
     policy: P,
 }
 
 impl<P> FollowRedirectLayer<P> {
     /// Create a new [`FollowRedirectLayer`] with the given redirection [`Policy`].
-    #[inline(always)]
-    pub const fn with_policy(policy: P) -> Self {
-        FollowRedirectLayer { policy }
+    #[inline]
+    pub(crate) const fn with_policy(policy: P) -> Self {
+        Self { policy }
     }
 }
 
@@ -76,7 +76,7 @@ where
 {
     type Service = FollowRedirect<S, P>;
 
-    #[inline(always)]
+    #[inline]
     fn layer(&self, inner: S) -> Self::Service {
         FollowRedirect::with_policy(inner, self.policy.clone())
     }
@@ -84,7 +84,7 @@ where
 
 /// Middleware that retries requests with a [`Service`] to follow redirection responses.
 #[derive(Clone, Copy)]
-pub struct FollowRedirect<S, P> {
+pub(crate) struct FollowRedirect<S, P> {
     inner: S,
     policy: P,
 }
@@ -94,9 +94,9 @@ where
     P: Clone,
 {
     /// Create a new [`FollowRedirect`] with the given redirection [`Policy`].
-    #[inline(always)]
-    pub const fn with_policy(inner: S, policy: P) -> Self {
-        FollowRedirect { inner, policy }
+    #[inline]
+    pub(crate) const fn with_policy(inner: S, policy: P) -> Self {
+        Self { inner, policy }
     }
 }
 

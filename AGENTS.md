@@ -182,7 +182,9 @@ If any command fails, report the failure and do not claim completion.
 
 ## Testing Requirements
 
-- BDD scenarios: place Gherkin features under `features/` and keep the runner in crate-level `tests/` with `cucumber-rs`.
+- BDD scenarios: place Gherkin features under crate-level `features/` directory
+  (e.g., `crates/hpx-dl/features/`, `bin/hpxless/features/`) and keep the runner
+  in crate-level `tests/` with `cucumber-rs`.
 - Use BDD to define acceptance behavior first, then use crate-local unit tests and `proptest` properties for the inner TDD loop.
 - Unit tests: colocate with implementation (`#[cfg(test)]`).
 - Prefer example-based unit tests for named business cases and edge cases, and reserve `proptest` for invariants that should hold across many generated inputs.
@@ -224,13 +226,19 @@ If any command fails, report the failure and do not claim completion.
 | hpx-streams | library | `crates/hpx-streams` |
 | yawc (hpx-yawc) | library | `crates/yawc` |
 | hpx-cli | binary | `bin/hpx-cli` |
+| hpxless | binary | `bin/hpxless` |
 
 ### Project Structure
 
 ```text
-├── bin/hpx-cli/              # CLI binary crate
-│   ├── src/                  # main.rs, cli.rs, http.rs, ws.rs, browser.rs, output.rs, progress.rs, proxy_test.rs
-│   └── tests/                # http_integration.rs, ws_integration.rs
+├── bin/
+│   ├── hpx-cli/              # CLI binary crate
+│   │   ├── src/              # main.rs, cli.rs, http.rs, ws.rs, browser.rs, output.rs, progress.rs, proxy_test.rs
+│   │   └── tests/            # http_integration.rs, ws_integration.rs
+│   └── hpxless/              # Lightweight CDP server binary (Puppeteer/Playwright-compatible endpoint)
+│       ├── src/              # main.rs, cli.rs
+│       ├── tests/            # cucumber.rs, cdp_integration.rs
+│       └── features/         # Gherkin BDD scenarios
 ├── crates/
 │   ├── hpx/                  # Core HTTP client (browser emulation, TLS, connection pooling)
 │   ├── hpx-browser/          # Headless browser engine (DOM, JS runtime, CDP, canvas, layout)

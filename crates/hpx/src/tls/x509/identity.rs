@@ -1,4 +1,3 @@
-#![allow(unused)]
 #[cfg(feature = "boring-tls")]
 use boring::{
     pkcs12::Pkcs12,
@@ -75,7 +74,7 @@ impl Identity {
     ///
     /// This is useful for client certificate bundles where the certificate chain and private key
     /// are delivered in a single PEM file.
-    pub fn from_pem(buf: &[u8]) -> crate::Result<Identity> {
+    pub fn from_pem(buf: &[u8]) -> crate::Result<Self> {
         #[cfg(feature = "boring-tls")]
         {
             let key = extract_private_key_pem(buf)
@@ -90,7 +89,7 @@ impl Identity {
                 Error::builder("at least one certificate must be provided to create an identity")
             })?;
             let chain = cert_chain.collect();
-            Ok(Identity { pkey, cert, chain })
+            Ok(Self { pkey, cert, chain })
         }
         #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
         {
@@ -170,12 +169,12 @@ impl Identity {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn from_pkcs12_der(buf: &[u8], pass: &str) -> crate::Result<Identity> {
+    pub fn from_pkcs12_der(buf: &[u8], pass: &str) -> crate::Result<Self> {
         #[cfg(feature = "boring-tls")]
         {
             let pkcs12 = Pkcs12::from_der(buf).map_err(Error::tls)?;
             let parsed = pkcs12.parse(pass).map_err(Error::tls)?;
-            Ok(Identity {
+            Ok(Self {
                 pkey: parsed.pkey,
                 cert: parsed.cert,
                 // > The stack is the reverse of what you might expect due to the way
@@ -234,7 +233,7 @@ impl Identity {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn from_pkcs8_pem(buf: &[u8], key: &[u8]) -> crate::Result<Identity> {
+    pub fn from_pkcs8_pem(buf: &[u8], key: &[u8]) -> crate::Result<Self> {
         #[cfg(feature = "boring-tls")]
         {
             if !key.starts_with(b"-----BEGIN PRIVATE KEY-----") {
@@ -247,7 +246,7 @@ impl Identity {
                 Error::builder("at least one certificate must be provided to create an identity")
             })?;
             let chain = cert_chain.collect();
-            Ok(Identity { pkey, cert, chain })
+            Ok(Self { pkey, cert, chain })
         }
         #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
         {
@@ -298,7 +297,7 @@ impl Identity {
     ) -> crate::Result<()> {
         connector.set_certificate(&self.cert).map_err(Error::tls)?;
         connector.set_private_key(&self.pkey).map_err(Error::tls)?;
-        for cert in self.chain.iter() {
+        for cert in &self.chain {
             connector
                 .add_extra_chain_cert(cert.clone())
                 .map_err(Error::tls)?;

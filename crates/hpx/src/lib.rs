@@ -4,7 +4,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(test, deny(warnings))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![allow(clippy::items_after_test_module)]
 
 //! # hpx
 //!
@@ -377,7 +376,7 @@ pub use self::client::ws;
 pub use self::{
     client::{
         AsSendBody, Body, BrowserProfile, Client, ClientBuilder, ClientResponseBody, Emulation,
-        EmulationBuilder, EmulationFactory, HttpInfo, Request, RequestBuilder, Response, Upgraded,
+        EmulationBuilder, EmulationFactory, Request, RequestBuilder, Response, Upgraded,
     },
     error::{Error, Result},
     ext::{ResponseBuilderExt, ResponseExt},
@@ -397,10 +396,10 @@ pub mod tower_compat {
 #[cfg(feature = "http3")]
 pub use crate::error::H3Error;
 
-fn _assert_impls() {
-    fn assert_send<T: Send>() {}
-    fn assert_sync<T: Sync>() {}
-    fn assert_clone<T: Clone>() {}
+const fn _assert_impls() {
+    const fn assert_send<T: Send>() {}
+    const fn assert_sync<T: Sync>() {}
+    const fn assert_clone<T: Clone>() {}
 
     assert_send::<Client>();
     assert_sync::<Client>();

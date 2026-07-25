@@ -163,7 +163,10 @@ impl Page {
                 }
             } else {
                 let rt_dom = crate::html_parser::parse_html(html);
-                self.js_runtime = Some(BrowserJsRuntime::new(rt_dom));
+                match BrowserJsRuntime::new(rt_dom) {
+                    Ok(rt) => self.js_runtime = Some(rt),
+                    Err(e) => tracing::error!("BrowserJsRuntime init failed in reload_html: {e}"),
+                }
             }
         }
     }
@@ -359,7 +362,10 @@ impl Page {
             return;
         }
         let rt_dom = crate::html_parser::parse_html(&self.html);
-        self.js_runtime = Some(BrowserJsRuntime::new(rt_dom));
+        match BrowserJsRuntime::new(rt_dom) {
+            Ok(rt) => self.js_runtime = Some(rt),
+            Err(e) => tracing::error!("BrowserJsRuntime init failed in ensure_js_runtime: {e}"),
+        }
     }
 
     /// Execute all inline `<script>` tags (those without `src`) in document order.
@@ -998,7 +1004,7 @@ Checking your browser before accessing the site...
         let mut page = Page::from_html(html, false).await.unwrap();
         page.execute_inline_scripts().unwrap();
 
-        let mut rt = BrowserJsRuntime::new(crate::dom::Dom::new());
+        let mut rt = BrowserJsRuntime::new(crate::dom::Dom::new()).unwrap();
         // The runtime is separate, so we verify via a fresh runtime that
         // our method returned Ok (scripts were executed without error).
         // The real integration test is that execute_inline_scripts doesn't panic.

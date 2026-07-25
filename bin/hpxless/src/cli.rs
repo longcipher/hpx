@@ -55,7 +55,14 @@ pub(crate) struct Cli {
 }
 
 impl Cli {
-    #[cfg(test)]
+    /// Parse `--proxy` into a [`hpx::Proxy`].
+    ///
+    /// Held as a non-test API so the surface stays consistent between builds;
+    /// production code does not yet wire it into `CdpServer::start`.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "production code does not call this yet; tests do")
+    )]
     pub(crate) fn proxy_config(&self) -> eyre::Result<Option<hpx::Proxy>> {
         match &self.proxy {
             Some(url) => Ok(Some(hpx::Proxy::all(url.as_str())?)),

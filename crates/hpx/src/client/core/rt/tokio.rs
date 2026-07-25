@@ -13,12 +13,12 @@ use super::{Executor, Sleep, Timer};
 /// Future executor that utilises `tokio` threads.
 #[non_exhaustive]
 #[derive(Default, Debug, Clone)]
-pub struct TokioExecutor {}
+pub(crate) struct TokioExecutor {}
 
 /// A Timer that uses the tokio runtime.
 #[non_exhaustive]
 #[derive(Default, Clone, Debug)]
-pub struct TokioTimer;
+pub(crate) struct TokioTimer;
 
 // Use TokioSleep to get tokio::time::Sleep to implement Unpin.
 // see https://docs.rs/tokio/latest/tokio/time/struct.Sleep.html
@@ -44,7 +44,7 @@ where
 
 impl TokioExecutor {
     /// Create new executor that relies on [`tokio::spawn`] to execute futures.
-    pub fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {}
     }
 }
@@ -70,14 +70,14 @@ impl Timer for TokioTimer {
 
     fn reset(&self, sleep: &mut Pin<Box<dyn Sleep>>, new_deadline: Instant) {
         if let Some(sleep) = sleep.as_mut().downcast_mut_pin::<TokioSleep>() {
-            sleep.reset(new_deadline)
+            sleep.reset(new_deadline);
         }
     }
 }
 
 impl TokioTimer {
     /// Create a new TokioTimer
-    pub fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {}
     }
 }

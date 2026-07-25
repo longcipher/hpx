@@ -50,8 +50,8 @@ pub struct JitterDelayWith<S, P> {
 impl<S> Delay<S> {
     /// Create a new [`Delay`] service wrapping the given inner service
     #[inline]
-    pub fn new(inner: S, delay: Duration) -> Self {
-        Delay { inner, delay }
+    pub const fn new(inner: S, delay: Duration) -> Self {
+        Self { inner, delay }
     }
 }
 
@@ -80,7 +80,7 @@ where
 impl<S, P> DelayWith<S, P> {
     /// Creates a new [`DelayWith`].
     #[inline]
-    pub fn new(inner: S, delay: Duration, predicate: P) -> Self {
+    pub const fn new(inner: S, delay: Duration, predicate: P) -> Self {
         Self {
             inner: Delay::new(inner, delay),
             predicate,
@@ -118,7 +118,7 @@ where
 impl<S> JitterDelay<S> {
     /// Creates a new [`JitterDelay`].
     #[inline]
-    pub fn new(inner: S, base: Duration, pct: f64) -> Self {
+    pub const fn new(inner: S, base: Duration, pct: f64) -> Self {
         Self {
             inner,
             base,
@@ -153,7 +153,7 @@ where
 impl<S, P> JitterDelayWith<S, P> {
     /// Creates a new [`JitterDelayWith`].
     #[inline]
-    pub fn new(inner: S, base: Duration, pct: f64, predicate: P) -> Self {
+    pub const fn new(inner: S, base: Duration, pct: f64, predicate: P) -> Self {
         Self {
             inner: JitterDelay::new(inner, base, pct),
             predicate,

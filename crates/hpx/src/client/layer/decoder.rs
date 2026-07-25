@@ -28,7 +28,7 @@ pub(crate) struct AcceptEncoding {
 
 /// Layer that adds response body decompression to a service.
 #[derive(Clone)]
-pub struct DecompressionLayer {
+pub(crate) struct DecompressionLayer {
     accept: AcceptEncoding,
 }
 
@@ -38,13 +38,13 @@ pub struct DecompressionLayer {
 /// `take()` + `replace()`. The invariant (`Some` before every `call`/`poll_ready`)
 /// is maintained by the implementation and guarded by `debug_assert`.
 #[derive(Clone)]
-pub struct Decompression<S>(Option<decompression::Decompression<S>>);
+pub(crate) struct Decompression<S>(Option<decompression::Decompression<S>>);
 
 // ===== AcceptEncoding =====
 
 impl Default for AcceptEncoding {
-    fn default() -> AcceptEncoding {
-        AcceptEncoding {
+    fn default() -> Self {
+        Self {
             #[cfg(feature = "gzip")]
             gzip: true,
             #[cfg(feature = "brotli")]
@@ -63,8 +63,8 @@ impl_request_config_value!(AcceptEncoding);
 
 impl DecompressionLayer {
     /// Creates a new [`DecompressionLayer`] with the specified [`AcceptEncoding`].
-    #[inline(always)]
-    pub const fn new(accept: AcceptEncoding) -> Self {
+    #[inline]
+    pub(crate) const fn new(accept: AcceptEncoding) -> Self {
         Self { accept }
     }
 }
@@ -72,7 +72,7 @@ impl DecompressionLayer {
 impl<S> Layer<S> for DecompressionLayer {
     type Service = Decompression<S>;
 
-    #[inline(always)]
+    #[inline]
     fn layer(&self, service: S) -> Self::Service {
         Decompression(Some(Decompression::<S>::apply_accept(
             decompression::Decompression::new(service),
@@ -112,7 +112,11 @@ impl<S> Decompression<S> {
     }
 
     #[inline]
-    fn get_inner(&mut self) -> &mut decompression::Decompression<S> {
+    #[expect(
+        clippy::expect_used,
+        reason = "Decompression layer invariant: inner service is initialized before any call"
+    )]
+    const fn get_inner(&mut self) -> &mut decompression::Decompression<S> {
         self.0
             .as_mut()
             .expect("[BUG] Decompression service not initialized")
@@ -129,7 +133,7 @@ where
     type Error = S::Error;
     type Future = ResponseFuture<S::Future>;
 
-    #[inline(always)]
+    #[inline]
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.get_inner().poll_ready(cx)
     }
@@ -137,7 +141,7 @@ where
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
         if let Some(accept) = RequestConfig::<AcceptEncoding>::get(req.extensions()) {
             if let Some(decoder) = self.0.take() {
-                self.0.replace(Decompression::apply_accept(decoder, accept));
+                self.0.replace(Self::apply_accept(decoder, accept));
             }
             debug_assert!(self.0.is_some());
         }

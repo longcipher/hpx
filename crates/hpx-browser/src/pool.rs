@@ -2,10 +2,9 @@
 //!
 //! Reusing pages skips V8 isolate creation and bootstrap JS execution.
 
-use std::{
-    collections::VecDeque,
-    sync::{Arc, Mutex},
-};
+use std::{collections::VecDeque, sync::Arc};
+
+use parking_lot::Mutex;
 
 use crate::{page::Page, stealth::StealthProfile};
 
@@ -36,10 +35,7 @@ impl PagePool {
         profile: Option<StealthProfile>,
     ) -> Result<Page, crate::page::PageError> {
         // Try to reuse a pooled page (brief sync lock).
-        if let Some(mut page) = {
-            let mut pages = self.idle_pages.lock().unwrap_or_else(|e| e.into_inner());
-            pages.pop_front()
-        } {
+        if let Some(mut page) = self.idle_pages.lock().pop_front() {
             page.reload_html("<html><head></head><body></body></html>", "about:blank");
             return Ok(page);
         }
@@ -49,7 +45,7 @@ impl PagePool {
 
     /// Return a page to the pool.
     pub fn release(&self, page: Page) {
-        let mut pages = self.idle_pages.lock().unwrap_or_else(|e| e.into_inner());
+        let mut pages = self.idle_pages.lock();
         if pages.len() < self.max_size {
             pages.push_back(page);
         }
@@ -94,7 +90,7 @@ mod tests {
         let p2 = pool.acquire(None).await.unwrap();
         pool.release(p1);
         pool.release(p2); // second release should be dropped (pool full)
-        let count = pool.idle_pages.lock().unwrap().len();
+        let count = pool.idle_pages.lock().len();
         assert_eq!(count, 1);
     }
 }

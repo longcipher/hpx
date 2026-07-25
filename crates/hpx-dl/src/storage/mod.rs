@@ -65,6 +65,8 @@ impl DownloadRecord {
 
 /// Status of an individual segment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlite", derive(sqlx::Type))]
+#[cfg_attr(feature = "sqlite", sqlx(type_name = "TEXT", rename_all = "lowercase"))]
 pub enum SegmentStatus {
     /// Segment has not been started.
     Pending,
@@ -85,8 +87,10 @@ pub enum SegmentStatus {
 
 /// Progress state for a single segment.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlite", derive(sqlx::FromRow))]
 pub struct SegmentState {
     /// Zero-based segment index.
+    #[cfg_attr(feature = "sqlite", sqlx(rename = "idx"))]
     pub index: u32,
     /// Byte offset where this segment starts (inclusive).
     pub start: u64,

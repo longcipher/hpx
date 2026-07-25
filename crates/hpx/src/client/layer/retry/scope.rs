@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::Req;
 
-pub trait Scope: Send + Sync + 'static {
+pub(crate) trait Scope: Send + Sync + 'static {
     fn applies_to(&self, req: &super::Req) -> bool;
 }
 
@@ -18,7 +18,7 @@ pub trait Scope: Send + Sync + 'static {
 // An alternative is to make things like `ScopeFn`. Slightly more annoying,
 // but also more forwards-compatible. :shrug:
 
-pub struct ScopeFn<F>(pub(crate) F);
+pub(crate) struct ScopeFn<F>(pub(crate) F);
 
 impl<F> Scope for ScopeFn<F>
 where
@@ -42,8 +42,8 @@ impl Scoped {
     /// Checks if the given request falls within the retry scope.
     pub(super) fn applies_to(&self, req: &super::Req) -> bool {
         let ret = match self {
-            Scoped::Unscoped => true,
-            Scoped::Dyn(s) => s.applies_to(req),
+            Self::Unscoped => true,
+            Self::Dyn(s) => s.applies_to(req),
         };
         trace!("retry in scope: {ret}");
         ret

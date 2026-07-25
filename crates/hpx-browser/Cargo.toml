@@ -27,6 +27,7 @@ hotpath = ["dep:hotpath"]
 
 [dependencies]
 ahash = { workspace = true }
+arc-swap.workspace = true
 async-trait = { workspace = true }
 base64-simd = { workspace = true }
 blitz-dom = { workspace = true, features = ["floats"] }

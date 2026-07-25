@@ -5,6 +5,10 @@ use http::{
 
 use super::error::{Error, ErrorKind};
 
+#[expect(
+    clippy::expect_used,
+    reason = "parts only contains a cloned path_and_query, which is always a valid Uri"
+)]
 pub(super) fn origin_form(uri: &mut Uri) {
     let path = match uri.path_and_query() {
         Some(path) if path.as_str() != "/" => {
@@ -13,14 +17,14 @@ pub(super) fn origin_form(uri: &mut Uri) {
             Uri::from_parts(parts).expect("path is valid uri")
         }
         _none_or_just_slash => {
-            debug_assert!(Uri::default() == "/");
+            debug_assert_eq!(Uri::default(), "/");
             Uri::default()
         }
     };
-    *uri = path
+    *uri = path;
 }
 
-pub(super) fn absolute_form(uri: &mut Uri) {
+pub(super) fn absolute_form(uri: &Uri) {
     debug_assert!(uri.scheme().is_some(), "absolute_form needs a scheme");
     debug_assert!(
         uri.authority().is_some(),
@@ -28,6 +32,10 @@ pub(super) fn absolute_form(uri: &mut Uri) {
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "parts only contains a cloned authority, which is always a valid Uri"
+)]
 pub(super) fn authority_form(uri: &mut Uri) {
     if let Some(path) = uri.path_and_query() {
         // `https://hyper.rs` would parse with `/` path, don't
@@ -48,6 +56,10 @@ pub(super) fn authority_form(uri: &mut Uri) {
     };
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "scheme+authority+static '/' path always builds a valid base URI"
+)]
 pub(super) fn normalize_uri<B>(req: &mut Request<B>, is_http_connect: bool) -> Result<Uri, Error> {
     let uri = req.uri().clone();
 
@@ -85,6 +97,10 @@ pub(super) fn get_non_default_port(uri: &Uri) -> Option<http::uri::Port<&str>> {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "existing Uri parts plus a scheme and static '/' path always forms a valid Uri"
+)]
 fn set_scheme(uri: &mut Uri, scheme: Scheme) {
     debug_assert!(
         uri.scheme().is_none(),
@@ -99,6 +115,5 @@ fn set_scheme(uri: &mut Uri, scheme: Scheme) {
 
 fn is_schema_secure(uri: &Uri) -> bool {
     uri.scheme_str()
-        .map(|scheme_str| matches!(scheme_str, "wss" | "https"))
-        .unwrap_or_default()
+        .is_some_and(|scheme_str| matches!(scheme_str, "wss" | "https"))
 }

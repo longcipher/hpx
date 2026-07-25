@@ -184,10 +184,17 @@ impl Browser {
 #[cfg(feature = "cdp")]
 impl Drop for Browser {
     fn drop(&mut self) {
-        if let Some(ref mut child) = self.child {
+        if let Some(mut child) = self.child.take() {
             tracing::info!("killing Chrome process (pid: {})", child.id());
+            // kill() sends SIGKILL — fast, non-blocking syscall.
             let _ = child.kill();
-            let _ = child.wait();
+            // wait() blocks until the process exits; run it in a detached
+            // thread so we don't block the async runtime thread on Drop.
+            // The OS reaps the zombie when this thread completes (or when the
+            // parent process exits if the thread is preempted).
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
         }
     }
 }

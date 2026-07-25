@@ -19,12 +19,11 @@ pub struct BrowserJsRuntime {
 }
 
 impl BrowserJsRuntime {
-    pub fn new(dom: Dom) -> Self {
+    pub fn new(dom: Dom) -> Result<Self, JsRuntimeError> {
         Self::with_base_url(dom, None)
     }
 
-    #[allow(clippy::expect_used, clippy::panic)]
-    pub fn with_base_url(dom: Dom, base_url: Option<url::Url>) -> Self {
+    pub fn with_base_url(dom: Dom, base_url: Option<url::Url>) -> Result<Self, JsRuntimeError> {
         let mut state = DomState::new(dom);
         if let Some(url) = base_url {
             state = state.with_base_url(url);
@@ -61,34 +60,33 @@ impl BrowserJsRuntime {
                 "[bootstrap:console]",
                 include_str!("js/console_bootstrap.js"),
             )
-            .expect("console bootstrap failed");
+            .map_err(|e| JsRuntimeError::bootstrap("console", e))?;
         runtime
             .execute_script("[bootstrap:crypto]", include_str!("js/crypto_bootstrap.js"))
-            .expect("crypto bootstrap failed");
+            .map_err(|e| JsRuntimeError::bootstrap("crypto", e))?;
         runtime
             .execute_script("[bootstrap:timer]", include_str!("js/timer_bootstrap.js"))
-            .expect("timer bootstrap failed");
+            .map_err(|e| JsRuntimeError::bootstrap("timer", e))?;
         runtime
             .execute_script("[bootstrap:dom]", include_str!("js/dom_bootstrap.js"))
-            .expect("dom bootstrap failed");
+            .map_err(|e| JsRuntimeError::bootstrap("dom", e))?;
         runtime
             .execute_script("[bootstrap:fetch]", include_str!("js/fetch_bootstrap.js"))
-            .expect("fetch bootstrap failed");
+            .map_err(|e| JsRuntimeError::bootstrap("fetch", e))?;
         runtime
             .execute_script(
                 "[bootstrap:storage]",
                 include_str!("js/storage_bootstrap.js"),
             )
-            .expect("storage bootstrap failed");
-
+            .map_err(|e| JsRuntimeError::bootstrap("storage", e))?;
         runtime
             .execute_script(
                 "[bootstrap:stealth]",
                 include_str!("js/stealth_bootstrap.js"),
             )
-            .expect("stealth bootstrap failed");
+            .map_err(|e| JsRuntimeError::bootstrap("stealth", e))?;
 
-        Self { inner: runtime }
+        Ok(Self { inner: runtime })
     }
 
     /// Update the DOM reference in the runtime's state without re-creating the V8 isolate.
@@ -172,8 +170,12 @@ impl BrowserJsRuntime {
 }
 
 impl Default for BrowserJsRuntime {
+    // Default requires infallible construction; the only way to satisfy that
+    // for a Result-returning `new` is to panic on bootstrap failure. Allow the
+    // lint here so callers that need fallible construction can use `new()`.
+    #[allow(clippy::expect_used)]
     fn default() -> Self {
-        Self::new(Dom::new())
+        Self::new(Dom::new()).expect("BrowserJsRuntime::default bootstrap failed")
     }
 }
 
@@ -185,34 +187,63 @@ pub enum JsError {
     Compilation(String),
 }
 
+/// Error raised while constructing a [`BrowserJsRuntime`].
+///
+/// Replaces the former `.expect("… bootstrap failed")` panics with structured
+/// `Result` propagation so callers can decide how to handle bootstrap failures
+/// (e.g. surface them as `PageError`, log + fall back, etc.).
+#[derive(Debug, thiserror::Error)]
+pub enum JsRuntimeError {
+    /// A bootstrap script (`console`, `crypto`, `timer`, `dom`, `fetch`,
+    /// `storage`, `stealth`) failed to execute during runtime initialization.
+    #[error("bootstrap script '{name}' failed: {message}")]
+    Bootstrap { name: &'static str, message: String },
+}
+
+impl JsRuntimeError {
+    /// Build a [`JsRuntimeError::Bootstrap`] from any displayable error.
+    ///
+    /// `deno_core::JsRuntime::execute_script` returns `Box<deno_core::JsError>`;
+    /// we stringify it here to keep the error type self-contained (avoids
+    /// leaking `deno_core::JsError` through the public API and avoids any
+    /// `anyhow` dependency — `deno_core::AnyError` is `anyhow::Error`, which
+    /// is forbidden in this workspace).
+    fn bootstrap(name: &'static str, err: impl std::fmt::Display) -> Self {
+        Self::Bootstrap {
+            name,
+            message: err.to_string(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn basic_eval() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         let result = rt.execute_script("1 + 2").unwrap();
         assert_eq!(result, "3");
     }
 
     #[test]
     fn eval_string() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         let result = rt.execute_script("'hello ' + 'world'").unwrap();
         assert_eq!(result, "hello world");
     }
 
     #[test]
     fn eval_syntax_error() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         let result = rt.execute_script("function {{{}}}");
         assert!(result.is_err());
     }
 
     #[test]
     fn console_log_capture() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.execute_script("console.log('test message')").unwrap();
         let output = rt.console_output();
         assert_eq!(output.len(), 1);
@@ -222,7 +253,7 @@ mod tests {
 
     #[test]
     fn console_warn_capture() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.execute_script("console.warn('warning msg')").unwrap();
         let output = rt.console_output();
         assert_eq!(output.len(), 1);
@@ -234,7 +265,7 @@ mod tests {
 
     #[test]
     fn dom_create_element() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         let result = rt
             .execute_script("let el = document.createElement('div'); el.tagName")
             .unwrap();
@@ -243,7 +274,7 @@ mod tests {
 
     #[test]
     fn dom_text_content() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         let result = rt
             .execute_script(
                 r#"
@@ -258,7 +289,7 @@ mod tests {
 
     #[test]
     fn dom_append_child() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         let result = rt
             .execute_script(
                 r#"
@@ -274,7 +305,7 @@ mod tests {
 
     #[test]
     fn dom_get_element_by_id() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         let result = rt
             .execute_script(
                 r#"
@@ -291,7 +322,7 @@ mod tests {
 
     #[test]
     fn dom_node_type() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         let result = rt
             .execute_script(
                 r#"
@@ -306,7 +337,7 @@ mod tests {
 
     #[test]
     fn dom_parent_child_navigation() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         let result = rt
             .execute_script(
                 r#"
@@ -322,7 +353,7 @@ mod tests {
 
     #[test]
     fn storage_local() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         let result = rt
             .execute_script(
                 r#"
@@ -336,7 +367,7 @@ mod tests {
 
     #[test]
     fn storage_length() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         let result = rt
             .execute_script(
                 r#"
@@ -352,7 +383,7 @@ mod tests {
 
     #[test]
     fn crypto_random_values() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         let result = rt
             .execute_script(
                 r#"
@@ -367,14 +398,14 @@ mod tests {
 
     #[test]
     fn fetch_stub() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         let result = rt.execute_script("typeof fetch").unwrap();
         assert_eq!(result, "function");
     }
 
     #[test]
     fn headers_class() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         let result = rt
             .execute_script(
                 r#"
@@ -388,7 +419,7 @@ mod tests {
 
     #[test]
     fn set_user_agent_test() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)");
         let result = rt.execute_script("globalThis.__hpx_ua").unwrap();
         assert_eq!(result, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)");
@@ -396,7 +427,7 @@ mod tests {
 
     #[test]
     fn set_platform_test() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_platform("macos", "MacIntel", "15.0.0");
         let result = rt
             .execute_script(
@@ -408,7 +439,7 @@ mod tests {
 
     #[test]
     fn set_stealth_test() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_stealth(true);
         let result = rt.execute_script("globalThis.__hpx_stealth").unwrap();
         assert_eq!(result, "true");
@@ -416,7 +447,7 @@ mod tests {
 
     #[test]
     fn run_page_init_test() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_stealth(true);
         rt.set_user_agent("test-agent");
         rt.run_page_init();
@@ -426,7 +457,7 @@ mod tests {
 
     #[test]
     fn navigator_useragent_from_global() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36");
         rt.set_platform("Win32", "Windows", "15.0.0");
         rt.set_stealth(true);
@@ -437,7 +468,7 @@ mod tests {
 
     #[test]
     fn webdriver_is_false() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_stealth(true);
         rt.run_page_init();
         let result = rt.execute_script("globalThis.navigator.webdriver").unwrap();
@@ -446,7 +477,7 @@ mod tests {
 
     #[test]
     fn webdriver_descriptor_is_undefined() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_stealth(true);
         rt.run_page_init();
         let result = rt
@@ -459,7 +490,7 @@ mod tests {
 
     #[test]
     fn chrome_object_exists() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_stealth(true);
         rt.run_page_init();
         let result = rt.execute_script("typeof globalThis.chrome").unwrap();
@@ -468,7 +499,7 @@ mod tests {
 
     #[test]
     fn chrome_csi_returns_timing() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_stealth(true);
         rt.run_page_init();
         let result = rt
@@ -479,7 +510,7 @@ mod tests {
 
     #[test]
     fn screen_dimensions() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_stealth(true);
         rt.run_page_init();
         let w: i32 = rt
@@ -497,7 +528,7 @@ mod tests {
 
     #[test]
     fn grease_brands_count() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_user_agent("Mozilla/5.0 Chrome/148.0.0.0");
         rt.set_stealth(true);
         rt.run_page_init();
@@ -509,7 +540,7 @@ mod tests {
 
     #[test]
     fn grease_chromium_version() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_user_agent("Mozilla/5.0 Chrome/148.0.0.0");
         rt.set_stealth(true);
         rt.run_page_init();
@@ -523,7 +554,7 @@ mod tests {
 
     #[test]
     fn plugins_count() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_stealth(true);
         rt.run_page_init();
         let result = rt
@@ -534,7 +565,7 @@ mod tests {
 
     #[test]
     fn performance_memory_exists() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_stealth(true);
         rt.run_page_init();
         let result = rt
@@ -545,7 +576,7 @@ mod tests {
 
     #[test]
     fn canvas_element_exists() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_stealth(true);
         rt.run_page_init();
         let result = rt
@@ -556,7 +587,7 @@ mod tests {
 
     #[test]
     fn audio_context_type() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_stealth(true);
         rt.run_page_init();
         let result = rt.execute_script("typeof AudioContext").unwrap();
@@ -565,7 +596,7 @@ mod tests {
 
     #[test]
     fn audio_context_creates_instance() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_stealth(true);
         rt.run_page_init();
         let result = rt
@@ -578,7 +609,7 @@ mod tests {
 
     #[test]
     fn audio_context_base_latency() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_stealth(true);
         rt.run_page_init();
         let result = rt
@@ -589,7 +620,7 @@ mod tests {
 
     #[test]
     fn audio_context_state_running() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_stealth(true);
         rt.run_page_init();
         let result = rt
@@ -600,7 +631,7 @@ mod tests {
 
     #[test]
     fn audio_context_destination() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_stealth(true);
         rt.run_page_init();
         let result = rt
@@ -611,7 +642,7 @@ mod tests {
 
     #[test]
     fn audio_context_webkit_compat() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_stealth(true);
         rt.run_page_init();
         let result = rt.execute_script("typeof webkitAudioContext").unwrap();
@@ -620,7 +651,7 @@ mod tests {
 
     #[test]
     fn canvas_noise_deterministic_per_session() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_stealth(true);
         rt.run_page_init();
         let result = rt
@@ -644,7 +675,7 @@ mod tests {
 
     #[test]
     fn profile_to_globals_chrome_148_macos() {
-        let mut rt = BrowserJsRuntime::new(Dom::new());
+        let mut rt = BrowserJsRuntime::new(Dom::new()).unwrap();
         rt.set_user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36");
         rt.set_platform("MacIntel", "macOS", "15.0.0");
         rt.set_stealth(true);

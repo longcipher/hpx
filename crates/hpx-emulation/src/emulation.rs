@@ -37,6 +37,14 @@ macro_rules! define_enum {
         }
 
         impl $name {
+            /// Dispatches to the per-variant emulation constructor.
+            ///
+            // NOTE (infallibility): The `match self` is exhaustive because the
+            // macro generates one arm per enum variant. The enum is
+            // `#[non_exhaustive]` only for external crates, so internal matches
+            // do not require a `_` arm and cannot panic at runtime. Each
+            // `$emulation_fn` returns `hpx::Emulation` (non-`Result`) because the
+            // underlying `EmulationBuilder::build()` is infallible.
             pub fn into_emulation(self, opt: EmulationOption) -> hpx::Emulation {
                 match self {
                     $(
@@ -274,6 +282,15 @@ define_enum!(
 );
 
 /// ======== Emulation impls ========
+// NOTE (infallibility): `EmulationFactory::emulation` returns `hpx::Emulation`
+// (non-`Result`) because the underlying `hpx::EmulationBuilder::build()` is
+// infallible — it simply returns the owned `Emulation` struct without any
+// validation that can fail. All header values inserted by per-variant
+// emulation functions are constructed via `HeaderValue::from_static`, which is
+// a `const fn` that panics at compile time on invalid input; since the inputs
+// are static string literals reviewed at compile time, there is no runtime
+// panic risk. The `EmulationFactory` trait signature is defined in the `hpx`
+// crate and cannot be changed here without breaking the public API contract.
 impl hpx::EmulationFactory for Emulation {
     #[inline]
     fn emulation(self) -> hpx::Emulation {
@@ -402,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    fn emulation_os_affects_emulation_output() {
+    fn emulation_os_affects_emulation_output() -> Result<(), Box<dyn std::error::Error>> {
         let mut emu = EmulationOption::builder()
             .emulation(Emulation::Chrome147)
             .emulation_os(EmulationOS::Linux)
@@ -411,9 +428,8 @@ mod tests {
         let ua = emu
             .headers_mut()
             .get(http::header::USER_AGENT)
-            .unwrap()
-            .to_str()
-            .unwrap();
+            .ok_or("USER_AGENT header not set for Chrome147")?
+            .to_str()?;
         assert!(
             ua.contains("Linux"),
             "expected Linux in User-Agent, got: {ua}"
@@ -422,6 +438,7 @@ mod tests {
             !ua.contains("Macintosh"),
             "did not expect Macintosh in User-Agent, got: {ua}"
         );
+        Ok(())
     }
 
     #[test]
@@ -436,7 +453,7 @@ mod tests {
     }
 
     #[test]
-    fn emulation_os_linux_preserved() {
+    fn emulation_os_linux_preserved() -> Result<(), Box<dyn std::error::Error>> {
         // When emulation_os is explicitly set, it should be used directly.
         let mut em = EmulationOption::builder()
             .emulation(Emulation::Chrome147)
@@ -446,12 +463,12 @@ mod tests {
         let ua = em
             .headers_mut()
             .get(http::header::USER_AGENT)
-            .unwrap()
-            .to_str()
-            .unwrap();
+            .ok_or("USER_AGENT header not set for Chrome147")?
+            .to_str()?;
         assert!(
             ua.contains("Linux"),
             "expected Linux in User-Agent when emulation_os=Linux, got: {ua}"
         );
+        Ok(())
     }
 }

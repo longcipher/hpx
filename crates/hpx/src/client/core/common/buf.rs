@@ -7,8 +7,8 @@ pub(crate) struct BufList<T> {
 }
 
 impl<T: Buf> BufList<T> {
-    pub(crate) fn new() -> BufList<T> {
-        BufList {
+    pub(crate) const fn new() -> Self {
+        Self {
             bufs: VecDeque::new(),
         }
     }
@@ -45,10 +45,9 @@ impl<T: Buf> Buf for BufList<T> {
                 if rem > cnt {
                     front.advance(cnt);
                     return;
-                } else {
-                    front.advance(rem);
-                    cnt -= rem;
                 }
+                front.advance(rem);
+                cnt -= rem;
             }
             self.bufs.pop_front();
         }

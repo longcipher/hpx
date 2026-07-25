@@ -35,7 +35,7 @@ where
     S: Service<Req>,
 {
     #[inline]
-    pub(crate) fn new(service: S, request: Req, sleep: Sleep) -> Self {
+    pub(crate) const fn new(service: S, request: Req, sleep: Sleep) -> Self {
         Self::Delaying {
             sleep,
             service: Some(service),
@@ -51,6 +51,10 @@ where
 {
     type Output = Result<S::Response, BoxError>;
 
+    #[expect(
+        clippy::expect_used,
+        reason = "Delaying state machine: service and request are Some until first poll consumes them"
+    )]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.as_mut().project();
 

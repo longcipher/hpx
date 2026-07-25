@@ -99,7 +99,7 @@ mod internal {
         Str(&'a str),
     }
 
-    pub(super) fn parse(s: Kind) -> Result<Uri> {
+    pub(super) fn parse(s: Kind<'_>) -> Result<Uri> {
         let s = match s {
             Kind::Bytes(bytes) => std::str::from_utf8(bytes).map_err(Error::decode),
             Kind::Str(s) => Ok(s),

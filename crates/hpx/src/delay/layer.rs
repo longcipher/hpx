@@ -59,7 +59,7 @@ impl DelayLayer {
     /// Create a new [`DelayLayer`] with the given delay duration.
     #[inline]
     pub const fn new(delay: Duration) -> Self {
-        DelayLayer { delay }
+        Self { delay }
     }
 
     /// Apply delay only to requests that satisfy a predicate.
@@ -77,7 +77,7 @@ impl DelayLayer {
     /// let layer = DelayLayer::new(Duration::from_secs(1))
     ///     .when(|req: &Request<_>| req.method() == http::Method::POST);
     /// ```
-    pub fn when<P, Req>(self, predicate: P) -> DelayLayerWith<P>
+    pub const fn when<P, Req>(self, predicate: P) -> DelayLayerWith<P>
     where
         P: Fn(&Req) -> bool + Clone,
     {
@@ -99,7 +99,7 @@ impl<S> Layer<S> for DelayLayer {
 impl<P> DelayLayerWith<P> {
     /// Creates a new [`DelayLayerWith`].
     #[inline]
-    pub fn new(delay: Duration, predicate: P) -> Self {
+    pub const fn new(delay: Duration, predicate: P) -> Self {
         Self { delay, predicate }
     }
 }
@@ -136,7 +136,7 @@ impl JitterDelayLayer {
     /// let layer = JitterDelayLayer::new(Duration::from_secs(1), 0.2);
     /// ```
     #[inline]
-    pub fn new(base: Duration, pct: f64) -> Self {
+    pub const fn new(base: Duration, pct: f64) -> Self {
         Self {
             base,
             pct: pct.clamp(0.0, 1.0),
@@ -158,7 +158,7 @@ impl JitterDelayLayer {
     /// let layer = JitterDelayLayer::new(Duration::from_secs(1), 0.2)
     ///     .when(|req: &Request<_>| req.uri().path().starts_with("/slow"));
     /// ```
-    pub fn when<P, Req>(self, predicate: P) -> JitterDelayLayerWith<P>
+    pub const fn when<P, Req>(self, predicate: P) -> JitterDelayLayerWith<P>
     where
         P: Fn(&Req) -> bool + Clone,
     {
@@ -180,7 +180,7 @@ impl<S> Layer<S> for JitterDelayLayer {
 impl<P> JitterDelayLayerWith<P> {
     /// Creates a new [`JitterDelayLayerWith`].
     #[inline]
-    pub fn new(base: Duration, pct: f64, predicate: P) -> Self {
+    pub const fn new(base: Duration, pct: f64, predicate: P) -> Self {
         Self {
             base,
             pct: pct.clamp(0.0, 1.0),

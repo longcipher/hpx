@@ -29,7 +29,7 @@ pub enum ProxyPoolStrategy {
 }
 
 /// Builder for creating a [`ProxyPool`].
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct ProxyPoolBuilder {
     proxies: Vec<Proxy>,
     strategy: ProxyPoolStrategy,
@@ -76,7 +76,7 @@ impl ProxyPoolBuilder {
 
     /// Set the selection strategy.
     #[inline]
-    pub fn strategy(mut self, strategy: ProxyPoolStrategy) -> Self {
+    pub const fn strategy(mut self, strategy: ProxyPoolStrategy) -> Self {
         self.strategy = strategy;
         self
     }

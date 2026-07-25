@@ -78,7 +78,7 @@ impl Incoming {
         Self::new_channel(DecodedLength::CHUNKED, /* wanter = */ false)
     }
 
-    pub(crate) fn new_channel(content_length: DecodedLength, wanter: bool) -> (Sender, Incoming) {
+    pub(crate) fn new_channel(content_length: DecodedLength, wanter: bool) -> (Sender, Self) {
         let (data_tx, data_rx) = mpsc::channel(0);
         let (trailers_tx, trailers_rx) = oneshot::channel();
 
@@ -93,7 +93,7 @@ impl Incoming {
             data_tx,
             trailers_tx: Some(trailers_tx),
         };
-        let rx = Incoming::new(Kind::Chan {
+        let rx = Self::new(Kind::Chan {
             content_length,
             want_tx,
             data_rx,
@@ -103,12 +103,12 @@ impl Incoming {
         (tx, rx)
     }
 
-    fn new(kind: Kind) -> Incoming {
-        Incoming { kind }
+    const fn new(kind: Kind) -> Self {
+        Self { kind }
     }
 
-    pub(crate) fn empty() -> Incoming {
-        Incoming::new(Kind::Empty)
+    pub(crate) const fn empty() -> Self {
+        Self::new(Kind::Empty)
     }
 
     #[cfg(feature = "http2")]
@@ -123,7 +123,7 @@ impl Incoming {
             content_length = DecodedLength::ZERO;
         }
 
-        Incoming::new(Kind::H2 {
+        Self::new(Kind::H2 {
             data_done: false,
             ping,
             content_length,
@@ -183,7 +183,7 @@ impl Body for Incoming {
                                 // These reasons should cause the body reading to stop, but not fail
                                 // it. The same logic as for `Read
                                 // for H2Upgraded` is applied here.
-                                Some(http2::Reason::NO_ERROR) | Some(http2::Reason::CANCEL) => {
+                                Some(http2::Reason::NO_ERROR | http2::Reason::CANCEL) => {
                                     Poll::Ready(None)
                                 }
                                 _ => Poll::Ready(Some(Err(Error::new_body(e)))),
@@ -260,7 +260,7 @@ impl Sender {
         self.data_tx.poll_ready(cx).map_err(|_| Error::new_closed())
     }
 
-    fn poll_want(&mut self, cx: &mut Context<'_>) -> Poll<core::Result<()>> {
+    fn poll_want(&self, cx: &Context<'_>) -> Poll<core::Result<()>> {
         match self.want_rx.load(cx) {
             WANT_READY => Poll::Ready(Ok(())),
             WANT_PENDING => Poll::Pending,
@@ -286,6 +286,10 @@ impl Sender {
     /// This is mostly useful for when trying to send from some other thread
     /// that doesn't have an async context. If in an async context, prefer
     /// `send_data()` instead.
+    #[expect(
+        clippy::expect_used,
+        reason = "into_inner() returns the Ok(chunk) we just sent; guaranteed by try_send of Ok"
+    )]
     pub(crate) fn try_send_data(&mut self, chunk: Bytes) -> Result<(), Bytes> {
         self.data_tx
             .try_send(Ok(chunk))
@@ -305,11 +309,11 @@ impl Sender {
     }
 
     #[cfg(test)]
-    pub(crate) fn abort(mut self) {
+    pub(crate) fn abort(self) {
         self.send_error(Error::new_body_write_aborted());
     }
 
-    pub(crate) fn send_error(&mut self, err: Error) {
+    pub(crate) fn send_error(&self, err: Error) {
         let _ = self
             .data_tx
             // clone so the send works even if buffer is full

@@ -10,7 +10,7 @@ pub(crate) trait Started: Future {
     fn started(&self) -> bool;
 }
 
-pub(crate) fn lazy<F, R>(func: F) -> Lazy<F, R>
+pub(crate) const fn lazy<F, R>(func: F) -> Lazy<F, R>
 where
     F: FnOnce() -> R,
     R: Future + Unpin,

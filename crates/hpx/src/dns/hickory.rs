@@ -12,7 +12,7 @@ use super::{Addrs, Name, Resolve, Resolving};
 
 /// Wrapper around an [`TokioResolver`], which implements the `Resolve` trait.
 #[derive(Debug, Clone)]
-pub struct HickoryDnsResolver {
+pub(crate) struct HickoryDnsResolver {
     /// Tokio-based DNS resolver.
     ///
     /// On initialization, it attempts to load the system's DNS configuration;
@@ -25,7 +25,7 @@ impl HickoryDnsResolver {
     /// which reads from `/etc/resolve.conf`. The options are
     /// overridden to look up for both IPv4 and IPv6 addresses
     /// to work with "happy eyeballs" algorithm.
-    pub fn new() -> crate::Result<HickoryDnsResolver> {
+    pub(crate) fn new() -> crate::Result<Self> {
         let mut builder = match TokioResolver::builder_tokio() {
             Ok(resolver) => {
                 debug!("using system DNS configuration");
@@ -43,7 +43,7 @@ impl HickoryDnsResolver {
         builder.options_mut().ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
         let resolver = builder.build().map_err(crate::Error::builder)?;
 
-        Ok(HickoryDnsResolver { resolver })
+        Ok(Self { resolver })
     }
 }
 

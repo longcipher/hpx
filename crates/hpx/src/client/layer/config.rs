@@ -1,5 +1,5 @@
 mod options;
-pub mod typestate;
+pub(crate) mod typestate;
 
 use std::{
     sync::Arc,
@@ -10,7 +10,7 @@ use futures_util::future::{self, Either, Ready};
 use http::{HeaderMap, Request, Response};
 use tower::{Layer, Service};
 
-pub use self::options::{RequestOptions, TransportOptions};
+pub(crate) use self::options::{RequestOptions, TransportOptions};
 use crate::{Error, config::RequestConfig, ext::UriExt, header::OrigHeaderMap};
 
 /// A marker type for the default headers configuration value.
@@ -26,13 +26,13 @@ struct Config {
 }
 
 /// Middleware layer to use [`ConfigService`].
-pub struct ConfigServiceLayer {
+pub(crate) struct ConfigServiceLayer {
     config: Arc<Config>,
 }
 
 /// Middleware service to use [`Config`].
 #[derive(Clone)]
-pub struct ConfigService<S> {
+pub(crate) struct ConfigService<S> {
     inner: S,
     config: Arc<Config>,
 }
@@ -45,9 +45,9 @@ impl_request_config_value!(DefaultHeaders, bool);
 
 impl ConfigServiceLayer {
     /// Creates a new [`ConfigServiceLayer`].
-    pub fn new(https_only: bool, headers: HeaderMap, orig_headers: OrigHeaderMap) -> Self {
+    pub(crate) fn new(https_only: bool, headers: HeaderMap, orig_headers: OrigHeaderMap) -> Self {
         let org_headers = (!orig_headers.is_empty()).then_some(orig_headers);
-        ConfigServiceLayer {
+        Self {
             config: Arc::new(Config {
                 https_only,
                 headers,
@@ -61,7 +61,7 @@ impl ConfigServiceLayer {
 impl<S> Layer<S> for ConfigServiceLayer {
     type Service = ConfigService<S>;
 
-    #[inline(always)]
+    #[inline]
     fn layer(&self, inner: S) -> Self::Service {
         ConfigService {
             inner,
@@ -81,7 +81,7 @@ where
     type Error = S::Error;
     type Future = Either<S::Future, Ready<Result<Self::Response, Self::Error>>>;
 
-    #[inline(always)]
+    #[inline]
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
@@ -91,7 +91,7 @@ where
 
         // check if the request URI scheme is valid.
         if !(uri.is_http() || uri.is_https()) || (self.config.https_only && !uri.is_https()) {
-            return Either::Right(future::err(Error::uri_bad_scheme(uri.clone()).into()));
+            return Either::Right(future::err(Error::uri_bad_scheme(uri).into()));
         }
 
         // check if the request ignores the default headers.

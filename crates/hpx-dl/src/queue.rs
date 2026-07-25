@@ -1,13 +1,8 @@
-//! Priority download queue and concurrency limiter.
+//! Priority download queue.
 
-use std::{cmp::Ordering, sync::Arc, time::Instant};
+use std::{cmp::Ordering, time::Instant};
 
-use tokio::sync::{Semaphore, SemaphorePermit};
-
-use crate::{
-    error::DownloadError,
-    types::{DownloadId, DownloadPriority, DownloadRequest},
-};
+use crate::types::{DownloadId, DownloadPriority, DownloadRequest};
 
 /// Entry in the priority queue.
 #[derive(Debug, Clone)]
@@ -139,59 +134,6 @@ impl PriorityQueue {
 impl Default for PriorityQueue {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// Limits the number of concurrent downloads.
-#[derive(Clone)]
-#[cfg_attr(not(test), expect(dead_code))]
-pub(crate) struct ConcurrencyLimiter {
-    semaphore: Arc<Semaphore>,
-    max_concurrent: usize,
-}
-
-impl std::fmt::Debug for ConcurrencyLimiter {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ConcurrencyLimiter")
-            .field("max_concurrent", &self.max_concurrent)
-            .field("available_permits", &self.semaphore.available_permits())
-            .finish()
-    }
-}
-
-#[cfg_attr(not(test), expect(dead_code))]
-impl ConcurrencyLimiter {
-    /// Create a new limiter allowing up to `max_concurrent` concurrent downloads.
-    #[must_use]
-    pub(crate) fn new(max_concurrent: usize) -> Self {
-        Self {
-            semaphore: Arc::new(Semaphore::new(max_concurrent)),
-            max_concurrent,
-        }
-    }
-
-    /// Acquire a permit, blocking until one is available.
-    ///
-    /// # Errors
-    ///
-    /// Returns `DownloadError::RateLimited` if the semaphore is closed.
-    pub(crate) async fn acquire(&self) -> Result<SemaphorePermit<'_>, DownloadError> {
-        self.semaphore
-            .acquire()
-            .await
-            .map_err(|_| DownloadError::RateLimited)
-    }
-
-    /// Number of currently available permits.
-    #[must_use]
-    pub(crate) fn available_permits(&self) -> usize {
-        self.semaphore.available_permits()
-    }
-
-    /// Maximum concurrent downloads.
-    #[must_use]
-    pub(crate) const fn max_concurrent(&self) -> usize {
-        self.max_concurrent
     }
 }
 
@@ -382,52 +324,5 @@ mod tests {
     fn default_is_empty() {
         let q = PriorityQueue::default();
         assert!(q.is_empty());
-    }
-
-    // --- ConcurrencyLimiter tests ---
-
-    #[tokio::test]
-    async fn limiter_limits_concurrency() {
-        let limiter = ConcurrencyLimiter::new(2);
-        assert_eq!(limiter.max_concurrent(), 2);
-        assert_eq!(limiter.available_permits(), 2);
-
-        let p1 = limiter.acquire().await.expect("acquire 1");
-        assert_eq!(limiter.available_permits(), 1);
-
-        let p2 = limiter.acquire().await.expect("acquire 2");
-        assert_eq!(limiter.available_permits(), 0);
-
-        drop(p1);
-        assert_eq!(limiter.available_permits(), 1);
-
-        drop(p2);
-        assert_eq!(limiter.available_permits(), 2);
-    }
-
-    #[tokio::test]
-    async fn limiter_permit_release_allows_next() {
-        let limiter = Arc::new(ConcurrencyLimiter::new(1));
-        let p = limiter.acquire().await.expect("acquire");
-        assert_eq!(limiter.available_permits(), 0);
-
-        let limiter2 = Arc::clone(&limiter);
-        let handle = tokio::spawn(async move {
-            let permit = limiter2.acquire().await.expect("acquire after release");
-            // permit is dropped here; verify it was obtained
-            assert!(true);
-            drop(permit);
-        });
-
-        // The spawned task should be waiting
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        assert!(!handle.is_finished());
-
-        // Release the permit
-        drop(p);
-
-        // Wait for the spawned task to complete
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        assert!(handle.is_finished());
     }
 }

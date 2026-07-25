@@ -20,7 +20,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub enum SocksError {
+pub(crate) enum SocksError {
     ConnectFailed(BoxError),
     DnsResolveFailure(BoxError),
     Socks(tokio_socks::Error),
@@ -75,7 +75,7 @@ impl From<tokio_socks::Error> for SocksError {
 /// Represents the SOCKS protocol version.
 #[derive(Clone, Copy)]
 #[repr(u8)]
-pub enum Version {
+pub(crate) enum Version {
     V4,
     V5,
 }
@@ -83,13 +83,13 @@ pub enum Version {
 /// Represents the DNS resolution strategy for SOCKS connections.
 #[derive(Clone, Copy)]
 #[repr(u8)]
-pub enum DnsResolve {
+pub(crate) enum DnsResolve {
     Local,
     Remote,
 }
 
 /// A connector that establishes connections through a SOCKS proxy.
-pub struct SocksConnector<C, R = GaiResolver> {
+pub(crate) struct SocksConnector<C, R = GaiResolver> {
     inner: C,
     resolver: R,
     proxy_dst: Uri,
@@ -110,8 +110,8 @@ where
     /// A `SocksConnector` can then be called with any destination. The `proxy_dst` passed to
     /// `call` will not be used to create the underlying connection, but will
     /// be used in a SOCKS handshake sent to the proxy destination.
-    pub fn new_with_resolver(proxy_dst: Uri, inner: C, resolver: R) -> Self {
-        SocksConnector {
+    pub(crate) const fn new_with_resolver(proxy_dst: Uri, inner: C, resolver: R) -> Self {
+        Self {
             inner,
             resolver,
             proxy_dst,
@@ -123,19 +123,19 @@ where
 
     /// Sets the authentication credentials for the SOCKS proxy connection.
     #[inline]
-    pub fn set_auth(&mut self, auth: Option<(Bytes, Bytes)>) {
+    pub(crate) fn set_auth(&mut self, auth: Option<(Bytes, Bytes)>) {
         self.auth = auth;
     }
 
     /// Sets whether to use the SOCKS5 protocol for the proxy connection.
     #[inline]
-    pub fn set_version(&mut self, version: Version) {
+    pub(crate) const fn set_version(&mut self, version: Version) {
         self.version = version;
     }
 
     /// Sets whether to resolve DNS locally or let the proxy handle DNS resolution.
     #[inline]
-    pub fn set_dns_mode(&mut self, dns_resolve: DnsResolve) {
+    pub(crate) const fn set_dns_mode(&mut self, dns_resolve: DnsResolve) {
         self.dns_resolve = dns_resolve;
     }
 }

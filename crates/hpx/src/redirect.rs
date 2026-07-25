@@ -76,7 +76,7 @@ pub struct HistoryEntry {
 
 #[derive(Clone)]
 enum PolicyKind {
-    Custom(Arc<dyn Fn(Attempt) -> Action + Send + Sync + 'static>),
+    Custom(Arc<dyn Fn(Attempt<'_>) -> Action + Send + Sync + 'static>),
     Limit(usize),
     None,
 }
@@ -110,7 +110,7 @@ impl Policy {
     ///
     /// An [`Error`] will be returned if the max is reached.
     #[inline]
-    pub fn limited(max: usize) -> Self {
+    pub const fn limited(max: usize) -> Self {
         Self {
             inner: PolicyKind::Limit(max),
         }
@@ -118,7 +118,7 @@ impl Policy {
 
     /// Create a [`Policy`] that does not follow any redirect.
     #[inline]
-    pub fn none() -> Self {
+    pub const fn none() -> Self {
         Self {
             inner: PolicyKind::None,
         }
@@ -162,7 +162,7 @@ impl Policy {
     #[inline]
     pub fn custom<T>(policy: T) -> Self
     where
-        T: Fn(Attempt) -> Action + Send + Sync + 'static,
+        T: Fn(Attempt<'_>) -> Action + Send + Sync + 'static,
     {
         Self {
             inner: PolicyKind::Custom(Arc::new(policy)),
@@ -189,7 +189,7 @@ impl Policy {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn redirect(&self, attempt: Attempt) -> Action {
+    pub fn redirect(&self, attempt: Attempt<'_>) -> Action {
         match self.inner {
             PolicyKind::Custom(ref custom) => custom(attempt),
             PolicyKind::Limit(max) => {
@@ -225,9 +225,9 @@ impl Policy {
 
 impl Default for Policy {
     #[inline]
-    fn default() -> Policy {
+    fn default() -> Self {
         // Keep `is_default` in sync
-        Policy::limited(10)
+        Self::limited(10)
     }
 }
 
@@ -307,6 +307,13 @@ impl Attempt<'_, true> {
 
 // ===== impl History =====
 
+impl History {
+    /// Returns an iterator over the history entries.
+    pub fn iter(&self) -> std::slice::Iter<'_, HistoryEntry> {
+        self.0.iter()
+    }
+}
+
 impl IntoIterator for History {
     type Item = HistoryEntry;
     type IntoIter = std::vec::IntoIter<HistoryEntry>;
@@ -330,11 +337,11 @@ impl<'a> IntoIterator for &'a History {
 // ===== impl PolicyKind =====
 
 impl fmt::Debug for PolicyKind {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            PolicyKind::Custom(..) => f.pad("Custom"),
-            PolicyKind::Limit(max) => f.debug_tuple("Limit").field(&max).finish(),
-            PolicyKind::None => f.pad("None"),
+            Self::Custom(..) => f.pad("Custom"),
+            Self::Limit(max) => f.debug_tuple("Limit").field(&max).finish(),
+            Self::None => f.pad("None"),
         }
     }
 }
@@ -353,7 +360,7 @@ impl StdError for TooManyRedirects {}
 
 impl FollowRedirectPolicy {
     /// Creates a new redirect policy handler with the given [`Policy`].
-    pub fn new(policy: Policy) -> Self {
+    pub(crate) const fn new(policy: Policy) -> Self {
         Self {
             policy: RequestConfig::new(Some(policy)),
             referer: false,
@@ -365,14 +372,14 @@ impl FollowRedirectPolicy {
 
     /// Enables or disables automatic Referer header management.
     #[inline]
-    pub fn with_referer(mut self, referer: bool) -> Self {
+    pub(crate) const fn with_referer(mut self, referer: bool) -> Self {
         self.referer = referer;
         self
     }
 
     /// Enables or disables HTTPS-only redirect enforcement.
     #[inline]
-    pub fn with_https_only(mut self, https_only: bool) -> Self {
+    pub(crate) const fn with_https_only(mut self, https_only: bool) -> Self {
         self.https_only = https_only;
         self
     }

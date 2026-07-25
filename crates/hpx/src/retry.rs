@@ -36,7 +36,7 @@
 //! Some common properties to check include if the request method is
 //! idempotent, or if the response status code indicates a transient error.
 
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 use http::Request;
 
@@ -54,13 +54,22 @@ pub struct Policy {
     pub(crate) scope: Scoped,
 }
 
+impl fmt::Debug for Policy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Policy")
+            .field("budget", &self.budget)
+            .field("max_retries_per_request", &self.max_retries_per_request)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Policy {
     /// Create a retry policy that will never retry any request.
     ///
     /// This is useful for disabling the `Client`s default behavior of retrying
     /// protocol nacks.
     #[inline]
-    pub fn never() -> Policy {
+    pub fn never() -> Self {
         Self::scoped(|_| false).no_budget()
     }
 
@@ -81,7 +90,7 @@ impl Policy {
     /// let policy = Policy::for_host("rust-lang.org");
     /// ```
     #[inline]
-    pub fn for_host<S>(host: S) -> Policy
+    pub fn for_host<S>(host: S) -> Self
     where
         S: for<'a> PartialEq<&'a str> + Send + Sync + 'static,
     {
@@ -96,7 +105,7 @@ impl Policy {
     ///
     /// For a more convenient constructor, see [`Policy::for_host()`].
     #[inline]
-    fn scoped<F>(func: F) -> Policy
+    fn scoped<F>(func: F) -> Self
     where
         F: Fn(&Request<Body>) -> bool + Send + Sync + 'static,
     {
@@ -116,7 +125,7 @@ impl Policy {
     /// This is NOT recommended. Disabling the budget can make your system more
     /// susceptible to retry storms.
     #[inline]
-    pub fn no_budget(mut self) -> Self {
+    pub const fn no_budget(mut self) -> Self {
         self.budget = None;
         self
     }
@@ -156,7 +165,7 @@ impl Policy {
     ///
     /// Default is currently 2 retries.
     #[inline]
-    pub fn max_retries_per_request(mut self, max: u32) -> Self {
+    pub const fn max_retries_per_request(mut self, max: u32) -> Self {
         self.max_retries_per_request = max;
         self
     }

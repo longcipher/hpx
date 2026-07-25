@@ -11,7 +11,7 @@ use std::{
 /// Handle for writing to a key log file.
 #[derive(Debug, Clone)]
 pub struct Handle {
-    #[allow(unused)]
+    #[expect(unused)]
     filepath: Arc<Path>,
     sender: Sender<String>,
 }

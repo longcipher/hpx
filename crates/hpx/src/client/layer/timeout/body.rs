@@ -67,10 +67,10 @@ pin_project! {
 /// ==== impl TimeoutBody ====
 impl<B> TimeoutBody<B> {
     /// Creates a new [`TimeoutBody`] with no timeout.
-    pub fn new(deadline: Option<Duration>, read_timeout: Option<Duration>, body: B) -> Self {
+    pub(crate) fn new(deadline: Option<Duration>, read_timeout: Option<Duration>, body: B) -> Self {
         let deadline = deadline.map(sleep).map(Box::pin);
         match (deadline, read_timeout) {
-            (Some(total_timeout), Some(read_timeout)) => TimeoutBody::CombinedTimeout {
+            (Some(total_timeout), Some(read_timeout)) => Self::CombinedTimeout {
                 body: TotalTimeoutBody {
                     timeout: total_timeout,
                     body: ReadTimeoutBody {
@@ -80,17 +80,17 @@ impl<B> TimeoutBody<B> {
                     },
                 },
             },
-            (Some(timeout), None) => TimeoutBody::TotalTimeout {
+            (Some(timeout), None) => Self::TotalTimeout {
                 body: TotalTimeoutBody { body, timeout },
             },
-            (None, Some(timeout)) => TimeoutBody::ReadTimeout {
+            (None, Some(timeout)) => Self::ReadTimeout {
                 body: ReadTimeoutBody {
                     timeout,
                     sleep: None,
                     body,
                 },
             },
-            (None, None) => TimeoutBody::Plain { body },
+            (None, None) => Self::Plain { body },
         }
     }
 }
@@ -103,7 +103,7 @@ where
     type Data = B::Data;
     type Error = BoxError;
 
-    #[inline(always)]
+    #[inline]
     fn poll_frame(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -116,28 +116,28 @@ where
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn size_hint(&self) -> http_body::SizeHint {
         match self {
-            TimeoutBody::TotalTimeout { body } => body.size_hint(),
-            TimeoutBody::ReadTimeout { body } => body.size_hint(),
-            TimeoutBody::CombinedTimeout { body } => body.size_hint(),
-            TimeoutBody::Plain { body } => body.size_hint(),
+            Self::TotalTimeout { body } => body.size_hint(),
+            Self::ReadTimeout { body } => body.size_hint(),
+            Self::CombinedTimeout { body } => body.size_hint(),
+            Self::Plain { body } => body.size_hint(),
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn is_end_stream(&self) -> bool {
         match self {
-            TimeoutBody::TotalTimeout { body } => body.is_end_stream(),
-            TimeoutBody::ReadTimeout { body } => body.is_end_stream(),
-            TimeoutBody::CombinedTimeout { body } => body.is_end_stream(),
-            TimeoutBody::Plain { body } => body.is_end_stream(),
+            Self::TotalTimeout { body } => body.is_end_stream(),
+            Self::ReadTimeout { body } => body.is_end_stream(),
+            Self::CombinedTimeout { body } => body.is_end_stream(),
+            Self::Plain { body } => body.is_end_stream(),
         }
     }
 }
 
-#[inline(always)]
+#[inline]
 fn poll_and_map_body<B>(
     body: Pin<&mut B>,
     cx: &mut Context<'_>,
@@ -160,21 +160,21 @@ where
 
     fn poll_frame(
         self: Pin<&mut Self>,
-        cx: &mut Context,
+        cx: &mut Context<'_>,
     ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
         let this = self.project();
-        if let Poll::Ready(()) = this.timeout.as_mut().poll(cx) {
+        if this.timeout.as_mut().poll(cx) == Poll::Ready(()) {
             return Poll::Ready(Some(Err(Error::body(TimedOut).into())));
         }
         poll_and_map_body(this.body, cx)
     }
 
-    #[inline(always)]
+    #[inline]
     fn size_hint(&self) -> http_body::SizeHint {
         self.body.size_hint()
     }
 
-    #[inline(always)]
+    #[inline]
     fn is_end_stream(&self) -> bool {
         self.body.is_end_stream()
     }
@@ -219,12 +219,12 @@ where
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn size_hint(&self) -> http_body::SizeHint {
         self.body.size_hint()
     }
 
-    #[inline(always)]
+    #[inline]
     fn is_end_stream(&self) -> bool {
         self.body.is_end_stream()
     }

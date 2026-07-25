@@ -28,7 +28,7 @@ pub struct WebSocketExtensions {
 impl WebSocketExtensions {
     /// Returns `true` if permessage-deflate was negotiated.
     #[inline]
-    pub fn has_deflate(&self) -> bool {
+    pub const fn has_deflate(&self) -> bool {
         // We consider deflate negotiated if we have any non-default parameters
         // OR if the extension was simply offered and accepted. The presence
         // of this struct at all means negotiation occurred.
@@ -122,7 +122,7 @@ pub enum ParseError {
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ParseError::InvalidParameter(param) => {
+            Self::InvalidParameter(param) => {
                 write!(f, "invalid permessage-deflate parameter: {param}")
             }
         }
@@ -146,11 +146,26 @@ pub struct DeflateCodec {
     /// Whether to reset the decompressor after each message.
     server_no_context_takeover: bool,
     /// The window bits for the compressor.
-    #[allow(dead_code)]
     client_max_window_bits: Option<u8>,
     /// The window bits for the decompressor.
-    #[allow(dead_code)]
     server_max_window_bits: Option<u8>,
+}
+
+impl std::fmt::Debug for DeflateCodec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeflateCodec")
+            .field(
+                "client_no_context_takeover",
+                &self.client_no_context_takeover,
+            )
+            .field(
+                "server_no_context_takeover",
+                &self.server_no_context_takeover,
+            )
+            .field("client_max_window_bits", &self.client_max_window_bits)
+            .field("server_max_window_bits", &self.server_max_window_bits)
+            .finish_non_exhaustive()
+    }
 }
 
 impl DeflateCodec {
@@ -237,8 +252,8 @@ pub enum DeflateError {
 impl std::fmt::Display for DeflateError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DeflateError::Compress(msg) => write!(f, "deflate compression error: {msg}"),
-            DeflateError::Decompress(msg) => write!(f, "deflate decompression error: {msg}"),
+            Self::Compress(msg) => write!(f, "deflate compression error: {msg}"),
+            Self::Decompress(msg) => write!(f, "deflate decompression error: {msg}"),
         }
     }
 }

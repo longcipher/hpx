@@ -107,22 +107,21 @@
 //! ## Low-Level `split_stream()` (Advanced)
 //!
 //! For advanced use cases requiring direct access to the underlying stream and protocol
-//! handlers, use the unsafe `split_stream()` method:
+//! handlers, use the `split_stream()` method:
 //!
 //! ```no_run
 //! # use yawc::WebSocket;
 //! # async fn example() -> yawc::Result<()> {
 //! let ws = WebSocket::connect("wss://example.com".parse()?).await?;
 //!
-//! // SAFETY: User must ensure the stream is not used after splitting
-//! let (mut stream, mut read_half, mut write_half) = unsafe { ws.split_stream() };
+//! let (mut stream, mut read_half, mut write_half) = ws.split_stream();
 //!
 //! // Manual protocol handling required
 //! # Ok(())
 //! # }
 //! ```
 //!
-//! **Warning**: This is unsafe because it requires manual protocol handling. Users must:
+//! **Warning**: This requires manual protocol handling. Users must:
 //! - Correctly handle control frames (Ping, Pong, Close)
 //! - Maintain proper message ordering
 //! - Handle compression state correctly
@@ -179,7 +178,7 @@ use crate::{
 ///     let url = "wss://api.example.com/ws".parse()?;
 ///     let ws = WebSocket::connect(url).await?;
 ///
-///     let (mut stream, mut read_half, write_half) = unsafe { ws.split_stream() };
+///     let (mut stream, mut read_half, write_half) = ws.split_stream();
 ///
 ///     std::future::poll_fn(|cx| read_half.poll_frame(&mut stream, cx)).await?;
 ///
@@ -305,7 +304,7 @@ impl ReadHalf {
     /// # use yawc::WebSocket;
     /// # async fn example() -> yawc::Result<()> {
     /// let ws = WebSocket::connect("wss://example.com".parse()?).await?;
-    /// let (mut stream, mut read_half, _write_half) = unsafe { ws.split_stream() };
+    /// let (mut stream, mut read_half, _write_half) = ws.split_stream();
     ///
     /// // Read frames one by one
     /// while let Ok(frame) = read_half.next_frame(&mut stream).await {
@@ -532,7 +531,7 @@ impl WriteHalf {
     /// # use yawc::{WebSocket, Frame};
     /// # async fn example() -> yawc::Result<()> {
     /// let ws = WebSocket::connect("wss://example.com".parse()?).await?;
-    /// let (mut stream, _read_half, mut write_half) = unsafe { ws.split_stream() };
+    /// let (mut stream, _read_half, mut write_half) = ws.split_stream();
     ///
     /// // Send a frame
     /// write_half
@@ -567,7 +566,7 @@ impl WriteHalf {
     /// # use yawc::WebSocket;
     /// # async fn example() -> yawc::Result<()> {
     /// let ws = WebSocket::connect("wss://example.com".parse()?).await?;
-    /// let (mut stream, _read_half, mut write_half) = unsafe { ws.split_stream() };
+    /// let (mut stream, _read_half, mut write_half) = ws.split_stream();
     ///
     /// // Close the connection
     /// write_half.close(&mut stream).await?;

@@ -20,7 +20,7 @@ use super::{Action, Attempt, BodyRepr, Policy};
 use crate::{Error, error::BoxError, ext::RequestUri, into_uri::IntoUriSealed};
 
 /// Pending future state for handling redirects.
-pub struct Pending<ReqBody, Response> {
+pub(crate) struct Pending<ReqBody, Response> {
     future: Pin<Box<dyn Future<Output = Action> + Send>>,
     location: Uri,
     body: ReqBody,
@@ -129,7 +129,7 @@ where
                         policy.on_response(&mut res);
                         return Poll::Ready(Ok(res));
                     }
-                };
+                }
 
                 // Extract the request body for potential reuse
                 let Some(body) = body_repr.take() else {
@@ -232,7 +232,7 @@ where
 }
 
 fn handle_action<S, ReqBody, ResBody, P>(
-    cx: &mut Context<'_>,
+    cx: &Context<'_>,
     redirect: RedirectAction<'_, S, ReqBody, ResBody, P>,
 ) -> Poll<Result<Response<ResBody>, S::Error>>
 where

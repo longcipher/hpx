@@ -30,8 +30,8 @@ hpxless --proxy socks5://127.0.0.1:1080
 | `--port` | `9222` | WebSocket port for CDP server |
 | `--stealth` | `false` | Enable anti-detection mode |
 | `--profile` | `chrome` | Browser profile: `chrome`, `firefox`, `safari` |
-| `--proxy` | — | Proxy URL (HTTP/HTTPS/SOCKS5) |
-| `--block` | — | Comma-separated resource types to block |
+| `--proxy` | — | Proxy URL (HTTP/HTTPS/SOCKS5) — *planned, not yet implemented* |
+| `--block` | — | Comma-separated resource types to block — *planned, not yet implemented* |
 | `--url` | — | Navigate to this URL on connect |
 | `--log-level` | `info` | Log level: `trace`, `debug`, `info`, `warn`, `error` |
 

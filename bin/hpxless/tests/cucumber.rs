@@ -60,7 +60,7 @@ impl HpxlessWorld {
 
         while let Some(frame) = ws.next().await {
             if frame.opcode() == OpCode::Text {
-                let text = frame.as_str();
+                let text = frame.as_str().expect("text frame decode");
                 if let Ok(value) = serde_json::from_str::<serde_json::Value>(text) {
                     // Collect events (no id field).
                     if value.get("id").is_none() {

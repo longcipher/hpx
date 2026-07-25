@@ -235,13 +235,13 @@ impl TlsOptionsBuilder {
 
     /// Sets whether to use a new codepoint for ALPS.
     #[inline]
-    pub fn alps_use_new_codepoint(mut self, enabled: bool) -> Self {
+    pub const fn alps_use_new_codepoint(mut self, enabled: bool) -> Self {
         self.config.alps_use_new_codepoint = enabled;
         self
     }
     /// Sets the session ticket flag.
     #[inline]
-    pub fn session_ticket(mut self, enabled: bool) -> Self {
+    pub const fn session_ticket(mut self, enabled: bool) -> Self {
         self.config.session_ticket = enabled;
         self
     }
@@ -268,14 +268,14 @@ impl TlsOptionsBuilder {
 
     /// Sets the pre-shared key flag.
     #[inline]
-    pub fn pre_shared_key(mut self, enabled: bool) -> Self {
+    pub const fn pre_shared_key(mut self, enabled: bool) -> Self {
         self.config.pre_shared_key = enabled;
         self
     }
 
     /// Sets the GREASE ECH extension flag.
     #[inline]
-    pub fn enable_ech_grease(mut self, enabled: bool) -> Self {
+    pub const fn enable_ech_grease(mut self, enabled: bool) -> Self {
         self.config.enable_ech_grease = enabled;
         self
     }
@@ -302,14 +302,14 @@ impl TlsOptionsBuilder {
 
     /// Sets the OCSP stapling flag.
     #[inline]
-    pub fn enable_ocsp_stapling(mut self, enabled: bool) -> Self {
+    pub const fn enable_ocsp_stapling(mut self, enabled: bool) -> Self {
         self.config.enable_ocsp_stapling = enabled;
         self
     }
 
     /// Sets the signed certificate timestamps flag.
     #[inline]
-    pub fn enable_signed_cert_timestamps(mut self, enabled: bool) -> Self {
+    pub const fn enable_signed_cert_timestamps(mut self, enabled: bool) -> Self {
         self.config.enable_signed_cert_timestamps = enabled;
         self
     }
@@ -323,7 +323,7 @@ impl TlsOptionsBuilder {
 
     /// Sets the PSK skip session ticket flag.
     #[inline]
-    pub fn psk_skip_session_ticket(mut self, skip: bool) -> Self {
+    pub const fn psk_skip_session_ticket(mut self, skip: bool) -> Self {
         self.config.psk_skip_session_ticket = skip;
         self
     }
@@ -340,14 +340,14 @@ impl TlsOptionsBuilder {
 
     /// Sets the PSK DHE key establishment flag.
     #[inline]
-    pub fn psk_dhe_ke(mut self, enabled: bool) -> Self {
+    pub const fn psk_dhe_ke(mut self, enabled: bool) -> Self {
         self.config.psk_dhe_ke = enabled;
         self
     }
 
     /// Sets the renegotiation flag.
     #[inline]
-    pub fn renegotiation(mut self, enabled: bool) -> Self {
+    pub const fn renegotiation(mut self, enabled: bool) -> Self {
         self.config.renegotiation = enabled;
         self
     }
@@ -426,7 +426,7 @@ impl TlsOptionsBuilder {
 
     /// Sets the random AES hardware override flag.
     #[inline]
-    pub fn random_aes_hw_override(mut self, enabled: bool) -> Self {
+    pub const fn random_aes_hw_override(mut self, enabled: bool) -> Self {
         self.config.random_aes_hw_override = enabled;
         self
     }
@@ -463,14 +463,14 @@ impl TlsOptions {
     /// Creates a new `TlsOptionsBuilder` instance.
     pub fn builder() -> TlsOptionsBuilder {
         TlsOptionsBuilder {
-            config: TlsOptions::default(),
+            config: Self::default(),
         }
     }
 }
 
 impl Default for TlsOptions {
     fn default() -> Self {
-        TlsOptions {
+        Self {
             alpn_protocols: Some(Cow::Borrowed(&[AlpnProtocol::HTTP2, AlpnProtocol::HTTP1])),
             alps_protocols: None,
             alps_use_new_codepoint: false,

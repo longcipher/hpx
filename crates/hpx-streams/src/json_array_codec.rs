@@ -16,16 +16,20 @@ pub(crate) struct JsonArrayCodec<T> {
 
 #[derive(Clone, Debug)]
 struct JsonCursor {
-    pub current_offset: usize,
-    pub array_is_opened: bool,
-    pub delimiter_expected: bool,
-    pub quote_opened: bool,
-    pub escaped: bool,
-    pub opened_brackets: usize,
-    pub current_obj_pos: usize,
+    pub(crate) current_offset: usize,
+    pub(crate) array_is_opened: bool,
+    pub(crate) delimiter_expected: bool,
+    pub(crate) quote_opened: bool,
+    /// Quote state for strings inside nested objects/arrays (`opened_brackets > 0`).
+    /// Kept separate from `quote_opened` so nested-string escape state never pollutes
+    /// top-level string tracking across frames.
+    pub(crate) nested_quote_opened: bool,
+    pub(crate) escaped: bool,
+    pub(crate) opened_brackets: usize,
+    pub(crate) current_obj_pos: usize,
     /// When Some(pos), we are accumulating a primitive value (number/bool/null/string)
     /// that started at `pos` in the buffer. A quoted string also uses this.
-    pub current_primitive_start: Option<usize>,
+    pub(crate) current_primitive_start: Option<usize>,
 }
 
 impl<T> JsonArrayCodec<T> {
@@ -35,6 +39,7 @@ impl<T> JsonArrayCodec<T> {
             array_is_opened: false,
             delimiter_expected: false,
             quote_opened: false,
+            nested_quote_opened: false,
             escaped: false,
             opened_brackets: 0,
             current_obj_pos: 0,
@@ -90,7 +95,10 @@ where
                     }
                 }
                 b'[' if !self.json_cursor.quote_opened && self.json_cursor.opened_brackets > 0 => {
-                    self.json_cursor.opened_brackets += 1;
+                    // Inside a nested context — must not be inside a nested string.
+                    if !self.json_cursor.nested_quote_opened {
+                        self.json_cursor.opened_brackets += 1;
+                    }
                     self.json_cursor.escaped = false;
                 }
                 b']' if !self.json_cursor.quote_opened && self.json_cursor.opened_brackets == 0 => {
@@ -114,11 +122,15 @@ where
                         }
                     }
                 }
-                b']' if !self.json_cursor.quote_opened && self.json_cursor.opened_brackets > 0 => {
+                b']' if !self.json_cursor.nested_quote_opened
+                    && self.json_cursor.opened_brackets > 0 =>
+                {
                     self.json_cursor.opened_brackets -= 1;
                     self.json_cursor.escaped = false;
                     if self.json_cursor.opened_brackets == 0 {
-                        // Closed a nested array/object item
+                        // Closed a nested array/object item — reset nested string state
+                        // so it cannot leak into the next frame.
+                        self.json_cursor.nested_quote_opened = false;
                         self.json_cursor.delimiter_expected = true;
                         let obj_slice = &buf[self.json_cursor.current_obj_pos..=abs_pos];
                         let result;
@@ -165,13 +177,14 @@ where
                     }
                 }
                 b'"' if !self.json_cursor.escaped => {
-                    // Inside a nested object/array
-                    self.json_cursor.quote_opened = !self.json_cursor.quote_opened;
+                    // Inside a nested object/array — toggle the dedicated nested quote state
+                    // so escape handling here never pollutes top-level `quote_opened`.
+                    self.json_cursor.nested_quote_opened = !self.json_cursor.nested_quote_opened;
                 }
-                b'\\' if self.json_cursor.quote_opened => {
+                b'\\' if self.json_cursor.quote_opened || self.json_cursor.nested_quote_opened => {
                     self.json_cursor.escaped = !self.json_cursor.escaped;
                 }
-                b'{' if !self.json_cursor.quote_opened => {
+                b'{' if !self.json_cursor.quote_opened && !self.json_cursor.nested_quote_opened => {
                     if self.json_cursor.opened_brackets == 0 {
                         self.json_cursor.current_obj_pos = abs_pos;
                         self.json_cursor.current_primitive_start = None;
@@ -179,10 +192,13 @@ where
                     self.json_cursor.opened_brackets += 1;
                     self.json_cursor.escaped = false;
                 }
-                b'}' if !self.json_cursor.quote_opened => {
+                b'}' if !self.json_cursor.quote_opened && !self.json_cursor.nested_quote_opened => {
                     self.json_cursor.opened_brackets -= 1;
                     self.json_cursor.escaped = false;
                     if self.json_cursor.opened_brackets == 0 {
+                        // Closed a nested object — reset nested string state so it cannot
+                        // leak into the next frame.
+                        self.json_cursor.nested_quote_opened = false;
                         self.json_cursor.delimiter_expected = true;
                         let obj_slice = &buf[self.json_cursor.current_obj_pos..=abs_pos];
                         let result;

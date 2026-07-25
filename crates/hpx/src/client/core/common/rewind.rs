@@ -15,8 +15,8 @@ pub(crate) struct Rewind<T> {
 }
 
 impl<T> Rewind<T> {
-    pub(crate) fn new_buffered(io: T, buf: Bytes) -> Self {
-        Rewind {
+    pub(crate) const fn new_buffered(io: T, buf: Bytes) -> Self {
+        Self {
             pre: Some(buf),
             inner: io,
         }

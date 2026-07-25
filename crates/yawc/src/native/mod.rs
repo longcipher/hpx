@@ -1132,11 +1132,11 @@ where
 {
     /// Splits the [`WebSocket`] into its low-level components for advanced usage.
     ///
-    /// # Safety
-    /// This function is unsafe because it splits ownership of shared state.
-    pub unsafe fn split_stream(self) -> (Framed<S, Codec>, ReadHalf, WriteHalf) {
-        // SAFETY: caller guarantees safe usage of split ownership
-        unsafe { self.streaming.split_stream() }
+    /// The returned [`ReadHalf`] and [`WriteHalf`] do not share mutable state, but the
+    /// caller is responsible for maintaining WebSocket protocol invariants when driving
+    /// the framed stream directly.
+    pub fn split_stream(self) -> (Framed<S, Codec>, ReadHalf, WriteHalf) {
+        self.streaming.split_stream()
     }
 
     /// Converts this `WebSocket` into a [`Streaming`] connection for manual fragment control.

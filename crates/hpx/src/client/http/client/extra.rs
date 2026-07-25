@@ -40,7 +40,7 @@ impl ConnectExtra {
     }
 
     /// Return the negotiated [`AlpnProtocol`].
-    pub fn alpn_protocol(&self) -> Option<AlpnProtocol> {
+    pub(crate) fn alpn_protocol(&self) -> Option<AlpnProtocol> {
         match self
             .extra
             .as_ref()
@@ -56,13 +56,13 @@ impl ConnectExtra {
 
     /// Return a reference to the [`ProxyMacher`].
     #[inline]
-    pub fn proxy_matcher(&self) -> Option<&Arc<ProxyMacher>> {
+    pub(crate) fn proxy_matcher(&self) -> Option<&Arc<ProxyMacher>> {
         self.extra.as_ref().and_then(RequestOptions::proxy_matcher)
     }
 
     /// Return a reference to the [`TlsOptions`].
     #[inline]
-    pub fn tls_options(&self) -> Option<&TlsOptions> {
+    pub(crate) fn tls_options(&self) -> Option<&TlsOptions> {
         self.extra
             .as_ref()
             .map(RequestOptions::transport_opts)
@@ -71,7 +71,7 @@ impl ConnectExtra {
 
     /// Return a reference to the [`TcpConnectOptions`].
     #[inline]
-    pub fn tcp_options(&self) -> Option<&TcpConnectOptions> {
+    pub(crate) fn tcp_options(&self) -> Option<&TcpConnectOptions> {
         self.extra.as_ref().map(RequestOptions::tcp_connect_opts)
     }
 }

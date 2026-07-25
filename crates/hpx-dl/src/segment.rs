@@ -7,7 +7,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::Write as _,
     future::Future,
-    path::{Path, PathBuf},
+    path::PathBuf,
     pin::Pin,
     time::Duration,
 };
@@ -17,11 +17,7 @@ use futures_util::StreamExt;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tracing::debug;
 
-use crate::{
-    CompositeLimiter,
-    error::DownloadError,
-    storage::{SegmentStatus, Storage},
-};
+use crate::{CompositeLimiter, error::DownloadError, storage::SegmentStatus};
 
 /// Internal progress updates emitted by [`SegmentDownloader`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,9 +61,16 @@ impl SegmentRange {
     }
 
     /// Return the number of bytes in this segment.
+    ///
+    /// Returns 0 for empty ranges (`start > end`) to avoid unsigned
+    /// subtraction underflow.
     #[must_use]
     pub const fn len(&self) -> u64 {
-        self.end - self.start + 1
+        if self.is_empty() {
+            0
+        } else {
+            self.end - self.start + 1
+        }
     }
 
     /// Return true if this segment contains zero bytes.
@@ -197,29 +200,11 @@ pub fn range_header_value(range: &SegmentRange) -> ArrayString<64> {
     buf
 }
 
-/// Download a single byte range from a URL and write to file.
-///
-/// Sends a GET request with a `Range` header, streams the response body,
-/// and writes each chunk to the file at the correct byte offset.
-///
-/// # Errors
-///
-/// Returns [`DownloadError::Http`] if the HTTP request fails,
-/// [`DownloadError::Io`] if file I/O fails.
-#[expect(dead_code)]
-pub(crate) async fn download_segment(
-    client: &hpx::Client,
-    url: &str,
-    range: &SegmentRange,
-    file: &mut tokio::fs::File,
-    progress_tx: Option<&tokio::sync::mpsc::Sender<u64>>,
-) -> Result<(), DownloadError> {
-    let headers = HashMap::new();
-    let limiter = CompositeLimiter::unlimited();
-    download_segment_with_options(client, url, range, file, progress_tx, &headers, &limiter).await
-}
-
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "inherent to the per-segment download signature"
+)]
 async fn download_segment_with_options(
     client: &hpx::Client,
     url: &str,
@@ -228,6 +213,7 @@ async fn download_segment_with_options(
     progress_tx: Option<&tokio::sync::mpsc::Sender<u64>>,
     headers: &HashMap<String, String, impl std::hash::BuildHasher>,
     limiter: &CompositeLimiter,
+    idle_timeout: Option<Duration>,
 ) -> Result<(), DownloadError> {
     let header_value = range_header_value(range);
     debug!(url, range = %header_value, "starting segment download");
@@ -248,7 +234,18 @@ async fn download_segment_with_options(
 
     file.seek(std::io::SeekFrom::Start(range.start)).await?;
 
-    while let Some(chunk_result) = stream.next().await {
+    loop {
+        let next_chunk = stream.next();
+        let chunk_result = match idle_timeout {
+            Some(timeout) => tokio::time::timeout(timeout, next_chunk)
+                .await
+                .map_err(|_| DownloadError::Timeout(timeout))?,
+            None => next_chunk.await,
+        };
+
+        let Some(chunk_result) = chunk_result else {
+            break;
+        };
         let chunk = chunk_result?;
         let chunk_len = chunk.len();
         limiter
@@ -363,6 +360,9 @@ pub struct SegmentDownloader {
     pub(crate) retry_max_delay: Duration,
     /// Jitter factor (0.0 to 1.0).
     pub(crate) retry_jitter: f64,
+    /// Maximum time to wait between consecutive stream chunks before
+    /// declaring the connection stalled. `None` disables the idle timeout.
+    pub(crate) idle_timeout: Option<Duration>,
 }
 
 impl std::fmt::Debug for SegmentDownloader {
@@ -375,6 +375,7 @@ impl std::fmt::Debug for SegmentDownloader {
             .field("retry_initial_delay", &self.retry_initial_delay)
             .field("retry_max_delay", &self.retry_max_delay)
             .field("retry_jitter", &self.retry_jitter)
+            .field("idle_timeout", &self.idle_timeout)
             .finish_non_exhaustive()
     }
 }
@@ -400,6 +401,7 @@ impl SegmentDownloader {
             retry_initial_delay: Duration::from_millis(200),
             retry_max_delay: Duration::from_secs(30),
             retry_jitter: 0.25,
+            idle_timeout: None,
         }
     }
 
@@ -460,6 +462,17 @@ impl SegmentDownloader {
         segment_tx: tokio::sync::mpsc::UnboundedSender<SegmentProgressUpdate>,
     ) -> Self {
         self.segment_tx = Some(segment_tx);
+        self
+    }
+
+    /// Set the per-segment idle timeout.
+    ///
+    /// When `Some(duration)`, a segment download is aborted with
+    /// [`DownloadError::Timeout`] if no data arrives for the given duration
+    /// between consecutive stream chunks. `None` disables the idle timeout.
+    #[must_use]
+    pub const fn with_idle_timeout(mut self, timeout: Option<Duration>) -> Self {
+        self.idle_timeout = timeout;
         self
     }
 
@@ -692,78 +705,6 @@ pub fn filter_remaining_segments(
         .collect()
 }
 
-/// Check if an existing download can be resumed.
-///
-/// Sends a HEAD request to get current ETag/Last-Modified, loads the previous
-/// download record from storage, and compares content-identity headers.
-///
-/// # Errors
-///
-/// Returns [`DownloadError::Http`] if the HEAD request fails.
-/// Returns storage errors if the record cannot be loaded.
-#[expect(dead_code)]
-pub(crate) async fn check_resume(
-    client: &hpx::Client,
-    url: &str,
-    existing_file: &Path,
-    storage: &dyn Storage,
-    download_id: crate::types::DownloadId,
-) -> Result<ResumeState, DownloadError> {
-    let file_exists = existing_file.exists();
-
-    if !file_exists {
-        debug!("no existing file found, starting fresh");
-        return Ok(ResumeState::Fresh);
-    }
-
-    // Probe remote for current content headers
-    let remote = probe_remote(client, url).await?;
-
-    // Load previous record
-    let record = storage.load(download_id).await?;
-
-    let (record_etag, record_last_modified) = match &record {
-        Some(r) => (r.etag.clone(), r.last_modified.clone()),
-        None => (None, None),
-    };
-
-    let state = determine_resume_state(
-        file_exists,
-        &record_etag,
-        &record_last_modified,
-        &remote.etag,
-        &remote.last_modified,
-    );
-
-    if let Some(record) = record {
-        let state = resume_state_from_segments(
-            &record_etag,
-            &record_last_modified,
-            &remote.etag,
-            &remote.last_modified,
-            &record.segments,
-        );
-
-        if let ResumeState::CanResume {
-            bytes_completed,
-            completed_segments,
-        } = &state
-        {
-            debug!(
-                bytes_completed,
-                segments = completed_segments.len(),
-                "content unchanged, can resume"
-            );
-        }
-
-        debug!(?state, "resume check completed");
-        return Ok(state);
-    }
-
-    debug!(?state, "resume check completed");
-    Ok(state)
-}
-
 impl SegmentDownloader {
     /// Create a clone of this downloader with different segments (internal helper).
     fn clone_for_segments(&self, segments: Vec<SegmentRange>) -> Self {
@@ -779,6 +720,7 @@ impl SegmentDownloader {
             retry_initial_delay: self.retry_initial_delay,
             retry_max_delay: self.retry_max_delay,
             retry_jitter: self.retry_jitter,
+            idle_timeout: self.idle_timeout,
         }
     }
 
@@ -817,6 +759,7 @@ impl SegmentDownloader {
             let headers = self.headers.clone();
             let limiter = self.limiter.clone();
             let segment_tx = self.segment_tx.clone();
+            let idle_timeout = self.idle_timeout;
             let segment_index = segment_index as u32;
 
             join_set.spawn(async move {
@@ -842,6 +785,7 @@ impl SegmentDownloader {
                             progress_tx.as_ref(),
                             &headers,
                             &limiter,
+                            idle_timeout,
                         )
                         .await
                     })
@@ -908,6 +852,8 @@ mod tests {
     fn segment_range_empty() {
         let seg = SegmentRange::new(5, 3);
         assert!(seg.is_empty());
+        // Empty ranges must report zero length without underflowing.
+        assert_eq!(seg.len(), 0);
     }
 
     // --- calculate_segments edge cases ---
@@ -1248,7 +1194,7 @@ mod tests {
     async fn progress_channel_receives_chunk_sizes() {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<u64>(16);
 
-        // Simulate what download_segment does: send chunk sizes
+        // Simulate what the segment downloader does: send chunk sizes
         let chunk_sizes: Vec<u64> = vec![1024, 1024, 512];
         for &size in &chunk_sizes {
             tx.send(size).await.expect("send");
@@ -1744,7 +1690,7 @@ mod tests {
         let state =
             determine_resume_state(true, &record_etag, &record_lm, &remote_etag, &remote_lm);
         // determine_resume_state is a pure header-comparison function;
-        // bytes_completed is filled in by check_resume from actual segment state.
+        // bytes_completed is filled in by the caller from actual segment state.
         assert!(matches!(state, ResumeState::CanResume { .. }));
     }
 

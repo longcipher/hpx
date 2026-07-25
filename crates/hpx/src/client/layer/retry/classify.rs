@@ -5,7 +5,7 @@ use http::{Method, StatusCode, Uri};
 use super::{Req, Res};
 use crate::error::BoxError;
 
-pub trait Classify: Send + Sync + 'static {
+pub(crate) trait Classify: Send + Sync + 'static {
     fn classify(&self, req_rep: ReqRep<'_>) -> Action;
 }
 
@@ -15,7 +15,7 @@ pub trait Classify: Send + Sync + 'static {
 //
 // An alternative is to make things like `ClassifyFn`. Slightly more
 // annoying, but also more forwards-compatible. :shrug:
-pub struct ClassifyFn<F>(pub(crate) F);
+pub(crate) struct ClassifyFn<F>(pub(crate) F);
 
 impl<F> Classify for ClassifyFn<F>
 where
@@ -52,18 +52,27 @@ impl ReqRep<'_> {
     }
 
     /// Returns a retryable action.
-    pub fn retryable(self) -> Action {
+    #[expect(
+        clippy::unused_self,
+        reason = "public API consumes self for builder-style ergonomics"
+    )]
+    pub const fn retryable(self) -> Action {
         Action::Retryable
     }
 
     /// Returns a success action.
-    pub fn success(self) -> Action {
+    #[expect(
+        clippy::unused_self,
+        reason = "public API consumes self for builder-style ergonomics"
+    )]
+    pub const fn success(self) -> Action {
         Action::Success
     }
 }
 
 /// The action to take after classifying a request/response pair.
 #[must_use]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     /// The request was successful and should not be retried.
     Success,
@@ -87,19 +96,16 @@ impl Classifier {
     pub(super) fn classify(&mut self, req: &Req, res: &Result<Res, BoxError>) -> Action {
         let req_rep = ReqRep(req, res.as_ref().map(|r| r.status()));
         match self {
-            Classifier::Never => Action::Success,
-            Classifier::ProtocolNacks => {
-                let is_protocol_nack = req_rep
-                    .error()
-                    .map(super::is_retryable_error)
-                    .unwrap_or(false);
+            Self::Never => Action::Success,
+            Self::ProtocolNacks => {
+                let is_protocol_nack = req_rep.error().is_some_and(super::is_retryable_error);
                 if is_protocol_nack {
                     Action::Retryable
                 } else {
                     Action::Success
                 }
             }
-            Classifier::Dyn(c) => c.classify(req_rep),
+            Self::Dyn(c) => c.classify(req_rep),
         }
     }
 }

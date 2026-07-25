@@ -42,13 +42,13 @@ fn key_index() -> Result<Index<Ssl, SessionKey<ConnectIdentity>>, ErrorStack> {
 }
 
 /// Builds for [`HandshakeConfig`].
-pub struct HandshakeConfigBuilder {
+pub(crate) struct HandshakeConfigBuilder {
     settings: HandshakeConfig,
 }
 
 /// Settings for [`TlsConnector`]
 #[derive(Clone)]
-pub struct HandshakeConfig {
+pub(crate) struct HandshakeConfig {
     no_ticket: bool,
     enable_ech_grease: bool,
     verify_hostname: bool,
@@ -61,31 +61,31 @@ pub struct HandshakeConfig {
 
 impl HandshakeConfigBuilder {
     /// Skips the session ticket.
-    pub fn no_ticket(mut self, skip: bool) -> Self {
+    pub(crate) const fn no_ticket(mut self, skip: bool) -> Self {
         self.settings.no_ticket = skip;
         self
     }
 
     /// Enables or disables ECH grease.
-    pub fn enable_ech_grease(mut self, enable: bool) -> Self {
+    pub(crate) const fn enable_ech_grease(mut self, enable: bool) -> Self {
         self.settings.enable_ech_grease = enable;
         self
     }
 
     /// Sets hostname verification.
-    pub fn verify_hostname(mut self, verify: bool) -> Self {
+    pub(crate) const fn verify_hostname(mut self, verify: bool) -> Self {
         self.settings.verify_hostname = verify;
         self
     }
 
     /// Sets TLS SNI.
-    pub fn tls_sni(mut self, sni: bool) -> Self {
+    pub(crate) const fn tls_sni(mut self, sni: bool) -> Self {
         self.settings.tls_sni = sni;
         self
     }
 
     /// Sets ALPN protocols.
-    pub fn alpn_protocols<P>(mut self, alpn_protocols: P) -> Self
+    pub(crate) fn alpn_protocols<P>(mut self, alpn_protocols: P) -> Self
     where
         P: Into<Option<Cow<'static, [AlpnProtocol]>>>,
     {
@@ -94,7 +94,7 @@ impl HandshakeConfigBuilder {
     }
 
     /// Sets ALPS protocol.
-    pub fn alps_protocols<P>(mut self, alps_protocols: P) -> Self
+    pub(crate) fn alps_protocols<P>(mut self, alps_protocols: P) -> Self
     where
         P: Into<Option<Cow<'static, [AlpsProtocol]>>>,
     {
@@ -103,28 +103,28 @@ impl HandshakeConfigBuilder {
     }
 
     /// Sets ALPS new codepoint usage.
-    pub fn alps_use_new_codepoint(mut self, use_new: bool) -> Self {
+    pub(crate) const fn alps_use_new_codepoint(mut self, use_new: bool) -> Self {
         self.settings.alps_use_new_codepoint = use_new;
         self
     }
 
     /// Sets random AES hardware override.
-    pub fn random_aes_hw_override(mut self, override_: bool) -> Self {
+    pub(crate) const fn random_aes_hw_override(mut self, override_: bool) -> Self {
         self.settings.random_aes_hw_override = override_;
         self
     }
 
     /// Builds the `HandshakeConfig`.
-    pub fn build(self) -> HandshakeConfig {
+    pub(crate) fn build(self) -> HandshakeConfig {
         self.settings
     }
 }
 
 impl HandshakeConfig {
     /// Creates a new `HandshakeConfigBuilder`.
-    pub fn builder() -> HandshakeConfigBuilder {
+    pub(crate) fn builder() -> HandshakeConfigBuilder {
         HandshakeConfigBuilder {
-            settings: HandshakeConfig::default(),
+            settings: Self::default(),
         }
     }
 }
@@ -146,7 +146,7 @@ impl Default for HandshakeConfig {
 
 /// A Connector using BoringSSL to support `http` and `https` schemes.
 #[derive(Clone)]
-pub struct HttpsConnector<T> {
+pub(crate) struct HttpsConnector<T> {
     http: T,
     inner: Inner,
 }
@@ -160,7 +160,7 @@ struct Inner {
 
 /// A builder for creating a `TlsConnector`.
 #[derive(Clone)]
-pub struct TlsConnectorBuilder {
+pub(crate) struct TlsConnectorBuilder {
     session_cache: Arc<SessionCache<ConnectIdentity>>,
     alpn_protocol: Option<AlpnProtocol>,
     max_version: Option<TlsVersion>,
@@ -175,7 +175,7 @@ pub struct TlsConnectorBuilder {
 
 /// A layer which wraps services in an `SslConnector`.
 #[derive(Clone)]
-pub struct TlsConnector {
+pub(crate) struct TlsConnector {
     inner: Inner,
 }
 
@@ -190,8 +190,8 @@ where
 {
     /// Creates a new [`HttpsConnector`] with a given [`TlsConnector`].
     #[inline]
-    pub fn with_connector(http: S, connector: TlsConnector) -> HttpsConnector<S> {
-        HttpsConnector {
+    pub(crate) fn with_connector(http: S, connector: TlsConnector) -> Self {
+        Self {
             http,
             inner: connector.inner,
         }
@@ -199,7 +199,7 @@ where
 
     /// Disables ALPN negotiation.
     #[inline]
-    pub fn no_alpn(&mut self) -> &mut Self {
+    pub(crate) fn no_alpn(&mut self) -> &mut Self {
         self.inner.config.alpn_protocols = None;
         self
     }
@@ -211,7 +211,7 @@ impl Inner {
     fn setup_ssl(&self, uri: Uri) -> Result<Ssl, BoxError> {
         let cfg = self.ssl.configure()?;
         let host = uri.host().ok_or("URI missing host")?;
-        let host = Self::normalize_host(host);
+        let host = super::normalize_host(host);
         let ssl = cfg.into_ssl(host)?;
         Ok(ssl)
     }
@@ -260,7 +260,7 @@ impl Inner {
 
         let uri = req.uri().clone();
         let host = uri.host().ok_or("URI missing host")?;
-        let host = Self::normalize_host(host);
+        let host = super::normalize_host(host);
 
         if let Some(ref cache) = self.cache {
             let key = SessionKey(req.identify());
@@ -268,7 +268,13 @@ impl Inner {
             // If the session cache is enabled, we try to retrieve the session
             // associated with the key. If it exists, we set it in the SSL configuration.
             if let Some(session) = cache.get(&key) {
-                #[allow(unsafe_code)]
+                // Safety: `session` was obtained from the session cache populated by a
+                // prior `set_new_session_callback` invoked by BoringSSL on the same
+                // `SslContext`, so the session handle is valid for the lifetime of the
+                // `SslConnectConfiguration`. `set_session` borrows the session by
+                // reference and does not take ownership; the `SslSession` is kept alive
+                // by the cache for the duration of this call.
+                #[expect(unsafe_code)]
                 unsafe { cfg.set_session(&session) }?;
 
                 if self.config.no_ticket {
@@ -283,55 +289,35 @@ impl Inner {
         let ssl = cfg.into_ssl(host)?;
         Ok(ssl)
     }
-
-    /// If `host` is an IPv6 address, we must strip away the square brackets that surround
-    /// it (otherwise, boring will fail to parse the host as an IP address, eventually
-    /// causing the handshake to fail due a hostname verification error).
-    fn normalize_host(host: &str) -> &str {
-        if host.is_empty() {
-            return host;
-        }
-
-        let last = host.len() - 1;
-        let mut chars = host.chars();
-
-        if let (Some('['), Some(']')) = (chars.next(), chars.last())
-            && host[1..last].parse::<std::net::Ipv6Addr>().is_ok()
-        {
-            return &host[1..last];
-        }
-
-        host
-    }
 }
 
 // ====== impl TlsConnectorBuilder =====
 
 impl TlsConnectorBuilder {
     /// Sets the alpn protocol to be used.
-    #[inline(always)]
-    pub fn alpn_protocol(mut self, protocol: Option<AlpnProtocol>) -> Self {
+    #[inline]
+    pub(crate) const fn alpn_protocol(mut self, protocol: Option<AlpnProtocol>) -> Self {
         self.alpn_protocol = protocol;
         self
     }
 
     /// Sets the TLS keylog policy.
-    #[inline(always)]
-    pub fn keylog(mut self, keylog: Option<KeyLog>) -> Self {
+    #[inline]
+    pub(crate) const fn keylog(mut self, keylog: Option<KeyLog>) -> Self {
         self.keylog = keylog;
         self
     }
 
     /// Sets the identity to be used for client certificate authentication.
-    #[inline(always)]
-    pub fn identity(mut self, identity: Option<Identity>) -> Self {
+    #[inline]
+    pub(crate) fn identity(mut self, identity: Option<Identity>) -> Self {
         self.identity = identity;
         self
     }
 
     /// Sets the certificate store used for TLS verification.
-    #[inline(always)]
-    pub fn cert_store<T>(mut self, cert_store: T) -> Self
+    #[inline]
+    pub(crate) fn cert_store<T>(mut self, cert_store: T) -> Self
     where
         T: Into<Option<CertStore>>,
     {
@@ -340,15 +326,15 @@ impl TlsConnectorBuilder {
     }
 
     /// Sets the certificate verification flag.
-    #[inline(always)]
-    pub fn cert_verification(mut self, enabled: bool) -> Self {
+    #[inline]
+    pub(crate) const fn cert_verification(mut self, enabled: bool) -> Self {
         self.cert_verification = enabled;
         self
     }
 
     /// Sets the minimum TLS version to use.
-    #[inline(always)]
-    pub fn min_version<T>(mut self, version: T) -> Self
+    #[inline]
+    pub(crate) fn min_version<T>(mut self, version: T) -> Self
     where
         T: Into<Option<TlsVersion>>,
     {
@@ -357,8 +343,8 @@ impl TlsConnectorBuilder {
     }
 
     /// Sets the maximum TLS version to use.
-    #[inline(always)]
-    pub fn max_version<T>(mut self, version: T) -> Self
+    #[inline]
+    pub(crate) fn max_version<T>(mut self, version: T) -> Self
     where
         T: Into<Option<TlsVersion>>,
     {
@@ -367,21 +353,21 @@ impl TlsConnectorBuilder {
     }
 
     /// Sets the Server Name Indication (SNI) flag.
-    #[inline(always)]
-    pub fn tls_sni(mut self, enabled: bool) -> Self {
+    #[inline]
+    pub(crate) const fn tls_sni(mut self, enabled: bool) -> Self {
         self.tls_sni = enabled;
         self
     }
 
     /// Sets the hostname verification flag.
-    #[inline(always)]
-    pub fn verify_hostname(mut self, enabled: bool) -> Self {
+    #[inline]
+    pub(crate) const fn verify_hostname(mut self, enabled: bool) -> Self {
         self.verify_hostname = enabled;
         self
     }
 
     /// Build the `TlsConnector` with the provided configuration.
-    pub fn build(&self, opts: &TlsOptions) -> crate::Result<TlsConnector> {
+    pub(crate) fn build(&self, opts: &TlsOptions) -> crate::Result<TlsConnector> {
         // Replace the default configuration with the provided one
         let max_tls_version = opts.max_tls_version.or(self.max_version);
         let min_tls_version = opts.min_tls_version.or(self.min_version);
@@ -546,7 +532,7 @@ impl TlsConnectorBuilder {
 
 impl TlsConnector {
     /// Creates a new `TlsConnectorBuilder` with the given configuration.
-    pub fn builder() -> TlsConnectorBuilder {
+    pub(crate) fn builder() -> TlsConnectorBuilder {
         const DEFAULT_SESSION_CACHE_CAPACITY: usize = 8;
         TlsConnectorBuilder {
             session_cache: Arc::new(SessionCache::with_capacity(DEFAULT_SESSION_CACHE_CAPACITY)),
@@ -564,7 +550,7 @@ impl TlsConnector {
 }
 
 /// A stream which may be wrapped with TLS.
-pub enum MaybeHttpsStream<T> {
+pub(crate) enum MaybeHttpsStream<T> {
     /// A raw HTTP stream.
     Http(T),
     /// An SSL-wrapped HTTP stream.
@@ -572,7 +558,7 @@ pub enum MaybeHttpsStream<T> {
 }
 
 /// A connection that has been established with a TLS handshake.
-pub struct EstablishedConn<IO> {
+pub(crate) struct EstablishedConn<IO> {
     io: IO,
     req: ConnectRequest,
 }
@@ -582,19 +568,19 @@ pub struct EstablishedConn<IO> {
 impl<T> MaybeHttpsStream<T> {
     /// Returns a reference to the underlying stream.
     #[inline]
-    pub fn get_ref(&self) -> &T {
+    pub(crate) fn get_ref(&self) -> &T {
         match self {
-            MaybeHttpsStream::Http(s) => s,
-            MaybeHttpsStream::Https(s) => s.get_ref(),
+            Self::Http(s) => s,
+            Self::Https(s) => s.get_ref(),
         }
     }
 }
 
 impl<T> fmt::Debug for MaybeHttpsStream<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            MaybeHttpsStream::Http(..) => f.pad("Http(..)"),
-            MaybeHttpsStream::Https(..) => f.pad("Https(..)"),
+            Self::Http(..) => f.pad("Http(..)"),
+            Self::Https(..) => f.pad("Https(..)"),
         }
     }
 }
@@ -605,8 +591,8 @@ where
 {
     fn connected(&self) -> Connected {
         match self {
-            MaybeHttpsStream::Http(s) => s.connected(),
-            MaybeHttpsStream::Https(s) => {
+            Self::Http(s) => s.connected(),
+            Self::Https(s) => {
                 let mut connected = s.get_ref().connected();
 
                 if s.ssl().selected_alpn_protocol() == Some(b"h2") {
@@ -629,8 +615,8 @@ where
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         match self.as_mut().get_mut() {
-            MaybeHttpsStream::Http(inner) => Pin::new(inner).poll_read(cx, buf),
-            MaybeHttpsStream::Https(inner) => Pin::new(inner).poll_read(cx, buf),
+            Self::Http(inner) => Pin::new(inner).poll_read(cx, buf),
+            Self::Https(inner) => Pin::new(inner).poll_read(cx, buf),
         }
     }
 }
@@ -645,22 +631,22 @@ where
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
         match self.as_mut().get_mut() {
-            MaybeHttpsStream::Http(inner) => Pin::new(inner).poll_write(ctx, buf),
-            MaybeHttpsStream::Https(inner) => Pin::new(inner).poll_write(ctx, buf),
+            Self::Http(inner) => Pin::new(inner).poll_write(ctx, buf),
+            Self::Https(inner) => Pin::new(inner).poll_write(ctx, buf),
         }
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<io::Result<()>> {
         match self.as_mut().get_mut() {
-            MaybeHttpsStream::Http(inner) => Pin::new(inner).poll_flush(ctx),
-            MaybeHttpsStream::Https(inner) => Pin::new(inner).poll_flush(ctx),
+            Self::Http(inner) => Pin::new(inner).poll_flush(ctx),
+            Self::Https(inner) => Pin::new(inner).poll_flush(ctx),
         }
     }
 
     fn poll_shutdown(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<io::Result<()>> {
         match self.as_mut().get_mut() {
-            MaybeHttpsStream::Http(inner) => Pin::new(inner).poll_shutdown(ctx),
-            MaybeHttpsStream::Https(inner) => Pin::new(inner).poll_shutdown(ctx),
+            Self::Http(inner) => Pin::new(inner).poll_shutdown(ctx),
+            Self::Https(inner) => Pin::new(inner).poll_shutdown(ctx),
         }
     }
 }
@@ -670,8 +656,8 @@ where
 impl<IO> EstablishedConn<IO> {
     /// Creates a new [`EstablishedConn`].
     #[inline]
-    pub fn new(io: IO, req: ConnectRequest) -> EstablishedConn<IO> {
-        EstablishedConn { io, req }
+    pub(crate) const fn new(io: IO, req: ConnectRequest) -> Self {
+        Self { io, req }
     }
 }
 

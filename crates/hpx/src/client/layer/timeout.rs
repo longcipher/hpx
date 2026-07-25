@@ -11,7 +11,7 @@ use std::{
 use http::{Request, Response};
 use tower::{Layer, Service};
 
-pub use self::body::TimeoutBody;
+pub(crate) use self::body::TimeoutBody;
 use self::future::{ResponseBodyTimeoutFuture, ResponseFuture};
 use crate::{config::RequestConfig, error::BoxError};
 
@@ -20,7 +20,7 @@ use crate::{config::RequestConfig, error::BoxError};
 /// Each field corresponds to a specific phase of the HTTP request lifecycle.
 /// All timeouts are independent and can be set individually or in combination.
 /// When multiple timeouts apply, the most restrictive one takes effect.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct TimeoutOptions {
     /// Timeout for the entire request lifecycle (end-to-end).
     /// Covers DNS resolution through response body completion.
@@ -81,49 +81,49 @@ impl TimeoutOptions {
     /// Returns the effective per-call timeout.
     #[inline]
     #[must_use]
-    pub fn per_call_timeout(&self) -> Option<Duration> {
+    pub const fn per_call_timeout(&self) -> Option<Duration> {
         self.per_call
     }
 
     /// Returns the DNS resolution timeout.
     #[inline]
     #[must_use]
-    pub fn resolve_timeout(&self) -> Option<Duration> {
+    pub const fn resolve_timeout(&self) -> Option<Duration> {
         self.resolve
     }
 
     /// Returns the connect (TCP + TLS) timeout.
     #[inline]
     #[must_use]
-    pub fn connect_timeout(&self) -> Option<Duration> {
+    pub const fn connect_timeout(&self) -> Option<Duration> {
         self.connect
     }
 
     /// Returns the send-request-headers timeout.
     #[inline]
     #[must_use]
-    pub fn send_request_timeout(&self) -> Option<Duration> {
+    pub const fn send_request_timeout(&self) -> Option<Duration> {
         self.send_request
     }
 
     /// Returns the 100-continue await timeout.
     #[inline]
     #[must_use]
-    pub fn await_100_timeout(&self) -> Option<Duration> {
+    pub const fn await_100_timeout(&self) -> Option<Duration> {
         self.await_100
     }
 
     /// Returns the send-body timeout.
     #[inline]
     #[must_use]
-    pub fn send_body_timeout(&self) -> Option<Duration> {
+    pub const fn send_body_timeout(&self) -> Option<Duration> {
         self.send_body
     }
 
     /// Returns the receive-response-headers timeout.
     #[inline]
     #[must_use]
-    pub fn recv_response_timeout(&self) -> Option<Duration> {
+    pub const fn recv_response_timeout(&self) -> Option<Duration> {
         self.recv_response
     }
 
@@ -138,63 +138,63 @@ impl TimeoutOptions {
 
     /// Sets the global (end-to-end) timeout.
     #[inline]
-    pub fn timeout_global(&mut self, timeout: Option<Duration>) -> &mut Self {
+    pub const fn timeout_global(&mut self, timeout: Option<Duration>) -> &mut Self {
         self.global = timeout;
         self
     }
 
     /// Sets the per-call timeout (resets on redirect).
     #[inline]
-    pub fn timeout_per_call(&mut self, timeout: Option<Duration>) -> &mut Self {
+    pub const fn timeout_per_call(&mut self, timeout: Option<Duration>) -> &mut Self {
         self.per_call = timeout;
         self
     }
 
     /// Sets the DNS resolution timeout.
     #[inline]
-    pub fn timeout_resolve(&mut self, timeout: Option<Duration>) -> &mut Self {
+    pub const fn timeout_resolve(&mut self, timeout: Option<Duration>) -> &mut Self {
         self.resolve = timeout;
         self
     }
 
     /// Sets the connect (TCP + TLS handshake) timeout.
     #[inline]
-    pub fn timeout_connect(&mut self, timeout: Option<Duration>) -> &mut Self {
+    pub const fn timeout_connect(&mut self, timeout: Option<Duration>) -> &mut Self {
         self.connect = timeout;
         self
     }
 
     /// Sets the send-request-headers timeout.
     #[inline]
-    pub fn timeout_send_request(&mut self, timeout: Option<Duration>) -> &mut Self {
+    pub const fn timeout_send_request(&mut self, timeout: Option<Duration>) -> &mut Self {
         self.send_request = timeout;
         self
     }
 
     /// Sets the 100-continue await timeout.
     #[inline]
-    pub fn timeout_await_100(&mut self, timeout: Option<Duration>) -> &mut Self {
+    pub const fn timeout_await_100(&mut self, timeout: Option<Duration>) -> &mut Self {
         self.await_100 = timeout;
         self
     }
 
     /// Sets the send-body timeout.
     #[inline]
-    pub fn timeout_send_body(&mut self, timeout: Option<Duration>) -> &mut Self {
+    pub const fn timeout_send_body(&mut self, timeout: Option<Duration>) -> &mut Self {
         self.send_body = timeout;
         self
     }
 
     /// Sets the receive-response-headers timeout.
     #[inline]
-    pub fn timeout_recv_response(&mut self, timeout: Option<Duration>) -> &mut Self {
+    pub const fn timeout_recv_response(&mut self, timeout: Option<Duration>) -> &mut Self {
         self.recv_response = timeout;
         self
     }
 
     /// Sets the receive-body timeout.
     #[inline]
-    pub fn timeout_recv_body(&mut self, timeout: Option<Duration>) -> &mut Self {
+    pub const fn timeout_recv_body(&mut self, timeout: Option<Duration>) -> &mut Self {
         self.recv_body = timeout;
         self
     }
@@ -203,14 +203,14 @@ impl TimeoutOptions {
 
     /// Sets the total timeout (alias for global, for backward compatibility).
     #[inline]
-    pub fn total_timeout(&mut self, total_timeout: Duration) -> &mut Self {
+    pub const fn total_timeout(&mut self, total_timeout: Duration) -> &mut Self {
         self.total_timeout = Some(total_timeout);
         self
     }
 
     /// Sets the read timeout (alias for recv_body, for backward compatibility).
     #[inline]
-    pub fn read_timeout(&mut self, read_timeout: Duration) -> &mut Self {
+    pub const fn read_timeout(&mut self, read_timeout: Duration) -> &mut Self {
         self.read_timeout = Some(read_timeout);
         self
     }
@@ -218,7 +218,7 @@ impl TimeoutOptions {
     /// Returns the max response header size.
     #[inline]
     #[must_use]
-    pub fn max_response_header_size(&self) -> Option<usize> {
+    pub const fn max_response_header_size(&self) -> Option<usize> {
         self.max_response_header_size
     }
 
@@ -226,7 +226,7 @@ impl TimeoutOptions {
     ///
     /// Default is 64KB. Set to `None` to disable the limit.
     #[inline]
-    pub fn set_max_response_header_size(&mut self, size: Option<usize>) -> &mut Self {
+    pub const fn set_max_response_header_size(&mut self, size: Option<usize>) -> &mut Self {
         self.max_response_header_size = size;
         self
     }
@@ -237,15 +237,15 @@ impl_request_config_value!(TimeoutOptions);
 /// [`Layer`] that applies a [`Timeout`] middleware to a service.
 // This layer allows you to set a total timeout and a read timeout for requests.
 #[derive(Clone)]
-pub struct TimeoutLayer {
+pub(crate) struct TimeoutLayer {
     timeout: RequestConfig<TimeoutOptions>,
 }
 
 impl TimeoutLayer {
     /// Create a new [`TimeoutLayer`].
-    #[inline(always)]
-    pub const fn new(options: TimeoutOptions) -> Self {
-        TimeoutLayer {
+    #[inline]
+    pub(crate) const fn new(options: TimeoutOptions) -> Self {
+        Self {
             timeout: RequestConfig::new(Some(options)),
         }
     }
@@ -254,7 +254,7 @@ impl TimeoutLayer {
 impl<S> Layer<S> for TimeoutLayer {
     type Service = Timeout<S>;
 
-    #[inline(always)]
+    #[inline]
     fn layer(&self, service: S) -> Self::Service {
         Timeout {
             inner: service,
@@ -265,7 +265,7 @@ impl<S> Layer<S> for TimeoutLayer {
 
 /// Middleware that applies total and per-read timeouts to a [`Service`] response body.
 #[derive(Clone)]
-pub struct Timeout<T> {
+pub(crate) struct Timeout<T> {
     inner: T,
     timeout: RequestConfig<TimeoutOptions>,
 }
@@ -278,12 +278,12 @@ where
     type Error = BoxError;
     type Future = ResponseFuture<S::Future>;
 
-    #[inline(always)]
+    #[inline]
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
-    #[inline(always)]
+    #[inline]
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
         let (total_timeout, read_timeout) = fetch_timeout_options(&self.timeout, req.extensions());
         ResponseFuture {
@@ -297,14 +297,14 @@ where
 /// [`Layer`] that applies a [`ResponseBodyTimeout`] middleware to a service.
 // This layer allows you to set a total timeout and a read timeout for the response body.
 #[derive(Clone)]
-pub struct ResponseBodyTimeoutLayer {
+pub(crate) struct ResponseBodyTimeoutLayer {
     timeout: RequestConfig<TimeoutOptions>,
 }
 
 impl ResponseBodyTimeoutLayer {
     /// Creates a new [`ResponseBodyTimeoutLayer`].
-    #[inline(always)]
-    pub const fn new(options: TimeoutOptions) -> Self {
+    #[inline]
+    pub(crate) const fn new(options: TimeoutOptions) -> Self {
         Self {
             timeout: RequestConfig::new(Some(options)),
         }
@@ -314,7 +314,7 @@ impl ResponseBodyTimeoutLayer {
 impl<S> Layer<S> for ResponseBodyTimeoutLayer {
     type Service = ResponseBodyTimeout<S>;
 
-    #[inline(always)]
+    #[inline]
     fn layer(&self, inner: S) -> Self::Service {
         ResponseBodyTimeout {
             inner,
@@ -326,7 +326,7 @@ impl<S> Layer<S> for ResponseBodyTimeoutLayer {
 /// Middleware that timeouts the response body of a request with a [`Service`] to a total timeout
 /// and a read timeout.
 #[derive(Clone)]
-pub struct ResponseBodyTimeout<S> {
+pub(crate) struct ResponseBodyTimeout<S> {
     inner: S,
     timeout: RequestConfig<TimeoutOptions>,
 }
@@ -339,12 +339,12 @@ where
     type Error = S::Error;
     type Future = ResponseBodyTimeoutFuture<S::Future>;
 
-    #[inline(always)]
+    #[inline]
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
-    #[inline(always)]
+    #[inline]
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
         let (total_timeout, read_timeout) = fetch_timeout_options(&self.timeout, req.extensions());
         ResponseBodyTimeoutFuture {
@@ -361,10 +361,12 @@ fn fetch_timeout_options(
 ) -> (Option<Duration>, Option<Duration>) {
     match (opts.as_ref(), opts.fetch(extensions)) {
         (Some(opts), Some(request_opts)) => (
-            request_opts.global_timeout().or(opts.global_timeout()),
+            request_opts
+                .global_timeout()
+                .or_else(|| opts.global_timeout()),
             request_opts
                 .recv_body_timeout()
-                .or(opts.recv_body_timeout()),
+                .or_else(|| opts.recv_body_timeout()),
         ),
         (Some(opts), None) => (opts.global_timeout(), opts.recv_body_timeout()),
         (None, Some(opts)) => (opts.global_timeout(), opts.recv_body_timeout()),

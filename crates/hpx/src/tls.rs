@@ -63,6 +63,29 @@ impl TlsInfo {
 #[cfg(any(feature = "boring-tls", feature = "openssl-tls"))]
 use bytes::{BufMut, BytesMut};
 
+/// If `host` is an IPv6 address, strip away the square brackets that surround
+/// it (otherwise, the TLS backend will fail to parse the host as an IP address,
+/// eventually causing the handshake to fail due a hostname verification error).
+///
+/// Shared by the BoringSSL and OpenSSL backends to avoid duplicated logic.
+#[cfg(any(feature = "boring-tls", feature = "openssl-tls"))]
+pub(crate) fn normalize_host(host: &str) -> &str {
+    if host.is_empty() {
+        return host;
+    }
+
+    let last = host.len() - 1;
+    let mut chars = host.chars();
+
+    if (chars.next(), chars.last()) == (Some('['), Some(']'))
+        && host[1..last].parse::<std::net::Ipv6Addr>().is_ok()
+    {
+        return &host[1..last];
+    }
+
+    host
+}
+
 /// A TLS protocol version.
 ///
 /// Internally stored as the TLS wire encoding (e.g. TLS 1.2 = 0x0303).
@@ -73,28 +96,28 @@ pub struct TlsVersion(u16);
 
 impl TlsVersion {
     /// Version 1.0 of the TLS protocol (wire value 0x0301).
-    pub const TLS_1_0: TlsVersion = TlsVersion(0x0301);
+    pub const TLS_1_0: Self = Self(0x0301);
     /// Version 1.1 of the TLS protocol (wire value 0x0302).
-    pub const TLS_1_1: TlsVersion = TlsVersion(0x0302);
+    pub const TLS_1_1: Self = Self(0x0302);
     /// Version 1.2 of the TLS protocol (wire value 0x0303).
-    pub const TLS_1_2: TlsVersion = TlsVersion(0x0303);
+    pub const TLS_1_2: Self = Self(0x0303);
     /// Version 1.3 of the TLS protocol (wire value 0x0304).
-    pub const TLS_1_3: TlsVersion = TlsVersion(0x0304);
+    pub const TLS_1_3: Self = Self(0x0304);
 
     /// Convert to the BoringSSL `SslVersion` native type.
+    ///
+    /// Unknown TLS wire versions are mapped to TLS 1.3 as a safe default
+    /// (modern clients should never negotiate below 1.2 anyway); this avoids
+    /// constructing an invalid `SslVersion` discriminant via `transmute`.
     #[cfg(feature = "boring-tls")]
-    #[allow(unsafe_code)]
-    pub(crate) fn to_native_version(self) -> ::boring::ssl::SslVersion {
+    pub(crate) const fn to_native_version(self) -> ::boring::ssl::SslVersion {
         match self.0 {
             0x0301 => ::boring::ssl::SslVersion::TLS1,
             0x0302 => ::boring::ssl::SslVersion::TLS1_1,
             0x0303 => ::boring::ssl::SslVersion::TLS1_2,
             0x0304 => ::boring::ssl::SslVersion::TLS1_3,
-            raw => {
-                // SAFETY: boring::ssl::SslVersion is repr(i16) and passthrough
-                // is the only reasonable fallback for unknown versions.
-                unsafe { std::mem::transmute::<i16, ::boring::ssl::SslVersion>(raw as i16) }
-            }
+            // Unknown version: safely downgrade to TLS 1.3 rather than risk UB.
+            _ => ::boring::ssl::SslVersion::TLS1_3,
         }
     }
 
@@ -117,25 +140,25 @@ pub struct AlpnProtocol(&'static [u8]);
 
 impl AlpnProtocol {
     /// Prefer HTTP/1.1
-    pub const HTTP1: AlpnProtocol = AlpnProtocol(b"http/1.1");
+    pub const HTTP1: Self = Self(b"http/1.1");
 
     /// Prefer HTTP/2
-    pub const HTTP2: AlpnProtocol = AlpnProtocol(b"h2");
+    pub const HTTP2: Self = Self(b"h2");
 
     /// Prefer HTTP/3
-    pub const HTTP3: AlpnProtocol = AlpnProtocol(b"h3");
+    pub const HTTP3: Self = Self(b"h3");
 
     /// Create a new [`AlpnProtocol`] from a static byte slice.
     #[inline]
     pub const fn new(value: &'static [u8]) -> Self {
-        AlpnProtocol(value)
+        Self(value)
     }
 
     /// Returns the raw protocol name bytes (e.g. `b"h2"`, `b"http/1.1"`).
     ///
     /// This is the format expected by rustls's `ClientConfig::alpn_protocols`.
     #[inline]
-    pub fn as_wire_bytes(&self) -> &'static [u8] {
+    pub const fn as_wire_bytes(&self) -> &'static [u8] {
         self.0
     }
 
@@ -154,7 +177,7 @@ impl AlpnProtocol {
     #[cfg(any(feature = "boring-tls", feature = "openssl-tls"))]
     fn encode_sequence<'a, I>(items: I) -> Bytes
     where
-        I: IntoIterator<Item = &'a AlpnProtocol>,
+        I: IntoIterator<Item = &'a Self>,
     {
         let mut buf = BytesMut::new();
         for item in items {
@@ -171,13 +194,13 @@ pub struct AlpsProtocol(&'static [u8]);
 
 impl AlpsProtocol {
     /// Prefer HTTP/1.1
-    pub const HTTP1: AlpsProtocol = AlpsProtocol(b"http/1.1");
+    pub const HTTP1: Self = Self(b"http/1.1");
 
     /// Prefer HTTP/2
-    pub const HTTP2: AlpsProtocol = AlpsProtocol(b"h2");
+    pub const HTTP2: Self = Self(b"h2");
 
     /// Prefer HTTP/3
-    pub const HTTP3: AlpsProtocol = AlpsProtocol(b"h3");
+    pub const HTTP3: Self = Self(b"h3");
 }
 
 #[cfg(test)]

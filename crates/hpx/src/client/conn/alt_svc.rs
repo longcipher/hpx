@@ -82,15 +82,19 @@ struct AltSvcEntry {
 ///
 /// The key is a `(host, port)` tuple representing the authority.
 /// Entries are evicted based on their `max_age` when retrieved.
+///
+/// Uses `scc::HashMap` for lock-free reads with fine-grained entry-level
+/// mutations, avoiding the `tokio::sync::RwLock` contention on the h3
+/// hot path. All methods are synchronous (no `.await` on the lock).
 pub(crate) struct AltSvcCache {
-    entries: tokio::sync::RwLock<std::collections::HashMap<(String, u16), Vec<AltSvcEntry>>>,
+    entries: scc::HashMap<(String, u16), Vec<AltSvcEntry>>,
 }
 
 impl AltSvcCache {
     /// Create an empty cache.
     pub(crate) fn new() -> Self {
         Self {
-            entries: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+            entries: scc::HashMap::new(),
         }
     }
 
@@ -98,9 +102,9 @@ impl AltSvcCache {
     ///
     /// If `entries` is empty (clear signal), remove all entries for that
     /// authority.
-    pub(crate) async fn insert(&self, authority: (String, u16), entries: Vec<AltSvc>) {
+    pub(crate) fn insert(&self, authority: (String, u16), entries: Vec<AltSvc>) {
         if entries.is_empty() {
-            self.entries.write().await.remove(&authority);
+            self.entries.remove_sync(&authority);
             return;
         }
         let now = std::time::Instant::now();
@@ -111,21 +115,20 @@ impl AltSvcCache {
                 inserted_at: now,
             })
             .collect();
-        self.entries
-            .write()
-            .await
-            .insert(authority, alt_svc_entries);
+        // `insert_sync` returns the previous entry (if any); we're
+        // overwriting unconditionally so the old value is irrelevant.
+        let _ = self.entries.insert_sync(authority, alt_svc_entries);
     }
 
     /// Returns non-expired entries for an authority.
     ///
     /// Entries where `inserted_at + Duration::from_secs(max_age) < now` are
     /// expired and filtered out. If all entries have expired, returns `None`.
-    pub(crate) async fn get(&self, authority: &(String, u16)) -> Option<Vec<AltSvc>> {
-        let guard = self.entries.read().await;
-        let cached = guard.get(authority)?;
+    pub(crate) fn get(&self, authority: &(String, u16)) -> Option<Vec<AltSvc>> {
+        let entry = self.entries.get_sync(authority)?;
         let now = std::time::Instant::now();
-        let alive: Vec<AltSvc> = cached
+        let alive: Vec<AltSvc> = entry
+            .get()
             .iter()
             .filter(|e| {
                 let max_age = std::time::Duration::from_secs(u64::from(e.alt_svc.max_age));
@@ -137,9 +140,9 @@ impl AltSvcCache {
     }
 
     /// Remove all entries for an authority.
-    #[allow(dead_code)] // HTTP/3 alt-svc invalidation API; reserved for future use.
-    pub(crate) async fn invalidate(&self, authority: &(String, u16)) {
-        self.entries.write().await.remove(authority);
+    #[expect(dead_code)] // HTTP/3 alt-svc invalidation API; reserved for future use.
+    pub(crate) fn invalidate(&self, authority: &(String, u16)) {
+        self.entries.remove_sync(authority);
     }
 }
 
@@ -162,10 +165,11 @@ impl AltSvcCache {
 /// # Thread safety
 ///
 /// `H3FailureTracker` is wrapped in `Arc` and shared across `HttpClient`
-/// clones. The internal map uses `tokio::sync::RwLock` for concurrent
-/// read/write access.
+/// clones. The internal map uses `scc::HashMap` for lock-free concurrent
+/// access, avoiding `tokio::sync::RwLock` contention on the h3 hot path.
+/// All methods are synchronous (no `.await` on the lock).
 pub(crate) struct H3FailureTracker {
-    failures: tokio::sync::RwLock<std::collections::HashMap<(String, u16), std::time::Instant>>,
+    failures: scc::HashMap<(String, u16), std::time::Instant>,
     cooldown: std::time::Duration,
 }
 
@@ -173,19 +177,18 @@ impl H3FailureTracker {
     /// Create a new failure tracker with the given cooldown duration.
     pub(crate) fn new(cooldown: std::time::Duration) -> Self {
         Self {
-            failures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+            failures: scc::HashMap::new(),
             cooldown,
         }
     }
 
     /// Returns `true` if the authority has a recent failure and is still
     /// within the cooldown period.
-    pub(crate) async fn is_blocked(&self, authority: &(String, u16)) -> bool {
-        let guard = self.failures.read().await;
-        match guard.get(authority) {
-            Some(failure_time) => {
-                let elapsed = failure_time.elapsed();
-                elapsed < self.cooldown
+    pub(crate) fn is_blocked(&self, authority: &(String, u16)) -> bool {
+        match self.failures.get_sync(authority) {
+            Some(entry) => {
+                let failure_time = entry.get();
+                failure_time.elapsed() < self.cooldown
             }
             None => false,
         }
@@ -195,19 +198,20 @@ impl H3FailureTracker {
     ///
     /// The authority is blocked from h3 attempts for the duration of the
     /// cooldown period.
-    pub(crate) async fn record_failure(&self, authority: (String, u16)) {
-        self.failures
-            .write()
-            .await
-            .insert(authority, std::time::Instant::now());
+    pub(crate) fn record_failure(&self, authority: (String, u16)) {
+        // `insert_sync` overwrites any prior failure timestamp; the
+        // previous value (if any) is irrelevant.
+        let _ = self
+            .failures
+            .insert_sync(authority, std::time::Instant::now());
     }
 
     /// Clears the failure record for the given authority.
     ///
     /// Called when a successful h3 connection is established, resetting
     /// the circuit breaker.
-    pub(crate) async fn clear(&self, authority: &(String, u16)) {
-        self.failures.write().await.remove(authority);
+    pub(crate) fn clear(&self, authority: &(String, u16)) {
+        self.failures.remove_sync(authority);
     }
 }
 
@@ -513,8 +517,8 @@ mod tests {
     // AltSvcCache tests
     // ------------------------------------------------------------------
 
-    #[tokio::test]
-    async fn alt_svc_cache_insert_lookup() {
+    #[test]
+    fn alt_svc_cache_insert_lookup() {
         let cache = AltSvcCache::new();
         let authority = ("example.com".to_string(), 443);
         let entries = vec![AltSvc {
@@ -524,16 +528,16 @@ mod tests {
             max_age: 86400,
             persist: false,
         }];
-        cache.insert(authority.clone(), entries).await;
-        let result = cache.get(&authority).await.unwrap();
+        cache.insert(authority.clone(), entries);
+        let result = cache.get(&authority).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].protocol, "h3");
         assert_eq!(result[0].host, "");
         assert_eq!(result[0].port, 443);
     }
 
-    #[tokio::test]
-    async fn alt_svc_cache_expiry() {
+    #[test]
+    fn alt_svc_cache_expiry() {
         let cache = AltSvcCache::new();
         let authority = ("example.com".to_string(), 443);
         let entries = vec![AltSvc {
@@ -543,13 +547,13 @@ mod tests {
             max_age: 0,
             persist: false,
         }];
-        cache.insert(authority.clone(), entries).await;
-        let result = cache.get(&authority).await;
+        cache.insert(authority.clone(), entries);
+        let result = cache.get(&authority);
         assert!(result.is_none());
     }
 
-    #[tokio::test]
-    async fn alt_svc_cache_invalidation() {
+    #[test]
+    fn alt_svc_cache_invalidation() {
         let cache = AltSvcCache::new();
         let authority = ("example.com".to_string(), 443);
         let entries = vec![AltSvc {
@@ -559,61 +563,61 @@ mod tests {
             max_age: 86400,
             persist: false,
         }];
-        cache.insert(authority.clone(), entries).await;
-        assert!(cache.get(&authority).await.is_some());
-        cache.invalidate(&authority).await;
-        assert!(cache.get(&authority).await.is_none());
+        cache.insert(authority.clone(), entries);
+        assert!(cache.get(&authority).is_some());
+        cache.invalidate(&authority);
+        assert!(cache.get(&authority).is_none());
     }
 
     // ------------------------------------------------------------------
     // H3FailureTracker tests
     // ------------------------------------------------------------------
 
-    #[tokio::test]
-    async fn h3_failure_tracker_is_blocked_after_failure() {
+    #[test]
+    fn h3_failure_tracker_is_blocked_after_failure() {
         let tracker = H3FailureTracker::new(std::time::Duration::from_secs(60));
         let authority = ("example.com".to_string(), 443);
         // Initially not blocked.
-        assert!(!tracker.is_blocked(&authority).await);
+        assert!(!tracker.is_blocked(&authority));
         // Record a failure.
-        tracker.record_failure(authority.clone()).await;
+        tracker.record_failure(authority.clone());
         // Now blocked.
-        assert!(tracker.is_blocked(&authority).await);
+        assert!(tracker.is_blocked(&authority));
     }
 
-    #[tokio::test]
-    async fn h3_failure_tracker_clear() {
+    #[test]
+    fn h3_failure_tracker_clear() {
         let tracker = H3FailureTracker::new(std::time::Duration::from_secs(60));
         let authority = ("example.com".to_string(), 443);
-        tracker.record_failure(authority.clone()).await;
-        assert!(tracker.is_blocked(&authority).await);
-        tracker.clear(&authority).await;
-        assert!(!tracker.is_blocked(&authority).await);
+        tracker.record_failure(authority.clone());
+        assert!(tracker.is_blocked(&authority));
+        tracker.clear(&authority);
+        assert!(!tracker.is_blocked(&authority));
     }
 
     #[tokio::test]
     async fn h3_failure_tracker_cooldown_expires() {
         let tracker = H3FailureTracker::new(std::time::Duration::from_millis(100));
         let authority = ("example.com".to_string(), 443);
-        tracker.record_failure(authority.clone()).await;
-        assert!(tracker.is_blocked(&authority).await);
+        tracker.record_failure(authority.clone());
+        assert!(tracker.is_blocked(&authority));
         // Wait for cooldown to expire.
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        assert!(!tracker.is_blocked(&authority).await);
+        assert!(!tracker.is_blocked(&authority));
     }
 
-    #[tokio::test]
-    async fn h3_failure_tracker_different_authorities() {
+    #[test]
+    fn h3_failure_tracker_different_authorities() {
         let tracker = H3FailureTracker::new(std::time::Duration::from_secs(60));
         let a1 = ("example.com".to_string(), 443);
         let a2 = ("example.com".to_string(), 8443);
-        tracker.record_failure(a1.clone()).await;
-        assert!(tracker.is_blocked(&a1).await);
-        assert!(!tracker.is_blocked(&a2).await);
+        tracker.record_failure(a1.clone());
+        assert!(tracker.is_blocked(&a1));
+        assert!(!tracker.is_blocked(&a2));
     }
 
-    #[tokio::test]
-    async fn alt_svc_cache_clear_signal() {
+    #[test]
+    fn alt_svc_cache_clear_signal() {
         let cache = AltSvcCache::new();
         let authority = ("example.com".to_string(), 443);
         let entries = vec![AltSvc {
@@ -623,10 +627,10 @@ mod tests {
             max_age: 86400,
             persist: false,
         }];
-        cache.insert(authority.clone(), entries).await;
-        assert!(cache.get(&authority).await.is_some());
+        cache.insert(authority.clone(), entries);
+        assert!(cache.get(&authority).is_some());
         // Insert empty vec (clear signal).
-        cache.insert(authority.clone(), Vec::new()).await;
-        assert!(cache.get(&authority).await.is_none());
+        cache.insert(authority.clone(), Vec::new());
+        assert!(cache.get(&authority).is_none());
     }
 }

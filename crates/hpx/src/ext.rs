@@ -98,7 +98,7 @@ impl UriExt for Uri {
     }
 
     fn port_or_default(&self) -> u16 {
-        match Uri::port(self) {
+        match Self::port(self) {
             Some(p) => p.as_u16(),
             None if self.is_https() => 443u16,
             _ => 80u16,
@@ -126,7 +126,7 @@ impl UriExt for Uri {
             }
         };
 
-        if let Ok(uri) = Uri::from_parts(parts) {
+        if let Ok(uri) = Self::from_parts(parts) {
             *self = uri;
         }
     }
@@ -153,8 +153,7 @@ impl UriExt for Uri {
         let host_and_port = authority
             .as_str()
             .rsplit_once('@')
-            .map(|(_, host)| host)
-            .unwrap_or_else(|| authority.as_str());
+            .map_or_else(|| authority.as_str(), |(_, host)| host);
 
         let authority = match (username.is_empty(), password) {
             (true, None) => Bytes::from(host_and_port.to_owned()),
@@ -181,9 +180,9 @@ impl UriExt for Uri {
                 debug!("Failed to set userinfo in URI: {_err}");
                 return;
             }
-        };
+        }
 
-        if let Ok(uri) = Uri::from_parts(parts) {
+        if let Ok(uri) = Self::from_parts(parts) {
             *self = uri;
         }
     }

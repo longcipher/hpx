@@ -9,7 +9,7 @@
 //! - Implementing custom backpressure and flow control
 //! - Real-time data processing pipelines
 //!
-//! **Warning**: `split_stream()` is an unsafe, low-level API. For most use cases,
+//! **Warning**: `split_stream()` is a low-level API. For most use cases,
 //! prefer the high-level `futures::StreamExt::split()` which handles protocol details
 //! automatically.
 

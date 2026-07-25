@@ -9,11 +9,9 @@ mod cli;
 
 use clap::Parser;
 use cli::Cli;
-use ecdysis::Ecdysis;
 use hpx_browser::protocol::CdpServer;
 
 fn main() -> eyre::Result<()> {
-    let ecd = Ecdysis::default();
     let cli = Cli::parse();
 
     let level_filter = match cli.log_level.to_lowercase().as_str() {
@@ -31,9 +29,22 @@ fn main() -> eyre::Result<()> {
     // Extract HTML: data:text/html,... → payload, http(s) → empty for now, none → empty
     let html = match &cli.url {
         Some(url) if url.starts_with("data:text/html,") => &url["data:text/html,".len()..],
-        Some(_) => "", // ponytail: real URL navigation deferred to later task
+        Some(url) => {
+            eprintln!(
+                "warning: --url only supports data:text/html,... URLs for now; got {url}, serving blank page"
+            );
+            ""
+        }
         None => "",
     };
+
+    // --proxy/--block are parsed but not yet wired into CdpServer::start.
+    if cli.proxy.is_some() {
+        eprintln!("warning: --proxy is not yet implemented, ignoring");
+    }
+    if !cli.block.is_empty() {
+        eprintln!("warning: --block is not yet implemented, ignoring");
+    }
 
     let profile = cli.stealth_profile();
     let server =
@@ -66,6 +77,5 @@ fn main() -> eyre::Result<()> {
         })?;
 
     drop(server);
-    ecd.quit();
     Ok(())
 }

@@ -1,4 +1,4 @@
-#![allow(unused)]
+#![expect(unused)]
 #[cfg(feature = "boring-tls")]
 use boring::x509::store::{X509Store, X509StoreBuilder};
 #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
@@ -35,7 +35,7 @@ type StoreType = RootCertStore;
 )))]
 type StoreType = ();
 
-pub fn parse_certs<'c, I>(
+pub(super) fn parse_certs<'c, I>(
     certs: I,
     parser: fn(&'c [u8]) -> crate::Result<Certificate>,
 ) -> Result<StoreType>
@@ -73,7 +73,7 @@ where
     return Ok(());
 }
 
-pub fn parse_certs_with_stack<C, F>(certs: C, parse: F) -> Result<StoreType>
+pub(super) fn parse_certs_with_stack<C, F>(certs: C, parse: F) -> Result<StoreType>
 where
     C: AsRef<[u8]>,
     F: Fn(C) -> Result<Vec<Certificate>>,
@@ -108,7 +108,7 @@ where
     return Ok(());
 }
 
-pub fn process_certs<I>(iter: I, store: &mut StoreBuilder) -> Result<()>
+pub(super) fn process_certs<I>(iter: I, store: &mut StoreBuilder) -> Result<()>
 where
     I: Iterator<Item = Certificate>,
 {
@@ -145,7 +145,7 @@ where
     Ok(())
 }
 
-pub fn filter_map_certs<I>(certs: I) -> impl Iterator<Item = Certificate>
+pub(super) fn filter_map_certs<I>(certs: I) -> impl Iterator<Item = Certificate>
 where
     I: IntoIterator<Item = Result<Certificate>>,
 {

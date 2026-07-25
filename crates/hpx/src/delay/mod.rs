@@ -53,7 +53,7 @@
 
 // pin_project_lite does not support doc comments on fields,
 // so we allow missing_docs for the future module.
-#[allow(missing_docs)]
+#[expect(missing_docs)]
 mod future;
 mod layer;
 mod service;
@@ -67,6 +67,10 @@ pub use self::{
 };
 
 /// Compute a randomized duration in `[base * (1 - pct), base * (1 + pct)]`.
+#[expect(
+    clippy::unwrap_used,
+    reason = "checked_sub is Some because early return guarantees low < high"
+)]
 fn jittered_duration(base: Duration, pct: f64) -> Duration {
     let jitter = base.mul_f64(pct);
     let low = base.saturating_sub(jitter);
@@ -82,6 +86,6 @@ fn jittered_duration(base: Duration, pct: f64) -> Duration {
     // Convert to fraction in [0, 1)
     let frac = (rand as f64) / (u64::MAX as f64);
 
-    let span = (high - low).as_secs_f64();
+    let span = high.checked_sub(low).unwrap().as_secs_f64();
     low + Duration::from_secs_f64(span * frac)
 }

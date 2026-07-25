@@ -11,16 +11,16 @@ impl From<Option<u64>> for DecodedLength {
             // If the length is u64::MAX, oh well, just reported chunked.
             Self::checked_new(len).ok()
         })
-        .unwrap_or(DecodedLength::CHUNKED)
+        .unwrap_or(Self::CHUNKED)
     }
 }
 
 const MAX_LEN: u64 = u64::MAX - 2;
 
 impl DecodedLength {
-    pub(crate) const CLOSE_DELIMITED: DecodedLength = DecodedLength(u64::MAX);
-    pub(crate) const CHUNKED: DecodedLength = DecodedLength(u64::MAX - 1);
-    pub(crate) const ZERO: DecodedLength = DecodedLength(0);
+    pub(crate) const CLOSE_DELIMITED: Self = Self(u64::MAX);
+    pub(crate) const CHUNKED: Self = Self(u64::MAX - 1);
+    pub(crate) const ZERO: Self = Self(0);
 
     #[cfg(test)]
     pub(crate) fn new(len: u64) -> Self {
@@ -39,27 +39,27 @@ impl DecodedLength {
     }
 
     /// Converts to an `Option<u64>` representing a Known or Unknown length.
-    pub(crate) fn into_opt(self) -> Option<u64> {
+    pub(crate) const fn into_opt(self) -> Option<u64> {
         match self {
-            DecodedLength::CHUNKED | DecodedLength::CLOSE_DELIMITED => None,
-            DecodedLength(known) => Some(known),
+            Self::CHUNKED | Self::CLOSE_DELIMITED => None,
+            Self(known) => Some(known),
         }
     }
 
     /// Checks the `u64` is within the maximum allowed for content-length.
     pub(crate) fn checked_new(len: u64) -> Result<Self, Parse> {
         if len <= MAX_LEN {
-            Ok(DecodedLength(len))
+            Ok(Self(len))
         } else {
             warn!("content-length bigger than maximum: {} > {}", len, MAX_LEN);
             Err(Parse::TooLarge)
         }
     }
 
-    pub(crate) fn sub_if(&mut self, amt: u64) {
+    pub(crate) const fn sub_if(&mut self, amt: u64) {
         match *self {
-            DecodedLength::CHUNKED | DecodedLength::CLOSE_DELIMITED => (),
-            DecodedLength(ref mut known) => {
+            Self::CHUNKED | Self::CLOSE_DELIMITED => (),
+            Self(ref mut known) => {
                 *known -= amt;
             }
         }
@@ -70,7 +70,7 @@ impl DecodedLength {
     /// This includes 0, which of course is an exact known length.
     ///
     /// It would return false if "chunked" or otherwise size-unknown.
-    pub(crate) fn is_exact(&self) -> bool {
+    pub(crate) const fn is_exact(&self) -> bool {
         self.0 <= MAX_LEN
     }
 }
@@ -78,9 +78,9 @@ impl DecodedLength {
 impl fmt::Debug for DecodedLength {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            DecodedLength::CLOSE_DELIMITED => f.write_str("CLOSE_DELIMITED"),
-            DecodedLength::CHUNKED => f.write_str("CHUNKED"),
-            DecodedLength(n) => f.debug_tuple("DecodedLength").field(&n).finish(),
+            Self::CLOSE_DELIMITED => f.write_str("CLOSE_DELIMITED"),
+            Self::CHUNKED => f.write_str("CHUNKED"),
+            Self(n) => f.debug_tuple("DecodedLength").field(&n).finish(),
         }
     }
 }
@@ -88,10 +88,10 @@ impl fmt::Debug for DecodedLength {
 impl fmt::Display for DecodedLength {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            DecodedLength::CLOSE_DELIMITED => f.write_str("close-delimited"),
-            DecodedLength::CHUNKED => f.write_str("chunked encoding"),
-            DecodedLength::ZERO => f.write_str("empty"),
-            DecodedLength(n) => write!(f, "content-length ({n} bytes)"),
+            Self::CLOSE_DELIMITED => f.write_str("close-delimited"),
+            Self::CHUNKED => f.write_str("chunked encoding"),
+            Self::ZERO => f.write_str("empty"),
+            Self(n) => write!(f, "content-length ({n} bytes)"),
         }
     }
 }

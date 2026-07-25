@@ -414,6 +414,11 @@ fn chunk(output: &mut BytesMut) -> &mut [u8] {
     let uninitbuf = output.spare_capacity_mut();
     // Zero-initialize spare capacity so the cast to &mut [u8] is sound.
     uninitbuf.fill(std::mem::MaybeUninit::new(0));
+    // SAFETY: `uninitbuf` has been fully zero-initialized via `fill(MaybeUninit::new(0))`,
+    // so all bytes are valid `u8`. The cast from `[MaybeUninit<u8>]` to `[u8]` is
+    // sound because `MaybeUninit<u8>` has the same layout as `u8` and the memory
+    // is initialized. The caller (flate2 writer) will overwrite the zeros with
+    // actual compressed data.
     unsafe { &mut *(uninitbuf as *mut [std::mem::MaybeUninit<u8>] as *mut [u8]) }
 }
 

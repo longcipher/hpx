@@ -31,7 +31,7 @@ use crate::ext::UriExt;
 
 /// A proxy matcher, usually built from environment variables.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Matcher {
+pub(crate) struct Matcher {
     http: Option<Intercept>,
     https: Option<Intercept>,
     no: NoProxy,
@@ -53,7 +53,7 @@ pub struct Intercept {
 ///
 /// Construct with [`Matcher::builder()`].
 #[derive(Default)]
-pub struct Builder {
+pub(crate) struct Builder {
     pub(super) is_cgi: bool,
     pub(super) all: String,
     pub(super) http: String,
@@ -64,7 +64,7 @@ pub struct Builder {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Auth {
+pub(crate) enum Auth {
     Empty,
     Basic(HeaderValue),
     Raw(Bytes, Bytes),
@@ -104,12 +104,12 @@ impl Matcher {
     /// constructor if you want to allow users to optionally enable more, or
     /// use `from_env` if you do not want the values to change based on an
     /// enabled feature.
-    pub fn from_system() -> Self {
+    pub(crate) fn from_system() -> Self {
         Builder::from_system().build(Extra::default())
     }
 
     /// Start a builder to configure a matcher.
-    pub fn builder() -> Builder {
+    pub(crate) fn builder() -> Builder {
         Builder::default()
     }
 
@@ -117,7 +117,7 @@ impl Matcher {
     ///
     /// If the proxy rules match the destination, a new `Uri` will be returned
     /// to connect to.
-    pub fn intercept(&self, dst: &Uri) -> Option<Intercepted> {
+    pub(crate) fn intercept(&self, dst: &Uri) -> Option<Intercepted> {
         // if unix sockets are configured, check them first
         #[cfg(unix)]
         if let Some(unix) = &self.unix {
@@ -144,11 +144,11 @@ impl Matcher {
 
 impl Intercept {
     #[inline]
-    pub(crate) fn uri(&self) -> &Uri {
+    pub(crate) const fn uri(&self) -> &Uri {
         &self.uri
     }
 
-    pub(crate) fn basic_auth(&self) -> Option<&HeaderValue> {
+    pub(crate) const fn basic_auth(&self) -> Option<&HeaderValue> {
         if let Some(ref val) = self.extra.auth {
             return Some(val);
         }
@@ -161,7 +161,7 @@ impl Intercept {
     }
 
     #[inline]
-    pub(crate) fn custom_headers(&self) -> Option<&HeaderMap> {
+    pub(crate) const fn custom_headers(&self) -> Option<&HeaderMap> {
         self.extra.misc.as_ref()
     }
 
@@ -179,7 +179,7 @@ impl Intercept {
 
 impl Builder {
     fn from_env() -> Self {
-        Builder {
+        Self {
             is_cgi: std::env::var_os("REQUEST_METHOD").is_some(),
             all: get_first_env(&["ALL_PROXY", "all_proxy"]),
             http: get_first_env(&["HTTP_PROXY", "http_proxy"]),
@@ -191,7 +191,7 @@ impl Builder {
     }
 
     fn from_system() -> Self {
-        #[allow(unused_mut)]
+        #[expect(unused_mut)]
         let mut builder = Self::from_env();
 
         #[cfg(all(target_os = "macos", feature = "system-proxy"))]
@@ -204,7 +204,7 @@ impl Builder {
     }
 
     /// Set the target proxy for all destinations.
-    pub fn all<S>(mut self, val: S) -> Self
+    pub(crate) fn all<S>(mut self, val: S) -> Self
     where
         S: IntoValue,
     {
@@ -213,7 +213,7 @@ impl Builder {
     }
 
     /// Set the target proxy for HTTP destinations.
-    pub fn http<S>(mut self, val: S) -> Self
+    pub(crate) fn http<S>(mut self, val: S) -> Self
     where
         S: IntoValue,
     {
@@ -222,7 +222,7 @@ impl Builder {
     }
 
     /// Set the target proxy for HTTPS destinations.
-    pub fn https<S>(mut self, val: S) -> Self
+    pub(crate) fn https<S>(mut self, val: S) -> Self
     where
         S: IntoValue,
     {
@@ -248,7 +248,7 @@ impl Builder {
     /// * `http://192.168.1.42/`
     ///
     /// The URI `http://notgoogle.com/` would not match.
-    pub fn no<S>(mut self, val: S) -> Self
+    pub(crate) fn no<S>(mut self, val: S) -> Self
     where
         S: IntoValue,
     {
@@ -258,7 +258,7 @@ impl Builder {
 
     // / Set the unix socket target proxy for all destinations.
     #[cfg(unix)]
-    pub fn unix<S>(mut self, val: S) -> Self
+    pub(crate) fn unix<S>(mut self, val: S) -> Self
     where
         S: super::uds::IntoUnixSocket,
     {
@@ -321,24 +321,21 @@ fn parse_env_uri(val: &str) -> Option<Intercept> {
     let mut is_socks = false;
     let mut auth = Auth::Empty;
 
-    builder = builder.scheme(match uri.scheme() {
-        Some(s) => {
-            if s == &Scheme::HTTP || s == &Scheme::HTTPS {
-                is_httpish = true;
-                s.clone()
-            } else if matches!(s.as_str(), "socks4" | "socks4a" | "socks5" | "socks5h") {
-                is_socks = true;
-                s.clone()
-            } else {
-                // can't use this proxy scheme
-                return None;
-            }
-        }
-        // if no scheme provided, assume they meant 'http'
-        None => {
+    builder = builder.scheme(if let Some(s) = uri.scheme() {
+        if s == &Scheme::HTTP || s == &Scheme::HTTPS {
             is_httpish = true;
-            Scheme::HTTP
+            s.clone()
+        } else if matches!(s.as_str(), "socks4" | "socks4a" | "socks5" | "socks5h") {
+            is_socks = true;
+            s.clone()
+        } else {
+            // can't use this proxy scheme
+            return None;
         }
+    } else {
+        // if no scheme provided, assume they meant 'http'
+        is_httpish = true;
+        Scheme::HTTP
     });
 
     let authority = {
@@ -383,8 +380,8 @@ fn parse_env_uri(val: &str) -> Option<Intercept> {
 }
 
 impl NoProxy {
-    fn empty() -> NoProxy {
-        NoProxy {
+    const fn empty() -> Self {
+        Self {
             ips: IpMatcher(Vec::new()),
             domains: DomainMatcher(Vec::new()),
         }
@@ -410,7 +407,7 @@ impl NoProxy {
     /// * `http://192.168.1.42/`
     ///
     /// The URI `http://notgoogle.com/` would not match.
-    pub fn from_string(no_proxy_list: &str) -> Self {
+    pub(crate) fn from_string(no_proxy_list: &str) -> Self {
         let mut ips = Vec::new();
         let mut domains = Vec::new();
         let parts = no_proxy_list.split(',').map(str::trim);
@@ -423,20 +420,20 @@ impl NoProxy {
                     Ok(addr) => ips.push(Ip::Address(addr)),
                     Err(_) => {
                         if !part.trim().is_empty() {
-                            domains.push(part.to_owned())
+                            domains.push(part.to_owned());
                         }
                     }
                 },
             }
         }
-        NoProxy {
+        Self {
             ips: IpMatcher(ips),
             domains: DomainMatcher(domains),
         }
     }
 
     /// Return true if this matches the host (domain or IP).
-    pub fn contains(&self, host: &str) -> bool {
+    pub(crate) fn contains(&self, host: &str) -> bool {
         // According to RFC3986, raw IPv6 hosts will be wrapped in []. So we need to strip those off
         // the end in order to parse correctly
         let host = if host.starts_with('[') {
@@ -515,7 +512,7 @@ mod builder {
     /// A type that can used as a `Builder` value.
     ///
     /// Private and sealed, only visible in docs.
-    pub trait IntoValue {
+    pub(crate) trait IntoValue {
         #[doc(hidden)]
         fn into_value(self) -> String;
     }

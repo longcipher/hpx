@@ -27,6 +27,8 @@ pub struct BrowserEventLoop {
 pub enum EventLoopError {
     #[error("js error: {0}")]
     Js(#[from] crate::js_runtime::JsError),
+    #[error("js runtime init failed: {0}")]
+    JsRuntime(#[from] crate::js_runtime::JsRuntimeError),
     #[error("event loop timeout")]
     Timeout,
     #[error("event loop error: {0}")]
@@ -64,9 +66,9 @@ const RAF_BOOTSTRAP: &str = r#"
 "#;
 
 impl BrowserEventLoop {
-    pub fn new() -> Self {
-        let runtime = BrowserJsRuntime::new(Dom::new());
-        Self::with_runtime(runtime)
+    pub fn new() -> Result<Self, EventLoopError> {
+        let runtime = BrowserJsRuntime::new(Dom::new())?;
+        Ok(Self::with_runtime(runtime))
     }
 
     /// Create from an existing runtime. Injects rAF bootstrap.
@@ -169,8 +171,11 @@ impl BrowserEventLoop {
 }
 
 impl Default for BrowserEventLoop {
+    // Default requires infallible construction; `new` returns Result, so we
+    // panic on bootstrap failure. Use `new()` directly for fallible construction.
+    #[allow(clippy::expect_used)]
     fn default() -> Self {
-        Self::new()
+        Self::new().expect("BrowserEventLoop::default bootstrap failed")
     }
 }
 
@@ -178,8 +183,9 @@ impl Default for BrowserEventLoop {
 mod tests {
     use super::*;
 
+    #[allow(clippy::expect_used)]
     fn create_loop() -> BrowserEventLoop {
-        BrowserEventLoop::new()
+        BrowserEventLoop::new().expect("failed to create event loop")
     }
 
     #[tokio::test]

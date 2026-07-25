@@ -23,9 +23,10 @@ impl ReasonPhrase {
     /// Converts a static byte slice to a reason phrase.
     pub const fn from_static(reason: &'static [u8]) -> Self {
         // TODO: this can be made const once MSRV is >= 1.57.0
-        if find_invalid_byte(reason).is_some() {
-            panic!("invalid byte in static reason phrase");
-        }
+        assert!(
+            find_invalid_byte(reason).is_none(),
+            "invalid byte in static reason phrase"
+        );
         Self(Bytes::from_static(reason))
     }
 
@@ -34,7 +35,7 @@ impl ReasonPhrase {
     ///
     /// Use with care; invalid bytes in a reason phrase can cause serious security problems if
     /// emitted in a response.
-    pub(crate) fn from_bytes_unchecked(reason: Bytes) -> Self {
+    pub(crate) const fn from_bytes_unchecked(reason: Bytes) -> Self {
         Self(reason)
     }
 }
@@ -127,7 +128,7 @@ const fn is_valid_byte(b: u8) -> bool {
     //
     // The 0xFF comparison is technically redundant, but it matches the text of the spec more
     // clearly and will be optimized away.
-    #[allow(unused_comparisons, clippy::absurd_extreme_comparisons)]
+    #[expect(unused_comparisons, clippy::absurd_extreme_comparisons)]
     const fn is_obs_text(b: u8) -> bool {
         0x80 <= b && b <= 0xFF
     }

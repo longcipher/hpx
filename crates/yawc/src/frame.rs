@@ -674,22 +674,22 @@ impl Frame {
         self
     }
 
-    /// Returns the payload as a string slice, expecting valid UTF-8.
+    /// Returns the payload as a string slice if it contains valid UTF-8.
     ///
-    /// # Panics
-    /// Panics if the payload is not valid UTF-8. Use `is_utf8()` to check first,
-    /// or use this only with frames you know contain text.
+    /// # Returns
+    /// - `Ok(&str)` if the payload is valid UTF-8.
+    /// - `Err(WebSocketError::InvalidUTF8)` if the payload is not valid UTF-8.
     ///
     /// # Example
     /// ```rust
     /// use yawc::frame::Frame;
     ///
     /// let frame = Frame::text("Hello");
-    /// assert_eq!(frame.as_str(), "Hello");
+    /// assert_eq!(frame.as_str().unwrap(), "Hello");
     /// ```
     #[inline]
-    pub fn as_str(&self) -> &str {
-        std::str::from_utf8(&self.payload).expect("frame payload is not valid UTF-8")
+    pub fn as_str(&self) -> Result<&str, WebSocketError> {
+        std::str::from_utf8(&self.payload).map_err(|_| WebSocketError::InvalidUTF8)
     }
 
     /// Extracts the close code from a Close frame's payload.
@@ -1011,7 +1011,7 @@ mod tests {
 
         fn test_frame_as_str() {
             let frame = Frame::text("Hello, World!");
-            assert_eq!(frame.as_str(), "Hello, World!");
+            assert_eq!(frame.as_str().unwrap(), "Hello, World!");
         }
 
         #[test]

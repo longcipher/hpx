@@ -26,6 +26,7 @@
 //! ```
 
 use std::{
+    fmt,
     future::Future,
     sync::Arc,
     task::{Context, Poll},
@@ -78,9 +79,7 @@ impl Token {
 
     /// Returns `true` if the token has expired.
     pub fn is_expired(&self) -> bool {
-        self.expires_at
-            .map(|exp| Instant::now() >= exp)
-            .unwrap_or(false)
+        self.expires_at.is_some_and(|exp| Instant::now() >= exp)
     }
 }
 
@@ -116,9 +115,23 @@ pub enum AuthMethod {
     /// Custom authentication via a closure.
     Custom {
         /// Function to apply auth to request headers.
-        #[allow(clippy::type_complexity)]
+        #[expect(clippy::type_complexity)]
         applier: Arc<dyn Fn(&mut HeaderMap) -> Result<(), Error> + Send + Sync>,
     },
+}
+
+impl fmt::Debug for AuthMethod {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Bearer { .. } => f.debug_struct("Bearer").finish_non_exhaustive(),
+            Self::BearerProvider { .. } => f.debug_struct("BearerProvider").finish_non_exhaustive(),
+            Self::ApiKey { header_name, .. } => f
+                .debug_struct("ApiKey")
+                .field("header_name", header_name)
+                .finish_non_exhaustive(),
+            Self::Custom { .. } => f.debug_struct("Custom").finish_non_exhaustive(),
+        }
+    }
 }
 
 impl AuthMethod {
@@ -167,6 +180,10 @@ impl AuthMethod {
     /// # Panics
     ///
     /// Panics if `name` is not a valid HTTP header name.
+    #[expect(
+        clippy::expect_used,
+        reason = "header name validity is caller invariant"
+    )]
     pub fn api_key(name: impl Into<String>, value: impl Into<String>) -> Self {
         Self::ApiKey {
             header_name: HeaderName::try_from(name.into())
@@ -187,7 +204,7 @@ impl AuthMethod {
 }
 
 /// Layer that adds authentication to requests.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AuthLayer {
     auth: Arc<AuthMethod>,
 }
@@ -213,7 +230,7 @@ impl<S> Layer<S> for AuthLayer {
 }
 
 /// Tower service that adds authentication headers to requests.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AuthService<S> {
     inner: S,
     auth: Arc<AuthMethod>,
@@ -302,7 +319,19 @@ where
     Fut: Future<Output = Result<Token, Error>> + Send,
 {
     refresh_fn: F,
-    token: Arc<tokio::sync::RwLock<Option<Token>>>,
+    token: Arc<parking_lot::RwLock<Option<Token>>>,
+}
+
+impl<F, Fut> fmt::Debug for CachedTokenProvider<F, Fut>
+where
+    F: Fn() -> Fut + Send + Sync,
+    Fut: Future<Output = Result<Token, Error>> + Send,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CachedTokenProvider")
+            .field("token", &self.token)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<F, Fut> CachedTokenProvider<F, Fut>
@@ -314,7 +343,7 @@ where
     pub fn new(refresh_fn: F) -> Self {
         Self {
             refresh_fn,
-            token: Arc::new(tokio::sync::RwLock::new(None)),
+            token: Arc::new(parking_lot::RwLock::new(None)),
         }
     }
 }
@@ -328,7 +357,7 @@ where
     async fn get_token(&self) -> Result<Token, Error> {
         // Check cached token
         {
-            let cached = self.token.read().await;
+            let cached = self.token.read();
             if let Some(ref token) = *cached
                 && !token.is_expired()
             {
@@ -339,7 +368,7 @@ where
         // Refresh
         let new_token = (self.refresh_fn)().await?;
         {
-            let mut write = self.token.write().await;
+            let mut write = self.token.write();
             *write = Some(new_token.clone());
         }
         Ok(new_token)

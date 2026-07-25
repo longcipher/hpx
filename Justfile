@@ -14,26 +14,20 @@ lint:
 test:
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ "$(uname)" = "Darwin" ]; then
-        cargo nextest run --workspace
-    else
-        cargo nextest run --workspace --all-features
-    fi
+    cargo nextest run --workspace --all-features
 test-full:
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ "$(uname)" = "Darwin" ]; then
-        cargo nextest run --workspace
-    else
-        cargo nextest run --workspace --all-features
-    fi
+    cargo nextest run --workspace --all-features
 bdd:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "$(uname)" = "Darwin" ]; then
         cargo test -p hpx-dl --test cucumber
+        cargo test -p hpxless --test cucumber
     else
         cargo test -p hpx-dl --test cucumber --all-features
+        cargo test -p hpxless --test cucumber --all-features
     fi
 test-all: test-full bdd
 build-docs:

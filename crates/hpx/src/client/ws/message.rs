@@ -103,7 +103,7 @@ impl From<&String> for Utf8Bytes {
 impl From<Utf8Bytes> for Bytes {
     #[inline]
     fn from(val: Utf8Bytes) -> Self {
-        Bytes::from(val.0)
+        Self::from(val.0)
     }
 }
 
@@ -134,33 +134,33 @@ impl CloseCode {
 
     /// Indicates a normal closure, meaning that the purpose for which the connection was
     /// established has been fulfilled.
-    pub const NORMAL: CloseCode = CloseCode(1000);
+    pub const NORMAL: Self = Self(1000);
 
     /// Indicates that an endpoint is "going away", such as a server going down or a browser having
     /// navigated away from a page.
-    pub const AWAY: CloseCode = CloseCode(1001);
+    pub const AWAY: Self = Self(1001);
 
     /// Indicates that an endpoint is terminating the connection due to a protocol error.
-    pub const PROTOCOL: CloseCode = CloseCode(1002);
+    pub const PROTOCOL: Self = Self(1002);
 
     /// Indicates that an endpoint is terminating the connection because it has received a type of
     /// data that it cannot accept.
     ///
     /// For example, an endpoint MAY send this if it understands only text data, but receives a
     /// binary message.
-    pub const UNSUPPORTED: CloseCode = CloseCode(1003);
+    pub const UNSUPPORTED: Self = Self(1003);
 
     /// Indicates that no status code was included in a closing frame.
-    pub const STATUS: CloseCode = CloseCode(1005);
+    pub const STATUS: Self = Self(1005);
 
     /// Indicates an abnormal closure.
-    pub const ABNORMAL: CloseCode = CloseCode(1006);
+    pub const ABNORMAL: Self = Self(1006);
 
     /// Indicates that an endpoint is terminating the connection because it has received data
     /// within a message that was not consistent with the type of the message.
     ///
     /// For example, an endpoint received non-UTF-8 RFC3629 data within a text message.
-    pub const INVALID: CloseCode = CloseCode(1007);
+    pub const INVALID: Self = Self(1007);
 
     /// Indicates that an endpoint is terminating the connection because it has received a message
     /// that violates its policy.
@@ -168,11 +168,11 @@ impl CloseCode {
     /// This is a generic status code that can be returned when there is
     /// no other more suitable status code (e.g., `UNSUPPORTED` or `SIZE`) or if there is a need to
     /// hide specific details about the policy.
-    pub const POLICY: CloseCode = CloseCode(1008);
+    pub const POLICY: Self = Self(1008);
 
     /// Indicates that an endpoint is terminating the connection because it has received a message
     /// that is too big for it to process.
-    pub const SIZE: CloseCode = CloseCode(1009);
+    pub const SIZE: Self = Self(1009);
 
     /// Indicates that an endpoint (client) is terminating the connection because the server
     /// did not respond to extension negotiation correctly.
@@ -182,32 +182,32 @@ impl CloseCode {
     /// The list of extensions that are needed should be given as the reason for closing.
     /// Note that this status code is not used by the server,
     /// because it can fail the WebSocket handshake instead.
-    pub const EXTENSION: CloseCode = CloseCode(1010);
+    pub const EXTENSION: Self = Self(1010);
 
     /// Indicates that a server is terminating the connection because it encountered an unexpected
     /// condition that prevented it from fulfilling the request.
-    pub const ERROR: CloseCode = CloseCode(1011);
+    pub const ERROR: Self = Self(1011);
 
     /// Indicates that the server is restarting.
-    pub const RESTART: CloseCode = CloseCode(1012);
+    pub const RESTART: Self = Self(1012);
 
     /// Indicates that the server is overloaded and the client should either connect to a different
     /// IP (when multiple targets exist), or reconnect to the same IP when a user has performed an
     /// action.
-    pub const AGAIN: CloseCode = CloseCode(1013);
+    pub const AGAIN: Self = Self(1013);
 }
 
 impl From<CloseCode> for u16 {
     #[inline]
-    fn from(code: CloseCode) -> u16 {
+    fn from(code: CloseCode) -> Self {
         code.0
     }
 }
 
 impl From<u16> for CloseCode {
     #[inline]
-    fn from(code: u16) -> CloseCode {
-        CloseCode(code)
+    fn from(code: u16) -> Self {
+        Self(code)
     }
 }
 
@@ -274,67 +274,67 @@ impl Message {
 
 impl Message {
     /// Create a new text WebSocket message from a stringable.
-    pub fn text<S>(string: S) -> Message
+    pub fn text<S>(string: S) -> Self
     where
         S: Into<Utf8Bytes>,
     {
-        Message::Text(string.into())
+        Self::Text(string.into())
     }
 
     /// Create a new binary WebSocket message by converting to `Bytes`.
-    pub fn binary<B>(bin: B) -> Message
+    pub fn binary<B>(bin: B) -> Self
     where
         B: Into<Bytes>,
     {
-        Message::Binary(bin.into())
+        Self::Binary(bin.into())
     }
 
     /// Create a new ping WebSocket message by converting to `Bytes`.
-    pub fn ping<B>(bin: B) -> Message
+    pub fn ping<B>(bin: B) -> Self
     where
         B: Into<Bytes>,
     {
-        Message::Ping(bin.into())
+        Self::Ping(bin.into())
     }
 
     /// Create a new pong WebSocket message by converting to `Bytes`.
-    pub fn pong<B>(bin: B) -> Message
+    pub fn pong<B>(bin: B) -> Self
     where
         B: Into<Bytes>,
     {
-        Message::Pong(bin.into())
+        Self::Pong(bin.into())
     }
 
     /// Create a new close WebSocket message with an optional close frame.
-    pub fn close<C>(close: C) -> Message
+    pub fn close<C>(close: C) -> Self
     where
         C: Into<Option<CloseFrame>>,
     {
-        Message::Close(close.into())
+        Self::Close(close.into())
     }
 }
 
 impl From<String> for Message {
     fn from(string: String) -> Self {
-        Message::Text(string.into())
+        Self::Text(string.into())
     }
 }
 
 impl<'s> From<&'s str> for Message {
     fn from(string: &'s str) -> Self {
-        Message::Text(string.into())
+        Self::Text(string.into())
     }
 }
 
 impl<'b> From<&'b [u8]> for Message {
     fn from(data: &'b [u8]) -> Self {
-        Message::Binary(Bytes::copy_from_slice(data))
+        Self::Binary(Bytes::copy_from_slice(data))
     }
 }
 
 impl From<Vec<u8>> for Message {
     fn from(data: Vec<u8>) -> Self {
-        Message::Binary(data.into())
+        Self::Binary(data.into())
     }
 }
 

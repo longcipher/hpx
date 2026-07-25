@@ -286,15 +286,30 @@ where
     }
 
     pub fn into_stream(self) -> AcceptedRecvStream<S, B> {
-        match self.ty.expect("Stream type not resolved yet") {
-            StreamType::CONTROL => AcceptedRecvStream::Control(FrameStream::new(self.stream)),
-            StreamType::PUSH => AcceptedRecvStream::Push(FrameStream::new(self.stream)),
-            StreamType::ENCODER => AcceptedRecvStream::Encoder(self.stream),
-            StreamType::DECODER => AcceptedRecvStream::Decoder(self.stream),
-            StreamType::WEBTRANSPORT_UNI => AcceptedRecvStream::WebTransportUni(
-                SessionId::from_varint(self.id.expect("Session ID not resolved yet")),
-                self.stream,
-            ),
+        // Defensive: `into_stream` is only meant to be called after `poll_type`
+        // has resolved the stream type. If a caller misuses the API and the
+        // type is still `None`, route the stream to `Unknown` instead of
+        // panicking.
+        match self.ty {
+            Some(StreamType::CONTROL) => AcceptedRecvStream::Control(FrameStream::new(self.stream)),
+            Some(StreamType::PUSH) => AcceptedRecvStream::Push(FrameStream::new(self.stream)),
+            Some(StreamType::ENCODER) => AcceptedRecvStream::Encoder(self.stream),
+            Some(StreamType::DECODER) => AcceptedRecvStream::Decoder(self.stream),
+            Some(StreamType::WEBTRANSPORT_UNI) => {
+                // Defensive: `id` is resolved right after the stream type in
+                // `poll_type`. If it is still `None` due to a caller misuse,
+                // fall back to a zero session id instead of panicking.
+                let id = self.id.unwrap_or_else(|| {
+                    #[cfg(feature = "tracing")]
+                    tracing::error!(
+                        "into_stream called with WEBTRANSPORT_UNI stream type but unresolved session id"
+                    );
+                    VarInt::from(0u32)
+                });
+                AcceptedRecvStream::WebTransportUni(SessionId::from_varint(id), self.stream)
+            }
+            // Includes `None` (unresolved) and any future stream types we don't
+            // recognize yet.
             _ => AcceptedRecvStream::Unknown(self.stream),
         }
     }

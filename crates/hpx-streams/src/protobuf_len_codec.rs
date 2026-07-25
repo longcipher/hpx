@@ -74,22 +74,53 @@ where
     }
 
     fn decode_eof(&mut self, buf: &mut BytesMut) -> Result<Option<T>, StreamBodyError> {
-        self.decode(buf)
+        if !buf.is_empty() {
+            match self.decode(buf) {
+                Ok(Some(item)) => Ok(Some(item)),
+                Ok(None) => {
+                    // Buffer has data but decode returned None, meaning the varint length
+                    // prefix or the message body is incomplete at EOF.
+                    Err(StreamBodyError::new(
+                        StreamBodyKind::CodecError,
+                        None,
+                        Some("incomplete varint length prefix at EOF".into()),
+                    ))
+                }
+                Err(e) => Err(e),
+            }
+        } else {
+            Ok(None)
+        }
     }
 }
 
 /// Decodes a LEB128-encoded variable length integer from the slice, returning the value and the
 /// number of bytes read.
 ///
-/// ## Safety
+/// # Errors
 ///
-/// The caller must ensure that `bytes` is non-empty and either `bytes.len() >= 10` or the last
-/// element in bytes is < `0x80`.
+/// Returns `StreamBodyError` if `bytes` is empty or if the varint is malformed (e.g. the slice
+/// ends before the varint terminator byte is encountered).
 #[inline]
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn decode_varint_slice(bytes: &[u8]) -> Result<(u64, usize), StreamBodyError> {
-    assert!(!bytes.is_empty());
-    assert!(bytes.len() > 10 || bytes[bytes.len() - 1] < 0x80);
+    if bytes.is_empty() {
+        return Err(StreamBodyError::new(
+            StreamBodyKind::CodecError,
+            None,
+            Some("varint slice is empty".into()),
+        ));
+    }
+    // The varint is incomplete when the slice is short (<= 10 bytes) AND the final byte still
+    // has the continuation bit set. A slice longer than 10 bytes is fine — only the first 10
+    // bytes are consumed.
+    if bytes.len() <= 10 && bytes[bytes.len() - 1] >= 0x80 {
+        return Err(StreamBodyError::new(
+            StreamBodyKind::CodecError,
+            None,
+            Some("malformed varint: incomplete length prefix".into()),
+        ));
+    }
 
     let mut b: u8 = bytes[0];
     let mut part0: u32 = u32::from(b);

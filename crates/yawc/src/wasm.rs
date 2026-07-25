@@ -171,10 +171,12 @@ impl futures::Sink<Frame> for WebSocket {
 
     fn start_send(self: Pin<&mut Self>, frame: Frame) -> Result<()> {
         match frame.opcode() {
-            OpCode::Text => self
-                .stream
-                .send_with_str(frame.as_str())
-                .map_err(|_| WebSocketError::ConnectionClosed),
+            OpCode::Text => {
+                let text = frame.as_str()?;
+                self.stream
+                    .send_with_str(text)
+                    .map_err(|_| WebSocketError::ConnectionClosed)
+            }
             OpCode::Binary => self
                 .stream
                 .send_with_js_u8_array(&js_sys::Uint8Array::from(frame.payload().as_ref()))

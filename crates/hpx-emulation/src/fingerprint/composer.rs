@@ -134,7 +134,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_custom_overrides_fingerprint() {
+    fn test_custom_overrides_fingerprint() -> Result<(), Box<dyn std::error::Error>> {
         let composer = HeaderComposer::new()
             .with_fingerprint_headers(vec![
                 ("user-agent", "fingerprint-ua"),
@@ -142,28 +142,37 @@ mod tests {
             ])
             .with_custom_headers(vec![("user-agent", "custom-ua")]);
 
-        let headers = composer.compose().unwrap();
-        assert_eq!(headers.get("user-agent").unwrap(), "custom-ua");
-        assert_eq!(headers.get("accept").unwrap(), "text/html");
+        let headers = composer.compose()?;
+        assert_eq!(
+            headers.get("user-agent").ok_or("user-agent missing")?,
+            "custom-ua"
+        );
+        assert_eq!(headers.get("accept").ok_or("accept missing")?, "text/html");
+        Ok(())
     }
 
     #[test]
-    fn test_case_insensitive_dedup() {
+    fn test_case_insensitive_dedup() -> Result<(), Box<dyn std::error::Error>> {
         let composer = HeaderComposer::new()
             .with_fingerprint_headers(vec![("User-Agent", "fp-ua")])
             .with_custom_headers(vec![("user-agent", "custom-ua")]);
 
-        let headers = composer.compose().unwrap();
-        assert_eq!(headers.get("user-agent").unwrap(), "custom-ua");
+        let headers = composer.compose()?;
+        assert_eq!(
+            headers.get("user-agent").ok_or("user-agent missing")?,
+            "custom-ua"
+        );
+        Ok(())
     }
 
     #[test]
-    fn test_empty_value_skipped() {
+    fn test_empty_value_skipped() -> Result<(), Box<dyn std::error::Error>> {
         let composer = HeaderComposer::new()
             .with_fingerprint_headers(vec![("x-empty", ""), ("x-valid", "value")]);
 
-        let headers = composer.compose().unwrap();
+        let headers = composer.compose()?;
         assert!(headers.get("x-empty").is_none());
-        assert_eq!(headers.get("x-valid").unwrap(), "value");
+        assert_eq!(headers.get("x-valid").ok_or("x-valid missing")?, "value");
+        Ok(())
     }
 }

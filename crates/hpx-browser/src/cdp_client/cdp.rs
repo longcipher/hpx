@@ -1,7 +1,6 @@
 //! Core CDP protocol types and message handling.
 
 use std::{
-    collections::HashMap,
     sync::{
         Arc,
         atomic::{AtomicU32, Ordering},
@@ -9,7 +8,8 @@ use std::{
     time::Duration,
 };
 
-use parking_lot::Mutex;
+use arc_swap::ArcSwapOption;
+use scc::HashMap;
 use serde::Serialize;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
@@ -47,9 +47,9 @@ pub struct CdpRequest {
 #[derive(Debug, Clone)]
 pub struct CdpClient {
     message_id: Arc<AtomicU32>,
-    pending_responses: Arc<Mutex<HashMap<u32, oneshot::Sender<CdpMessage>>>>,
+    pending_responses: Arc<HashMap<u32, oneshot::Sender<CdpMessage>>>,
     event_broadcast: broadcast::Sender<CdpMessage>,
-    ws_tx: Arc<Mutex<Option<mpsc::UnboundedSender<String>>>>,
+    ws_tx: Arc<ArcSwapOption<mpsc::UnboundedSender<String>>>,
 }
 
 /// Filtered event receiver that only yields messages matching the given criteria.
@@ -145,9 +145,9 @@ impl CdpClient {
         let (event_tx, _) = broadcast::channel(BROADCAST_CAPACITY);
         Self {
             message_id: Arc::new(AtomicU32::new(1)),
-            pending_responses: Arc::new(Mutex::new(HashMap::new())),
+            pending_responses: Arc::new(HashMap::new()),
             event_broadcast: event_tx,
-            ws_tx: Arc::new(Mutex::new(None)),
+            ws_tx: Arc::new(ArcSwapOption::empty()),
         }
     }
 
@@ -158,7 +158,11 @@ impl CdpClient {
 
     /// Register a pending response handler.
     pub(crate) fn register_response_handler(&self, id: u32, tx: oneshot::Sender<CdpMessage>) {
-        self.pending_responses.lock().insert(id, tx);
+        // scc::HashMap::insert_sync refuses to overwrite an existing key.
+        // IDs are monotonic so collisions should not happen in normal operation,
+        // but remove any stale entry first to preserve overwrite semantics.
+        let _ = self.pending_responses.remove_sync(&id);
+        let _ = self.pending_responses.insert_sync(id, tx);
     }
 
     /// Send a CDP command and await the response.
@@ -203,16 +207,14 @@ impl CdpClient {
 
         let json = serde_json::to_string(&request)?;
 
-        // Send through the mpsc channel — lock released before any .await
-        {
-            let sender = self.ws_tx.lock();
-            let sender = sender
-                .as_ref()
-                .ok_or_else(|| CdpClientError::websocket("send_command", "no writer connected"))?;
-            sender
-                .send(json)
-                .map_err(|_| CdpClientError::websocket("send_command", "writer channel closed"))?;
-        }
+        // Send through the mpsc channel — ArcSwapOption::load_full clones the
+        // Arc (a single atomic refcount bump) and never blocks.
+        let sender = self.ws_tx.load_full();
+        let sender = sender
+            .ok_or_else(|| CdpClientError::websocket("send_command", "no writer connected"))?;
+        sender
+            .send(json)
+            .map_err(|_| CdpClientError::websocket("send_command", "writer channel closed"))?;
 
         // Await response with timeout
         tokio::time::timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS), rx)
@@ -264,7 +266,7 @@ impl CdpClient {
 
         // Writer channel: mpsc → WebSocket sink
         let (ws_tx, mut ws_rx) = mpsc::unbounded_channel::<String>();
-        *client.ws_tx.lock() = Some(ws_tx);
+        client.ws_tx.store(Some(Arc::new(ws_tx)));
 
         tokio::spawn(async move {
             while let Some(msg) = ws_rx.recv().await {
@@ -301,17 +303,16 @@ impl CdpClient {
 
     /// Fail all pending responses by dropping their senders.
     pub fn fail_all_pending(&self, reason: &str) {
-        let mut pending = self.pending_responses.lock();
-        tracing::debug!("failing {} pending responses: {reason}", pending.len());
-        pending.clear();
+        let len = self.pending_responses.len();
+        tracing::debug!("failing {} pending responses: {reason}", len);
+        self.pending_responses.clear_sync();
     }
 
     /// Dispatch an incoming message (called by the WebSocket reader).
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn dispatch_message(&self, msg: CdpMessage) {
         let sender = if let Some(id) = msg.id {
-            let mut pending = self.pending_responses.lock();
-            pending.remove(&id)
+            self.pending_responses.remove_sync(&id).map(|(_, tx)| tx)
         } else {
             None
         };
@@ -319,14 +320,28 @@ impl CdpClient {
         if let Some(tx) = sender {
             let _ = tx.send(msg);
         } else {
-            let _ = self.event_broadcast.send(msg);
+            // M-8: surface back-pressure instead of silently dropping. tokio's
+            // broadcast::send errors only when there are no active receivers
+            // (the buffer does not "fill" — lagging receivers are dropped with
+            // a Lagged error on the recv side). A send error here means every
+            // subscriber went away, so the event is unreachable; log it rather
+            // than swallowing it as `let _ =`.
+            let method = msg.method.clone();
+            let id = msg.id;
+            if self.event_broadcast.send(msg).is_err() {
+                tracing::warn!(
+                    method = ?method.as_deref().unwrap_or("?"),
+                    ?id,
+                    "CDP event broadcast dropped: no active receivers"
+                );
+            }
         }
     }
 
     /// Set the writer channel for testing purposes.
     #[cfg(test)]
     pub(crate) fn set_test_writer(&self, tx: mpsc::UnboundedSender<String>) {
-        *self.ws_tx.lock() = Some(tx);
+        self.ws_tx.store(Some(Arc::new(tx)));
     }
 }
 
@@ -349,17 +364,11 @@ mod tests {
 
         client.register_response_handler(42, tx);
 
-        {
-            let pending = client.pending_responses.lock();
-            assert!(pending.contains_key(&42));
-        }
+        assert!(client.pending_responses.get_sync(&42).is_some());
 
         client.fail_all_pending("test");
 
-        {
-            let pending = client.pending_responses.lock();
-            assert!(!pending.contains_key(&42));
-        }
+        assert!(client.pending_responses.get_sync(&42).is_none());
     }
 
     #[tokio::test]
@@ -464,7 +473,7 @@ mod tests {
     async fn send_command_full_flow() {
         let client = CdpClient::new();
         let (writer_tx, mut writer_rx) = mpsc::unbounded_channel();
-        *client.ws_tx.lock() = Some(writer_tx);
+        client.ws_tx.store(Some(Arc::new(writer_tx)));
 
         let client_clone = client.clone();
         let send_handle = tokio::spawn(async move {
@@ -514,7 +523,7 @@ mod tests {
     async fn send_command_with_session() {
         let client = CdpClient::new();
         let (writer_tx, mut writer_rx) = mpsc::unbounded_channel();
-        *client.ws_tx.lock() = Some(writer_tx);
+        client.ws_tx.store(Some(Arc::new(writer_tx)));
 
         let client_clone = client.clone();
         let send_handle = tokio::spawn(async move {

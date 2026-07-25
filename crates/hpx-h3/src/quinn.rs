@@ -72,9 +72,19 @@ where
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::BidiStream, ConnectionErrorIncoming>> {
-        let (send, recv) = ready!(self.incoming_bi.poll_next_unpin(cx))
-            .expect("self.incoming_bi BoxStream never returns None")
-            .map_err(convert_connection_error)?;
+        // Defensive: the `incoming_bi` unfold stream should never return `None`
+        // because it always re-yields the connection for the next iteration.
+        // Return an internal error instead of panicking if it ever does.
+        let (send, recv) = match ready!(self.incoming_bi.poll_next_unpin(cx)) {
+            Some(result) => result.map_err(convert_connection_error)?,
+            None => {
+                #[cfg(feature = "tracing")]
+                tracing::error!("incoming_bi BoxStream returned None unexpectedly");
+                return Poll::Ready(Err(ConnectionErrorIncoming::InternalError(
+                    "incoming_bi BoxStream returned None".to_string(),
+                )));
+            }
+        };
         Poll::Ready(Ok(Self::BidiStream {
             send: Self::SendStream::new(send),
             recv: Self::RecvStream::new(recv),
@@ -86,9 +96,17 @@ where
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::RecvStream, ConnectionErrorIncoming>> {
-        let recv = ready!(self.incoming_uni.poll_next_unpin(cx))
-            .expect("self.incoming_uni BoxStream never returns None")
-            .map_err(convert_connection_error)?;
+        // Defensive: see note on `poll_accept_bidi`.
+        let recv = match ready!(self.incoming_uni.poll_next_unpin(cx)) {
+            Some(result) => result.map_err(convert_connection_error)?,
+            None => {
+                #[cfg(feature = "tracing")]
+                tracing::error!("incoming_uni BoxStream returned None unexpectedly");
+                return Poll::Ready(Err(ConnectionErrorIncoming::InternalError(
+                    "incoming_uni BoxStream returned None".to_string(),
+                )));
+            }
+        };
         Poll::Ready(Ok(Self::RecvStream::new(recv)))
     }
 
@@ -138,11 +156,22 @@ where
                 Some((conn.open_bi().await, conn))
             }))
         });
-        let (send, recv) = ready!(bi.poll_next_unpin(cx))
-            .expect("BoxStream does not return None")
-            .map_err(|e| StreamErrorIncoming::ConnectionErrorIncoming {
+        // Defensive: the unfold stream never returns `None`. Return an error
+        // instead of panicking if it ever does.
+        let (send, recv) = match ready!(bi.poll_next_unpin(cx)) {
+            Some(result) => result.map_err(|e| StreamErrorIncoming::ConnectionErrorIncoming {
                 connection_error: convert_connection_error(e),
-            })?;
+            })?,
+            None => {
+                #[cfg(feature = "tracing")]
+                tracing::error!("opening_bi BoxStream returned None unexpectedly");
+                return Poll::Ready(Err(StreamErrorIncoming::ConnectionErrorIncoming {
+                    connection_error: ConnectionErrorIncoming::InternalError(
+                        "opening_bi BoxStream returned None".to_string(),
+                    ),
+                }));
+            }
+        };
         Poll::Ready(Ok(Self::BidiStream {
             send: Self::SendStream::new(send),
             recv: RecvStream::new(recv),
@@ -160,20 +189,30 @@ where
             }))
         });
 
-        let send = ready!(uni.poll_next_unpin(cx))
-            .expect("BoxStream does not return None")
-            .map_err(|e| StreamErrorIncoming::ConnectionErrorIncoming {
+        // Defensive: see note on `poll_open_bidi`.
+        let send = match ready!(uni.poll_next_unpin(cx)) {
+            Some(result) => result.map_err(|e| StreamErrorIncoming::ConnectionErrorIncoming {
                 connection_error: convert_connection_error(e),
-            })?;
+            })?,
+            None => {
+                #[cfg(feature = "tracing")]
+                tracing::error!("opening_uni BoxStream returned None unexpectedly");
+                return Poll::Ready(Err(StreamErrorIncoming::ConnectionErrorIncoming {
+                    connection_error: ConnectionErrorIncoming::InternalError(
+                        "opening_uni BoxStream returned None".to_string(),
+                    ),
+                }));
+            }
+        };
         Poll::Ready(Ok(Self::SendStream::new(send)))
     }
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn close(&mut self, code: Code, reason: &[u8]) {
-        self.conn.close(
-            VarInt::from_u64(code.value()).expect("error code VarInt"),
-            reason,
-        );
+        // Defensive: `from_u64` only fails for values >= 2^62. Fall back to
+        // `VarInt::MAX` instead of panicking so a vendored fork cannot crash.
+        let code = VarInt::from_u64(code.value()).unwrap_or(VarInt::MAX);
+        self.conn.close(code, reason);
     }
 }
 
@@ -205,11 +244,21 @@ where
             }))
         });
 
-        let (send, recv) = ready!(bi.poll_next_unpin(cx))
-            .expect("BoxStream does not return None")
-            .map_err(|e| StreamErrorIncoming::ConnectionErrorIncoming {
+        // Defensive: see note on `Connection::poll_open_bidi`.
+        let (send, recv) = match ready!(bi.poll_next_unpin(cx)) {
+            Some(result) => result.map_err(|e| StreamErrorIncoming::ConnectionErrorIncoming {
                 connection_error: convert_connection_error(e),
-            })?;
+            })?,
+            None => {
+                #[cfg(feature = "tracing")]
+                tracing::error!("opening_bi BoxStream returned None unexpectedly");
+                return Poll::Ready(Err(StreamErrorIncoming::ConnectionErrorIncoming {
+                    connection_error: ConnectionErrorIncoming::InternalError(
+                        "opening_bi BoxStream returned None".to_string(),
+                    ),
+                }));
+            }
+        };
         Poll::Ready(Ok(Self::BidiStream {
             send: Self::SendStream::new(send),
             recv: RecvStream::new(recv),
@@ -227,20 +276,29 @@ where
             }))
         });
 
-        let send = ready!(uni.poll_next_unpin(cx))
-            .expect("BoxStream does not return None")
-            .map_err(|e| StreamErrorIncoming::ConnectionErrorIncoming {
+        // Defensive: see note on `Connection::poll_open_bidi`.
+        let send = match ready!(uni.poll_next_unpin(cx)) {
+            Some(result) => result.map_err(|e| StreamErrorIncoming::ConnectionErrorIncoming {
                 connection_error: convert_connection_error(e),
-            })?;
+            })?,
+            None => {
+                #[cfg(feature = "tracing")]
+                tracing::error!("opening_uni BoxStream returned None unexpectedly");
+                return Poll::Ready(Err(StreamErrorIncoming::ConnectionErrorIncoming {
+                    connection_error: ConnectionErrorIncoming::InternalError(
+                        "opening_uni BoxStream returned None".to_string(),
+                    ),
+                }));
+            }
+        };
         Poll::Ready(Ok(Self::SendStream::new(send)))
     }
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn close(&mut self, code: Code, reason: &[u8]) {
-        self.conn.close(
-            VarInt::from_u64(code.value()).expect("error code VarInt"),
-            reason,
-        );
+        // Defensive: see note on `Connection::close`.
+        let code = VarInt::from_u64(code.value()).unwrap_or(VarInt::MAX);
+        self.conn.close(code, reason);
     }
 }
 
@@ -366,8 +424,17 @@ impl RecvStream {
         let is_0rtt = stream.is_0rtt();
         Self {
             stream: Some(stream),
-            // Should only allocate once the first time it's used
-            read_chunk_fut: ReusableBoxFuture::new(async { unreachable!() }),
+            // Should only allocate once the first time it's used.
+            // Defensive: this future is never polled because `set` is always
+            // called before `poll`. Use `pending` so a stray `poll` never
+            // panics, instead of the upstream `unreachable!()`.
+            read_chunk_fut: ReusableBoxFuture::new(async {
+                std::future::pending::<(
+                    quinn::RecvStream,
+                    Result<Option<quinn::Chunk>, quinn::ReadError>,
+                )>()
+                .await
+            }),
             is_0rtt,
             pending_stop: None,
         }
@@ -401,7 +468,9 @@ impl quic::RecvStream for RecvStream {
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn stop_sending(&mut self, error_code: u64) {
-        let error_code = VarInt::from_u64(error_code).expect("invalid error_code");
+        // Defensive: `from_u64` only fails for values >= 2^62. Fall back to
+        // `VarInt::MAX` instead of panicking.
+        let error_code = VarInt::from_u64(error_code).unwrap_or(VarInt::MAX);
         if let Some(stream) = self.stream.as_mut() {
             let _ = stream.stop(error_code);
         } else {
@@ -411,9 +480,18 @@ impl quic::RecvStream for RecvStream {
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn recv_id(&self) -> StreamId {
-        let num: u64 = self.stream.as_ref().unwrap().id().into();
+        // Defensive: `stream` is `Some` for the lifetime of `RecvStream` (it's
+        // only taken out during `poll_data` and put back). Guard against `None`
+        // instead of `unwrap()`-ing, and fall back to a zero id if the
+        // conversion fails instead of `expect`-ing.
+        let num: u64 = self.stream.as_ref().map(|s| s.id().into()).unwrap_or(0);
 
-        num.try_into().expect("invalid stream id")
+        num.try_into().unwrap_or_else(|_| {
+            #[cfg(feature = "tracing")]
+            tracing::error!("invalid stream id: {}", num);
+            // Fallback: stream id 0 is always valid (it is below VarInt::MAX).
+            StreamId::from(crate::proto::varint::VarInt::from(0u32))
+        })
     }
 }
 
@@ -438,7 +516,16 @@ fn convert_read_error_to_stream_error(error: ReadError) -> StreamErrorIncoming {
             }
         }
         error @ ReadError::ClosedStream => StreamErrorIncoming::Unknown(Box::new(error)),
-        ReadError::IllegalOrderedRead => panic!("h3-quinn only performs ordered reads"),
+        // Defensive: h3-quinn only performs ordered reads, so this error should
+        // never occur. Return it as an unknown stream error instead of
+        // panicking so a vendored fork cannot crash.
+        error @ ReadError::IllegalOrderedRead => {
+            #[cfg(feature = "tracing")]
+            tracing::error!(
+                "IllegalOrderedRead encountered (h3-quinn only performs ordered reads)"
+            );
+            StreamErrorIncoming::Unknown(Box::new(error))
+        }
         error @ ReadError::ZeroRttRejected => StreamErrorIncoming::Unknown(Box::new(error)),
     }
 }
@@ -538,7 +625,15 @@ where
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn send_id(&self) -> StreamId {
         let num: u64 = self.stream.id().into();
-        num.try_into().expect("invalid stream id")
+        // Defensive: `try_into` only fails for values >= 2^62, which should not
+        // occur for a valid QUIC stream id. Fall back to a zero id instead of
+        // panicking so a vendored fork cannot crash.
+        num.try_into().unwrap_or_else(|_| {
+            #[cfg(feature = "tracing")]
+            tracing::error!("invalid send stream id: {}", num);
+            // Fallback: stream id 0 is always valid (it is below VarInt::MAX).
+            StreamId::from(crate::proto::varint::VarInt::from(0u32))
+        })
     }
 }
 
@@ -553,8 +648,17 @@ where
         buf: &mut D,
     ) -> Poll<Result<usize, StreamErrorIncoming>> {
         if self.writing.is_some() {
-            // This signifies a bug in implementation
-            panic!("poll_send called while send stream is not ready")
+            // Defensive: this signifies a bug in the h3 implementation (the
+            // traits were misused). Mirror the handling in `send_data` and
+            // return an internal error instead of panicking so a vendored fork
+            // cannot crash.
+            #[cfg(feature = "tracing")]
+            tracing::error!("poll_send called while send stream is not ready");
+            return Poll::Ready(Err(StreamErrorIncoming::ConnectionErrorIncoming {
+                connection_error: ConnectionErrorIncoming::InternalError(
+                    "poll_send called while send stream is not ready".to_string(),
+                ),
+            }));
         }
 
         let s = Pin::new(&mut self.stream);

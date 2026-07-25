@@ -12,8 +12,15 @@ use crate::{
 };
 
 /// Serializes V8-critical page operations across all connections on the same thread.
-/// Multiple V8 isolates on a single thread corrupt the HandleScope stack; this mutex
-/// ensures only one isolate is active at a time.
+///
+/// V8's HandleScope stack is thread-local. When multiple isolates are active
+/// concurrently on the same thread (as happens with `spawn_local` tasks in the
+/// CDP server's `LocalSet`), they corrupt each other's HandleScope state,
+/// triggering `Cannot create a handle without a HandleScope` fatal errors.
+/// This global mutex ensures only one isolate is active at a time.
+///
+/// The lock is held across `.await` points (inside `handle_request`), so it
+/// must be `tokio::sync::Mutex`, not `parking_lot::Mutex`.
 static V8_SERIALIZE: std::sync::LazyLock<tokio::sync::Mutex<()>> =
     std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
 
@@ -254,7 +261,7 @@ async fn handle_ws_connection(
     while let Some(frame) = ws.next().await {
         match frame.opcode() {
             OpCode::Text => {
-                let text = frame.as_str();
+                let text = frame.as_str()?;
                 let req: CdpRequest = match serde_json::from_str(text) {
                     Ok(r) => r,
                     Err(e) => {
@@ -267,8 +274,9 @@ async fn handle_ws_connection(
                     }
                 };
 
-                // Serialize V8-critical CDP request handling.
-                // Multiple V8 isolates on a single thread corrupt the HandleScope stack.
+                // Serialize V8-critical CDP request handling across all connections.
+                // The global lock has no borrow on `session`, so the subsequent
+                // `&mut session` call to `handle_request` compiles cleanly.
                 let (response, events) = {
                     let _v8_lock = V8_SERIALIZE.lock().await;
                     session.handle_request(&mut page, &req).await

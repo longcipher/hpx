@@ -12,7 +12,7 @@ use system_configuration::{
     },
 };
 
-#[allow(unsafe_code)]
+#[expect(unsafe_code)]
 pub(super) fn with_system(builder: &mut super::matcher::Builder) {
     let Some(proxies_map) = SCDynamicStoreBuilder::new("")
         .build()
@@ -24,6 +24,10 @@ pub(super) fn with_system(builder: &mut super::matcher::Builder) {
     if builder.http.is_empty() {
         let http_proxy_config = parse_setting_from_dynamic_store(
             &proxies_map,
+            // SAFETY: `kSCPropNetProxiesHTTP*` are immutable `CFStringRef` extern
+            // statics provided by the system Configuration framework. They point
+            // to statically-allocated, never-freed string constants and are safe
+            // to read at any time.
             unsafe { kSCPropNetProxiesHTTPEnable },
             unsafe { kSCPropNetProxiesHTTPProxy },
             unsafe { kSCPropNetProxiesHTTPPort },
@@ -36,6 +40,8 @@ pub(super) fn with_system(builder: &mut super::matcher::Builder) {
     if builder.https.is_empty() {
         let https_proxy_config = parse_setting_from_dynamic_store(
             &proxies_map,
+            // SAFETY: same as above — `kSCPropNetProxiesHTTPS*` are immutable
+            // system-provided `CFStringRef` extern statics, safe to read.
             unsafe { kSCPropNetProxiesHTTPSEnable },
             unsafe { kSCPropNetProxiesHTTPSProxy },
             unsafe { kSCPropNetProxiesHTTPSPort },

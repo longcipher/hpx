@@ -124,7 +124,12 @@ fn main() -> eyre::Result<()> {
             };
             return runtime.block_on(browser::handle_serve(config));
         }
-        Some(cli::Commands::Dl(_)) => unreachable!(),
+        Some(cli::Commands::Dl(_)) => {
+            // Dl is handled by the `if let` above and returns early; reaching
+            // here means a future refactor broke that invariant. Bail instead
+            // of panicking so the safety net stays intact.
+            eyre::bail!("internal error: Dl command reached unreachable handler");
+        }
         Some(cli::Commands::ProxyTest { proxy }) => {
             let runtime = build_runtime()?;
             return runtime.block_on(proxy_test::run(&proxy));
@@ -150,7 +155,7 @@ fn main() -> eyre::Result<()> {
     match result {
         Ok(()) => Ok(()),
         Err(e) => {
-            eprintln!("error: {e:#}");
+            tracing::error!("{e:#}");
             std::process::exit(1);
         }
     }

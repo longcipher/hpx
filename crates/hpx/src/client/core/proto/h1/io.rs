@@ -47,7 +47,7 @@ where
         f.debug_struct("Buffered")
             .field("read_buf", &self.read_buf)
             .field("write_buf", &self.write_buf)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -56,14 +56,14 @@ where
     T: AsyncRead + AsyncWrite + Unpin,
     B: Buf,
 {
-    pub(crate) fn new(io: T) -> Buffered<T, B> {
+    pub(crate) fn new(io: T) -> Self {
         let strategy = if io.is_write_vectored() {
             WriteStrategy::Queue
         } else {
             WriteStrategy::Flatten
         };
         let write_buf = WriteBuf::new(strategy);
-        Buffered {
+        Self {
             flush_pipeline: false,
             io,
             partial_len: None,
@@ -83,21 +83,21 @@ where
         self.write_buf.max_buf_size = max;
     }
 
-    pub(crate) fn set_read_buf_exact_size(&mut self, sz: usize) {
+    pub(crate) const fn set_read_buf_exact_size(&mut self, sz: usize) {
         self.read_buf_strategy = ReadStrategy::Exact(sz);
     }
 
     pub(crate) fn set_write_strategy_flatten(&mut self) {
         // this should always be called only at construction time,
         // so this assert is here to catch myself
-        debug_assert!(self.write_buf.queue.bufs_cnt() == 0);
+        debug_assert_eq!(self.write_buf.queue.bufs_cnt(), 0);
         self.write_buf.set_strategy(WriteStrategy::Flatten);
     }
 
     pub(crate) fn set_write_strategy_queue(&mut self) {
         // this should always be called only at construction time,
         // so this assert is here to catch myself
-        debug_assert!(self.write_buf.queue.bufs_cnt() == 0);
+        debug_assert_eq!(self.write_buf.queue.bufs_cnt(), 0);
         self.write_buf.set_strategy(WriteStrategy::Queue);
     }
 
@@ -124,12 +124,12 @@ where
         &mut buf.bytes
     }
 
-    pub(super) fn write_buf(&mut self) -> &mut WriteBuf<B> {
+    pub(super) const fn write_buf(&mut self) -> &mut WriteBuf<B> {
         &mut self.write_buf
     }
 
     pub(crate) fn buffer<BB: Buf + Into<B>>(&mut self, buf: BB) {
-        self.write_buf.buffer(buf)
+        self.write_buf.buffer(buf);
     }
 
     pub(crate) fn can_buffer(&self) -> bool {
@@ -158,7 +158,7 @@ where
         S: Http1Transaction,
     {
         loop {
-            match super::role::parse_headers::<S>(
+            if let Some(msg) = super::role::parse_headers::<S>(
                 &mut self.read_buf,
                 self.partial_len,
                 ParseContext {
@@ -170,25 +170,23 @@ where
                     received_continue: parse_ctx.received_continue,
                 },
             )? {
-                Some(msg) => {
-                    debug!("parsed {} headers", msg.head.headers.len());
-                    self.partial_len = None;
-                    return Poll::Ready(Ok(msg));
+                debug!("parsed {} headers", msg.head.headers.len());
+                self.partial_len = None;
+                return Poll::Ready(Ok(msg));
+            }
+            {
+                let max = self.read_buf_strategy.max();
+                let curr_len = self.read_buf.len();
+                if curr_len >= max {
+                    debug!("max_buf_size ({}) reached, closing", max);
+                    return Poll::Ready(Err(Error::new_too_large()));
                 }
-                None => {
-                    let max = self.read_buf_strategy.max();
-                    let curr_len = self.read_buf.len();
-                    if curr_len >= max {
-                        debug!("max_buf_size ({}) reached, closing", max);
-                        return Poll::Ready(Err(Error::new_too_large()));
-                    }
-                    if curr_len > 0 {
-                        trace!("partial headers; {} bytes so far", curr_len);
-                        self.partial_len = Some(curr_len);
-                    } else {
-                        // 1xx gobled some bytes
-                        self.partial_len = None;
-                    }
+                if curr_len > 0 {
+                    trace!("partial headers; {} bytes so far", curr_len);
+                    self.partial_len = Some(curr_len);
+                } else {
+                    // 1xx gobled some bytes
+                    self.partial_len = None;
                 }
             }
             if ready!(self.poll_read_from_io(cx)).map_err(Error::new_io)? == 0 {
@@ -228,11 +226,11 @@ where
         (self.io, self.read_buf.freeze())
     }
 
-    pub(crate) fn io_mut(&mut self) -> &mut T {
+    pub(crate) const fn io_mut(&mut self) -> &mut T {
         &mut self.io
     }
 
-    pub(crate) fn is_read_blocked(&self) -> bool {
+    pub(crate) const fn is_read_blocked(&self) -> bool {
         self.read_blocked
     }
 
@@ -242,7 +240,7 @@ where
         } else if self.write_buf.remaining() == 0 {
             Pin::new(&mut self.io).poll_flush(cx)
         } else {
-            if let WriteStrategy::Flatten = self.write_buf.strategy {
+            if matches!(self.write_buf.strategy, WriteStrategy::Flatten) {
                 return self.poll_flush_flattened(cx);
             }
 
@@ -315,12 +313,12 @@ where
     B: Buf,
 {
     fn read_mem(&mut self, cx: &mut Context<'_>, len: usize) -> Poll<io::Result<Bytes>> {
-        if !self.read_buf.is_empty() {
-            let n = std::cmp::min(len, self.read_buf.len());
-            Poll::Ready(Ok(self.read_buf.split_to(n).freeze()))
-        } else {
+        if self.read_buf.is_empty() {
             let n = ready!(self.poll_read_from_io(cx))?;
             Poll::Ready(Ok(self.read_buf.split_to(::std::cmp::min(len, n)).freeze()))
+        } else {
+            let n = std::cmp::min(len, self.read_buf.len());
+            Poll::Ready(Ok(self.read_buf.split_to(n).freeze()))
         }
     }
 }
@@ -336,31 +334,31 @@ enum ReadStrategy {
 }
 
 impl ReadStrategy {
-    fn with_max(max: usize) -> ReadStrategy {
-        ReadStrategy::Adaptive {
+    const fn with_max(max: usize) -> Self {
+        Self::Adaptive {
             decrease_now: false,
             next: INIT_BUFFER_SIZE,
             max,
         }
     }
 
-    fn next(&self) -> usize {
+    const fn next(&self) -> usize {
         match *self {
-            ReadStrategy::Adaptive { next, .. } => next,
-            ReadStrategy::Exact(exact) => exact,
+            Self::Adaptive { next, .. } => next,
+            Self::Exact(exact) => exact,
         }
     }
 
-    fn max(&self) -> usize {
+    const fn max(&self) -> usize {
         match *self {
-            ReadStrategy::Adaptive { max, .. } => max,
-            ReadStrategy::Exact(exact) => exact,
+            Self::Adaptive { max, .. } => max,
+            Self::Exact(exact) => exact,
         }
     }
 
     fn record(&mut self, bytes_read: usize) {
         match *self {
-            ReadStrategy::Adaptive {
+            Self::Adaptive {
                 ref mut decrease_now,
                 ref mut next,
                 max,
@@ -387,12 +385,12 @@ impl ReadStrategy {
                     }
                 }
             }
-            ReadStrategy::Exact(_) => (),
+            Self::Exact(_) => (),
         }
     }
 }
 
-fn incr_power_of_two(n: usize) -> usize {
+const fn incr_power_of_two(n: usize) -> usize {
     n.saturating_mul(2)
 }
 
@@ -404,8 +402,8 @@ fn prev_power_of_two(n: usize) -> usize {
 }
 
 impl Default for ReadStrategy {
-    fn default() -> ReadStrategy {
-        ReadStrategy::with_max(DEFAULT_MAX_BUFFER_SIZE)
+    fn default() -> Self {
+        Self::with_max(DEFAULT_MAX_BUFFER_SIZE)
     }
 }
 
@@ -417,8 +415,8 @@ pub(crate) struct Cursor<T> {
 
 impl<T: AsRef<[u8]>> Cursor<T> {
     #[inline]
-    pub(crate) fn new(bytes: T) -> Cursor<T> {
-        Cursor { bytes, pos: 0 }
+    pub(crate) const fn new(bytes: T) -> Self {
+        Self { bytes, pos: 0 }
     }
 }
 
@@ -485,8 +483,8 @@ pub(super) struct WriteBuf<B> {
 }
 
 impl<B: Buf> WriteBuf<B> {
-    fn new(strategy: WriteStrategy) -> WriteBuf<B> {
-        WriteBuf {
+    fn new(strategy: WriteStrategy) -> Self {
+        Self {
             headers: Cursor::new(Vec::with_capacity(INIT_BUFFER_SIZE)),
             max_buf_size: DEFAULT_MAX_BUFFER_SIZE,
             queue: BufList::new(),
@@ -499,7 +497,7 @@ impl<B> WriteBuf<B>
 where
     B: Buf,
 {
-    fn set_strategy(&mut self, strategy: WriteStrategy) {
+    const fn set_strategy(&mut self, strategy: WriteStrategy) {
         self.strategy = strategy;
     }
 
@@ -560,7 +558,7 @@ impl<B: Buf> fmt::Debug for WriteBuf<B> {
         f.debug_struct("WriteBuf")
             .field("remaining", &self.remaining())
             .field("strategy", &self.strategy)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -573,10 +571,10 @@ impl<B: Buf> Buf for WriteBuf<B> {
     #[inline]
     fn chunk(&self) -> &[u8] {
         let headers = self.headers.chunk();
-        if !headers.is_empty() {
-            headers
-        } else {
+        if headers.is_empty() {
             self.queue.chunk()
+        } else {
+            headers
         }
     }
 

@@ -45,6 +45,7 @@
 //! ```
 
 use std::{
+    fmt,
     future::Future,
     sync::Arc,
     task::{Context, Poll},
@@ -96,10 +97,28 @@ pub struct Hooks {
     pub(crate) on_error: Vec<Arc<dyn OnErrorHook>>,
 }
 
+impl fmt::Debug for Hooks {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Hooks")
+            .field("before_request", &self.before_request.len())
+            .field("after_response", &self.after_response.len())
+            .field("on_error", &self.on_error.len())
+            .finish()
+    }
+}
+
 /// Builder for configuring [`Hooks`].
 #[derive(Default)]
 pub struct HooksBuilder {
     hooks: Hooks,
+}
+
+impl fmt::Debug for HooksBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HooksBuilder")
+            .field("hooks", &self.hooks)
+            .finish()
+    }
 }
 
 impl Hooks {
@@ -186,7 +205,7 @@ impl HooksBuilder {
 // Built-in hooks
 
 /// A hook that logs request and response information.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct LoggingHook {
     log_headers: bool,
 }
@@ -205,7 +224,7 @@ impl LoggingHook {
     }
 
     /// Enables logging of request and response headers.
-    pub fn with_headers(mut self) -> Self {
+    pub const fn with_headers(mut self) -> Self {
         self.log_headers = true;
         self
     }
@@ -265,13 +284,14 @@ impl AfterResponseHook for LoggingHook {
 }
 
 /// A hook that injects headers into every request.
+#[derive(Debug)]
 pub struct HeaderInjectionHook {
     headers: HeaderMap,
 }
 
 impl HeaderInjectionHook {
     /// Creates a new header injection hook with the given headers.
-    pub fn new(headers: HeaderMap) -> Self {
+    pub const fn new(headers: HeaderMap) -> Self {
         Self { headers }
     }
 
@@ -293,6 +313,7 @@ impl BeforeRequestHook for HeaderInjectionHook {
 }
 
 /// A hook that adds a unique request ID to each request.
+#[derive(Debug)]
 pub struct RequestIdHook {
     header_name: http::header::HeaderName,
 }
@@ -340,7 +361,7 @@ impl BeforeRequestHook for RequestIdHook {
 // Tower Layer and Service implementation
 
 /// A Tower layer that wraps services with hooks.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct HooksLayer {
     hooks: Arc<Hooks>,
 }
@@ -370,6 +391,14 @@ impl<S> Layer<S> for HooksLayer {
 pub struct HooksService<S> {
     inner: S,
     hooks: Arc<Hooks>,
+}
+
+impl<S> fmt::Debug for HooksService<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HooksService")
+            .field("hooks", &self.hooks)
+            .finish_non_exhaustive()
+    }
 }
 
 pin_project! {
@@ -440,6 +469,10 @@ where
 {
     type Output = Result<Response<ResBody>, crate::error::BoxError>;
 
+    #[expect(
+        clippy::expect_used,
+        reason = "HooksFuture::Error state machine: error is Some until first poll consumes it"
+    )]
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
 

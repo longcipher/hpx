@@ -12,7 +12,7 @@ use ahash::RandomState;
 /// program runs. Primarily used for connection pools and internal caches.
 ///
 /// **Note**: Not cryptographically secure due to fixed seeds.
-pub const HASHER: RandomState = RandomState::with_seeds(
+pub(crate) const HASHER: RandomState = RandomState::with_seeds(
     0x6b68_d618_a4b5_3c57,
     0xadc8_c4d5_82bb_1313,
     0x2f72_c2c1_9b04_2d4c,
@@ -20,14 +20,14 @@ pub const HASHER: RandomState = RandomState::with_seeds(
 );
 
 /// A type alias for a hash set using `ahash` with a pre-seeded `RandomState`.
-pub type HashSet<T> = std::collections::HashSet<T, RandomState>;
+pub(crate) type HashSet<T> = std::collections::HashSet<T, RandomState>;
 
 /// A type alias for a hash map using `ahash` with a pre-seeded `RandomState`.
-pub type HashMap<K, V> = std::collections::HashMap<K, V, RandomState>;
+pub(crate) type HashMap<K, V> = std::collections::HashMap<K, V, RandomState>;
 
 /// A wrapper that memoizes the hash value of its contained data.
 #[derive(Debug)]
-pub struct HashMemo<T, H: BuildHasher = RandomState>
+pub(crate) struct HashMemo<T, H: BuildHasher = RandomState>
 where
     T: Eq + PartialEq + Hash,
 {
@@ -46,7 +46,7 @@ where
     ///
     /// This allows you to specify a custom `BuildHasher` implementation for
     /// controlling how hash values are computed.
-    pub const fn with_hasher(value: T, hasher: H) -> Self {
+    pub(crate) const fn with_hasher(value: T, hasher: H) -> Self {
         Self {
             value,
             hash: AtomicU64::new(0),

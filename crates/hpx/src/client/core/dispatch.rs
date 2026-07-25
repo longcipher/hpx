@@ -33,7 +33,7 @@ pub(crate) type RetryPromise<T, U> = oneshot::Receiver<Result<U, TrySendError<T>
 /// transport. If that happens, it is safe to return the request back to the
 /// caller, as it was never fully sent.
 #[derive(Debug)]
-pub struct TrySendError<T> {
+pub(crate) struct TrySendError<T> {
     pub(crate) error: Error,
     pub(crate) message: Option<T>,
 }
@@ -100,6 +100,10 @@ impl<T, U> Sender<T, U> {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "envelope is freshly constructed with Some(_) above; take() cannot be None"
+    )]
     pub(crate) fn try_send(&mut self, val: T) -> Result<RetryPromise<T, U>, T> {
         if !self.can_send() {
             return Err(val);
@@ -107,7 +111,7 @@ impl<T, U> Sender<T, U> {
         let (tx, rx) = oneshot::channel();
         self.inner
             .send(Envelope(Some((val, Callback(Some(tx))))))
-            .map(move |_| rx)
+            .map(move |()| rx)
             .map_err(|mut e| (e.0).0.take().expect("envelope not dropped").0)
     }
 
@@ -128,18 +132,22 @@ impl<T, U> UnboundedSender<T, U> {
         self.giver.is_canceled()
     }
 
-    pub(crate) fn try_send(&mut self, val: T) -> Result<RetryPromise<T, U>, T> {
+    #[expect(
+        clippy::expect_used,
+        reason = "envelope is freshly constructed with Some(_) above; take() cannot be None"
+    )]
+    pub(crate) fn try_send(&self, val: T) -> Result<RetryPromise<T, U>, T> {
         let (tx, rx) = oneshot::channel();
         self.inner
             .send(Envelope(Some((val, Callback(Some(tx))))))
-            .map(move |_| rx)
+            .map(move |()| rx)
             .map_err(|mut e| (e.0).0.take().expect("envelope not dropped").0)
     }
 }
 
 impl<T, U> Clone for UnboundedSender<T, U> {
     fn clone(&self) -> Self {
-        UnboundedSender {
+        Self {
             giver: self.giver.clone(),
             inner: self.inner.clone(),
         }
@@ -152,6 +160,10 @@ pub(crate) struct Receiver<T, U> {
 }
 
 impl<T, U> Receiver<T, U> {
+    #[expect(
+        clippy::expect_used,
+        reason = "Envelope is only constructed with Some(_); take() cannot be None"
+    )]
     pub(crate) fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<(T, Callback<T, U>)>> {
         match self.inner.poll_recv(cx) {
             Poll::Ready(item) => {
@@ -239,6 +251,10 @@ impl<T, U> Callback<T, U> {
         unreachable!()
     }
 
+    #[expect(
+        clippy::unwrap_used,
+        reason = "send consumes self so 0 can only be Some; Drop is the only other taker and runs after"
+    )]
     pub(crate) fn send(mut self, val: Result<U, TrySendError<T>>) {
         let _ = self.0.take().unwrap().send(val);
     }
@@ -250,12 +266,12 @@ impl<T> TrySendError<T> {
     /// The message will not always have been recovered. If an error occurs
     /// after the message has been serialized onto the connection, it will not
     /// be available here.
-    pub fn take_message(&mut self) -> Option<T> {
+    pub(crate) const fn take_message(&mut self) -> Option<T> {
         self.message.take()
     }
 
     /// Consumes this to return the inner error.
-    pub fn into_error(self) -> Error {
+    pub(crate) fn into_error(self) -> Error {
         self.error
     }
 }
@@ -280,6 +296,10 @@ where
 {
     type Output = ();
 
+    #[expect(
+        clippy::expect_used,
+        reason = "SendWhen future state machine: call_back is Some until completion"
+    )]
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
 
@@ -299,7 +319,7 @@ where
                         this.call_back.set(Some(call_back));
                         return Poll::Pending;
                     }
-                };
+                }
                 trace!("send_when canceled");
                 Poll::Ready(())
             }

@@ -142,8 +142,8 @@ pub struct HpxAdapter<S> {
 
 impl<S> HpxAdapter<S> {
     /// Wrap a service that accepts `http::Request<Body>` so it accepts `hpx::Request`.
-    pub fn new(inner: S) -> Self {
-        HpxAdapter { inner }
+    pub const fn new(inner: S) -> Self {
+        Self { inner }
     }
 
     /// Consume the adapter and return the inner service.
@@ -152,12 +152,12 @@ impl<S> HpxAdapter<S> {
     }
 
     /// Get a reference to the inner service.
-    pub fn inner(&self) -> &S {
+    pub const fn inner(&self) -> &S {
         &self.inner
     }
 
     /// Get a mutable reference to the inner service.
-    pub fn inner_mut(&mut self) -> &mut S {
+    pub const fn inner_mut(&mut self) -> &mut S {
         &mut self.inner
     }
 }

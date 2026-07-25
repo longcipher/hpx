@@ -14,17 +14,17 @@ use super::{Addrs, Name, Resolve, Resolving};
 
 /// A resolver using blocking `getaddrinfo` calls in a threadpool.
 #[derive(Clone, Default)]
-pub struct GaiResolver {
+pub(crate) struct GaiResolver {
     _priv: (),
 }
 
 /// An iterator of IP addresses returned from `getaddrinfo`.
-pub struct GaiAddrs {
+pub(crate) struct GaiAddrs {
     inner: SocketAddrs,
 }
 
 /// A future to resolve a name returned by `GaiResolver`.
-pub struct GaiFuture {
+pub(crate) struct GaiFuture {
     inner: JoinHandle<Result<SocketAddrs, io::Error>>,
 }
 
@@ -37,8 +37,8 @@ pub(crate) struct SocketAddrs {
 
 impl GaiResolver {
     /// Creates a new [`GaiResolver`].
-    pub fn new() -> Self {
-        GaiResolver { _priv: () }
+    pub(crate) const fn new() -> Self {
+        Self { _priv: () }
     }
 }
 
@@ -88,7 +88,9 @@ impl Future for GaiFuture {
                 if join_err.is_cancelled() {
                     Err(io::Error::new(io::ErrorKind::Interrupted, join_err))
                 } else {
-                    panic!("gai background task failed: {join_err:?}")
+                    Err(io::Error::other(format!(
+                        "gai background task failed: {join_err:?}"
+                    )))
                 }
             }
         })
@@ -116,21 +118,21 @@ impl Iterator for GaiAddrs {
 
 impl SocketAddrs {
     pub(crate) fn new(addrs: Vec<SocketAddr>) -> Self {
-        SocketAddrs {
+        Self {
             iter: addrs.into_iter(),
         }
     }
 
-    pub(crate) fn try_parse(host: &str, port: u16) -> Option<SocketAddrs> {
+    pub(crate) fn try_parse(host: &str, port: u16) -> Option<Self> {
         if let Ok(addr) = host.parse::<Ipv4Addr>() {
             let addr = SocketAddrV4::new(addr, port);
-            return Some(SocketAddrs {
+            return Some(Self {
                 iter: vec![SocketAddr::V4(addr)].into_iter(),
             });
         }
         if let Ok(addr) = host.parse::<Ipv6Addr>() {
             let addr = SocketAddrV6::new(addr, port, 0, 0);
-            return Some(SocketAddrs {
+            return Some(Self {
                 iter: vec![SocketAddr::V6(addr)].into_iter(),
             });
         }
@@ -138,31 +140,30 @@ impl SocketAddrs {
     }
 
     #[inline]
-    fn filter(self, predicate: impl FnMut(&SocketAddr) -> bool) -> SocketAddrs {
-        SocketAddrs::new(self.iter.filter(predicate).collect())
+    fn filter(self, predicate: impl FnMut(&SocketAddr) -> bool) -> Self {
+        Self::new(self.iter.filter(predicate).collect())
     }
 
     pub(crate) fn split_by_preference(
         self,
         local_addr_ipv4: Option<Ipv4Addr>,
         local_addr_ipv6: Option<Ipv6Addr>,
-    ) -> (SocketAddrs, SocketAddrs) {
+    ) -> (Self, Self) {
         match (local_addr_ipv4, local_addr_ipv6) {
-            (Some(_), None) => (self.filter(SocketAddr::is_ipv4), SocketAddrs::new(vec![])),
-            (None, Some(_)) => (self.filter(SocketAddr::is_ipv6), SocketAddrs::new(vec![])),
+            (Some(_), None) => (self.filter(SocketAddr::is_ipv4), Self::new(vec![])),
+            (None, Some(_)) => (self.filter(SocketAddr::is_ipv6), Self::new(vec![])),
             _ => {
                 let preferring_v6 = self
                     .iter
                     .as_slice()
                     .first()
-                    .map(SocketAddr::is_ipv6)
-                    .unwrap_or(false);
+                    .is_some_and(SocketAddr::is_ipv6);
 
                 let (preferred, fallback) = self
                     .iter
                     .partition::<Vec<_>, _>(|addr| addr.is_ipv6() == preferring_v6);
 
-                (SocketAddrs::new(preferred), SocketAddrs::new(fallback))
+                (Self::new(preferred), Self::new(fallback))
             }
         }
     }

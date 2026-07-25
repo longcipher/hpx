@@ -21,7 +21,7 @@
 //!     .expect("client build failed");
 //! ```
 
-use std::time::Duration;
+use std::{fmt, time::Duration};
 
 use crate::{Client, ClientBuilder, Method, client::request::RequestBuilder};
 
@@ -46,11 +46,32 @@ pub struct RequestScope {
 impl private::ConfigScope for ClientScope {}
 impl private::ConfigScope for RequestScope {}
 
+impl fmt::Debug for ClientScope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ClientScope").finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for RequestScope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RequestScope")
+            .field("method", &self.method)
+            .field("uri", &self.uri)
+            .finish_non_exhaustive()
+    }
+}
+
 // ===== ConfigBuilder =====
 
 /// A typestate builder that provides a uniform configuration API
 /// scoped to either client-level or request-level context.
 pub struct ConfigBuilder<S: private::ConfigScope>(S);
+
+impl<S: private::ConfigScope + fmt::Debug> fmt::Debug for ConfigBuilder<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ConfigBuilder").field(&self.0).finish()
+    }
+}
 
 impl ConfigBuilder<ClientScope> {
     /// Create a new client-scoped config builder.
@@ -61,7 +82,7 @@ impl ConfigBuilder<ClientScope> {
     }
 
     /// Create from an existing [`ClientBuilder`].
-    pub fn from_builder(builder: ClientBuilder) -> Self {
+    pub const fn from_builder(builder: ClientBuilder) -> Self {
         Self(ClientScope { builder })
     }
 
@@ -147,7 +168,7 @@ impl ConfigBuilder<ClientScope> {
 
 impl ConfigBuilder<RequestScope> {
     /// Create a new request-scoped config builder.
-    pub fn request(client: Client, method: Method, uri: http::Uri) -> Self {
+    pub const fn request(client: Client, method: Method, uri: http::Uri) -> Self {
         Self(RequestScope {
             client,
             method,
@@ -156,7 +177,7 @@ impl ConfigBuilder<RequestScope> {
     }
 
     /// Set global timeout for this request.
-    pub fn timeout_global(self, _timeout: Option<Duration>) -> Self {
+    pub const fn timeout_global(self, _timeout: Option<Duration>) -> Self {
         self
     }
 

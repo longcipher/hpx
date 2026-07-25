@@ -32,6 +32,12 @@ fn apply_mask_fallback(buf: &mut [u8], mask: [u8; 4]) {
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn apply_mask_fast32(buf: &mut [u8], mask: [u8; 4]) {
     let mask_u32 = u32::from_ne_bytes(mask);
+    // SAFETY: `[u8]` has no alignment requirement and `align_to_mut::<u32>()` splits
+    // the slice into a prefix (unaligned head), an aligned middle (reinterpreted as
+    // `[u32]`), and a suffix (unaligned tail). The cast is sound because `u8` is a
+    // plain old data type and the alignment of the middle slice is guaranteed by
+    // `align_to_mut`. All three sub-slices still refer to valid, initialized memory
+    // owned by `buf`.
     let (prefix, words, suffix) = unsafe { buf.align_to_mut::<u32>() };
     apply_mask_fallback(prefix, mask);
 
@@ -62,6 +68,12 @@ pub fn apply_mask_fast64(buf: &mut [u8], mask: [u8; 4]) {
     let mask_u32 = u32::from_ne_bytes(mask);
     let mask_u64 = ((mask_u32 as u64) << 32) | (mask_u32 as u64);
 
+    // SAFETY: `[u8]` has no alignment requirement and `align_to_mut::<u64>()` splits
+    // the slice into a prefix (unaligned head), an aligned middle (reinterpreted as
+    // `[u64]`), and a suffix (unaligned tail). The cast is sound because `u8` is a
+    // plain old data type and the alignment of the middle slice is guaranteed by
+    // `align_to_mut`. All three sub-slices still refer to valid, initialized memory
+    // owned by `buf`.
     let (prefix, words, suffix) = unsafe { buf.align_to_mut::<u64>() };
     apply_mask_fallback(prefix, mask);
 

@@ -1,12 +1,13 @@
 #[macro_use]
-pub mod error;
+pub(crate) mod error;
 mod exec;
-pub mod extra;
+pub(crate) mod extra;
 mod lazy;
 mod pool;
 mod util;
 
 use std::{
+    fmt,
     future::Future,
     num::NonZeroU32,
     pin::Pin,
@@ -36,8 +37,6 @@ use self::{
 use crate::client::conn::alt_svc::{AltSvcCache, H3FailureTracker, parse_alt_svc};
 #[cfg(feature = "http3")]
 use crate::client::conn::quic::H3Connection;
-#[allow(unused_imports)]
-use crate::client::core::conn::{self, TrySendError as ConnTrySendError};
 #[cfg(feature = "http1")]
 use crate::client::core::http1::Http1Options;
 #[cfg(feature = "http2")]
@@ -47,6 +46,7 @@ use crate::{
         conn::{Connected, Connection},
         core::{
             body::Incoming,
+            conn::{self, TrySendError as ConnTrySendError},
             rt::{ArcTimer, Executor, Timer},
         },
         layer::config::RequestOptions,
@@ -71,6 +71,14 @@ pub struct ConnectRequest {
     identifier: ConnectIdentity,
 }
 
+impl fmt::Debug for ConnectRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConnectRequest")
+            .field("uri", &self.uri)
+            .finish_non_exhaustive()
+    }
+}
+
 // ===== impl ConnectRequest =====
 
 impl ConnectRequest {
@@ -80,11 +88,11 @@ impl ConnectRequest {
     /// `client/conn/quic.rs`) can synthesize a request without going through
     /// the full `HttpClient` pipeline.
     #[inline]
-    pub(crate) fn new<T>(uri: Uri, identifier: T) -> ConnectRequest
+    pub(crate) fn new<T>(uri: Uri, identifier: T) -> Self
     where
         T: Into<Option<RequestOptions>>,
     {
-        ConnectRequest {
+        Self {
             uri: uri.clone(),
             identifier: Arc::new(HashMemo::with_hasher(
                 ConnectExtra::new(uri, identifier),
@@ -95,13 +103,13 @@ impl ConnectRequest {
 
     /// Returns a reference to the [`Uri`].
     #[inline]
-    pub fn uri(&self) -> &Uri {
+    pub const fn uri(&self) -> &Uri {
         &self.uri
     }
 
     /// Returns a mutable reference to the [`Uri`].
     #[inline]
-    pub fn uri_mut(&mut self) -> &mut Uri {
+    pub const fn uri_mut(&mut self) -> &mut Uri {
         &mut self.uri
     }
 
@@ -152,11 +160,33 @@ pub struct HttpClient<C, B> {
     pool: pool::Pool<PoolClient<B>, ConnectIdentity>,
 }
 
+impl<C, B> fmt::Debug for HttpClient<C, B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HttpClient").finish_non_exhaustive()
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Config {
     retry_canceled_requests: bool,
     set_host: bool,
     ver: Ver,
+}
+
+/// Outcome of an HTTP/3 Alt-Svc upgrade attempt.
+///
+/// Returned by [`HttpClient::try_h3_upgrade`] to communicate whether the h3
+/// path produced a response, should fall through to h2/h1, or failed
+/// irrecoverably.
+#[cfg(feature = "http3")]
+enum H3UpgradeOutcome<B> {
+    /// h3 succeeded; the caller should return this response.
+    Success(Response<Incoming>),
+    /// h3 was not attempted or failed with a retryable error; the
+    /// caller should fall through to h2/h1 with the returned request.
+    FallThrough(Request<B>),
+    /// h3 failed irrecoverably; the caller should return this error.
+    Failed(Error),
 }
 
 // ===== impl HttpClient =====
@@ -208,7 +238,7 @@ where
                     ErrorKind::UserUnsupportedVersion,
                 )));
             }
-        };
+        }
 
         // Extract and normalize URI
         let uri = match util::normalize_uri(&mut req, is_http_connect) {
@@ -216,7 +246,6 @@ where
             Err(err) => return ResponseFuture::new(futures_util::future::err(err)),
         };
 
-        #[allow(unused_mut)]
         let mut this = self.clone();
 
         // Extract per-request options from the request extensions and apply them to the client
@@ -225,7 +254,6 @@ where
         let options = RequestConfig::<RequestOptions>::remove(req.extensions_mut());
 
         // Apply HTTP/1 and HTTP/2 options if provided
-        #[allow(unused_variables)]
         if let Some(opts) = options.as_ref().map(RequestOptions::transport_opts) {
             #[cfg(feature = "http1")]
             if let Some(opts) = opts.http1_options() {
@@ -255,147 +283,21 @@ where
         let mut h3_attempted = false;
 
         loop {
-            // Check Alt-Svc cache for HTTP/3 upgrade opportunity on the
-            // first iteration of the loop. When the cache has a fresh h3
-            // entry for the authority, try h3 first. If the h3 attempt
-            // fails, fall through to the h2/h1 path below.
+            // Attempt an HTTP/3 upgrade via the Alt-Svc cache on the
+            // first loop iteration. `try_h3_upgrade` handles the circuit
+            // breaker check, cache lookup, h3 connect, and alt-svc header
+            // capture; it returns the outcome (success, fall-through, or
+            // irrecoverable failure).
             #[cfg(feature = "http3")]
             {
                 if !h3_attempted && self.config.ver == Ver::Auto && self.h3_connector.is_some() {
                     h3_attempted = true;
-                    if let Some(host) = connect_req.uri().host() {
-                        let port = connect_req.uri().port_u16().unwrap_or(443);
-                        let authority = (host.to_string(), port);
-
-                        // Circuit breaker: skip h3 if this authority had a
-                        // recent QUIC failure (still in cooldown).
-                        if self.h3_failure_tracker.is_blocked(&authority).await {
-                            trace!(
-                                "h3 circuit breaker: skipping h3 for {:?} (in cooldown)",
-                                authority
-                            );
-                            // Fall through to h2/h1 below.
-                        } else if let Some(entries) = self.alt_svc_cache.get(&authority).await {
-                            let h3_entry = entries.iter().find(|e| e.protocol == "h3");
-                            if let Some(h3_entry) = h3_entry {
-                                let mut h3_connect_req = connect_req.clone();
-                                let alt_svc_host = if h3_entry.host.is_empty() {
-                                    host.to_string()
-                                } else {
-                                    h3_entry.host.clone()
-                                };
-                                let alt_svc_port = h3_entry.port;
-                                let alt_svc_uri =
-                                    format!("https://{}:{}", alt_svc_host, alt_svc_port);
-                                if let Ok(new_uri) = alt_svc_uri.parse::<Uri>() {
-                                    *h3_connect_req.uri_mut() = new_uri;
-                                }
-
-                                // Bypass the connection pool: call
-                                // connect_h3 directly to create a fresh
-                                // h3 connection instead of going through
-                                // try_send_request which could return a
-                                // cached h2 connection.
-                                if let Some(h3_connector) = self.h3_connector.clone() {
-                                    let pool = self.pool.clone();
-                                    let lazy_conn =
-                                        Self::connect_h3(Some(h3_connector), pool, h3_connect_req);
-                                    match lazy_conn.await {
-                                        Ok(mut pool_client) => {
-                                            match pool_client.try_send_request(req).await {
-                                                Ok(resp) => {
-                                                    // Capture
-                                                    // Alt-Svc
-                                                    // headers
-                                                    // from the
-                                                    // h3
-                                                    // response.
-                                                    if let Some(host) = connect_req.uri().host() {
-                                                        let port = connect_req
-                                                            .uri()
-                                                            .port_u16()
-                                                            .unwrap_or(443);
-                                                        if let Some(alt_svc_value) = resp
-                                                            .headers()
-                                                            .get(
-                                                            http::header::HeaderName::from_static(
-                                                                "alt-svc",
-                                                            ),
-                                                        ) && let Some(entries) =
-                                                            parse_alt_svc(alt_svc_value)
-                                                        {
-                                                            self.alt_svc_cache
-                                                                .insert(
-                                                                    (host.to_string(), port),
-                                                                    entries,
-                                                                )
-                                                                .await;
-                                                        }
-                                                    }
-                                                    // Clear the circuit breaker
-                                                    // on successful h3
-                                                    // connection.
-                                                    self.h3_failure_tracker.clear(&authority).await;
-                                                    return Ok(resp);
-                                                }
-                                                Err(mut err) => {
-                                                    if let Some(retry_req) = err.take_message() {
-                                                        trace!(
-                                                            "h3 alt-svc upgrade retryable, falling back to h2/h1"
-                                                        );
-                                                        // Record the
-                                                        // failure so
-                                                        // subsequent
-                                                        // requests skip
-                                                        // h3 for this
-                                                        // authority.
-                                                        self.h3_failure_tracker
-                                                            .record_failure(authority.clone())
-                                                            .await;
-                                                        req = retry_req;
-                                                        *req.uri_mut() = uri.clone();
-                                                        // Fall
-                                                        // through
-                                                        // to
-                                                        // h2/h1
-                                                        // below.
-                                                    } else {
-                                                        let err = err.into_error();
-                                                        trace!(
-                                                            "h3 alt-svc upgrade failed irrecoverably (reason={:?})",
-                                                            err
-                                                        );
-                                                        // Record the
-                                                        // failure so
-                                                        // subsequent
-                                                        // requests skip
-                                                        // h3 for this
-                                                        // authority.
-                                                        self.h3_failure_tracker
-                                                            .record_failure(authority.clone())
-                                                            .await;
-                                                        return Err(Error::new(
-                                                            ErrorKind::SendRequest,
-                                                            err,
-                                                        ));
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        Err(_err) => {
-                                            trace!("h3 alt-svc upgrade failed (reason={:?})", _err);
-                                            // Record the failure so
-                                            // subsequent requests skip
-                                            // h3 for this authority.
-                                            self.h3_failure_tracker
-                                                .record_failure(authority.clone())
-                                                .await;
-                                            // Fall through to h2/h1.
-                                        }
-                                    }
-                                }
-                            }
+                    match self.try_h3_upgrade(&connect_req, req, &uri).await {
+                        H3UpgradeOutcome::Success(resp) => return Ok(resp),
+                        H3UpgradeOutcome::FallThrough(retry_req) => {
+                            req = retry_req;
                         }
+                        H3UpgradeOutcome::Failed(err) => return Err(err),
                     }
                 }
             }
@@ -412,9 +314,7 @@ where
                                 .get(http::header::HeaderName::from_static("alt-svc"))
                                 && let Some(entries) = parse_alt_svc(alt_svc_value)
                             {
-                                self.alt_svc_cache
-                                    .insert((host.to_string(), port), entries)
-                                    .await;
+                                self.alt_svc_cache.insert((host.to_string(), port), entries);
                             }
                         }
                     }
@@ -443,7 +343,133 @@ where
         }
     }
 
-    #[allow(clippy::result_large_err)]
+    /// Attempt an HTTP/3 (QUIC) upgrade for the request via the Alt-Svc cache.
+    ///
+    /// Called on the first iteration of `send_request`'s loop when `Ver::Auto`
+    /// is configured and an `h3_connector` is available. Looks up the origin
+    /// authority in the `alt_svc_cache`; if a fresh `h3` entry exists and the
+    /// circuit breaker is not open, connects via QUIC and sends the request.
+    ///
+    /// On success, any `alt-svc` header in the h3 response is folded back into
+    /// the cache, and the circuit breaker is cleared for the authority.
+    /// On failure, the circuit breaker records the failure so subsequent
+    /// requests skip h3 for the cooldown period.
+    ///
+    /// The origin `authority` (host, port) is computed once and reused across
+    /// cache lookups, circuit-breaker checks, and failure recording — avoiding
+    /// repeated `host.to_string()` allocations on the h3 hot path.
+    #[cfg(feature = "http3")]
+    async fn try_h3_upgrade(
+        &self,
+        connect_req: &ConnectRequest,
+        req: Request<B>,
+        original_uri: &Uri,
+    ) -> H3UpgradeOutcome<B> {
+        let Some(host) = connect_req.uri().host() else {
+            return H3UpgradeOutcome::FallThrough(req);
+        };
+        let port = connect_req.uri().port_u16().unwrap_or(443);
+        // Compute the origin authority once and reuse it for cache lookups,
+        // circuit-breaker checks, and failure recording. This avoids
+        // re-allocating `host.to_string()` at each call site.
+        let authority = (host.to_string(), port);
+
+        // Circuit breaker: skip h3 if this authority had a recent QUIC
+        // failure (still in cooldown).
+        if self.h3_failure_tracker.is_blocked(&authority) {
+            trace!(
+                "h3 circuit breaker: skipping h3 for {:?} (in cooldown)",
+                authority
+            );
+            return H3UpgradeOutcome::FallThrough(req);
+        }
+
+        // Look up alt-svc entries for this authority.
+        let Some(entries) = self.alt_svc_cache.get(&authority) else {
+            return H3UpgradeOutcome::FallThrough(req);
+        };
+        let Some(h3_entry) = entries.iter().find(|e| e.protocol == "h3") else {
+            return H3UpgradeOutcome::FallThrough(req);
+        };
+
+        // Build the alt-svc target URI. When the entry's host is empty,
+        // reuse the origin host.
+        let mut h3_connect_req = connect_req.clone();
+        let alt_svc_host = if h3_entry.host.is_empty() {
+            host.to_string()
+        } else {
+            h3_entry.host.clone()
+        };
+        let alt_svc_port = h3_entry.port;
+        // Build the URI from parts via `Uri::builder` rather than allocating
+        // and parsing a `format!("https://{}:{}", ...)` string.
+        let alt_svc_authority = format!("{alt_svc_host}:{alt_svc_port}");
+        if let Ok(new_uri) = Uri::builder()
+            .scheme("https")
+            .authority(alt_svc_authority.as_str())
+            .path_and_query("/")
+            .build()
+        {
+            *h3_connect_req.uri_mut() = new_uri;
+        }
+
+        // Bypass the connection pool: call `connect_h3` directly to create a
+        // fresh h3 connection instead of going through `try_send_request`
+        // which could return a cached h2 connection.
+        let Some(h3_connector) = self.h3_connector.clone() else {
+            return H3UpgradeOutcome::FallThrough(req);
+        };
+        let pool = self.pool.clone();
+        let lazy_conn = Self::connect_h3(Some(h3_connector), pool, h3_connect_req);
+        match lazy_conn.await {
+            Ok(mut pool_client) => match pool_client.try_send_request(req).await {
+                Ok(resp) => {
+                    // Fold any alt-svc header from the h3 response back into
+                    // the cache for the origin authority. Clone the authority
+                    // here since we still need it for the circuit-breaker
+                    // clear below.
+                    if let Some(alt_svc_value) = resp
+                        .headers()
+                        .get(http::header::HeaderName::from_static("alt-svc"))
+                        && let Some(new_entries) = parse_alt_svc(alt_svc_value)
+                    {
+                        self.alt_svc_cache.insert(authority.clone(), new_entries);
+                    }
+                    // Clear the circuit breaker on successful h3.
+                    self.h3_failure_tracker.clear(&authority);
+                    H3UpgradeOutcome::Success(resp)
+                }
+                Err(mut err) => {
+                    if let Some(mut retry_req) = err.take_message() {
+                        trace!("h3 alt-svc upgrade retryable, falling back to h2/h1");
+                        // Record the failure so subsequent requests skip h3
+                        // for this authority.
+                        self.h3_failure_tracker.record_failure(authority);
+                        *retry_req.uri_mut() = original_uri.clone();
+                        H3UpgradeOutcome::FallThrough(retry_req)
+                    } else {
+                        let err = err.into_error();
+                        trace!("h3 alt-svc upgrade failed irrecoverably (reason={:?})", err);
+                        self.h3_failure_tracker.record_failure(authority);
+                        H3UpgradeOutcome::Failed(Error::new(ErrorKind::SendRequest, err))
+                    }
+                }
+            },
+            Err(_err) => {
+                trace!("h3 alt-svc upgrade failed (reason={:?})", _err);
+                // Record the failure so subsequent requests skip h3 for
+                // this authority.
+                self.h3_failure_tracker.record_failure(authority);
+                H3UpgradeOutcome::FallThrough(req)
+            }
+        }
+    }
+
+    #[expect(clippy::result_large_err)]
+    #[expect(
+        clippy::expect_used,
+        reason = "set_host: uri.host() is Some for absolute URIs; host string is valid HeaderValue"
+    )]
     async fn try_send_request(
         &self,
         mut req: Request<B>,
@@ -493,7 +519,7 @@ where
                     crate::util::replace_headers(req.headers_mut(), headers.clone());
                 }
 
-                util::absolute_form(req.uri_mut());
+                util::absolute_form(req.uri());
             } else {
                 util::origin_form(req.uri_mut());
             }
@@ -560,9 +586,8 @@ where
                         "unstarted request canceled, trying again (reason={:?})",
                         reason,
                     );
-                    continue;
                 }
-            };
+            }
         }
     }
 
@@ -664,7 +689,6 @@ where
     + Send
     + Unpin
     + 'static {
-        #[allow(unused_variables)]
         let executor = self.exec.clone();
         let pool = self.pool.clone();
 
@@ -713,24 +737,23 @@ where
             // If the pool_key is for HTTP/2, and there is already a
             // connection being established, then this can't take a
             // second lock. The "connect_to" future is Canceled.
-            let connecting = match pool.connecting(req.identify(), ver) {
-                Some(lock) => lock,
-                None => {
-                    let canceled = Error::new_kind(ErrorKind::Canceled);
-                    // HTTP/2 connection in progress.
-                    return Box::pin(futures_util::future::err(canceled))
-                        as Pin<
-                            Box<
-                                dyn Future<
-                                        Output = Result<
-                                            pool::Pooled<PoolClient<B>, ConnectIdentity>,
-                                            Error,
-                                        >,
-                                    > + Send
-                                    + 'static,
-                            >,
-                        >;
-                }
+            let connecting = if let Some(lock) = pool.connecting(req.identify(), ver) {
+                lock
+            } else {
+                let canceled = Error::new_kind(ErrorKind::Canceled);
+                // HTTP/2 connection in progress.
+                return Box::pin(futures_util::future::err(canceled))
+                    as Pin<
+                        Box<
+                            dyn Future<
+                                    Output = Result<
+                                        pool::Pooled<PoolClient<B>, ConnectIdentity>,
+                                        Error,
+                                    >,
+                                > + Send
+                                + 'static,
+                        >,
+                    >;
             };
             Box::pin(
                 Oneshot::new(connector, req)
@@ -739,19 +762,15 @@ where
                         let connected = io.connected();
                         // If ALPN is h2 and we aren't http2_only already,
                         // then we need to convert our pool checkout into
-                        #[allow(unused_variables)]
                         let connecting = if connected.is_negotiated_h2() && !is_ver_h2 {
-                            match connecting.alpn_h2(&pool) {
-                                Some(lock) => {
-                                    trace!("ALPN negotiated h2, updating pool");
-                                    lock
-                                }
-                                None => {
-                                    // Another connection has already upgraded,
-                                    // the pool checkout should finish up for us.
-                                    let canceled =Error::new(ErrorKind::Canceled, "ALPN upgraded to HTTP/2");
-                                    return Either::Right(futures_util::future::err(canceled));
-                                }
+                            if let Some(lock) = connecting.alpn_h2(&pool) {
+                                trace!("ALPN negotiated h2, updating pool");
+                                lock
+                            } else {
+                                // Another connection has already upgraded,
+                                // the pool checkout should finish up for us.
+                                let canceled =Error::new(ErrorKind::Canceled, "ALPN upgraded to HTTP/2");
+                                return Either::Right(futures_util::future::err(canceled));
                             }
                         } else {
                             connecting
@@ -761,11 +780,10 @@ where
 
                         Either::Left(Box::pin(async move {
                             let _ = (&pool, &connected, &connecting);
-                            #[allow(unused_variables)]
                             let tx = if is_h2 {
                                 #[cfg(feature = "http2")]
                                 {
-                                    let (mut tx, conn) =
+                                    let (tx, conn) =
                                         h2_builder.handshake(io).await.map_err(Error::tx)?;
 
                                     trace!(
@@ -831,7 +849,7 @@ where
                                     // declare this tx as usable
                                     match tx.ready().await {
                                         // If ready, the connection is usable for sending requests.
-                                        Ok(_) => {
+                                        Ok(()) => {
                                             // Log that the connection is ready for use.
                                             trace!("connection is ready");
                                             // Drop the error receiver, as it’s no longer needed since the sender is ready.
@@ -846,23 +864,16 @@ where
                                             // Log that the channel is closed, indicating a potential connection issue.
                                             trace!("connection channel closed, checking for connection error");
                                             // Check the oneshot channel for a specific error from the connection task.
-                                            match err_rx.await {
-                                                // If an error was received, it’s a specific connection failure.
-                                                Ok(err) => {
-                                                     // Log the specific connection error for diagnostics.
-                                                    trace!("received connection error: {:?}", err);
-                                                    // Return the error wrapped in Error::tx to propagate it.
-                                                    return Err(Error::tx(err));
-                                                }
-                                                // If the error channel is closed, no specific error was sent.
-                                                // Fall back to the vague ChannelClosed error.
-                                                Err(_) => {
-                                                    // Log that the error channel is closed, indicating no specific error.
-                                                    trace!("error channel closed, returning the vague ChannelClosed error");
-                                                    // Return the original error wrapped in Error::tx.
-                                                    return Err(Error::tx(e));
-                                                }
+                                            if let Ok(err) = err_rx.await {
+                                                // Log the specific connection error for diagnostics.
+                                                trace!("received connection error: {:?}", err);
+                                                // Return the error wrapped in Error::tx to propagate it.
+                                                return Err(Error::tx(err));
                                             }
+                                            // If the error channel is closed, no specific error was sent.
+                                            // Fall back to the vague ChannelClosed error.
+                                            trace!("error channel closed, returning the vague ChannelClosed error");
+                                            return Err(Error::tx(e));
                                         }
                                         // For other errors (e.g., timeout, I/O issues), propagate them directly.
                                         // These are not ChannelClosed errors and don’t require error channel checks.
@@ -880,7 +891,6 @@ where
                                 }
                             };
 
-                            #[allow(unreachable_code)]
                             Ok(pool.pooled(
                                 connecting,
                                 PoolClient {
@@ -928,7 +938,7 @@ where
     /// single concrete return type without a per-branch cast at the call
     /// site.
     #[cfg(feature = "http3")]
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     fn connect_h3(
         h3_connector: Option<crate::client::conn::quic::QuicConnector>,
         pool: pool::Pool<PoolClient<B>, ConnectIdentity>,
@@ -983,8 +993,8 @@ where
 impl<C, B> HttpClient<C, B> {
     /// Returns a reference to the [`AltSvcCache`].
     #[cfg(feature = "http3")]
-    #[allow(dead_code)] // HTTP/3 Alt-Svc accessor; wired in by future tasks.
-    pub(crate) fn alt_svc_cache(&self) -> &Arc<AltSvcCache> {
+    #[expect(dead_code)] // HTTP/3 Alt-Svc accessor; wired in by future tasks.
+    pub(crate) const fn alt_svc_cache(&self) -> &Arc<AltSvcCache> {
         &self.alt_svc_cache
     }
 
@@ -995,11 +1005,8 @@ impl<C, B> HttpClient<C, B> {
     /// (`crates/hpx/tests/http3.rs`). Not part of the stable public API.
     #[cfg(feature = "http3")]
     #[doc(hidden)]
-    pub async fn __test_alt_svc_cache_has_entry(&self, host: &str, port: u16) -> bool {
-        self.alt_svc_cache
-            .get(&(host.to_string(), port))
-            .await
-            .is_some()
+    pub fn __test_alt_svc_cache_has_entry(&self, host: &str, port: u16) -> bool {
+        self.alt_svc_cache.get(&(host.to_string(), port)).is_some()
     }
 
     /// Test helper: checks whether the H3 failure tracker has blocked
@@ -1009,10 +1016,9 @@ impl<C, B> HttpClient<C, B> {
     /// (`crates/hpx/tests/http3.rs`). Not part of the stable public API.
     #[cfg(feature = "http3")]
     #[doc(hidden)]
-    pub async fn __test_h3_failure_tracker_is_blocked(&self, host: &str, port: u16) -> bool {
+    pub fn __test_h3_failure_tracker_is_blocked(&self, host: &str, port: u16) -> bool {
         self.h3_failure_tracker
             .is_blocked(&(host.to_string(), port))
-            .await
     }
 }
 
@@ -1063,8 +1069,8 @@ where
 }
 
 impl<C: Clone, B> Clone for HttpClient<C, B> {
-    fn clone(&self) -> HttpClient<C, B> {
-        HttpClient {
+    fn clone(&self) -> Self {
+        Self {
             config: self.config,
             exec: self.exec.clone(),
             #[cfg(feature = "http1")]
@@ -1111,7 +1117,6 @@ enum PoolTx<B> {
 // ===== impl PoolClient =====
 
 impl<B> PoolClient<B> {
-    #[allow(unused_variables)]
     fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Error>> {
         match self.tx {
             #[cfg(feature = "http1")]
@@ -1129,11 +1134,11 @@ impl<B> PoolClient<B> {
         }
     }
 
-    fn is_http1(&self) -> bool {
+    const fn is_http1(&self) -> bool {
         !self.is_http2() && !self.is_http3()
     }
 
-    fn is_http2(&self) -> bool {
+    const fn is_http2(&self) -> bool {
         match self.tx {
             #[cfg(feature = "http1")]
             PoolTx::Http1(_) => false,
@@ -1149,7 +1154,7 @@ impl<B> PoolClient<B> {
     /// Returns `true` if this pooled connection is an HTTP/3 (QUIC) connection.
     /// Mirrors `is_http2()`; used by `can_share()` to apply `Shared` reservation
     /// semantics for both HTTP/2 and HTTP/3 (C-05).
-    fn is_http3(&self) -> bool {
+    const fn is_http3(&self) -> bool {
         match self.tx {
             #[cfg(feature = "http1")]
             PoolTx::Http1(_) => false,
@@ -1184,7 +1189,7 @@ impl<B> PoolClient<B> {
 }
 
 impl<B: Body + 'static> PoolClient<B> {
-    #[allow(clippy::result_large_err)]
+    #[expect(clippy::result_large_err)]
     fn try_send_request(
         &mut self,
         req: Request<B>,
@@ -1370,19 +1375,19 @@ where
     fn reserve(self) -> pool::Reservation<Self> {
         match self.tx {
             #[cfg(feature = "http1")]
-            PoolTx::Http1(tx) => pool::Reservation::Unique(PoolClient {
+            PoolTx::Http1(tx) => pool::Reservation::Unique(Self {
                 conn_info: self.conn_info,
                 tx: PoolTx::Http1(tx),
                 _marker: std::marker::PhantomData,
             }),
             #[cfg(feature = "http2")]
             PoolTx::Http2(tx) => {
-                let b = PoolClient {
+                let b = Self {
                     conn_info: self.conn_info.clone(),
                     tx: PoolTx::Http2(tx.clone()),
                     _marker: std::marker::PhantomData,
                 };
-                let a = PoolClient {
+                let a = Self {
                     conn_info: self.conn_info,
                     tx: PoolTx::Http2(tx),
                     _marker: std::marker::PhantomData,
@@ -1401,7 +1406,7 @@ where
             // retrieval via `close_rx` is T1.9 scope.
             #[cfg(feature = "http3")]
             PoolTx::Http3(conn) => {
-                let b = PoolClient {
+                let b = Self {
                     conn_info: self.conn_info.clone(),
                     tx: PoolTx::Http3(H3Connection {
                         send_request: conn.send_request.clone(),
@@ -1416,7 +1421,7 @@ where
                     }),
                     _marker: std::marker::PhantomData,
                 };
-                let a = PoolClient {
+                let a = Self {
                     conn_info: self.conn_info,
                     tx: PoolTx::Http3(conn),
                     _marker: std::marker::PhantomData,
@@ -1445,15 +1450,21 @@ pub struct ResponseFuture {
     inner: Pin<Box<dyn Future<Output = Result<Response<Incoming>, Error>> + Send>>,
 }
 
+impl fmt::Debug for ResponseFuture {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ResponseFuture").finish_non_exhaustive()
+    }
+}
+
 // ===== impl ResponseFuture =====
 
 impl ResponseFuture {
     #[inline]
-    pub(super) fn new<F>(value: F) -> ResponseFuture
+    pub(super) fn new<F>(value: F) -> Self
     where
         F: Future<Output = Result<Response<Incoming>, Error>> + Send + 'static,
     {
-        ResponseFuture {
+        Self {
             inner: Box::pin(value),
         }
     }
@@ -1475,9 +1486,9 @@ pub struct Builder {
     exec: Exec,
 
     #[cfg(feature = "http1")]
-    h1_builder: conn::http1::Builder,
+    h1: conn::http1::Builder,
     #[cfg(feature = "http2")]
-    h2_builder: conn::http2::Builder<Exec>,
+    h2: conn::http2::Builder<Exec>,
     /// HTTP/3 (QUIC) connector. `Some` when the caller (typically
     /// `Client::build` or a test escape hatch) supplied a `QuicConnector`.
     /// Passed through to `HttpClient` verbatim by `Builder::build`.
@@ -1494,6 +1505,12 @@ pub struct Builder {
     h3_failure_tracker: Option<Arc<H3FailureTracker>>,
     pool_config: pool::Config,
     pool_timer: Option<ArcTimer>,
+}
+
+impl fmt::Debug for Builder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Builder").finish_non_exhaustive()
+    }
 }
 
 // ===== impl Builder =====
@@ -1514,9 +1531,9 @@ impl Builder {
             exec: exec.clone(),
 
             #[cfg(feature = "http1")]
-            h1_builder: conn::http1::Builder::new(),
+            h1: conn::http1::Builder::new(),
             #[cfg(feature = "http2")]
-            h2_builder: conn::http2::Builder::new(exec),
+            h2: conn::http2::Builder::new(exec),
             #[cfg(feature = "http3")]
             h3_connector: None,
             #[cfg(feature = "http3")]
@@ -1550,7 +1567,7 @@ impl Builder {
     ///
     /// Default is `usize::MAX` (no limit).
     #[inline]
-    pub fn pool_max_idle_per_host(mut self, max_idle: usize) -> Self {
+    pub const fn pool_max_idle_per_host(mut self, max_idle: usize) -> Self {
         self.pool_config.max_idle_per_host = max_idle;
         self
     }
@@ -1575,7 +1592,7 @@ impl Builder {
     ///
     /// Default is false.
     #[inline]
-    pub fn http2_only(mut self, val: bool) -> Self {
+    pub const fn http2_only(mut self, val: bool) -> Self {
         self.config.ver = if val { Ver::Http2 } else { Ver::Auto };
         self
     }
@@ -1596,7 +1613,7 @@ impl Builder {
     /// Default is false.
     #[cfg(feature = "http3")]
     #[inline]
-    pub fn http3_only(mut self, val: bool) -> Self {
+    pub const fn http3_only(mut self, val: bool) -> Self {
         self.config.ver = if val { Ver::Http3 } else { Ver::Auto };
         self
     }
@@ -1613,7 +1630,7 @@ impl Builder {
     where
         M: Timer + Send + Sync + 'static,
     {
-        self.h2_builder.timer(timer);
+        self.h2.timer(timer);
         self
     }
 
@@ -1625,7 +1642,7 @@ impl Builder {
         O: Into<Option<Http1Options>>,
     {
         if let Some(opts) = opts.into() {
-            self.h1_builder.options(opts);
+            self.h1.options(opts);
         }
 
         self
@@ -1639,7 +1656,7 @@ impl Builder {
         O: Into<Option<Http2Options>>,
     {
         if let Some(opts) = opts.into() {
-            self.h2_builder.options(opts);
+            self.h2.options(opts);
         }
         self
     }
@@ -1666,7 +1683,7 @@ impl Builder {
     ///
     /// Default is `true`.
     #[inline]
-    pub fn retry_canceled_requests(mut self, val: bool) -> Self {
+    pub const fn retry_canceled_requests(mut self, val: bool) -> Self {
         self.config.retry_canceled_requests = val;
         self
     }
@@ -1678,7 +1695,7 @@ impl Builder {
     ///
     /// Default is `true`.
     #[inline]
-    pub fn set_host(mut self, val: bool) -> Self {
+    pub const fn set_host(mut self, val: bool) -> Self {
         self.config.set_host = val;
         self
     }
@@ -1740,9 +1757,9 @@ impl Builder {
             exec: exec.clone(),
 
             #[cfg(feature = "http1")]
-            h1_builder: self.h1_builder,
+            h1_builder: self.h1,
             #[cfg(feature = "http2")]
-            h2_builder: self.h2_builder,
+            h2_builder: self.h2,
             #[cfg(feature = "http3")]
             h3_connector: self.h3_connector,
             #[cfg(feature = "http3")]

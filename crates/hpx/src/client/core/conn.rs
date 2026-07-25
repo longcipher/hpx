@@ -6,8 +6,8 @@
 //! customize those things externally.
 
 #[cfg(feature = "http1")]
-pub mod http1;
+pub(crate) mod http1;
 #[cfg(feature = "http2")]
-pub mod http2;
+pub(crate) mod http2;
 
-pub use super::dispatch::TrySendError;
+pub(crate) use super::dispatch::TrySendError;

@@ -44,7 +44,7 @@ pub(crate) enum RecvResponseResult {
 /// chunk via [`hpx_h3::client::RequestStream::send_data`]. Trailers are
 /// ignored (Phase 1 scope). After all data frames are consumed, calls
 /// [`hpx_h3::client::RequestStream::finish`] to half-close the send direction.
-#[allow(clippy::result_large_err)]
+#[expect(clippy::result_large_err)]
 pub(crate) async fn send_request_body<B>(
     stream: &mut hpx_h3::client::RequestStream<hpx_h3::quinn::BidiStream<Bytes>, Bytes>,
     body: &mut B,
@@ -93,7 +93,7 @@ where
 ///
 /// On success, returns [`RecvResponseResult::Success`] with the
 /// `Response<()>` from h3 so the caller can collect the body.
-#[allow(clippy::result_large_err)]
+#[expect(clippy::result_large_err)]
 pub(crate) async fn handle_response<B>(
     stream: &mut hpx_h3::client::RequestStream<hpx_h3::quinn::BidiStream<Bytes>, Bytes>,
 ) -> Result<RecvResponseResult, (Error, Option<http::Request<B>>)> {
@@ -131,7 +131,7 @@ pub(crate) async fn handle_response<B>(
             // rather than during `send_request()`. This ensures the error
             // satisfies `is_body()`.
             let h3_err = stream_error_to_h3_error(e);
-            let (mut body_tx, body_rx) =
+            let (body_tx, body_rx) =
                 IncomingBody::new_channel(DecodedLength::CHUNKED, /* wanter = */ false);
             body_tx.send_error(Error::new_body(h3_err));
             let response = http::Response::builder()
@@ -159,7 +159,7 @@ pub(crate) async fn handle_response<B>(
 /// Drains all `recv_data` chunks into a `Vec<Bytes>`, then spawns a task
 /// that delivers them through the channel so the caller can read the body
 /// through the standard [`Body`] API.
-#[allow(clippy::result_large_err)]
+#[expect(clippy::result_large_err)]
 pub(crate) async fn collect_response_body<B>(
     stream: &mut hpx_h3::client::RequestStream<hpx_h3::quinn::BidiStream<Bytes>, Bytes>,
     response: http::Response<()>,
@@ -192,6 +192,6 @@ pub(crate) async fn collect_response_body<B>(
     });
     drop(send_task);
 
-    let response = response.map(|_| body_rx);
+    let response = response.map(|()| body_rx);
     Ok(response)
 }

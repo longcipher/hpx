@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt, io::IoSlice};
+use std::{collections::HashSet, fmt, io::IoSlice};
 
 use bytes::{
     Buf, Bytes,
@@ -51,47 +51,51 @@ enum BufKind<B> {
 }
 
 impl Encoder {
-    fn new(kind: Kind) -> Encoder {
-        Encoder {
+    const fn new(kind: Kind) -> Self {
+        Self {
             kind,
             is_last: false,
         }
     }
-    pub(crate) fn chunked() -> Encoder {
-        Encoder::new(Kind::Chunked(None))
+    pub(crate) const fn chunked() -> Self {
+        Self::new(Kind::Chunked(None))
     }
 
-    pub(crate) fn length(len: u64) -> Encoder {
-        Encoder::new(Kind::Length(len))
+    pub(crate) const fn length(len: u64) -> Self {
+        Self::new(Kind::Length(len))
     }
 
-    pub(crate) fn into_chunked_with_trailing_fields(self, trailers: Vec<HeaderValue>) -> Encoder {
+    pub(crate) fn into_chunked_with_trailing_fields(self, trailers: Vec<HeaderValue>) -> Self {
         match self.kind {
-            Kind::Chunked(_) => Encoder {
+            Kind::Chunked(_) => Self {
                 kind: Kind::Chunked(Some(trailers)),
                 is_last: self.is_last,
             },
-            _ => self,
+            Kind::Length(_) => self,
         }
     }
 
-    pub(crate) fn is_eof(&self) -> bool {
+    pub(crate) const fn is_eof(&self) -> bool {
         matches!(self.kind, Kind::Length(0))
     }
 
-    pub(crate) fn is_last(&self) -> bool {
+    pub(crate) const fn is_last(&self) -> bool {
         self.is_last
     }
 
-    pub(crate) fn is_close_delimited(&self) -> bool {
+    #[expect(
+        clippy::unused_self,
+        reason = "H1 encoder always returns false; method kept for API consistency with H2 encoder"
+    )]
+    pub(crate) const fn is_close_delimited(&self) -> bool {
         false
     }
 
-    pub(crate) fn is_chunked(&self) -> bool {
+    pub(crate) const fn is_chunked(&self) -> bool {
         matches!(self.kind, Kind::Chunked(_))
     }
 
-    pub(crate) fn end<B>(&self) -> Result<Option<EncodedBuf<B>>, NotEof> {
+    pub(crate) const fn end<B>(&self) -> Result<Option<EncodedBuf<B>>, NotEof> {
         match self.kind {
             Kind::Length(0) => Ok(None),
             Kind::Chunked(_) => Ok(Some(EncodedBuf {
@@ -131,6 +135,10 @@ impl Encoder {
         EncodedBuf { kind }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "HeaderMap::into_iter yields Some(name) before any None; cur_name is set on first iteration"
+    )]
     pub(crate) fn encode_trailers<B>(&self, trailers: HeaderMap) -> Option<EncodedBuf<B>> {
         trace!("encoding trailers");
         match &self.kind {
@@ -146,7 +154,7 @@ impl Encoder {
                     }
                     let name = cur_name.as_ref().expect("current header name");
 
-                    if allowed_trailer_field_map.contains_key(name.as_str()) {
+                    if allowed_trailer_field_map.contains(name.as_str()) {
                         if is_valid_trailer_field(name) {
                             allowed_trailers.insert(name, value);
                         } else {
@@ -218,7 +226,7 @@ impl Encoder {
     }
 }
 
-fn is_valid_trailer_field(name: &HeaderName) -> bool {
+const fn is_valid_trailer_field(name: &HeaderName) -> bool {
     !matches!(
         *name,
         AUTHORIZATION
@@ -236,20 +244,20 @@ fn is_valid_trailer_field(name: &HeaderName) -> bool {
     )
 }
 
-fn allowed_trailer_field_map(allowed_trailer_fields: &Vec<HeaderValue>) -> HashMap<String, ()> {
-    let mut trailer_map = HashMap::new();
+fn allowed_trailer_field_map(allowed_trailer_fields: &Vec<HeaderValue>) -> HashSet<String> {
+    let mut trailer_set = HashSet::new();
 
     for header_value in allowed_trailer_fields {
         if let Ok(header_str) = header_value.to_str() {
             let items: Vec<&str> = header_str.split(',').map(|item| item.trim()).collect();
 
             for item in items {
-                trailer_map.entry(item.to_string()).or_insert(());
+                trailer_set.insert(item.to_string());
             }
         }
     }
 
-    trailer_map
+    trailer_set
 }
 
 impl<B> Buf for EncodedBuf<B>
@@ -318,9 +326,13 @@ struct ChunkSize {
 }
 
 impl ChunkSize {
-    fn new(len: usize) -> ChunkSize {
+    #[expect(
+        clippy::expect_used,
+        reason = "writing hex into a fixed-size [u8; CHUNK_SIZE_MAX_BYTES+2] buffer cannot fail"
+    )]
+    fn new(len: usize) -> Self {
         use std::fmt::Write;
-        let mut size = ChunkSize {
+        let mut size = Self {
             bytes: [0; CHUNK_SIZE_MAX_BYTES + 2],
             pos: 0,
             len: 0,
@@ -358,6 +370,10 @@ impl fmt::Debug for ChunkSize {
 }
 
 impl fmt::Write for ChunkSize {
+    #[expect(
+        clippy::expect_used,
+        reason = "write_all into &mut [u8] slice cannot error (infallible I/O on byte slices)"
+    )]
     fn write_str(&mut self, num: &str) -> fmt::Result {
         use std::io::Write;
         (&mut self.bytes[self.len.into()..])
@@ -370,7 +386,7 @@ impl fmt::Write for ChunkSize {
 
 impl<B: Buf> From<B> for EncodedBuf<B> {
     fn from(buf: B) -> Self {
-        EncodedBuf {
+        Self {
             kind: BufKind::Exact(buf),
         }
     }
@@ -378,7 +394,7 @@ impl<B: Buf> From<B> for EncodedBuf<B> {
 
 impl<B: Buf> From<Take<B>> for EncodedBuf<B> {
     fn from(buf: Take<B>) -> Self {
-        EncodedBuf {
+        Self {
             kind: BufKind::Limited(buf),
         }
     }
@@ -386,7 +402,7 @@ impl<B: Buf> From<Take<B>> for EncodedBuf<B> {
 
 impl<B: Buf> From<Chain<Chain<ChunkSize, B>, StaticBuf>> for EncodedBuf<B> {
     fn from(buf: Chain<Chain<ChunkSize, B>, StaticBuf>) -> Self {
-        EncodedBuf {
+        Self {
             kind: BufKind::Chunked(buf),
         }
     }

@@ -1,4 +1,5 @@
 #![deny(warnings)]
+//! Example: connect through a Tor SOCKS5 proxy and verify the exit node.
 
 // This is using the `tokio` runtime. You'll need the following dependency:
 //

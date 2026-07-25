@@ -25,13 +25,13 @@ use crate::{
 };
 
 /// The sender side of an established connection.
-pub struct SendRequest<B> {
+pub(crate) struct SendRequest<B> {
     dispatch: dispatch::UnboundedSender<Request<B>, Response<IncomingBody>>,
 }
 
 impl<B> Clone for SendRequest<B> {
-    fn clone(&self) -> SendRequest<B> {
-        SendRequest {
+    fn clone(&self) -> Self {
+        Self {
             dispatch: self.dispatch.clone(),
         }
     }
@@ -42,7 +42,7 @@ impl<B> Clone for SendRequest<B> {
 /// In most cases, this should just be spawned into an executor, so that it
 /// can process incoming and outgoing messages, notice hangups, and the like.
 #[must_use = "futures do nothing unless polled"]
-pub struct Connection<T, B, E>
+pub(crate) struct Connection<T, B, E>
 where
     T: AsyncRead + AsyncWrite + Unpin,
     B: Body + 'static,
@@ -59,7 +59,7 @@ where
 /// **Note**: The default values of options are *not considered stable*. They
 /// are subject to change at any time.
 #[derive(Clone)]
-pub struct Builder<Ex> {
+pub(crate) struct Builder<Ex> {
     exec: Ex,
     timer: Time,
     opts: Http2Options,
@@ -71,7 +71,7 @@ impl<B> SendRequest<B> {
     /// Polls to determine whether this sender can be used yet for a request.
     ///
     /// If the associated connection is closed, this returns an Error.
-    pub fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<()>> {
+    pub(crate) fn poll_ready(&self, _cx: &mut Context<'_>) -> Poll<Result<()>> {
         if self.is_closed() {
             Poll::Ready(Err(Error::new_closed()))
         } else {
@@ -82,7 +82,7 @@ impl<B> SendRequest<B> {
     /// Waits until the dispatcher is ready
     ///
     /// If the associated connection is closed, this returns an Error.
-    pub async fn ready(&mut self) -> Result<()> {
+    pub(crate) async fn ready(&self) -> Result<()> {
         std::future::poll_fn(|cx| self.poll_ready(cx)).await
     }
 
@@ -93,12 +93,12 @@ impl<B> SendRequest<B> {
     /// This is mostly a hint. Due to inherent latency of networks, it is
     /// possible that even after checking this is ready, sending a request
     /// may still fail because the connection was closed in the meantime.
-    pub fn is_ready(&self) -> bool {
+    pub(crate) fn is_ready(&self) -> bool {
         self.dispatch.is_ready()
     }
 
     /// Checks if the connection side has been closed.
-    pub fn is_closed(&self) -> bool {
+    pub(crate) fn is_closed(&self) -> bool {
         self.dispatch.is_closed()
     }
 }
@@ -115,9 +115,9 @@ where
     ///
     /// If there was an error before trying to serialize the request to the
     /// connection, the message will be returned as part of this error.
-    #[allow(clippy::result_large_err)]
-    pub fn try_send_request(
-        &mut self,
+    #[expect(clippy::result_large_err)]
+    pub(crate) fn try_send_request(
+        &self,
         req: Request<B>,
     ) -> impl Future<Output = std::result::Result<Response<IncomingBody>, TrySendError<Request<B>>>>
     {
@@ -127,8 +127,14 @@ where
                 Ok(rx) => match rx.await {
                     Ok(Ok(res)) => Ok(res),
                     Ok(Err(err)) => Err(err),
-                    // this is definite bug if it happens, but it shouldn't happen!
-                    Err(_) => panic!("dispatch dropped without returning error"),
+                    // The dispatch task dropped its callback sender without
+                    // returning a result. This indicates a bug in the
+                    // connection lifecycle; surface it as a closed-connection
+                    // error rather than panicking.
+                    Err(_) => Err(TrySendError {
+                        error: Error::new_closed().with("dispatch dropped without result"),
+                        message: None,
+                    }),
                 },
                 Err(req) => {
                     debug!("connection was not ready");
@@ -168,7 +174,6 @@ where
     T: AsyncRead + AsyncWrite + Unpin + 'static,
     B: Body + 'static + Unpin,
     B::Data: Send,
-    E: Unpin,
     B::Error: Into<BoxError>,
     E: Http2ClientConnExec<B, T> + Unpin,
 {
@@ -190,8 +195,8 @@ where
 {
     /// Creates a new connection builder.
     #[inline]
-    pub fn new(exec: Ex) -> Builder<Ex> {
-        Builder {
+    pub(crate) fn new(exec: Ex) -> Self {
+        Self {
             exec,
             timer: Time::Empty,
             opts: Default::default(),
@@ -200,7 +205,7 @@ where
 
     /// Provide a timer to execute background HTTP2 tasks.
     #[inline]
-    pub fn timer<M>(&mut self, timer: M)
+    pub(crate) fn timer<M>(&mut self, timer: M)
     where
         M: Timer + Send + Sync + 'static,
     {
@@ -209,7 +214,7 @@ where
 
     /// Provide a options configuration for the HTTP/2 connection.
     #[inline]
-    pub fn options(&mut self, opts: Http2Options) {
+    pub(crate) fn options(&mut self, opts: Http2Options) {
         self.opts = opts;
     }
 
@@ -217,7 +222,10 @@ where
     ///
     /// Note, if [`Connection`] is not `await`-ed, [`SendRequest`] will
     /// do nothing.
-    pub async fn handshake<T, B>(self, io: T) -> Result<(SendRequest<B>, Connection<T, B, Ex>)>
+    pub(crate) async fn handshake<T, B>(
+        self,
+        io: T,
+    ) -> Result<(SendRequest<B>, Connection<T, B, Ex>)>
     where
         T: AsyncRead + AsyncWrite + Unpin,
         B: Body + 'static,

@@ -1,4 +1,4 @@
-#![allow(unused)]
+#![expect(unused)]
 use std::{
     borrow::Cow,
     fmt::{self, Debug, Write as _},
@@ -130,28 +130,28 @@ pub struct TlsConnectorBuilder {
 
 impl TlsConnectorBuilder {
     /// Sets the alpn protocol to be used.
-    #[inline(always)]
+    #[inline]
     pub fn alpn_protocol(mut self, protocol: Option<AlpnProtocol>) -> Self {
         self.alpn_protocol = protocol;
         self
     }
 
     /// Sets the TLS keylog policy.
-    #[inline(always)]
+    #[inline]
     pub fn keylog(mut self, keylog: Option<KeyLog>) -> Self {
         self.keylog = keylog;
         self
     }
 
     /// Sets the identity to be used for client certificate authentication.
-    #[inline(always)]
+    #[inline]
     pub fn identity(mut self, identity: Option<Identity>) -> Self {
         self.identity = identity;
         self
     }
 
     /// Sets the certificate store used for TLS verification.
-    #[inline(always)]
+    #[inline]
     pub fn cert_store<T>(mut self, cert_store: T) -> Self
     where
         T: Into<Option<CertStore>>,
@@ -161,14 +161,14 @@ impl TlsConnectorBuilder {
     }
 
     /// Sets the certificate verification flag.
-    #[inline(always)]
+    #[inline]
     pub fn cert_verification(mut self, enabled: bool) -> Self {
         self.cert_verification = enabled;
         self
     }
 
     /// Sets the minimum TLS version to use.
-    #[inline(always)]
+    #[inline]
     pub fn min_version<T>(mut self, version: T) -> Self
     where
         T: Into<Option<TlsVersion>>,
@@ -178,7 +178,7 @@ impl TlsConnectorBuilder {
     }
 
     /// Sets the maximum TLS version to use.
-    #[inline(always)]
+    #[inline]
     pub fn max_version<T>(mut self, version: T) -> Self
     where
         T: Into<Option<TlsVersion>>,
@@ -188,14 +188,14 @@ impl TlsConnectorBuilder {
     }
 
     /// Sets the Server Name Indication (SNI) flag.
-    #[inline(always)]
+    #[inline]
     pub fn tls_sni(mut self, enabled: bool) -> Self {
         self.tls_sni = enabled;
         self
     }
 
     /// Sets the hostname verification flag.
-    #[inline(always)]
+    #[inline]
     pub fn verify_hostname(mut self, enabled: bool) -> Self {
         self.verify_hostname = enabled;
         self
@@ -558,7 +558,7 @@ impl<T> MaybeHttpsStream<T> {
 }
 
 impl<T> fmt::Debug for MaybeHttpsStream<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             MaybeHttpsStream::Http(..) => f.pad("Http(..)"),
             MaybeHttpsStream::Https(..) => f.pad("Https(..)"),

@@ -1,6 +1,7 @@
 //! Response recovery support for the HTTP client.
 
 use std::{
+    fmt,
     sync::Arc,
     task::{Context, Poll},
 };
@@ -33,8 +34,18 @@ pub struct StatusRecoveryContext {
     original_request: Option<Request<Body>>,
 }
 
+impl fmt::Debug for StatusRecoveryContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StatusRecoveryContext")
+            .field("status", &self.status)
+            .field("headers", &self.headers)
+            .field("body_size", &self.body.len())
+            .finish_non_exhaustive()
+    }
+}
+
 impl StatusRecoveryContext {
-    pub(crate) fn new(
+    pub(crate) const fn new(
         status: StatusCode,
         headers: HeaderMap,
         body: Bytes,
@@ -49,17 +60,17 @@ impl StatusRecoveryContext {
     }
 
     /// Returns the response status being recovered.
-    pub fn status(&self) -> StatusCode {
+    pub const fn status(&self) -> StatusCode {
         self.status
     }
 
     /// Returns the response headers being recovered.
-    pub fn headers(&self) -> &HeaderMap {
+    pub const fn headers(&self) -> &HeaderMap {
         &self.headers
     }
 
     /// Returns the buffered response body.
-    pub fn body(&self) -> &Bytes {
+    pub const fn body(&self) -> &Bytes {
         &self.body
     }
 
@@ -82,10 +93,19 @@ pub struct Recoveries {
     max_body_bytes: usize,
 }
 
+impl fmt::Debug for Recoveries {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Recoveries")
+            .field("hooks_count", &self.hooks.len())
+            .field("max_body_bytes", &self.max_body_bytes)
+            .finish()
+    }
+}
+
 impl Recoveries {
     /// Creates an empty recovery collection.
     #[inline]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             hooks: Vec::new(),
             max_body_bytes: 64 * 1024,
@@ -99,7 +119,7 @@ impl Recoveries {
     }
 
     #[inline]
-    pub(crate) fn is_empty(&self) -> bool {
+    pub(crate) const fn is_empty(&self) -> bool {
         self.hooks.is_empty()
     }
 
@@ -115,7 +135,7 @@ impl Recoveries {
         self.hooks.push(StatusRecoveryEntry { status, hook });
     }
 
-    fn max_body_bytes(&self) -> usize {
+    const fn max_body_bytes(&self) -> usize {
         self.max_body_bytes
     }
 }
@@ -124,6 +144,14 @@ impl Recoveries {
 #[derive(Default)]
 pub struct RecoveriesBuilder {
     recoveries: Recoveries,
+}
+
+impl fmt::Debug for RecoveriesBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RecoveriesBuilder")
+            .field("recoveries", &self.recoveries)
+            .finish()
+    }
 }
 
 impl RecoveriesBuilder {
@@ -139,7 +167,7 @@ impl RecoveriesBuilder {
     }
 
     /// Sets the maximum response body size that will be buffered for recovery.
-    pub fn max_body_bytes(mut self, max_body_bytes: usize) -> Self {
+    pub const fn max_body_bytes(mut self, max_body_bytes: usize) -> Self {
         self.recoveries.max_body_bytes = max_body_bytes;
         self
     }
@@ -158,7 +186,7 @@ pub(crate) struct ResponseRecoveryLayer {
 
 impl ResponseRecoveryLayer {
     /// Creates a new response recovery layer.
-    pub fn new(recoveries: Recoveries) -> Self {
+    pub(crate) fn new(recoveries: Recoveries) -> Self {
         Self {
             recoveries: Arc::new(recoveries),
         }

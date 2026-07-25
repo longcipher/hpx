@@ -153,9 +153,9 @@ impl ReadState {
             0x8 => OpCode::Close,
             0x9 => OpCode::Ping,
             0xA => OpCode::Pong,
-            // This branch is unreachable because ReadState::new only stores
-            // valid OpCode values. If it is reached, it indicates a bug.
-            _ => unreachable!("invalid opcode bits in ReadState"),
+            // ReadState::new only stores valid OpCode values, but fall back to
+            // Binary for any unexpected bits rather than panicking.
+            _ => OpCode::Binary,
         }
     }
 
@@ -321,7 +321,10 @@ impl codec::Decoder for Decoder {
                 Ok(length) => length,
                 Err(_) => return Err(WebSocketError::FrameTooLarge),
             },
-            _ => unreachable!(),
+            // `extra` is only ever 0, 2, or 8 (derived from `length_code`), so
+            // this branch should never be taken. If it ever is, fail gracefully
+            // instead of panicking.
+            _ => return Err(WebSocketError::InvalidFragment),
         };
 
         // Parse optional mask

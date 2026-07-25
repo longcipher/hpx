@@ -8,7 +8,7 @@ use crate::{StatusCode, client::ext::ReasonPhrase, util::Escape};
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// A boxed error type that can be used for dynamic error handling.
-pub type BoxError = Box<dyn StdError + Send + Sync>;
+pub(crate) type BoxError = Box<dyn StdError + Send + Sync>;
 
 /// The Errors that may occur when processing a `Request`.
 ///
@@ -26,11 +26,11 @@ struct Inner {
 }
 
 impl Error {
-    pub(crate) fn new<E>(kind: Kind, source: Option<E>) -> Error
+    pub(crate) fn new<E>(kind: Kind, source: Option<E>) -> Self
     where
         E: Into<BoxError>,
     {
-        Error {
+        Self {
             inner: Box::new(Inner {
                 kind,
                 source: source.map(Into::into),
@@ -39,24 +39,24 @@ impl Error {
         }
     }
 
-    pub(crate) fn builder<E: Into<BoxError>>(e: E) -> Error {
-        Error::new(Kind::Builder, Some(e))
+    pub(crate) fn builder<E: Into<BoxError>>(e: E) -> Self {
+        Self::new(Kind::Builder, Some(e))
     }
 
-    pub(crate) fn body<E: Into<BoxError>>(e: E) -> Error {
-        Error::new(Kind::Body, Some(e))
+    pub(crate) fn body<E: Into<BoxError>>(e: E) -> Self {
+        Self::new(Kind::Body, Some(e))
     }
 
-    pub(crate) fn tls<E: Into<BoxError>>(e: E) -> Error {
-        Error::new(Kind::Tls, Some(e))
+    pub(crate) fn tls<E: Into<BoxError>>(e: E) -> Self {
+        Self::new(Kind::Tls, Some(e))
     }
 
-    pub(crate) fn decode<E: Into<BoxError>>(e: E) -> Error {
-        Error::new(Kind::Decode, Some(e))
+    pub(crate) fn decode<E: Into<BoxError>>(e: E) -> Self {
+        Self::new(Kind::Decode, Some(e))
     }
 
-    pub(crate) fn request<E: Into<BoxError>>(e: E) -> Error {
-        Error::new(Kind::Request, Some(e))
+    pub(crate) fn request<E: Into<BoxError>>(e: E) -> Self {
+        Self::new(Kind::Request, Some(e))
     }
 
     /// Construct a connection-level `Error`. Used by the HTTP/3 connector
@@ -64,62 +64,62 @@ impl Error {
     /// failures such as QUIC handshake errors, idle close, 0-RTT rejection,
     /// connection migration failure, etc. Maps to `Kind::Connect`, which
     /// `is_connect()` reports as `true`.
-    pub(crate) fn connect<E: Into<BoxError>>(e: E) -> Error {
-        Error::new(Kind::Connect, Some(e))
+    pub(crate) fn connect<E: Into<BoxError>>(e: E) -> Self {
+        Self::new(Kind::Connect, Some(e))
     }
 
-    pub(crate) fn redirect<E: Into<BoxError>>(e: E, uri: Uri) -> Error {
-        Error::new(Kind::Redirect, Some(e)).with_uri(uri)
+    pub(crate) fn redirect<E: Into<BoxError>>(e: E, uri: Uri) -> Self {
+        Self::new(Kind::Redirect, Some(e)).with_uri(uri)
     }
 
-    pub(crate) fn upgrade<E: Into<BoxError>>(e: E) -> Error {
-        Error::new(Kind::Upgrade, Some(e))
+    pub(crate) fn upgrade<E: Into<BoxError>>(e: E) -> Self {
+        Self::new(Kind::Upgrade, Some(e))
     }
 
     #[cfg(feature = "ws-yawc")]
-    #[allow(dead_code)] // ponytail: part of error API, used when websocket feature matures
-    pub(crate) fn websocket<E: Into<BoxError>>(e: E) -> Error {
-        Error::new(Kind::WebSocket, Some(e))
+    #[expect(dead_code)] // ponytail: part of error API, used when websocket feature matures
+    pub(crate) fn websocket<E: Into<BoxError>>(e: E) -> Self {
+        Self::new(Kind::WebSocket, Some(e))
     }
 
-    pub(crate) fn status_code(uri: Uri, status: StatusCode, reason: Option<ReasonPhrase>) -> Error {
-        Error::new(Kind::Status(status, reason), None::<Error>).with_uri(uri)
+    pub(crate) fn status_code(uri: Uri, status: StatusCode, reason: Option<ReasonPhrase>) -> Self {
+        Self::new(Kind::Status(status, reason), None::<Self>).with_uri(uri)
     }
 
-    pub(crate) fn uri_bad_scheme(uri: Uri) -> Error {
-        Error::new(Kind::Builder, Some(BadScheme)).with_uri(uri)
+    pub(crate) fn uri_bad_scheme(uri: Uri) -> Self {
+        Self::new(Kind::Builder, Some(BadScheme)).with_uri(uri)
     }
 
-    pub(crate) fn canceled<E: Into<BoxError>>(e: E) -> Error {
-        Error::new(Kind::Canceled, Some(e))
+    pub(crate) fn canceled<E: Into<BoxError>>(e: E) -> Self {
+        Self::new(Kind::Canceled, Some(e))
     }
 
-    pub(crate) fn channel_closed<E: Into<BoxError>>(e: E) -> Error {
-        Error::new(Kind::ChannelClosed, Some(e))
+    pub(crate) fn channel_closed<E: Into<BoxError>>(e: E) -> Self {
+        Self::new(Kind::ChannelClosed, Some(e))
     }
 
-    #[allow(dead_code)] // TODO: wire up when transport layer integration completes
-    pub(crate) fn io<E: Into<BoxError>>(e: E) -> Error {
-        Error::new(Kind::Io, Some(e))
+    #[expect(dead_code)] // TODO: wire up when transport layer integration completes
+    pub(crate) fn io<E: Into<BoxError>>(e: E) -> Self {
+        Self::new(Kind::Io, Some(e))
     }
 
-    #[allow(dead_code)] // TODO: wire up when body streaming integration completes
-    pub(crate) fn body_write<E: Into<BoxError>>(e: E) -> Error {
-        Error::new(Kind::BodyWrite, Some(e))
+    #[expect(dead_code)] // TODO: wire up when body streaming integration completes
+    pub(crate) fn body_write<E: Into<BoxError>>(e: E) -> Self {
+        Self::new(Kind::BodyWrite, Some(e))
     }
 
-    #[allow(dead_code)] // TODO: wire up when graceful shutdown integration completes
-    pub(crate) fn shutdown<E: Into<BoxError>>(e: E) -> Error {
-        Error::new(Kind::Shutdown, Some(e))
+    #[expect(dead_code)] // TODO: wire up when graceful shutdown integration completes
+    pub(crate) fn shutdown<E: Into<BoxError>>(e: E) -> Self {
+        Self::new(Kind::Shutdown, Some(e))
     }
 
-    #[allow(dead_code)] // TODO: wire up when HTTP/2 error integration completes
-    pub(crate) fn http2<E: Into<BoxError>>(e: E) -> Error {
-        Error::new(Kind::Http2, Some(e))
+    #[expect(dead_code)] // TODO: wire up when HTTP/2 error integration completes
+    pub(crate) fn http2<E: Into<BoxError>>(e: E) -> Self {
+        Self::new(Kind::Http2, Some(e))
     }
 
-    pub(crate) fn proxy_connect<E: Into<BoxError>>(e: E) -> Error {
-        Error::new(Kind::ProxyConnect, Some(e))
+    pub(crate) fn proxy_connect<E: Into<BoxError>>(e: E) -> Self {
+        Self::new(Kind::ProxyConnect, Some(e))
     }
 }
 
@@ -302,7 +302,6 @@ impl Error {
     }
 
     #[cfg(feature = "ws-yawc")]
-    #[allow(dead_code)] // ponytail: part of public API, used when websocket feature matures
     /// Returns true if the error is related to WebSocket operations
     pub fn is_websocket(&self) -> bool {
         matches!(self.inner.kind, Kind::WebSocket)
@@ -356,7 +355,7 @@ pub(crate) fn map_timeout_to_request_error(error: BoxError) -> BoxError {
 }
 
 impl fmt::Debug for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("hpx::Error");
 
         builder.field("kind", &self.inner.kind);
@@ -374,7 +373,7 @@ impl fmt::Debug for Error {
 }
 
 impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.inner.kind {
             Kind::Builder => f.write_str("builder error")?,
             Kind::Request => f.write_str("error sending request")?,
@@ -411,7 +410,7 @@ impl fmt::Display for Error {
                     write!(f, "{prefix} ({code})")?;
                 }
             }
-        };
+        }
 
         if let Some(uri) = &self.inner.uri {
             write!(f, " for uri ({})", uri)?;
@@ -434,13 +433,13 @@ impl StdError for Error {
 impl From<crate::client::CoreError> for Error {
     fn from(e: crate::client::CoreError) -> Self {
         if e.is_canceled() {
-            Error::canceled(e)
+            Self::canceled(e)
         } else if e.is_closed() {
-            Error::channel_closed(e)
+            Self::channel_closed(e)
         } else if e.is_timeout() {
-            Error::request(TimedOut)
+            Self::request(TimedOut)
         } else {
-            Error::request(e)
+            Self::request(e)
         }
     }
 }
@@ -448,11 +447,11 @@ impl From<crate::client::CoreError> for Error {
 impl From<crate::client::Error> for Error {
     fn from(e: crate::client::Error) -> Self {
         if e.is_connect() {
-            Error::connect(e)
+            Self::connect(e)
         } else if e.is_proxy_connect() {
-            Error::proxy_connect(e)
+            Self::proxy_connect(e)
         } else {
-            Error::request(e)
+            Self::request(e)
         }
     }
 }
@@ -473,7 +472,7 @@ pub(crate) enum Kind {
     Decode,
     Upgrade,
     #[cfg(feature = "ws-yawc")]
-    #[allow(dead_code)] // ponytail: part of error API, used when websocket feature matures
+    #[expect(dead_code)] // ponytail: part of error API, used when websocket feature matures
     WebSocket,
     // Unified from core::Error
     Canceled,
@@ -498,7 +497,7 @@ pub(crate) struct ProxyConnect(pub(crate) BoxError);
 // ==== impl TimedOut ====
 
 impl fmt::Display for TimedOut {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("operation timed out")
     }
 }
@@ -508,7 +507,7 @@ impl StdError for TimedOut {}
 // ==== impl BadScheme ====
 
 impl fmt::Display for BadScheme {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("URI scheme is not allowed")
     }
 }
@@ -518,7 +517,7 @@ impl StdError for BadScheme {}
 // ==== impl ProxyConnect ====
 
 impl fmt::Display for ProxyConnect {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "proxy connect error: {}", self.0)
     }
 }
@@ -616,29 +615,29 @@ pub enum H3Error {
 impl fmt::Display for H3Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            H3Error::Handshake { source } => {
+            Self::Handshake { source } => {
                 write!(f, "QUIC handshake failed: {source:?}")
             }
-            H3Error::Framing { source } => write!(f, "HTTP/3 framing error: {source}"),
-            H3Error::StreamReset { code, stream_id } => {
+            Self::Framing { source } => write!(f, "HTTP/3 framing error: {source}"),
+            Self::StreamReset { code, stream_id } => {
                 write!(
                     f,
                     "HTTP/3 stream reset (code={code:#x}, stream={stream_id})"
                 )
             }
-            H3Error::IdleClose => write!(f, "HTTP/3 connection closed while idle"),
-            H3Error::ZeroRttRejected => write!(f, "HTTP/3 0-RTT rejected"),
-            H3Error::MigrationFailed => write!(f, "HTTP/3 connection migration failed"),
-            H3Error::VersionNegotiationFailed => {
+            Self::IdleClose => write!(f, "HTTP/3 connection closed while idle"),
+            Self::ZeroRttRejected => write!(f, "HTTP/3 0-RTT rejected"),
+            Self::MigrationFailed => write!(f, "HTTP/3 connection migration failed"),
+            Self::VersionNegotiationFailed => {
                 write!(f, "HTTP/3 version negotiation failed")
             }
-            H3Error::FlowControl => write!(f, "HTTP/3 flow control error"),
-            H3Error::MaxConcurrentStreamsExceeded => {
+            Self::FlowControl => write!(f, "HTTP/3 flow control error"),
+            Self::MaxConcurrentStreamsExceeded => {
                 write!(f, "HTTP/3 max concurrent streams exceeded")
             }
-            H3Error::GoAwayDrained => write!(f, "HTTP/3 connection drained (GOAWAY)"),
-            H3Error::AltSvcUnreachable => write!(f, "HTTP/3 Alt-Svc unreachable"),
-            H3Error::Other(err) => write!(f, "HTTP/3 connector error: {err}"),
+            Self::GoAwayDrained => write!(f, "HTTP/3 connection drained (GOAWAY)"),
+            Self::AltSvcUnreachable => write!(f, "HTTP/3 Alt-Svc unreachable"),
+            Self::Other(err) => write!(f, "HTTP/3 connector error: {err}"),
         }
     }
 }
@@ -647,19 +646,19 @@ impl fmt::Display for H3Error {
 impl StdError for H3Error {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
-            H3Error::Handshake { source } => Some(source),
-            H3Error::Framing { source } => Some(source),
-            H3Error::Other(err) => Some(&**err),
+            Self::Handshake { source } => Some(source),
+            Self::Framing { source } => Some(source),
+            Self::Other(err) => Some(&**err),
             // The remaining variants carry no inner error.
-            H3Error::StreamReset { .. }
-            | H3Error::IdleClose
-            | H3Error::ZeroRttRejected
-            | H3Error::MigrationFailed
-            | H3Error::VersionNegotiationFailed
-            | H3Error::FlowControl
-            | H3Error::MaxConcurrentStreamsExceeded
-            | H3Error::GoAwayDrained
-            | H3Error::AltSvcUnreachable => None,
+            Self::StreamReset { .. }
+            | Self::IdleClose
+            | Self::ZeroRttRejected
+            | Self::MigrationFailed
+            | Self::VersionNegotiationFailed
+            | Self::FlowControl
+            | Self::MaxConcurrentStreamsExceeded
+            | Self::GoAwayDrained
+            | Self::AltSvcUnreachable => None,
         }
     }
 }
@@ -667,23 +666,23 @@ impl StdError for H3Error {
 #[cfg(feature = "http3")]
 impl H3Error {
     /// Check if this error is a STOP_SENDING (stream reset) with a specific error code.
-    #[allow(dead_code)] // HTTP/3 error classification helper; wired in by future tasks.
-    pub(crate) fn is_stop_sending(&self, code: u64) -> bool {
-        matches!(self, H3Error::StreamReset { code: c, .. } if *c == code)
+    #[expect(dead_code)] // HTTP/3 error classification helper; wired in by future tasks.
+    pub(crate) const fn is_stop_sending(&self, code: u64) -> bool {
+        matches!(self, Self::StreamReset { code: c, .. } if *c == code)
     }
 }
 
 #[cfg(feature = "http3")]
 impl From<quinn::ConnectError> for H3Error {
     fn from(err: quinn::ConnectError) -> Self {
-        H3Error::Other(Box::new(err))
+        Self::Other(Box::new(err))
     }
 }
 
 #[cfg(feature = "http3")]
 impl From<Box<dyn StdError + Send + Sync>> for H3Error {
     fn from(err: Box<dyn StdError + Send + Sync>) -> Self {
-        H3Error::Other(err)
+        Self::Other(err)
     }
 }
 
@@ -694,7 +693,7 @@ impl From<Box<dyn StdError + Send + Sync>> for H3Error {
 /// comment for the full mapping table.
 #[cfg(feature = "http3")]
 impl From<H3Error> for Error {
-    fn from(err: H3Error) -> Error {
+    fn from(err: H3Error) -> Self {
         match err {
             H3Error::Handshake { .. }
             | H3Error::IdleClose
@@ -702,12 +701,12 @@ impl From<H3Error> for Error {
             | H3Error::MigrationFailed
             | H3Error::VersionNegotiationFailed
             | H3Error::GoAwayDrained
-            | H3Error::AltSvcUnreachable => Error::new(Kind::Connect, Some(err)),
+            | H3Error::AltSvcUnreachable => Self::new(Kind::Connect, Some(err)),
             H3Error::Framing { .. } | H3Error::MaxConcurrentStreamsExceeded => {
-                Error::new(Kind::Request, Some(err))
+                Self::new(Kind::Request, Some(err))
             }
-            H3Error::StreamReset { .. } | H3Error::FlowControl => Error::new(Kind::Body, Some(err)),
-            H3Error::Other(_) => Error::new(Kind::Request, Some(err)),
+            H3Error::StreamReset { .. } | H3Error::FlowControl => Self::new(Kind::Body, Some(err)),
+            H3Error::Other(_) => Self::new(Kind::Request, Some(err)),
         }
     }
 }

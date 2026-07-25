@@ -35,13 +35,13 @@ pin_project! {
 
 /// Layer to apply [`CookieService`] middleware.
 #[derive(Clone)]
-pub struct CookieServiceLayer {
+pub(crate) struct CookieServiceLayer {
     store: RequestConfig<Arc<dyn CookieStore>>,
 }
 
 /// Middleware to use [`CookieStore`].
 #[derive(Clone)]
-pub struct CookieService<S> {
+pub(crate) struct CookieService<S> {
     inner: S,
     store: RequestConfig<Arc<dyn CookieStore>>,
 }
@@ -78,8 +78,8 @@ where
 
 impl CookieServiceLayer {
     /// Create a new [`CookieServiceLayer`].
-    #[inline(always)]
-    pub const fn new(store: Option<Arc<dyn CookieStore + 'static>>) -> Self {
+    #[inline]
+    pub(crate) const fn new(store: Option<Arc<dyn CookieStore + 'static>>) -> Self {
         Self {
             store: RequestConfig::new(store),
         }
@@ -89,7 +89,7 @@ impl CookieServiceLayer {
 impl<S> Layer<S> for CookieServiceLayer {
     type Service = CookieService<S>;
 
-    #[inline(always)]
+    #[inline]
     fn layer(&self, inner: S) -> Self::Service {
         CookieService {
             inner,
@@ -102,7 +102,6 @@ impl<S> Layer<S> for CookieServiceLayer {
 
 impl<S> CookieService<S> {
     fn inject_cookies<B>(
-        &self,
         req: &mut Request<B>,
         store: Arc<dyn CookieStore>,
     ) -> (Arc<dyn CookieStore>, Uri) {
@@ -136,7 +135,7 @@ where
     type Error = S::Error;
     type Future = ResponseFuture<S::Future>;
 
-    #[inline(always)]
+    #[inline]
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
@@ -146,7 +145,7 @@ where
             .store
             .fetch(req.extensions())
             .cloned()
-            .map(|store| self.inject_cookies(&mut req, store))
+            .map(|store| Self::inject_cookies(&mut req, store))
         {
             Some((store, uri)) => ResponseFuture::Managed {
                 uri,

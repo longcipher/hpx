@@ -72,7 +72,7 @@ impl AsyncRead for Conn {
     #[inline]
     fn poll_read(
         self: Pin<&mut Self>,
-        cx: &mut Context,
+        cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         AsyncRead::poll_read(self.project().inner, cx, buf)
@@ -83,7 +83,7 @@ impl AsyncWrite for Conn {
     #[inline]
     fn poll_write(
         self: Pin<&mut Self>,
-        cx: &mut Context,
+        cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
         AsyncWrite::poll_write(self.project().inner, cx, buf)
@@ -104,12 +104,12 @@ impl AsyncWrite for Conn {
     }
 
     #[inline]
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         AsyncWrite::poll_flush(self.project().inner, cx)
     }
 
     #[inline]
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         AsyncWrite::poll_shutdown(self.project().inner, cx)
     }
 }
@@ -121,8 +121,8 @@ where
     T: AsyncRead + AsyncWrite + Unpin,
 {
     /// Creates a new `TlsConn` wrapping the provided `TlsStream`.
-    #[inline(always)]
-    pub fn new(inner: TlsStream<T>) -> Self {
+    #[inline]
+    pub(super) const fn new(inner: TlsStream<T>) -> Self {
         Self { inner }
     }
 }
@@ -301,7 +301,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> AsyncRead for TlsConn<T> {
     #[inline]
     fn poll_read(
         self: Pin<&mut Self>,
-        cx: &mut Context,
+        cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<tokio::io::Result<()>> {
         AsyncRead::poll_read(self.project().inner, cx, buf)
@@ -312,7 +312,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> AsyncWrite for TlsConn<T> {
     #[inline]
     fn poll_write(
         self: Pin<&mut Self>,
-        cx: &mut Context,
+        cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, tokio::io::Error>> {
         AsyncWrite::poll_write(self.project().inner, cx, buf)
@@ -333,12 +333,18 @@ impl<T: AsyncRead + AsyncWrite + Unpin> AsyncWrite for TlsConn<T> {
     }
 
     #[inline]
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), tokio::io::Error>> {
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), tokio::io::Error>> {
         AsyncWrite::poll_flush(self.project().inner, cx)
     }
 
     #[inline]
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), tokio::io::Error>> {
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), tokio::io::Error>> {
         AsyncWrite::poll_shutdown(self.project().inner, cx)
     }
 }

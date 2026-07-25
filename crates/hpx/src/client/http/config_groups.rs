@@ -16,7 +16,7 @@ use crate::{
 /// the client converts it to the richer [`HttpVersionPref`](super::HttpVersionPref)
 /// which additionally carries an `Http3` variant (set via
 /// [`ClientBuilder::http3_only()`](crate::ClientBuilder::http3_only)).
-#[derive(Clone, Copy, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Default, Eq, PartialEq, Debug)]
 pub enum HttpVersionPreference {
     /// Only negotiate HTTP/1.
     Http1,
@@ -30,7 +30,7 @@ pub enum HttpVersionPreference {
 /// Reusable transport-layer settings for a [`crate::ClientBuilder`].
 /// Applying a grouped config replaces the current transport group on the builder.
 #[must_use]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 
 pub struct TransportConfigOptions {
     pub(crate) connect_timeout: Option<Duration>,
@@ -84,19 +84,19 @@ impl TransportConfigOptions {
     }
 
     /// Enable or disable verbose transport logging.
-    pub fn connection_verbose(mut self, verbose: bool) -> Self {
+    pub const fn connection_verbose(mut self, verbose: bool) -> Self {
         self.connection_verbose = verbose;
         self
     }
 
     /// Set whether sockets use `TCP_NODELAY`.
-    pub fn tcp_nodelay(mut self, enabled: bool) -> Self {
+    pub const fn tcp_nodelay(mut self, enabled: bool) -> Self {
         self.tcp_nodelay = enabled;
         self
     }
 
     /// Set whether sockets use `SO_REUSEADDR`.
-    pub fn tcp_reuse_address(mut self, enabled: bool) -> Self {
+    pub const fn tcp_reuse_address(mut self, enabled: bool) -> Self {
         self.tcp_reuse_address = enabled;
         self
     }
@@ -178,7 +178,7 @@ impl TransportConfigOptions {
 
 /// Reusable connection-pool settings for a [`crate::ClientBuilder`].
 #[must_use]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 
 pub struct PoolConfigOptions {
     pub(crate) idle_timeout: Option<Duration>,
@@ -212,7 +212,7 @@ impl PoolConfigOptions {
     }
 
     /// Set the maximum idle connections per host.
-    pub fn max_idle_per_host(mut self, max: usize) -> Self {
+    pub const fn max_idle_per_host(mut self, max: usize) -> Self {
         self.max_idle_per_host = max;
         self
     }
@@ -226,7 +226,7 @@ impl PoolConfigOptions {
 
 /// Reusable TLS settings for a [`crate::ClientBuilder`].
 #[must_use]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 
 pub struct TlsConfigOptions {
     pub(crate) keylog: Option<KeyLog>,
@@ -275,43 +275,43 @@ impl TlsConfigOptions {
     }
 
     /// Enable or disable certificate verification.
-    pub fn cert_verification(mut self, enabled: bool) -> Self {
+    pub const fn cert_verification(mut self, enabled: bool) -> Self {
         self.cert_verification = enabled;
         self
     }
 
     /// Enable or disable hostname verification.
-    pub fn verify_hostname(mut self, enabled: bool) -> Self {
+    pub const fn verify_hostname(mut self, enabled: bool) -> Self {
         self.verify_hostname = enabled;
         self
     }
 
     /// Enable or disable SNI.
-    pub fn tls_sni(mut self, enabled: bool) -> Self {
+    pub const fn tls_sni(mut self, enabled: bool) -> Self {
         self.tls_sni = enabled;
         self
     }
 
     /// Enable TLS info extensions on responses.
-    pub fn tls_info(mut self, enabled: bool) -> Self {
+    pub const fn tls_info(mut self, enabled: bool) -> Self {
         self.tls_info = enabled;
         self
     }
 
     /// Configure TLS key logging.
-    pub fn keylog(mut self, keylog: KeyLog) -> Self {
+    pub const fn keylog(mut self, keylog: KeyLog) -> Self {
         self.keylog = Some(keylog);
         self
     }
 
     /// Set the minimum TLS version.
-    pub fn min_tls_version(mut self, version: TlsVersion) -> Self {
+    pub const fn min_tls_version(mut self, version: TlsVersion) -> Self {
         self.min_version = Some(version);
         self
     }
 
     /// Set the maximum TLS version.
-    pub fn max_tls_version(mut self, version: TlsVersion) -> Self {
+    pub const fn max_tls_version(mut self, version: TlsVersion) -> Self {
         self.max_version = Some(version);
         self
     }
@@ -319,7 +319,7 @@ impl TlsConfigOptions {
 
 /// Reusable HTTP protocol settings for a [`crate::ClientBuilder`].
 #[must_use]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 
 pub struct ProtocolConfigOptions {
     pub(crate) http_version_preference: HttpVersionPreference,
@@ -352,13 +352,13 @@ impl ProtocolConfigOptions {
     }
 
     /// Set the preferred HTTP version.
-    pub fn http_version_preference(mut self, preference: HttpVersionPreference) -> Self {
+    pub const fn http_version_preference(mut self, preference: HttpVersionPreference) -> Self {
         self.http_version_preference = preference;
         self
     }
 
     /// Restrict the client to HTTPS requests only.
-    pub fn https_only(mut self, enabled: bool) -> Self {
+    pub const fn https_only(mut self, enabled: bool) -> Self {
         self.https_only = enabled;
         self
     }
@@ -376,13 +376,13 @@ impl ProtocolConfigOptions {
     }
 
     /// Enable or disable automatic referer propagation.
-    pub fn referer(mut self, enabled: bool) -> Self {
+    pub const fn referer(mut self, enabled: bool) -> Self {
         self.referer = enabled;
         self
     }
 
     /// Replace the grouped timeout settings.
-    pub fn timeout_options(mut self, options: TimeoutOptions) -> Self {
+    pub const fn timeout_options(mut self, options: TimeoutOptions) -> Self {
         self.timeout_options = options;
         self
     }
@@ -396,7 +396,7 @@ impl ProtocolConfigOptions {
 
 /// Reusable proxy settings for a [`crate::ClientBuilder`].
 #[must_use]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 
 pub struct ProxyConfigOptions {
     pub(crate) proxies: Vec<Proxy>,
@@ -411,7 +411,7 @@ impl Default for ProxyConfigOptions {
 
 impl ProxyConfigOptions {
     /// Create a proxy config with the client defaults.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             proxies: Vec::new(),
             auto_system_proxy: true,
@@ -419,7 +419,7 @@ impl ProxyConfigOptions {
     }
 
     /// Enable or disable automatic system proxy detection.
-    pub fn system_proxy(mut self, enabled: bool) -> Self {
+    pub const fn system_proxy(mut self, enabled: bool) -> Self {
         self.auto_system_proxy = enabled;
         self
     }

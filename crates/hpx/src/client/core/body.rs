@@ -20,14 +20,15 @@
 mod incoming;
 mod length;
 
-#[allow(unused_imports)]
-pub(crate) use self::incoming::{Incoming, Sender};
-pub(crate) use self::length::DecodedLength;
+pub(crate) use self::{
+    incoming::{Incoming, Sender},
+    length::DecodedLength,
+};
 
-fn _assert_send_sync() {
-    fn _assert_send<T: Send>() {}
-    fn _assert_sync<T: Sync>() {}
+const fn _assert_send_sync() {
+    const fn assert_send<T: Send>() {}
+    const fn assert_sync<T: Sync>() {}
 
-    _assert_send::<Incoming>();
-    _assert_sync::<Incoming>();
+    assert_send::<Incoming>();
+    assert_sync::<Incoming>();
 }

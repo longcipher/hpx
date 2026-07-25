@@ -35,7 +35,7 @@ use crate::{
 /// Sets the [`HttpInfo`] value on responses, which includes
 /// transport information such as the remote socket address used.
 #[derive(Clone)]
-pub struct HttpConnector<R = GaiResolver> {
+pub(crate) struct HttpConnector<R = GaiResolver> {
     config: Arc<Config>,
     resolver: R,
 }
@@ -61,7 +61,7 @@ pub struct HttpConnector<R = GaiResolver> {
 /// this value will not exist in the extensions. Consult that specific
 /// connector to see what "extra" information it might provide to responses.
 #[derive(Clone, Debug)]
-pub struct HttpInfo {
+pub(crate) struct HttpInfo {
     remote_addr: SocketAddr,
     local_addr: SocketAddr,
 }
@@ -158,7 +158,7 @@ impl TcpConnectOptions {
 
         #[cfg(not(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))]
         {
-            self.interface = std::ffi::CString::new(interface.into().into_owned()).ok()
+            self.interface = std::ffi::CString::new(interface.into().into_owned()).ok();
         }
 
         self
@@ -170,7 +170,7 @@ impl TcpConnectOptions {
     ///
     /// Default is `None`.
     #[inline]
-    pub fn set_local_address(&mut self, local_addr: Option<IpAddr>) {
+    pub const fn set_local_address(&mut self, local_addr: Option<IpAddr>) {
         match local_addr {
             Some(IpAddr::V4(a)) => {
                 self.local_ipv4 = Some(a);
@@ -179,7 +179,7 @@ impl TcpConnectOptions {
                 self.local_ipv6 = Some(a);
             }
             _ => {}
-        };
+        }
     }
 
     /// Set that all sockets are bound to the configured IPv4 or IPv6 address (depending on host's
@@ -200,7 +200,7 @@ struct Config {
     connect_timeout: Option<Duration>,
     enforce_http: bool,
     happy_eyeballs_timeout: Option<Duration>,
-    tcp_keepalive_config: TcpKeepaliveConfig,
+    tcp_keepalive: TcpKeepaliveConfig,
     tcp_connect_options: TcpConnectOptions,
     nodelay: bool,
     reuse_address: bool,
@@ -251,12 +251,12 @@ struct TcpKeepaliveConfig {
 
 impl TcpKeepaliveConfig {
     /// Converts into a `socket2::TcpKeepalive` if there is any keep alive configuration.
-    fn into_tcpkeepalive(self) -> Option<TcpKeepalive> {
+    const fn into_tcpkeepalive(self) -> Option<TcpKeepalive> {
         let mut dirty = false;
         let mut ka = TcpKeepalive::new();
         if let Some(time) = self.time {
             ka = ka.with_time(time);
-            dirty = true
+            dirty = true;
         }
 
         // Set the value of the `TCP_KEEPINTVL` option. On Windows, this sets the
@@ -285,8 +285,8 @@ impl TcpKeepaliveConfig {
         {
             if let Some(interval) = self.interval {
                 dirty = true;
-                ka = ka.with_interval(interval)
-            };
+                ka = ka.with_interval(interval);
+            }
         }
 
         // Set the value of the `TCP_KEEPCNT` option.
@@ -311,7 +311,7 @@ impl TcpKeepaliveConfig {
         ))]
         if let Some(retries) = self.retries {
             dirty = true;
-            ka = ka.with_retries(retries)
+            ka = ka.with_retries(retries);
         };
 
         if dirty { Some(ka) } else { None }
@@ -328,20 +328,20 @@ impl Default for HttpConnector {
 
 impl HttpConnector {
     /// Construct a new HttpConnector.
-    pub fn new() -> HttpConnector {
-        HttpConnector::new_with_resolver(GaiResolver::new())
+    pub(crate) fn new() -> Self {
+        Self::new_with_resolver(GaiResolver::new())
     }
 }
 
 impl<R> HttpConnector<R> {
     /// Construct a new [`HttpConnector`].
-    pub fn new_with_resolver(resolver: R) -> HttpConnector<R> {
-        HttpConnector {
+    pub(crate) fn new_with_resolver(resolver: R) -> Self {
+        Self {
             config: Arc::new(Config {
                 connect_timeout: None,
                 enforce_http: true,
                 happy_eyeballs_timeout: Some(Duration::from_millis(300)),
-                tcp_keepalive_config: TcpKeepaliveConfig::default(),
+                tcp_keepalive: TcpKeepaliveConfig::default(),
                 tcp_connect_options: TcpConnectOptions::default(),
                 nodelay: false,
                 reuse_address: false,
@@ -358,7 +358,7 @@ impl<R> HttpConnector<R> {
     ///
     /// Enabled by default.
     #[inline]
-    pub fn enforce_http(&mut self, is_enforced: bool) {
+    pub(crate) fn enforce_http(&mut self, is_enforced: bool) {
         self.config_mut().enforce_http = is_enforced;
     }
 
@@ -369,47 +369,47 @@ impl<R> HttpConnector<R> {
     ///
     /// Default is `None`.
     #[inline]
-    pub fn set_keepalive(&mut self, time: Option<Duration>) {
-        self.config_mut().tcp_keepalive_config.time = time;
+    pub(crate) fn set_keepalive(&mut self, time: Option<Duration>) {
+        self.config_mut().tcp_keepalive.time = time;
     }
 
     /// Set the duration between two successive TCP keepalive retransmissions,
     /// if acknowledgement to the previous keepalive transmission is not received.
     #[inline]
-    pub fn set_keepalive_interval(&mut self, interval: Option<Duration>) {
-        self.config_mut().tcp_keepalive_config.interval = interval;
+    pub(crate) fn set_keepalive_interval(&mut self, interval: Option<Duration>) {
+        self.config_mut().tcp_keepalive.interval = interval;
     }
 
     /// Set the number of retransmissions to be carried out before declaring that remote end is not
     /// available.
     #[inline]
-    pub fn set_keepalive_retries(&mut self, retries: Option<u32>) {
-        self.config_mut().tcp_keepalive_config.retries = retries;
+    pub(crate) fn set_keepalive_retries(&mut self, retries: Option<u32>) {
+        self.config_mut().tcp_keepalive.retries = retries;
     }
 
     /// Set that all sockets have `SO_NODELAY` set to the supplied value `nodelay`.
     ///
     /// Default is `false`.
     #[inline]
-    pub fn set_nodelay(&mut self, nodelay: bool) {
+    pub(crate) fn set_nodelay(&mut self, nodelay: bool) {
         self.config_mut().nodelay = nodelay;
     }
 
     /// Sets the value of the SO_SNDBUF option on the socket.
     #[inline]
-    pub fn set_send_buffer_size(&mut self, size: Option<usize>) {
+    pub(crate) fn set_send_buffer_size(&mut self, size: Option<usize>) {
         self.config_mut().send_buffer_size = size;
     }
 
     /// Sets the value of the SO_RCVBUF option on the socket.
     #[inline]
-    pub fn set_recv_buffer_size(&mut self, size: Option<usize>) {
+    pub(crate) fn set_recv_buffer_size(&mut self, size: Option<usize>) {
         self.config_mut().recv_buffer_size = size;
     }
 
     /// Set the connect options to be used when connecting.
     #[inline]
-    pub fn set_connect_options(&mut self, opts: TcpConnectOptions) {
+    pub(crate) fn set_connect_options(&mut self, opts: TcpConnectOptions) {
         let this = self.config_mut();
 
         #[cfg(any(
@@ -446,7 +446,7 @@ impl<R> HttpConnector<R> {
     ///
     /// Default is `None`.
     #[inline]
-    pub fn set_connect_timeout(&mut self, dur: Option<Duration>) {
+    pub(crate) fn set_connect_timeout(&mut self, dur: Option<Duration>) {
         self.config_mut().connect_timeout = dur;
     }
 
@@ -463,7 +463,7 @@ impl<R> HttpConnector<R> {
     ///
     /// [RFC 6555]: https://tools.ietf.org/html/rfc6555
     #[inline]
-    pub fn set_happy_eyeballs_timeout(&mut self, dur: Option<Duration>) {
+    pub(crate) fn set_happy_eyeballs_timeout(&mut self, dur: Option<Duration>) {
         self.config_mut().happy_eyeballs_timeout = dur;
     }
 
@@ -471,7 +471,7 @@ impl<R> HttpConnector<R> {
     ///
     /// Default is `false`.
     #[inline]
-    pub fn set_reuse_address(&mut self, reuse_address: bool) -> &mut Self {
+    pub(crate) fn set_reuse_address(&mut self, reuse_address: bool) -> &mut Self {
         self.config_mut().reuse_address = reuse_address;
         self
     }
@@ -630,12 +630,12 @@ impl Connection for TcpStream {
 
 impl HttpInfo {
     /// Get the remote address of the transport used.
-    pub fn remote_addr(&self) -> SocketAddr {
+    pub(crate) const fn remote_addr(&self) -> SocketAddr {
         self.remote_addr
     }
 
     /// Get the local address of the transport used.
-    pub fn local_addr(&self) -> SocketAddr {
+    pub(crate) const fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
 }
@@ -647,7 +647,7 @@ pin_project! {
     // so that users don't rely on it fitting in a `Pin<Box<dyn Future>>` slot
     // (and thus we can change the type in the future).
     #[must_use = "futures do nothing unless polled"]
-    pub struct HttpConnecting<R> {
+    pub(crate) struct HttpConnecting<R> {
         #[pin]
         fut: BoxConnecting,
         _marker: PhantomData<R>,
@@ -666,36 +666,36 @@ impl<R: InternalResolve> Future for HttpConnecting<R> {
 }
 
 // Not publicly exported (so missing_docs doesn't trigger).
-pub struct ConnectError {
+pub(crate) struct ConnectError {
     msg: &'static str,
     addr: Option<SocketAddr>,
     cause: Option<BoxError>,
 }
 
 impl ConnectError {
-    fn new<E>(msg: &'static str, cause: E) -> ConnectError
+    fn new<E>(msg: &'static str, cause: E) -> Self
     where
         E: Into<BoxError>,
     {
-        ConnectError {
+        Self {
             msg,
             addr: None,
             cause: Some(cause.into()),
         }
     }
 
-    fn dns<E>(cause: E) -> ConnectError
+    fn dns<E>(cause: E) -> Self
     where
         E: Into<BoxError>,
     {
-        ConnectError::new("dns error", cause)
+        Self::new("dns error", cause)
     }
 
-    fn m<E>(msg: &'static str) -> impl FnOnce(E) -> ConnectError
+    fn m<E>(msg: &'static str) -> impl FnOnce(E) -> Self
     where
         E: Into<BoxError>,
     {
-        move |cause| ConnectError::new(msg, cause)
+        move |cause| Self::new(msg, cause)
     }
 }
 
@@ -789,7 +789,7 @@ impl ConnectingTcpRemote {
     async fn connect(&mut self, config: &Config) -> Result<TcpStream, ConnectError> {
         let mut err = None;
         for addr in &mut self.addrs {
-            eprintln!(
+            debug!(
                 "HTTP Connect: trying addr {addr} timeout={:?}",
                 self.connect_timeout
             );
@@ -867,7 +867,7 @@ fn connect(
         .set_nonblocking(true)
         .map_err(ConnectError::m("tcp set_nonblocking error"))?;
 
-    if let Some(tcp_keepalive) = &config.tcp_keepalive_config.into_tcpkeepalive()
+    if let Some(tcp_keepalive) = &config.tcp_keepalive.into_tcpkeepalive()
         && let Err(_e) = socket.set_tcp_keepalive(tcp_keepalive)
     {
         warn!("tcp set_keepalive error: {_e}");
@@ -908,7 +908,11 @@ fn connect(
             target_os = "watchos",
         ))]
         {
-            #[allow(unsafe_code)]
+            #[expect(unsafe_code)]
+            // SAFETY: `interface.as_ptr()` yields a valid NUL-terminated C string
+            // borrowed from a live `CString`; `libc::if_nametoindex` is a plain
+            // FFI read that does not retain the pointer or have aliasing
+            // requirements. The call is safe for any well-formed C string.
             let idx = unsafe { libc::if_nametoindex(interface.as_ptr()) };
             let idx = std::num::NonZeroU32::new(idx).ok_or_else(|| {
                 // If the index is 0, check errno and return an I/O error.
@@ -1020,8 +1024,8 @@ impl ConnectingTcp<'_> {
 /// Respect explicit ports in the URI, if none, either
 /// keep non `0` ports resolved from a custom dns resolver,
 /// or use the default port for the scheme.
-fn set_port(addr: &mut SocketAddr, host_port: u16, explicit: bool) {
+const fn set_port(addr: &mut SocketAddr, host_port: u16, explicit: bool) {
     if explicit || addr.port() == 0 {
-        addr.set_port(host_port)
-    };
+        addr.set_port(host_port);
+    }
 }

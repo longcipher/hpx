@@ -59,16 +59,13 @@ pub(crate) async fn handle_fetch(config: FetchConfig) -> eyre::Result<()> {
         eprintln!("fetch: {url} (dump={dump:?}, wait={wait}s, timeout={timeout}s)");
     }
 
-    // Process-level hard deadline: exit(124) after timeout + wait + 10s.
+    // Hard deadline: use tokio::time::timeout so Drop runs normally on timeout.
     // ponytail: HPX_CDP_COMMAND_TIMEOUT_MS and HPX_SCRIPT_DEADLINE_MS
     // not yet wired to browser config. Add when CDP command timeout is implemented.
-    let deadline_secs = timeout + wait + 10;
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_secs(deadline_secs));
-        std::process::exit(124);
-    });
+    let deadline = Duration::from_secs(timeout + wait + 10);
 
-    // Original format: short-circuit browser, use raw HTTP client.
+    let outcome = tokio::time::timeout(deadline, async {
+        // Original format: short-circuit browser, use raw HTTP client.
     if dump == DumpFormat::Original {
         // SSRF check — reject private/special-use IPs unless explicitly allowed.
         // Uses DNS resolution to prevent DNS rebinding attacks.
@@ -89,13 +86,12 @@ pub(crate) async fn handle_fetch(config: FetchConfig) -> eyre::Result<()> {
         return Ok(());
     }
 
-    // ponytail: selector wait requires JS engine (v8). Ignored for now.
-    if selector.is_some() && !quiet {
-        eprintln!("warning: --selector requires v8, ignoring");
+    // --selector/--eval require v8 feature, which is not enabled in this build.
+    if selector.is_some() {
+        eyre::bail!("--selector requires v8 feature, which is not enabled in this build");
     }
-    // ponytail: eval requires JS engine (v8). Ignored for now.
-    if eval.is_some() && !quiet {
-        eprintln!("warning: --eval requires v8, ignoring");
+    if eval.is_some() {
+        eyre::bail!("--eval requires v8 feature, which is not enabled in this build");
     }
     // ponytail: wait_until is not yet wired to Page::navigate. Ignored.
     let _ = wait_until;
@@ -144,13 +140,17 @@ pub(crate) async fn handle_fetch(config: FetchConfig) -> eyre::Result<()> {
                 }
                 DumpFormat::Markdown => {
                     // ponytail: markdown conversion pending Task 4.4
-                    page.content().to_string()
+                    return Err(eyre::eyre!("--dump markdown is not yet implemented"));
                 }
                 DumpFormat::Cookies => {
                     // ponytail: cookie extraction pending storage integration
-                    "[]".to_string()
+                    return Err(eyre::eyre!("--dump cookies is not yet implemented"));
                 }
-                DumpFormat::Original => unreachable!("handled above"),
+                DumpFormat::Original => {
+                    return Err(eyre::eyre!(
+                        "internal error: Original format handled above"
+                    ));
+                }
             };
 
             Ok::<_, eyre::Report>(content)
@@ -159,10 +159,22 @@ pub(crate) async fn handle_fetch(config: FetchConfig) -> eyre::Result<()> {
         let _ = tx.send(result);
     });
 
-    let content = rx.recv().wrap_err("page worker thread panicked")??;
-    write_output(&output, content.as_bytes())?;
+        // Use spawn_blocking so the blocking recv() doesn't stall the async
+        // runtime, and so tokio::time::timeout can actually fire.
+        let content = tokio::task::spawn_blocking(move || rx.recv())
+            .await
+            .wrap_err("page worker task join")?
+            .wrap_err("page worker thread panicked")??;
 
-    Ok(())
+        write_output(&output, content.as_bytes())?;
+        Ok(())
+    })
+    .await;
+
+    match outcome {
+        Ok(result) => result,
+        Err(_) => Err(eyre::eyre!("fetch timed out after {}s", deadline.as_secs())),
+    }
 }
 
 fn write_output(path: &Option<PathBuf>, data: &[u8]) -> eyre::Result<()> {
@@ -430,6 +442,12 @@ pub(crate) async fn handle_serve(config: ServeConfig) -> eyre::Result<()> {
         eprintln!(
             "WARNING: CDP WebSocket bound to {host}:{port} — accessible to external networks. Full browser control is exposed."
         );
+    }
+
+    // Overflow check: port + workers must not exceed u16 range.
+    let max_port = u32::from(port) + u32::from(workers) - 1;
+    if max_port > u32::from(u16::MAX) {
+        eyre::bail!("port {port} + workers {workers} exceeds u16 range (max 65535)");
     }
 
     if workers <= 1 {

@@ -6,7 +6,7 @@ pub(crate) type BoxSendFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 // Either the user provides an executor for background tasks, or we use `tokio::spawn`.
 #[derive(Clone)]
-pub struct Exec(Arc<dyn Executor<BoxSendFuture> + Send + Sync>);
+pub(super) struct Exec(Arc<dyn Executor<BoxSendFuture> + Send + Sync>);
 
 // ===== impl Exec =====
 
@@ -15,7 +15,7 @@ impl Exec {
     where
         E: Executor<BoxSendFuture> + Send + Sync + 'static,
     {
-        Exec(Arc::new(inner))
+        Self(Arc::new(inner))
     }
 }
 

@@ -37,7 +37,7 @@ pub(super) enum ClientConnectError {
     CheckoutIsClosed(pool::Error),
 }
 
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 pub(super) enum TrySendError<B> {
     Retryable {
         error: Error,
@@ -101,19 +101,19 @@ impl Error {
 
     /// Returns true if this was an error from [`ErrorKind::Connect`].
     #[inline]
-    pub fn is_connect(&self) -> bool {
+    pub const fn is_connect(&self) -> bool {
         matches!(self.kind, ErrorKind::Connect)
     }
 
     /// Returns true if this was an error from [`ErrorKind::ProxyConnect`].
     #[inline]
-    pub fn is_proxy_connect(&self) -> bool {
+    pub const fn is_proxy_connect(&self) -> bool {
         matches!(self.kind, ErrorKind::ProxyConnect)
     }
 
     /// Returns the info of the client connection on which this error occurred.
     #[inline]
-    pub fn connect_info(&self) -> Option<&Connected> {
+    pub const fn connect_info(&self) -> Option<&Connected> {
         self.connect_info.as_ref()
     }
 
@@ -126,7 +126,7 @@ impl Error {
     }
 
     #[inline]
-    pub(super) fn is_canceled(&self) -> bool {
+    pub(super) const fn is_canceled(&self) -> bool {
         matches!(self.kind, ErrorKind::Canceled)
     }
 

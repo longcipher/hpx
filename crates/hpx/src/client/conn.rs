@@ -1,4 +1,4 @@
-#[allow(clippy::module_inception)]
+#[expect(clippy::module_inception)]
 mod conn;
 mod connector;
 mod http;
@@ -16,7 +16,7 @@ mod verbose;
 // The parent `client::conn` module is `#[doc(hidden)] pub mod conn;` so this
 // submodule does not pollute the public API surface.
 #[cfg(feature = "http3")]
-pub mod quic;
+pub(crate) mod quic;
 
 // HTTP/3 connection adapter. Re-exports `H3Connection` and ensures it
 // implements the `Connection` trait so the dispatcher can treat it as a
@@ -44,20 +44,25 @@ use tower::{
     util::{BoxCloneSyncService, BoxCloneSyncServiceLayer},
 };
 
-pub use self::http::{HttpInfo, TcpConnectOptions};
 #[cfg(feature = "socks")]
 pub(super) use self::proxy::socks;
-pub(crate) use self::{conn::Conn, connector::Connector, proxy::tunnel, tls_info::TlsInfoFactory};
+pub(crate) use self::{
+    conn::Conn,
+    connector::Connector,
+    http::{HttpInfo, TcpConnectOptions},
+    proxy::tunnel,
+    tls_info::TlsInfoFactory,
+};
 use crate::{client::http::ConnectRequest, dns::DynResolver, proxy::matcher::Intercept};
 
 /// HTTP connector with dynamic DNS resolver.
-pub type HttpConnector = self::http::HttpConnector<DynResolver>;
+pub(crate) type HttpConnector = self::http::HttpConnector<DynResolver>;
 
 /// Boxed connector service for establishing connections.
-pub type BoxedConnectorService = BoxCloneSyncService<Unnameable, Conn, BoxError>;
+pub(crate) type BoxedConnectorService = BoxCloneSyncService<Unnameable, Conn, BoxError>;
 
 /// Boxed layer for building a boxed connector service.
-pub type BoxedConnectorLayer =
+pub(crate) type BoxedConnectorLayer =
     BoxCloneSyncServiceLayer<BoxedConnectorService, Unnameable, Conn, BoxError>;
 
 /// A wrapper type for [`ConnectRequest`] used to erase its concrete type.
@@ -66,6 +71,12 @@ pub type BoxedConnectorLayer =
 /// type-erased interfaces where the concrete type of the request is not important.
 /// This is mainly used internally to simplify service composition and dynamic dispatch.
 pub struct Unnameable(pub(super) ConnectRequest);
+
+impl fmt::Debug for Unnameable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Unnameable").field(self.0.uri()).finish()
+    }
+}
 
 /// A trait alias for types that can be used as async connections.
 ///
@@ -188,7 +199,7 @@ impl PoisonPill {
     /// Poison this pill.
     #[inline]
     fn poison(&self) {
-        self.poisoned.store(true, Ordering::Release)
+        self.poisoned.store(true, Ordering::Release);
     }
 
     /// Check if this pill is poisoned.
@@ -202,8 +213,8 @@ impl PoisonPill {
 
 impl Connected {
     /// Create new `Connected` type with empty metadata.
-    pub fn new() -> Connected {
-        Connected {
+    pub fn new() -> Self {
+        Self {
             alpn: Alpn::None,
             proxy: Box::new(ProxyIdentity::default()),
             extra: None,
@@ -212,7 +223,7 @@ impl Connected {
     }
 
     /// Set extra connection information to be set in the extensions of every `Response`.
-    pub fn extra<T: Clone + Send + Sync + Debug + 'static>(mut self, extra: T) -> Connected {
+    pub fn extra<T: Clone + Send + Sync + Debug + 'static>(mut self, extra: T) -> Self {
         if let Some(prev) = self.extra {
             self.extra = Some(Extra(Box::new(ExtraChain(prev.0, extra))));
         } else {
@@ -230,7 +241,7 @@ impl Connected {
     }
 
     /// Set that the proxy was used for this connected transport.
-    pub fn proxy(mut self, proxy: Intercept) -> Connected {
+    pub fn proxy(mut self, proxy: Intercept) -> Self {
         self.proxy.is_proxied = true;
 
         if let Some(auth) = proxy.basic_auth() {
@@ -264,7 +275,7 @@ impl Connected {
 
     /// Set that the connected transport negotiated HTTP/2 as its next protocol.
     #[inline]
-    pub fn negotiated_h2(mut self) -> Connected {
+    pub const fn negotiated_h2(mut self) -> Self {
         self.alpn = Alpn::H2;
         self
     }
@@ -301,8 +312,8 @@ impl Connected {
 
     // Don't public expose that `Connected` is `Clone`, unsure if we want to
     // keep that contract...
-    pub(crate) fn clone(&self) -> Connected {
-        Connected {
+    pub(crate) fn clone(&self) -> Self {
+        Self {
             alpn: self.alpn,
             proxy: self.proxy.clone(),
             extra: self.extra.clone(),
@@ -321,8 +332,8 @@ impl Extra {
 }
 
 impl Clone for Extra {
-    fn clone(&self) -> Extra {
-        Extra(self.0.clone_box())
+    fn clone(&self) -> Self {
+        Self(self.0.clone_box())
     }
 }
 
@@ -345,7 +356,7 @@ where
 
 impl<T: Clone> Clone for ExtraChain<T> {
     fn clone(&self) -> Self {
-        ExtraChain(self.0.clone_box(), self.1.clone())
+        Self(self.0.clone_box(), self.1.clone())
     }
 }
 

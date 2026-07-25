@@ -1,10 +1,14 @@
-#![allow(unused)]
+#![expect(unused)]
 use std::{fmt, fmt::Write};
 
 use bytes::Bytes;
 
 use crate::header::{Entry, HeaderMap, HeaderValue, OccupiedEntry};
 
+#[expect(
+    clippy::expect_used,
+    reason = "base64 output is ASCII and \"Basic \" prefix is valid; combined is a valid HeaderValue"
+)]
 pub(crate) fn basic_auth<U, P>(username: U, password: Option<P>) -> HeaderValue
 where
     U: fmt::Display,
@@ -35,7 +39,7 @@ pub(crate) fn replace_headers(dst: &mut HeaderMap, src: HeaderMap) {
     // there are more values with the same name, the next yield will be
     // None.
 
-    let mut prev_entry: Option<OccupiedEntry<_>> = None;
+    let mut prev_entry: Option<OccupiedEntry<'_, _>> = None;
     for (key, value) in src {
         match key {
             Some(key) => match dst.entry(key) {
@@ -61,7 +65,7 @@ pub(crate) fn replace_headers(dst: &mut HeaderMap, src: HeaderMap) {
 pub(crate) struct Escape<'a>(&'a [u8]);
 
 impl<'a> Escape<'a> {
-    pub(crate) fn new(bytes: &'a [u8]) -> Self {
+    pub(crate) const fn new(bytes: &'a [u8]) -> Self {
         Escape(bytes)
     }
 }

@@ -61,17 +61,18 @@ pub(crate) fn strip_connection_headers(headers: &mut HeaderMap, is_request: bool
             "Connection header illegal in HTTP/2: {}",
             CONNECTION.as_str()
         );
-        let header_contents = header.to_str().unwrap();
-
-        // A `Connection` header may have a comma-separated list of names of other headers that
-        // are meant for only this specific connection.
-        //
-        // Iterate these names and remove them as headers. Connection-specific headers are
-        // forbidden in HTTP2, as that information has been moved into frame types of the h2
-        // protocol.
-        for name in header_contents.split(',') {
-            let name = name.trim();
-            headers.remove(name);
+        // Best-effort removal of connection-scoped headers; skip if not valid UTF-8.
+        if let Ok(header_contents) = header.to_str() {
+            // A `Connection` header may have a comma-separated list of names of other headers that
+            // are meant for only this specific connection.
+            //
+            // Iterate these names and remove them as headers. Connection-specific headers are
+            // forbidden in HTTP2, as that information has been moved into frame types of the h2
+            // protocol.
+            for name in header_contents.split(',') {
+                let name = name.trim();
+                headers.remove(name);
+            }
         }
     }
 }
@@ -91,7 +92,7 @@ pub(super) fn content_length_parse_all_values(values: ValueIter<'_, HeaderValue>
             for v in line.split(',') {
                 let n = from_digits(v.trim().as_bytes())?;
                 if content_length.is_none() {
-                    content_length = Some(n)
+                    content_length = Some(n);
                 } else if content_length != Some(n) {
                     return None;
                 }
@@ -119,7 +120,7 @@ fn from_digits(bytes: &[u8]) -> Option<u64> {
         match b {
             b'0'..=b'9' => {
                 result = result.checked_mul(RADIX)?;
-                result = result.checked_add((b - b'0') as u64)?;
+                result = result.checked_add(u64::from(b - b'0'))?;
             }
             _ => {
                 // not a DIGIT, get outta here!
@@ -131,7 +132,7 @@ fn from_digits(bytes: &[u8]) -> Option<u64> {
     Some(result)
 }
 
-pub(crate) fn method_has_defined_payload_semantics(method: &Method) -> bool {
+pub(crate) const fn method_has_defined_payload_semantics(method: &Method) -> bool {
     !matches!(
         *method,
         Method::GET | Method::HEAD | Method::DELETE | Method::CONNECT | Method::OPTIONS
@@ -189,6 +190,10 @@ pub(super) fn is_chunked_(value: &HeaderValue) -> bool {
     false
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "original header value bytes plus ASCII \", chunked\" is always a valid HeaderValue"
+)]
 pub(super) fn add_chunked(mut entry: http::header::OccupiedEntry<'_, HeaderValue>) {
     const CHUNKED: &str = "chunked";
 

@@ -12,7 +12,7 @@ use crate::{client::conn::TcpConnectOptions, proxy::Matcher, tls::TlsOptions};
 /// Overrides client defaults for a single request.
 #[derive(Debug, Default, Clone, Hash, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct RequestOptions {
+pub(crate) struct RequestOptions {
     proxy_matcher: Option<Arc<Matcher>>,
     enforced_version: Option<Version>,
     tcp_connect_opts: TcpConnectOptions,
@@ -25,7 +25,11 @@ pub struct RequestOptions {
 /// for network connections made by the client.
 #[derive(Debug, Default, Clone, Hash, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct TransportOptions {
+#[expect(
+    clippy::struct_field_names,
+    reason = "field names mirror the option categories they hold and are accessed across multiple crates"
+)]
+pub(crate) struct TransportOptions {
     pub(crate) tls_options: Option<TlsOptions>,
     #[cfg(feature = "http1")]
     pub(crate) http1_options: Option<Http1Options>,
@@ -42,46 +46,46 @@ impl_request_config_value!(RequestOptions);
 impl TransportOptions {
     /// Get the reference to the TLS options.
     #[inline]
-    pub fn tls_options(&self) -> Option<&TlsOptions> {
+    pub(crate) const fn tls_options(&self) -> Option<&TlsOptions> {
         self.tls_options.as_ref()
     }
 
     /// Get a mutable reference to the TLS options.
     #[inline]
-    pub fn tls_options_mut(&mut self) -> &mut Option<TlsOptions> {
+    pub(crate) const fn tls_options_mut(&mut self) -> &mut Option<TlsOptions> {
         &mut self.tls_options
     }
 
     /// Get the reference to the HTTP/1 options.
     #[cfg(feature = "http1")]
     #[inline]
-    pub fn http1_options(&self) -> Option<&Http1Options> {
+    pub(crate) const fn http1_options(&self) -> Option<&Http1Options> {
         self.http1_options.as_ref()
     }
 
     /// Get a mutable reference to the HTTP/1 options.
     #[cfg(feature = "http1")]
     #[inline]
-    pub fn http1_options_mut(&mut self) -> &mut Option<Http1Options> {
+    pub(crate) const fn http1_options_mut(&mut self) -> &mut Option<Http1Options> {
         &mut self.http1_options
     }
 
     /// Get the reference to the HTTP/2 options.
     #[cfg(feature = "http2")]
     #[inline]
-    pub fn http2_options(&self) -> Option<&Http2Options> {
+    pub(crate) const fn http2_options(&self) -> Option<&Http2Options> {
         self.http2_options.as_ref()
     }
 
     /// Get a mutable reference to the HTTP/2 options.
     #[cfg(feature = "http2")]
     #[inline]
-    pub fn http2_options_mut(&mut self) -> &mut Option<Http2Options> {
+    pub(crate) const fn http2_options_mut(&mut self) -> &mut Option<Http2Options> {
         &mut self.http2_options
     }
 
     /// Apply the transport options for HTTP/1, HTTP/2, and TLS.
-    pub(crate) fn apply_transport_options(&mut self, opts: TransportOptions) -> &mut Self {
+    pub(crate) fn apply_transport_options(&mut self, opts: Self) -> &mut Self {
         if let Some(tls) = opts.tls_options {
             *self.tls_options_mut() = Some(tls);
         }
@@ -102,49 +106,49 @@ impl TransportOptions {
 impl RequestOptions {
     /// Get a reference to the proxy matcher.
     #[inline]
-    pub fn proxy_matcher(&self) -> Option<&Arc<Matcher>> {
+    pub(crate) const fn proxy_matcher(&self) -> Option<&Arc<Matcher>> {
         self.proxy_matcher.as_ref()
     }
 
     /// Get a mutable reference to the proxy matcher.
     #[inline]
-    pub fn proxy_matcher_mut(&mut self) -> &mut Option<Arc<Matcher>> {
+    pub(crate) const fn proxy_matcher_mut(&mut self) -> &mut Option<Arc<Matcher>> {
         &mut self.proxy_matcher
     }
 
     /// Get the enforced HTTP version.
     #[inline]
-    pub fn enforced_version(&self) -> Option<Version> {
+    pub(crate) const fn enforced_version(&self) -> Option<Version> {
         self.enforced_version
     }
 
     /// Get a mutable reference to the enforced HTTP version.
     #[inline]
-    pub fn enforced_version_mut(&mut self) -> &mut Option<Version> {
+    pub(crate) const fn enforced_version_mut(&mut self) -> &mut Option<Version> {
         &mut self.enforced_version
     }
 
     /// Get a reference to the TCP connection options.
     #[inline]
-    pub fn tcp_connect_opts(&self) -> &TcpConnectOptions {
+    pub(crate) const fn tcp_connect_opts(&self) -> &TcpConnectOptions {
         &self.tcp_connect_opts
     }
 
     /// Get a mutable reference to the TCP connection options.
     #[inline]
-    pub fn tcp_connect_opts_mut(&mut self) -> &mut TcpConnectOptions {
+    pub(crate) const fn tcp_connect_opts_mut(&mut self) -> &mut TcpConnectOptions {
         &mut self.tcp_connect_opts
     }
 
     /// Get a reference to the transport options.
     #[inline]
-    pub fn transport_opts(&self) -> &TransportOptions {
+    pub(crate) const fn transport_opts(&self) -> &TransportOptions {
         &self.transport_opts
     }
 
     /// Get a mutable reference to the transport options.
     #[inline]
-    pub fn transport_opts_mut(&mut self) -> &mut TransportOptions {
+    pub(crate) const fn transport_opts_mut(&mut self) -> &mut TransportOptions {
         &mut self.transport_opts
     }
 }

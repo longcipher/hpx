@@ -16,8 +16,6 @@
 //!    running average. 3c. Calculate bdp as bytes/rtt. 3d. If bdp is over 2/3 max, set new max to
 //!    bdp and update windows.
 
-#![allow(clippy::items_after_test_module)]
-
 use std::{
     fmt,
     future::Future,
@@ -40,7 +38,7 @@ use crate::client::core::{
 
 type WindowSize = u32;
 
-pub(super) fn disabled() -> Recorder {
+pub(super) const fn disabled() -> Recorder {
     Recorder { shared: None }
 }
 
@@ -51,7 +49,7 @@ pub(super) fn channel(ping_pong: PingPong, config: Config, timer: Time) -> (Reco
     );
 
     let bdp = config.bdp_initial_window.map(|wnd| Bdp {
-        bdp: wnd,
+        current: wnd,
         max_bandwidth: 0.0,
         rtt: 0.0,
         ping_delay: Duration::from_millis(100),
@@ -61,7 +59,7 @@ pub(super) fn channel(ping_pong: PingPong, config: Config, timer: Time) -> (Reco
     let now = timer.now();
     let bdp_enabled = bdp.is_some();
     let keep_alive_enabled = config.keep_alive_interval.is_some();
-    let next_bdp_at = if bdp_enabled { Some(now) } else { None };
+    let next_bdp_at = bdp_enabled.then_some(now);
 
     let keep_alive = config.keep_alive_interval.map(|interval| KeepAlive {
         interval,
@@ -79,7 +77,7 @@ pub(super) fn channel(ping_pong: PingPong, config: Config, timer: Time) -> (Reco
         bdp_enabled,
         keep_alive_enabled,
         start: now,
-        timer: timer.clone(),
+        timer,
         inner: Mutex::new(PingInner {
             ping_pong,
             ping_sent_at: None,
@@ -141,7 +139,7 @@ struct PingInner {
 
 struct Bdp {
     /// Current BDP in bytes
-    bdp: u32,
+    current: u32,
     /// Largest bandwidth we've seen so far.
     max_bandwidth: f64,
     /// Round trip time in seconds
@@ -185,14 +183,14 @@ pub(super) struct KeepAliveTimedOut;
 
 impl Config {
     /// Creates a new `Config` with the specified parameters.
-    pub(crate) fn new(
+    pub(crate) const fn new(
         adaptive_window: bool,
         initial_window_size: u32,
         keep_alive_interval: Option<Duration>,
         keep_alive_timeout: Duration,
         keep_alive_while_idle: bool,
     ) -> Self {
-        Config {
+        Self {
             bdp_initial_window: if adaptive_window {
                 Some(initial_window_size)
             } else {
@@ -204,7 +202,7 @@ impl Config {
         }
     }
 
-    pub(super) fn is_enabled(&self) -> bool {
+    pub(super) const fn is_enabled(&self) -> bool {
         self.bdp_initial_window.is_some() || self.keep_alive_interval.is_some()
     }
 }
@@ -280,9 +278,12 @@ impl Recorder {
 // ===== impl Ponger =====
 
 impl Ponger {
+    #[expect(
+        clippy::expect_used,
+        reason = "is_ping_sent() true implies ping_sent_at was set; pong implies ping was sent"
+    )]
     pub(super) fn poll(&mut self, cx: &mut task::Context<'_>) -> Poll<Ponged> {
         let now = self.shared.timer.now();
-
         let is_idle = self.is_idle();
         let mut inner = self.shared.inner.lock();
 
@@ -327,7 +328,7 @@ impl Ponger {
             }
             Poll::Pending => {
                 if let Some(ref mut ka) = self.keep_alive
-                    && let Err(KeepAliveTimedOut) = ka.maybe_timeout(cx)
+                    && matches!(ka.maybe_timeout(cx), Err(KeepAliveTimedOut))
                 {
                     self.keep_alive = None;
                     self.shared
@@ -376,7 +377,7 @@ impl PingInner {
         }
     }
 
-    fn is_ping_sent(&self) -> bool {
+    const fn is_ping_sent(&self) -> bool {
         self.ping_sent_at.is_some()
     }
 }
@@ -389,7 +390,7 @@ const BDP_LIMIT: usize = 1024 * 1024 * 16;
 impl Bdp {
     fn calculate(&mut self, bytes: usize, rtt: Duration) -> Option<WindowSize> {
         // No need to do any math if we're at the limit.
-        if self.bdp as usize == BDP_LIMIT {
+        if self.current as usize == BDP_LIMIT {
             self.stabilize_delay();
             return None;
         }
@@ -401,7 +402,7 @@ impl Bdp {
             self.rtt = rtt;
         } else {
             // Weigh this rtt as 1/8 for a moving average.
-            self.rtt += (rtt - self.rtt) * 0.125;
+            self.rtt = (rtt - self.rtt).mul_add(0.125, self.rtt);
         }
 
         // calculate the current bandwidth
@@ -412,19 +413,18 @@ impl Bdp {
             // not a faster bandwidth, so don't update
             self.stabilize_delay();
             return None;
-        } else {
-            self.max_bandwidth = bw;
         }
+        self.max_bandwidth = bw;
 
         // if the current `bytes` sample is at least 2/3 the previous
         // bdp, increase to double the current sample.
-        if bytes >= self.bdp as usize * 2 / 3 {
-            self.bdp = (bytes * 2).min(BDP_LIMIT) as WindowSize;
-            trace!("BDP increased to {}", self.bdp);
+        if bytes >= self.current as usize * 2 / 3 {
+            self.current = (bytes * 2).min(BDP_LIMIT) as WindowSize;
+            trace!("BDP increased to {}", self.current);
 
             self.stable_count = 0;
             self.ping_delay /= 2;
-            Some(self.bdp)
+            Some(self.current)
         } else {
             self.stabilize_delay();
             None
@@ -446,7 +446,7 @@ impl Bdp {
 fn seconds(dur: Duration) -> f64 {
     const NANOS_PER_SEC: f64 = 1_000_000_000.0;
     let secs = dur.as_secs() as f64;
-    secs + (dur.subsec_nanos() as f64) / NANOS_PER_SEC
+    secs + f64::from(dur.subsec_nanos()) / NANOS_PER_SEC
 }
 
 // ===== impl KeepAlive =====

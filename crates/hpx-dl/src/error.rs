@@ -82,4 +82,8 @@ pub enum DownloadError {
     /// Path traversal detected in download destination.
     #[error("Path traversal rejected: {0}")]
     PathTraversal(String),
+
+    /// An HTTP request or stream read timed out.
+    #[error("Request timed out after {0:?}")]
+    Timeout(std::time::Duration),
 }

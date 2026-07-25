@@ -1,23 +1,12 @@
-#![allow(unused)]
 use std::{fmt::Debug, sync::Arc};
 
 #[cfg(feature = "boring-tls")]
-use boring::{
-    ssl::SslConnectorBuilder,
-    x509::store::{X509Store, X509StoreBuilder},
-};
+use boring::x509::store::{X509Store, X509StoreBuilder};
 #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
-use openssl::{
-    ssl::SslConnectorBuilder,
-    x509::store::{X509Store, X509StoreBuilder},
-};
+use openssl::x509::store::{X509Store, X509StoreBuilder};
 #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 use rustls::RootCertStore;
 
-#[cfg(feature = "boring-tls")]
-use super::parser::{parse_certs, parse_certs_with_stack};
-#[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
-use super::parser::{parse_certs, parse_certs_with_stack};
 use super::{
     Certificate, CertificateInput,
     parser::{filter_map_certs, process_certs},
@@ -38,6 +27,12 @@ pub struct CertStoreBuilder {
         feature = "rustls-tls"
     )))]
     _marker: std::marker::PhantomData<()>,
+}
+
+impl Debug for CertStoreBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CertStoreBuilder").finish_non_exhaustive()
+    }
 }
 
 // ====== impl CertStoreBuilder ======
@@ -268,13 +263,17 @@ impl CertStore {
         I: IntoIterator,
         I::Item: Into<CertificateInput<'a>>,
     {
-        CertStore::builder().add_der_certs(certs).build()
+        Self::builder().add_der_certs(certs).build()
     }
 }
 
 impl Default for CertStore {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "Default impl panics if system cert store cannot be loaded; documented behavior"
+    )]
     fn default() -> Self {
-        CertStore::builder().set_default_paths().build().unwrap()
+        Self::builder().set_default_paths().build().unwrap()
     }
 }
 

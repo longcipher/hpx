@@ -53,6 +53,10 @@ type ConnDropRef = mpsc::Sender<Infallible>;
 ///// the "dispatch" task will be notified and can shutdown sooner.
 type ConnEof = oneshot::Receiver<Infallible>;
 
+#[expect(
+    clippy::expect_used,
+    reason = "ping_pong() returns Some when ping_config.is_enabled() at handshake time"
+)]
 pub(crate) async fn handshake<T, B, E>(
     io: T,
     req_rx: ClientRx<B>,
@@ -127,8 +131,8 @@ where
     B: Body,
     T: AsyncRead + AsyncWrite + Unpin,
 {
-    fn new(ponger: Ponger, conn: Connection<T, SendBuf<<B as Body>::Data>>) -> Self {
-        Conn { ponger, conn }
+    const fn new(ponger: Ponger, conn: Connection<T, SendBuf<<B as Body>::Data>>) -> Self {
+        Self { ponger, conn }
     }
 }
 
@@ -227,7 +231,7 @@ where
     B: Body,
     T: AsyncRead + AsyncWrite + Unpin,
 {
-    fn new(
+    const fn new(
         conn: ConnMapErr<T, B>,
         drop_rx: Receiver<Infallible>,
         cancel_tx: oneshot::Sender<Infallible>,
@@ -247,6 +251,10 @@ where
 {
     type Output = ();
 
+    #[expect(
+        clippy::expect_used,
+        reason = "ConnTask Future state machine: cancel_tx is Some until first poll after drop"
+    )]
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
 
@@ -363,6 +371,10 @@ where
 {
     type Output = ();
 
+    #[expect(
+        clippy::expect_used,
+        reason = "PipeMap Future state machine: conn_drop_ref and ping are Some until completion"
+    )]
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> std::task::Poll<Self::Output> {
         let mut this = self.project();
 
@@ -376,7 +388,7 @@ where
                 return Poll::Ready(());
             }
             Poll::Pending => (),
-        };
+        }
         Poll::Pending
     }
 }
@@ -392,7 +404,9 @@ where
     fn poll_pipe(&mut self, f: FutCtx<B>, cx: &mut Context<'_>) {
         let ping = self.ping.clone();
 
-        let send_stream = if !f.is_connect {
+        let send_stream = if f.is_connect {
+            Some(f.body_tx)
+        } else {
             if !f.eos {
                 let mut pipe = PipeToSendStream::new(f.body, f.body_tx);
 
@@ -420,8 +434,6 @@ where
             }
 
             None
-        } else {
-            Some(f.body_tx)
         };
 
         self.executor.execute_h2_future(H2ClientFuture::Send {
@@ -459,6 +471,10 @@ where
 {
     type Output = Result<Response<body::Incoming>, (Error, Option<Request<B>>)>;
 
+    #[expect(
+        clippy::expect_used,
+        reason = "ResponseFutMap state machine: ping and send_stream are Some until completion"
+    )]
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
 
@@ -540,7 +556,7 @@ where
                         Poll::Ready(Err(Error::new_h2(err)))
                     };
                 }
-            };
+            }
 
             // If we were waiting on pending open
             // continue where we left off.
@@ -627,7 +643,6 @@ where
                         }
                     }
                     self.poll_pipe(f, cx);
-                    continue;
                 }
 
                 Poll::Ready(None) => {

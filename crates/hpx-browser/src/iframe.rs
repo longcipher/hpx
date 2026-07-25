@@ -30,7 +30,7 @@ impl ChildIframe {
         _profile: &crate::stealth::StealthProfile,
     ) -> Result<Self, crate::event_loop::EventLoopError> {
         let dom = crate::html_parser::parse_html(html);
-        let runtime = crate::js_runtime::BrowserJsRuntime::new(dom);
+        let runtime = crate::js_runtime::BrowserJsRuntime::new(dom)?;
         let mut event_loop = crate::event_loop::BrowserEventLoop::with_runtime(runtime);
 
         // Run child event loop
@@ -76,7 +76,7 @@ impl ChildIframe {
         }
 
         let dom = crate::html_parser::parse_html(&html);
-        let runtime = crate::js_runtime::BrowserJsRuntime::new(dom);
+        let runtime = crate::js_runtime::BrowserJsRuntime::new(dom)?;
         let mut event_loop = crate::event_loop::BrowserEventLoop::with_runtime(runtime);
 
         // Set location

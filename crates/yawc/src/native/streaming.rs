@@ -206,19 +206,15 @@ where
     /// This method provides access to the underlying framed stream and read/write halves,
     /// allowing for direct manipulation of the WebSocket protocol layer.
     ///
-    /// # Safety
-    ///
-    /// This function is unsafe because it splits ownership of shared state. The caller
-    /// must ensure that:
-    /// - Only one component performs reads at a time
-    /// - Only one component performs writes at a time
-    /// - Protocol invariants are maintained (control frames, fragment ordering, etc.)
+    /// The returned [`ReadHalf`] and [`WriteHalf`] do not share mutable state, but the
+    /// caller is responsible for maintaining WebSocket protocol invariants when driving
+    /// the framed stream directly.
     ///
     /// # Example
     ///
     /// See [`examples/streaming.rs`](https://github.com/infinitefield/yawc/blob/master/examples/streaming.rs)
     /// for a complete example of using `split_stream()` for low-level frame processing.
-    pub unsafe fn split_stream(self) -> (Framed<S, Codec>, ReadHalf, WriteHalf) {
+    pub fn split_stream(self) -> (Framed<S, Codec>, ReadHalf, WriteHalf) {
         (self.stream, self.read_half, self.write_half)
     }
 
@@ -331,7 +327,9 @@ where
             0 => {}
             1 => return Err(WebSocketError::InvalidCloseFrame),
             _ => {
-                let code = frame.close_code().expect("close code");
+                let code = frame
+                    .close_code()
+                    .ok_or(WebSocketError::InvalidCloseFrame)?;
                 let _ = frame.close_reason()?;
 
                 if !code.is_allowed() {

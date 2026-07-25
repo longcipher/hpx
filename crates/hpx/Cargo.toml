@@ -130,7 +130,7 @@ http1 = ["dep:httparse", "dep:smallvec", "tracing", "stream"]
 http2 = ["dep:http2"]
 
 # Enable HTTP/3 support (opt-in; pulls in quinn + hpx-h3 with quinn transport).
-http3 = ["dep:quinn", "dep:hpx-h3", "hpx-h3/quinn", "rustls-tls-quic"]
+http3 = ["dep:quinn", "dep:hpx-h3", "hpx-h3/quinn", "rustls-tls-quic", "dep:scc"]
 
 # Enable macros.
 macros = ["tokio/macros"]
@@ -457,3 +457,6 @@ harness = false
 name = "http3_throughput"
 harness = false
 required-features = ["http3"]
+
+[lints]
+workspace = true

@@ -1,8 +1,8 @@
 //! Proxy helpers
 
 #[cfg(feature = "socks")]
-pub mod socks;
-pub mod tunnel;
+pub(crate) mod socks;
+pub(crate) mod tunnel;
 
 use std::{
     marker::PhantomData,

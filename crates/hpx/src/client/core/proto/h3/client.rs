@@ -31,7 +31,7 @@ use crate::{
 /// Dispatch channel receiver type for h3.
 ///
 /// Mirrors `proto::h2::client::ClientRx<B>` but lives under the h3 module.
-#[allow(dead_code)] // HTTP/3 dispatch scaffolding; wired in by future tasks.
+#[expect(dead_code)] // HTTP/3 dispatch scaffolding; wired in by future tasks.
 pub(crate) type ClientRx<B> = dispatch::Receiver<Request<B>, Response<IncomingBody>>;
 
 /// HTTP/3 connection dispatch task.
@@ -52,7 +52,7 @@ pub(crate) type ClientRx<B> = dispatch::Receiver<Request<B>, Response<IncomingBo
 /// `send_request` is an `async fn` (not a sync `poll_ready` + `send_request`
 /// pair like h2). Each spawned task owns a `Clone` of the `SendRequest` and
 /// runs the full request lifecycle independently.
-#[allow(dead_code)] // HTTP/3 dispatch scaffolding; wired in by future tasks.
+#[expect(dead_code)] // HTTP/3 dispatch scaffolding; wired in by future tasks.
 pub(crate) struct ConnTask<B>
 where
     B: Body,
@@ -82,8 +82,8 @@ where
     /// The caller is responsible for spawning this future (typically via
     /// `tokio::spawn`) so it runs concurrently with the connection-driver
     /// task that feeds `close_rx`.
-    #[allow(dead_code)] // HTTP/3 dispatch scaffolding; wired in by future tasks.
-    pub(crate) fn new(
+    #[expect(dead_code)] // HTTP/3 dispatch scaffolding; wired in by future tasks.
+    pub(crate) const fn new(
         send_request: hpx_h3::client::SendRequest<hpx_h3::quinn::OpenStreams, Bytes>,
         req_rx: ClientRx<B>,
         close_rx: mpsc::Receiver<hpx_h3::error::ConnectionError>,
@@ -194,7 +194,7 @@ where
 ///
 /// Any [`hpx_h3::error::StreamError`] is mapped to [`H3Error`] (and then to
 /// [`Error`] via the `From<H3Error>` impl) per §5.1.9 of the design.
-#[allow(clippy::result_large_err)]
+#[expect(clippy::result_large_err)]
 pub(crate) async fn drive_request<B>(
     send_request: &mut hpx_h3::client::SendRequest<hpx_h3::quinn::OpenStreams, Bytes>,
     req: Request<B>,
@@ -251,7 +251,7 @@ where
         let (body_tx, body_rx) =
             IncomingBody::new_channel(DecodedLength::CHUNKED, /* wanter = */ false);
         drop(body_tx); // Empty body — no data chunks for CONNECT.
-        let mut response = response.map(|_| body_rx);
+        let mut response = response.map(|()| body_rx);
         response.extensions_mut().insert(H3WebSocket {
             inner: Arc::new(tokio::sync::Mutex::new(H3WebSocketInner {
                 stream,
@@ -359,10 +359,10 @@ pub enum WsError {
 impl std::fmt::Display for WsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            WsError::Stream(e) => write!(f, "h3 stream error: {e}"),
-            WsError::Timeout => write!(f, "WebSocket operation timed out"),
-            WsError::FrameTooLarge => write!(f, "WebSocket frame payload exceeds max size"),
-            WsError::FrameMalformed(reason) => write!(f, "WebSocket frame malformed: {reason}"),
+            Self::Stream(e) => write!(f, "h3 stream error: {e}"),
+            Self::Timeout => write!(f, "WebSocket operation timed out"),
+            Self::FrameTooLarge => write!(f, "WebSocket frame payload exceeds max size"),
+            Self::FrameMalformed(reason) => write!(f, "WebSocket frame malformed: {reason}"),
         }
     }
 }
@@ -370,7 +370,7 @@ impl std::fmt::Display for WsError {
 impl std::error::Error for WsError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            WsError::Stream(e) => Some(e),
+            Self::Stream(e) => Some(e),
             _ => None,
         }
     }
@@ -378,7 +378,7 @@ impl std::error::Error for WsError {
 
 impl From<hpx_h3::error::StreamError> for WsError {
     fn from(e: hpx_h3::error::StreamError) -> Self {
-        WsError::Stream(e)
+        Self::Stream(e)
     }
 }
 
@@ -426,7 +426,7 @@ impl std::fmt::Debug for H3WebSocket {
             .field("read_timeout", &self.read_timeout)
             .field("write_timeout", &self.write_timeout)
             .field("max_frame_size", &self.max_frame_size)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -437,11 +437,10 @@ impl H3WebSocket {
     /// directly without going through [`drive_request`]. Normal usage should
     /// use [`H3WebSocket::from_response`] instead.
     #[doc(hidden)]
-    #[allow(dead_code)]
     pub fn new(
         stream: hpx_h3::client::RequestStream<hpx_h3::quinn::BidiStream<Bytes>, Bytes>,
     ) -> Self {
-        H3WebSocket {
+        Self {
             inner: Arc::new(tokio::sync::Mutex::new(H3WebSocketInner {
                 stream,
                 recv_buf: Vec::new(),
@@ -460,15 +459,14 @@ impl H3WebSocket {
     /// `H3WebSocket` into the extensions).
     #[inline]
     pub fn from_response<B>(response: &mut http::Response<B>) -> Option<Self> {
-        response.extensions_mut().remove::<H3WebSocket>()
+        response.extensions_mut().remove::<Self>()
     }
 
     /// Set the read timeout for `recv()` operations.
     ///
     /// When set, `recv()` will return an error if no data is received within
     /// the specified duration.
-    #[allow(dead_code)]
-    pub fn set_read_timeout(&mut self, timeout: Option<std::time::Duration>) {
+    pub const fn set_read_timeout(&mut self, timeout: Option<std::time::Duration>) {
         self.read_timeout = timeout;
     }
 
@@ -476,8 +474,7 @@ impl H3WebSocket {
     ///
     /// When set, `send_*()` methods will return an error if the data cannot
     /// be sent within the specified duration.
-    #[allow(dead_code)]
-    pub fn set_write_timeout(&mut self, timeout: Option<std::time::Duration>) {
+    pub const fn set_write_timeout(&mut self, timeout: Option<std::time::Duration>) {
         self.write_timeout = timeout;
     }
 
@@ -485,19 +482,16 @@ impl H3WebSocket {
     ///
     /// Frames exceeding this limit will be rejected with an error.
     /// Default is 1 MB.
-    #[allow(dead_code)]
-    pub fn set_max_frame_size(&mut self, max_size: usize) {
+    pub const fn set_max_frame_size(&mut self, max_size: usize) {
         self.max_frame_size = max_size;
     }
 
     /// Send a WebSocket text frame (opcode 0x1).
-    #[allow(dead_code)]
     pub async fn send_text(&mut self, data: &str) -> Result<(), WsError> {
         self.send_frame(0x1, data.as_bytes()).await
     }
 
     /// Send a WebSocket binary frame (opcode 0x2).
-    #[allow(dead_code)]
     pub async fn send_binary(&mut self, data: &[u8]) -> Result<(), WsError> {
         self.send_frame(0x2, data).await
     }
@@ -506,7 +500,6 @@ impl H3WebSocket {
     ///
     /// If `code` is provided, a 2-byte status code is prepended to the payload
     /// per RFC 6455 §5.5.1.
-    #[allow(dead_code)]
     pub async fn send_close(
         &mut self,
         code: Option<u16>,
@@ -517,13 +510,11 @@ impl H3WebSocket {
     }
 
     /// Send a WebSocket ping frame (opcode 0x9).
-    #[allow(dead_code)]
     pub async fn send_ping(&mut self, data: &[u8]) -> Result<(), WsError> {
         self.send_frame(0x9, data).await
     }
 
     /// Send a WebSocket pong frame (opcode 0xA).
-    #[allow(dead_code)]
     pub async fn send_pong(&mut self, data: &[u8]) -> Result<(), WsError> {
         self.send_frame(0xA, data).await
     }
@@ -533,7 +524,6 @@ impl H3WebSocket {
     /// Returns `Ok(None)` when the stream has been closed cleanly (no more
     /// data). Returns an error if the frame is malformed, exceeds
     /// `max_frame_size`, or the read timeout expires.
-    #[allow(dead_code)]
     pub async fn recv(&mut self) -> Result<Option<WsMessage>, WsError> {
         let mut inner = self.inner.lock().await;
 
@@ -583,7 +573,6 @@ impl H3WebSocket {
     }
 
     /// Finish the send direction of the stream.
-    #[allow(dead_code)]
     pub async fn finish(&mut self) -> Result<(), WsError> {
         Ok(self.inner.lock().await.stream.finish().await?)
     }
@@ -592,7 +581,7 @@ impl H3WebSocket {
 
     /// Build and send a WebSocket frame with the given opcode and payload.
     /// Client frames are masked per RFC 6455 §5.3.
-    async fn send_frame(&mut self, opcode: u8, payload: &[u8]) -> Result<(), WsError> {
+    async fn send_frame(&self, opcode: u8, payload: &[u8]) -> Result<(), WsError> {
         let frame = build_ws_frame(opcode, payload);
         let frame_bytes = Bytes::from(frame);
 
@@ -625,7 +614,7 @@ impl H3WebSocket {
         let _fin = byte0 & 0x80 != 0;
         let opcode = byte0 & 0x0F;
         let masked = byte1 & 0x80 != 0;
-        let mut payload_len = (byte1 & 0x7F) as u64;
+        let mut payload_len = u64::from(byte1 & 0x7F);
 
         // Determine header size.
         let mut header_len = 2usize;
@@ -633,7 +622,7 @@ impl H3WebSocket {
             if buf.len() < 4 {
                 return Ok(None);
             }
-            payload_len = u16::from_be_bytes([buf[2], buf[3]]) as u64;
+            payload_len = u64::from(u16::from_be_bytes([buf[2], buf[3]]));
             header_len = 4;
         } else if payload_len == 127 {
             if buf.len() < 10 {
@@ -721,10 +710,10 @@ fn build_ws_frame(opcode: u8, payload: &[u8]) -> Vec<u8> {
     if len < 126 {
         frame.push(0x80 | len as u8);
     } else if len <= 0xFFFF {
-        frame.push(0x80 | 126);
+        frame.push(0x80 | 0x7E);
         frame.extend_from_slice(&(len as u16).to_be_bytes());
     } else {
-        frame.push(0x80 | 127);
+        frame.push(0x80 | 0x7F);
         frame.extend_from_slice(&(len as u64).to_be_bytes());
     }
 
@@ -748,8 +737,7 @@ fn generate_mask_key() -> [u8; 4] {
     use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_nanos());
     // Mix with a simple xorshift to get more entropy from the timestamp.
     let mut x = nanos as u64;
     x ^= x << 13;
@@ -774,11 +762,7 @@ fn build_close_payload(code: Option<u16>, reason: Option<&str>) -> Vec<u8> {
 
 /// Parse a close frame payload into an optional code and reason.
 fn parse_close_payload(payload: &[u8]) -> (Option<u16>, Option<String>) {
-    let code = if payload.len() >= 2 {
-        Some(u16::from_be_bytes([payload[0], payload[1]]))
-    } else {
-        None
-    };
+    let code = (payload.len() >= 2).then(|| u16::from_be_bytes([payload[0], payload[1]]));
     let reason = if payload.len() > 2 {
         String::from_utf8(payload[2..].to_vec()).ok()
     } else {

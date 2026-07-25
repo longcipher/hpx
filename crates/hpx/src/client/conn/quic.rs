@@ -192,7 +192,7 @@ impl QuicConnector {
     ///
     /// All inputs are `Arc`-shared and replaceable (DIP per §5.1.5).
     #[must_use]
-    pub fn new(
+    pub const fn new(
         endpoint: quinn::Endpoint,
         transport_config: Arc<quinn::TransportConfig>,
         tls_config: Arc<rustls::ClientConfig>,

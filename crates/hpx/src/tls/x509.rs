@@ -16,6 +16,7 @@ pub use self::{
 use crate::Error;
 
 /// A certificate input.
+#[derive(Debug)]
 pub enum CertificateInput<'c> {
     /// Raw DER or PEM data.
     Raw(&'c [u8]),
@@ -42,7 +43,7 @@ impl From<Certificate> for CertificateInput<'_> {
 }
 
 impl<'c, T: AsRef<[u8]> + ?Sized + 'c> From<&'c T> for CertificateInput<'c> {
-    fn from(value: &'c T) -> CertificateInput<'c> {
+    fn from(value: &'c T) -> Self {
         CertificateInput::Raw(value.as_ref())
     }
 }
@@ -50,12 +51,12 @@ impl<'c, T: AsRef<[u8]> + ?Sized + 'c> From<&'c T> for CertificateInput<'c> {
 /// A certificate.
 #[cfg(feature = "boring-tls")]
 /// An X509 certificate.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Certificate(X509);
 
 #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
 /// An X509 certificate.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Certificate(X509);
 
 #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]

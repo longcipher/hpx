@@ -77,7 +77,7 @@ struct Config {
 }
 
 /// Builder for `Connector`.
-pub struct ConnectorBuilder {
+pub(crate) struct ConnectorBuilder {
     config: Config,
     #[cfg(feature = "socks")]
     resolver: DynResolver,
@@ -88,14 +88,14 @@ pub struct ConnectorBuilder {
 
 /// Connector service that establishes connections.
 #[derive(Clone)]
-pub enum Connector {
+pub(crate) enum Connector {
     Simple(ConnectorService),
     WithLayers(BoxedConnectorService),
 }
 
 /// Service that establishes connections to HTTP servers.
 #[derive(Clone)]
-pub struct ConnectorService {
+pub(crate) struct ConnectorService {
     config: Config,
     #[cfg(feature = "socks")]
     resolver: DynResolver,
@@ -109,7 +109,7 @@ pub struct ConnectorService {
 impl ConnectorBuilder {
     /// Set the HTTP connector to use.
     #[inline]
-    pub fn with_http<F>(mut self, call: F) -> ConnectorBuilder
+    pub(crate) fn with_http<F>(mut self, call: F) -> Self
     where
         F: FnOnce(&mut HttpConnector),
     {
@@ -119,7 +119,7 @@ impl ConnectorBuilder {
 
     /// Set the TLS connector builder to use.
     #[inline]
-    pub fn with_tls<F>(mut self, call: F) -> ConnectorBuilder
+    pub(crate) fn with_tls<F>(mut self, call: F) -> Self
     where
         F: FnOnce(TlsConnectorBuilder) -> TlsConnectorBuilder,
     {
@@ -132,28 +132,28 @@ impl ConnectorBuilder {
     /// If a domain resolves to multiple IP addresses, the timeout will be
     /// evenly divided across them.
     #[inline]
-    pub fn timeout(mut self, timeout: Option<Duration>) -> ConnectorBuilder {
+    pub(crate) const fn timeout(mut self, timeout: Option<Duration>) -> Self {
         self.config.timeout = timeout;
         self
     }
 
     /// Set connecting verbose mode.
     #[inline]
-    pub fn verbose(mut self, enabled: bool) -> ConnectorBuilder {
+    pub(crate) const fn verbose(mut self, enabled: bool) -> Self {
         self.config.verbose.0 = enabled;
         self
     }
 
     /// Sets the TLS info flag.
     #[inline]
-    pub fn tls_info(mut self, enabled: bool) -> ConnectorBuilder {
+    pub(crate) const fn tls_info(mut self, enabled: bool) -> Self {
         self.config.tls_info = enabled;
         self
     }
 
     /// Sets the TLS options to use.
     #[inline]
-    pub fn tls_options(mut self, opts: Option<TlsOptions>) -> ConnectorBuilder {
+    pub(crate) fn tls_options(mut self, opts: Option<TlsOptions>) -> Self {
         if let Some(opts) = opts {
             self.tls_options = opts;
         }
@@ -161,7 +161,7 @@ impl ConnectorBuilder {
     }
 
     /// Build a [`Connector`] with the provided layers.
-    pub fn build(self, layers: Vec<BoxedConnectorLayer>) -> crate::Result<Connector> {
+    pub(crate) fn build(self, layers: Vec<BoxedConnectorLayer>) -> crate::Result<Connector> {
         let mut service = ConnectorService {
             config: self.config,
             #[cfg(feature = "socks")]
@@ -195,25 +195,22 @@ impl ConnectorBuilder {
         // now we handle the concrete stuff - any `connect_timeout`,
         // plus a final map_err layer we can use to cast default tower layer
         // errors to internal errors
-        match timeout {
-            Some(timeout) => {
-                let service = ServiceBuilder::new()
-                    .layer(TimeoutLayer::new(timeout))
-                    .service(service)
-                    .map_err(map_timeout_to_connector_error);
+        if let Some(timeout) = timeout {
+            let service = ServiceBuilder::new()
+                .layer(TimeoutLayer::new(timeout))
+                .service(service)
+                .map_err(map_timeout_to_connector_error);
 
-                Ok(Connector::WithLayers(BoxCloneSyncService::new(service)))
-            }
-            None => {
-                // no timeout, but still map err
-                // no named timeout layer but we still map errors since
-                // we might have user-provided timeout layer
-                let service = ServiceBuilder::new()
-                    .service(service)
-                    .map_err(map_timeout_to_connector_error);
+            Ok(Connector::WithLayers(BoxCloneSyncService::new(service)))
+        } else {
+            // no timeout, but still map err
+            // no named timeout layer but we still map errors since
+            // we might have user-provided timeout layer
+            let service = ServiceBuilder::new()
+                .service(service)
+                .map_err(map_timeout_to_connector_error);
 
-                Ok(Connector::WithLayers(BoxCloneSyncService::new(service)))
-            }
+            Ok(Connector::WithLayers(BoxCloneSyncService::new(service)))
         }
     }
 }
@@ -248,16 +245,16 @@ impl Service<ConnectRequest> for Connector {
     #[inline]
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self {
-            Connector::Simple(service) => service.poll_ready(cx),
-            Connector::WithLayers(service) => service.poll_ready(cx),
+            Self::Simple(service) => service.poll_ready(cx),
+            Self::WithLayers(service) => service.poll_ready(cx),
         }
     }
 
     #[inline]
     fn call(&mut self, req: ConnectRequest) -> Self::Future {
         match self {
-            Connector::Simple(service) => service.call(req),
-            Connector::WithLayers(service) => service.call(Unnameable(req)),
+            Self::Simple(service) => service.call(req),
+            Self::WithLayers(service) => service.call(Unnameable(req)),
         }
     }
 }

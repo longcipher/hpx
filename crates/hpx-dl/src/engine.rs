@@ -66,6 +66,18 @@ pub struct EngineConfig {
     /// Coalescing delay the scheduler waits when starting from idle, to batch
     /// rapid successive `add()` calls into a single scheduling pass.
     pub scheduler_coalesce_delay: Duration,
+    /// Timeout for the HEAD probe request that discovers remote file metadata.
+    ///
+    /// Defaults to 30 seconds. If the server does not respond within this
+    /// window the download fails with [`DownloadError::Timeout`].
+    pub probe_timeout: Duration,
+    /// Per-segment idle timeout: maximum time to wait between consecutive
+    /// stream chunks before declaring the connection stalled.
+    ///
+    /// `None` (the default) disables the idle timeout, relying on the
+    /// underlying client's TCP-level timeouts. Set to a `Some(duration)` to
+    /// detect stalled downloads proactively.
+    pub segment_idle_timeout: Option<Duration>,
 }
 
 impl Default for EngineConfig {
@@ -81,6 +93,8 @@ impl Default for EngineConfig {
             retry_jitter: 0.25,
             storage_path: default_storage_path(),
             scheduler_coalesce_delay: SCHEDULER_IDLE_COALESCE_DELAY,
+            probe_timeout: Duration::from_secs(30),
+            segment_idle_timeout: None,
         }
     }
 }
@@ -168,6 +182,23 @@ impl EngineBuilder {
         self
     }
 
+    /// Set the HEAD probe timeout. If the server does not respond within
+    /// this duration, the download fails with [`DownloadError::Timeout`].
+    #[must_use]
+    pub const fn probe_timeout(mut self, timeout: Duration) -> Self {
+        self.config.probe_timeout = timeout;
+        self
+    }
+
+    /// Set the per-segment idle timeout. When `Some`, a segment download is
+    /// aborted if no data arrives for the given duration, detecting stalled
+    /// connections. `None` disables the idle timeout.
+    #[must_use]
+    pub const fn segment_idle_timeout(mut self, timeout: Option<Duration>) -> Self {
+        self.config.segment_idle_timeout = timeout;
+        self
+    }
+
     /// Set the storage database path.
     #[must_use]
     pub fn storage_path(mut self, path: impl Into<PathBuf>) -> Self {
@@ -215,6 +246,7 @@ impl EngineBuilder {
             queue: Mutex::new(PriorityQueue::new()),
             active_tasks: Mutex::new(StdHashMap::new()),
             scheduler_running: AtomicBool::new(false),
+            shutting_down: AtomicBool::new(false),
             concurrency: Arc::new(Semaphore::new(config.max_concurrent_downloads.max(1))),
             global_limiter: config.global_speed_limit.map(SpeedLimiter::depleted),
             persistence,
@@ -310,6 +342,36 @@ impl DownloadEntry {
     }
 }
 
+/// RAII guard ensuring a download task's entry is removed from
+/// `active_tasks` and the scheduler is re-triggered when the task ends —
+/// whether by normal completion, panic, or abort.
+///
+/// This prevents the `active_tasks` map from leaking entries when a spawned
+/// download task fails unexpectedly. The guard is moved into the task body
+/// so its [`Drop`] implementation runs in all exit paths.
+struct TaskGuard {
+    inner: Arc<EngineInner>,
+    id: DownloadId,
+}
+
+impl TaskGuard {
+    const fn new(inner: Arc<EngineInner>, id: DownloadId) -> Self {
+        Self { inner, id }
+    }
+}
+
+impl Drop for TaskGuard {
+    fn drop(&mut self) {
+        self.inner.active_tasks.lock().remove(&self.id);
+        // Avoid spawning fresh scheduler work while the engine is shutting
+        // down: the shutdown path aborts tasks and pauses downloads, so any
+        // re-trigger would race with teardown.
+        if !self.inner.shutting_down.load(Ordering::Acquire) {
+            self.inner.trigger_scheduler();
+        }
+    }
+}
+
 struct EngineInner {
     client: hpx::Client,
     config: EngineConfig,
@@ -318,6 +380,10 @@ struct EngineInner {
     queue: Mutex<PriorityQueue>,
     active_tasks: Mutex<StdHashMap<DownloadId, tokio::task::JoinHandle<()>>>,
     scheduler_running: AtomicBool,
+    /// Set to `true` at the start of [`EngineInner::shutdown`]. Prevents the
+    /// [`TaskGuard`] from re-triggering the scheduler (and spawning new work)
+    /// while the engine is tearing down.
+    shutting_down: AtomicBool,
     concurrency: Arc<Semaphore>,
     global_limiter: Option<SpeedLimiter>,
     persistence: Arc<PersistenceHandle>,
@@ -412,6 +478,7 @@ impl EngineInner {
         let mut downloaded = None;
         let updated = self.downloads.update_sync(&id, |_, entry| {
             entry.bytes_downloaded = entry.bytes_downloaded.saturating_add(delta);
+            entry.touch();
             total = entry.total_bytes;
             downloaded = Some(entry.bytes_downloaded);
         });
@@ -521,21 +588,46 @@ impl EngineInner {
             handle.abort();
         }
 
-        // Use atomic update_sync to avoid TOCTOU races with concurrent
-        // progress updates. This ensures we never overwrite bytes_downloaded
-        // with a stale snapshot.
+        // Atomically validate state and transition to avoid TOCTOU races
+        // with concurrent progress updates.
+        let mut transitioned = false;
+        let mut already_paused = false;
         let updated = self.downloads.update_sync(&id, |_, entry| {
-            entry.state = DownloadState::Paused;
-            entry.last_error = None;
-            entry.touch();
+            match entry.state {
+                DownloadState::Queued | DownloadState::Connecting | DownloadState::Downloading => {
+                    entry.state = DownloadState::Paused;
+                    entry.last_error = None;
+                    entry.touch();
+                    transitioned = true;
+                }
+                DownloadState::Paused => {
+                    already_paused = true;
+                    transitioned = true;
+                }
+                DownloadState::Completed | DownloadState::Failed => {
+                    // Cannot pause from terminal states.
+                    transitioned = false;
+                }
+            }
         });
         if updated.is_none() {
             return Err(DownloadError::NotFound(id.0));
         }
+        if !transitioned {
+            let entry = self.entry_snapshot(id)?;
+            return Err(DownloadError::InvalidState {
+                expected: "queued, connecting, or downloading".to_string(),
+                actual: entry.state.to_string(),
+            });
+        }
+
+        // Already paused — no state change, skip persist/emit.
+        if already_paused {
+            return Ok(());
+        }
 
         let entry = self.entry_snapshot(id)?;
         self.persistence.upsert(entry.to_record(id))?;
-
         let _ = self.events.emit(DownloadEvent::StateChanged {
             id,
             state: DownloadState::Paused,
@@ -595,10 +687,16 @@ impl EngineInner {
                 break;
             };
 
-            let state = self
-                .downloads
-                .read_sync(&entry.id, |_, item| item.state)
-                .unwrap_or(DownloadState::Failed);
+            let state = self.downloads.read_sync(&entry.id, |_, item| item.state);
+            let Some(state) = state else {
+                // Entry was removed between queueing and scheduling; skip it.
+                tracing::debug!(
+                    id = %entry.id.0,
+                    "skipping dequeued entry: no longer in registry"
+                );
+                drop(permit);
+                continue;
+            };
             if state != DownloadState::Queued {
                 drop(permit);
                 continue;
@@ -646,11 +744,14 @@ impl EngineInner {
         let id = queue_entry.id;
         let request = queue_entry.request;
         let inner = Arc::clone(self);
+        // The guard is moved into the spawned task so its `Drop` runs on
+        // normal completion, panic, or abort — guaranteeing the entry is
+        // removed from `active_tasks` and the scheduler is re-triggered.
+        let guard = TaskGuard::new(Arc::clone(&inner), id);
         let handle = tokio::spawn(async move {
             let _permit = permit;
+            let _guard = guard;
             Arc::clone(&inner).execute_download(id, request).await;
-            inner.active_tasks.lock().remove(&id);
-            inner.trigger_scheduler();
         });
 
         self.active_tasks.lock().insert(id, handle);
@@ -689,7 +790,10 @@ impl EngineInner {
         self.transition_state(id, DownloadState::Connecting).await?;
 
         let client = build_client(&self.client, request.proxy.as_ref())?;
-        let remote = probe_remote_with_headers(&client, candidate_url, &request.headers).await?;
+        let probe = probe_remote_with_headers(&client, candidate_url, &request.headers);
+        let remote = tokio::time::timeout(self.config.probe_timeout, probe)
+            .await
+            .map_err(|_| DownloadError::Timeout(self.config.probe_timeout))??;
         let total_bytes = remote.content_length.unwrap_or(0);
         let max_connections = request
             .max_connections
@@ -768,7 +872,8 @@ impl EngineInner {
             )
             .with_headers(request.headers.clone())
             .with_limiter(limiter)
-            .with_segment_updates(segment_tx);
+            .with_segment_updates(segment_tx)
+            .with_idle_timeout(self.config.segment_idle_timeout);
 
         let download_result = downloader.download_with_resume(resume_state, Some(progress_tx));
         tokio::pin!(download_result);
@@ -837,6 +942,10 @@ impl EngineInner {
     }
 
     fn shutdown(&self) {
+        // Mark the engine as shutting down so TaskGuard drops don't spawn
+        // fresh scheduler work while we abort in-flight tasks below.
+        self.shutting_down.store(true, Ordering::Release);
+
         let handles = std::mem::take(&mut *self.active_tasks.lock());
         for (_, handle) in handles {
             handle.abort();
@@ -1340,6 +1449,8 @@ mod tests {
             config.scheduler_coalesce_delay,
             SCHEDULER_IDLE_COALESCE_DELAY
         );
+        assert_eq!(config.probe_timeout, Duration::from_secs(30));
+        assert!(config.segment_idle_timeout.is_none());
     }
 
     #[test]
@@ -1355,11 +1466,15 @@ mod tests {
             retry_jitter: 0.5,
             storage_path: PathBuf::from("/tmp/custom.db"),
             scheduler_coalesce_delay: Duration::from_millis(100),
+            probe_timeout: Duration::from_secs(10),
+            segment_idle_timeout: Some(Duration::from_secs(60)),
         };
         assert_eq!(config.max_concurrent_downloads, 10);
         assert_eq!(config.global_speed_limit, Some(1_000_000));
         assert_eq!(config.storage_path, PathBuf::from("/tmp/custom.db"));
         assert_eq!(config.scheduler_coalesce_delay, Duration::from_millis(100));
+        assert_eq!(config.probe_timeout, Duration::from_secs(10));
+        assert_eq!(config.segment_idle_timeout, Some(Duration::from_secs(60)));
     }
 
     #[test]

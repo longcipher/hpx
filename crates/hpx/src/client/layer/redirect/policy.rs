@@ -7,7 +7,7 @@ use http::{HeaderMap, Request, Response, StatusCode, Uri};
 use crate::error::BoxError;
 
 /// Trait for the policy on handling redirection responses.
-pub trait Policy<B, E> {
+pub(crate) trait Policy<B, E> {
     /// Invoked when the service received a response with a redirection status code (`3xx`).
     ///
     /// This method returns an [`Action`] which indicates whether the service should follow
@@ -31,7 +31,7 @@ pub trait Policy<B, E> {
 }
 
 /// A type that holds information on a redirection attempt.
-pub struct Attempt<'a> {
+pub(crate) struct Attempt<'a> {
     pub(crate) status: StatusCode,
     pub(crate) headers: &'a HeaderMap,
     pub(crate) location: &'a Uri,
@@ -40,13 +40,13 @@ pub struct Attempt<'a> {
 
 /// A value returned by [`Policy::redirect`] which indicates the action
 /// [`FollowRedirect`][super::FollowRedirect] should take for a redirection response.
-pub enum Action {
+pub(crate) enum Action {
     /// Follow the redirection.
     Follow,
     /// Do not follow the redirection, and return the redirection response as-is.
     Stop,
     /// Pending async decision. The async task will be awaited to determine the final action.
-    Pending(Pin<Box<dyn Future<Output = Action> + Send>>),
+    Pending(Pin<Box<dyn Future<Output = Self> + Send>>),
     /// An error occurred while determining the redirection action.
     Error(BoxError),
 }
@@ -54,10 +54,10 @@ pub enum Action {
 impl fmt::Debug for Action {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Action::Follow => f.debug_tuple("Follow").finish(),
-            Action::Stop => f.debug_tuple("Stop").finish(),
-            Action::Pending(_) => f.debug_tuple("Pending").finish(),
-            Action::Error(_) => f.debug_tuple("Error").finish(),
+            Self::Follow => f.debug_tuple("Follow").finish(),
+            Self::Stop => f.debug_tuple("Stop").finish(),
+            Self::Pending(_) => f.debug_tuple("Pending").finish(),
+            Self::Error(_) => f.debug_tuple("Error").finish(),
         }
     }
 }

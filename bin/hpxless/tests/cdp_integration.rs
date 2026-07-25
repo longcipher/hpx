@@ -40,7 +40,7 @@ impl CdpClient {
 
         while let Some(frame) = self.ws.next().await {
             if frame.opcode() == OpCode::Text {
-                let text = frame.as_str();
+                let text = frame.as_str().expect("text frame decode");
                 if let Ok(value) = serde_json::from_str::<serde_json::Value>(text) {
                     if value.get("id").is_none() {
                         self.events.push(value);

@@ -31,7 +31,7 @@ impl<S> Layer<S> for DelayLayer {
 }
 
 impl std::fmt::Debug for DelayLayer {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DelayLayer")
             .field("delay", &self.delay)
             .finish()

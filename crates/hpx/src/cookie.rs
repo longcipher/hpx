@@ -157,7 +157,7 @@ impl IntoCookie for &str {
 // ===== impl Cookie =====
 
 impl<'a> Cookie<'a> {
-    pub(crate) fn parse(value: &'a HeaderValue) -> crate::Result<Cookie<'a>> {
+    pub(crate) fn parse(value: &'a HeaderValue) -> crate::Result<Self> {
         std::str::from_utf8(value.as_bytes())
             .map_err(cookie::ParseError::from)
             .and_then(cookie::Cookie::parse)
@@ -238,21 +238,21 @@ impl<'a> Cookie<'a> {
 
 impl fmt::Display for Cookie<'_> {
     #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
 }
 
 impl<'c> From<RawCookie<'c>> for Cookie<'c> {
     #[inline]
-    fn from(cookie: RawCookie<'c>) -> Cookie<'c> {
+    fn from(cookie: RawCookie<'c>) -> Self {
         Cookie(cookie)
     }
 }
 
 impl<'c> From<Cookie<'c>> for RawCookie<'c> {
     #[inline]
-    fn from(cookie: Cookie<'c>) -> RawCookie<'c> {
+    fn from(cookie: Cookie<'c>) -> Self {
         cookie.0
     }
 }
@@ -271,7 +271,7 @@ impl Jar {
 
     /// Clone this [`Jar`], sharing storage but enabling compression.
     pub fn compressed(self: &Arc<Self>) -> Arc<Self> {
-        Arc::new(Jar {
+        Arc::new(Self {
             compression: true,
             store: self.store.clone(),
             psl: self.psl.clone(),
@@ -280,7 +280,7 @@ impl Jar {
 
     /// Clone this [`Jar`], sharing storage but disabling compression.
     pub fn uncompressed(self: &Arc<Self>) -> Arc<Self> {
-        Arc::new(Jar {
+        Arc::new(Self {
             compression: false,
             store: self.store.clone(),
             psl: self.psl.clone(),
@@ -377,7 +377,7 @@ impl Jar {
     /// // You can also use a string directly
     /// jar.add("foo=bar; Domain=example.com; Path=/", "http://example.com");
     /// ```
-    #[allow(clippy::unwrap_or_default)]
+    #[expect(clippy::unwrap_or_default)]
     pub fn add<C, U>(&self, cookie: C, uri: U)
     where
         C: IntoCookie,
@@ -456,7 +456,7 @@ impl Jar {
     ///     .build();
     /// jar.add_cookie(cookie, "http://example.com");
     /// ```
-    #[allow(clippy::unwrap_or_default)]
+    #[expect(clippy::unwrap_or_default)]
     pub fn add_cookie<C, U>(&self, cookie: C, uri: U)
     where
         C: Into<RawCookie<'static>>,
@@ -533,7 +533,7 @@ impl Jar {
     /// jar.remove("foo", "http://example.com/foo");
     /// assert!(jar.get("foo", "http://example.com/foo").is_none());
     /// ```
-    #[allow(clippy::unwrap_or_default)]
+    #[expect(clippy::unwrap_or_default)]
     pub fn remove<C, U>(&self, cookie: C, uri: U)
     where
         C: Into<RawCookie<'static>>,
@@ -627,8 +627,7 @@ impl CookieStore for Jar {
             }
 
             HeaderValue::from_maybe_shared(Bytes::from(cookies))
-                .map(Cookies::Compressed)
-                .unwrap_or(Cookies::Empty)
+                .map_or(Cookies::Empty, Cookies::Compressed)
         } else {
             let mut cookie_strs = Vec::new();
             self.store.iter_sync(|domain, path_map| {
@@ -683,7 +682,7 @@ impl fmt::Debug for Jar {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Jar")
             .field("compression", &self.compression)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 

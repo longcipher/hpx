@@ -60,13 +60,21 @@ pub struct RequestBuilder {
     request: crate::Result<Request>,
 }
 
+impl fmt::Debug for RequestBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RequestBuilder")
+            .field("request", &self.request)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Request {
     /// Constructs a new [`Request`].
     pub fn new(method: Method, uri: Uri) -> Self {
         let mut request = http::Request::new(None);
         *request.method_mut() = method;
         *request.uri_mut() = uri;
-        Request(request)
+        Self(request)
     }
 
     /// Construct an [`hpx::Request`](crate::Request) from any standard [`http::Request`].
@@ -82,7 +90,7 @@ impl Request {
         B::Error: Into<crate::error::BoxError>,
     {
         let (parts, body) = req.into_parts();
-        Request(HttpRequest::from_parts(parts, Some(Body::wrap(body))))
+        Self(HttpRequest::from_parts(parts, Some(Body::wrap(body))))
     }
 
     /// Get the method.
@@ -151,12 +159,12 @@ impl Request {
     /// Attempt to clone the request.
     ///
     /// `None` is returned if the request can not be cloned, i.e. if the body is a stream.
-    pub fn try_clone(&self) -> Option<Request> {
+    pub fn try_clone(&self) -> Option<Self> {
         let body = match self.body() {
             Some(body) => Some(body.try_clone()?),
             None => None,
         };
-        let mut req = Request::new(self.method().clone(), self.uri().clone());
+        let mut req = Self::new(self.method().clone(), self.uri().clone());
         *req.headers_mut() = self.headers().clone();
         *req.version_mut() = self.version();
         *req.extensions_mut() = self.extensions().clone();
@@ -192,8 +200,8 @@ impl Request {
 }
 
 impl RequestBuilder {
-    pub(super) fn new(client: Client, request: crate::Result<Request>) -> RequestBuilder {
-        let mut builder = RequestBuilder { client, request };
+    pub(super) fn new(client: Client, request: crate::Result<Request>) -> Self {
+        let mut builder = Self { client, request };
 
         let auth = builder
             .request
@@ -219,15 +227,15 @@ impl RequestBuilder {
     }
 
     /// Assemble a builder starting from an existing `Client` and a `Request`.
-    pub fn from_parts(client: Client, request: Request) -> RequestBuilder {
-        RequestBuilder {
+    pub const fn from_parts(client: Client, request: Request) -> Self {
+        Self {
             client,
             request: crate::Result::Ok(request),
         }
     }
 
     /// Add a `Header` to this Request with ability to define if `header_value` is sensitive.
-    fn header_sensitive<K, V>(mut self, key: K, value: V, sensitive: bool) -> RequestBuilder
+    fn header_sensitive<K, V>(mut self, key: K, value: V, sensitive: bool) -> Self
     where
         HeaderName: TryFrom<K>,
         <HeaderName as TryFrom<K>>::Error: Into<http::Error>,
@@ -250,7 +258,7 @@ impl RequestBuilder {
                     Err(e) => error = Some(Error::builder(e.into())),
                 },
                 Err(e) => error = Some(Error::builder(e.into())),
-            };
+            }
         }
         if let Some(err) = error {
             self.set_error(err);
@@ -262,7 +270,7 @@ impl RequestBuilder {
     ///
     /// If the header is already present, the value will be replaced.
     #[inline]
-    pub fn header<K, V>(self, key: K, value: V) -> RequestBuilder
+    pub fn header<K, V>(self, key: K, value: V) -> Self
     where
         HeaderName: TryFrom<K>,
         <HeaderName as TryFrom<K>>::Error: Into<http::Error>,
@@ -275,7 +283,7 @@ impl RequestBuilder {
     /// Add a set of Headers to the existing ones on this Request.
     ///
     /// The headers will be merged in to any already set.
-    pub fn headers(mut self, headers: HeaderMap) -> RequestBuilder {
+    pub fn headers(mut self, headers: HeaderMap) -> Self {
         if let Ok(ref mut req) = self.request {
             crate::util::replace_headers(req.headers_mut(), headers);
         }
@@ -283,7 +291,7 @@ impl RequestBuilder {
     }
 
     /// Set the original headers for this request.
-    pub fn orig_headers(mut self, orig_headers: OrigHeaderMap) -> RequestBuilder {
+    pub fn orig_headers(mut self, orig_headers: OrigHeaderMap) -> Self {
         if let Ok(ref mut req) = self.request {
             req.config_mut::<OrigHeaderMap>().replace(orig_headers);
         }
@@ -293,7 +301,7 @@ impl RequestBuilder {
     /// Enable or disable client default headers for this request.
     ///
     /// By default, client default headers are included. Set to `false` to skip them.
-    pub fn default_headers(mut self, enable: bool) -> RequestBuilder {
+    pub fn default_headers(mut self, enable: bool) -> Self {
         if let Ok(ref mut req) = self.request {
             req.config_mut::<DefaultHeaders>().replace(enable);
         }
@@ -315,7 +323,7 @@ impl RequestBuilder {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn auth<V>(self, token: V) -> RequestBuilder
+    pub fn auth<V>(self, token: V) -> Self
     where
         HeaderValue: TryFrom<V>,
         <HeaderValue as TryFrom<V>>::Error: Into<http::Error>,
@@ -338,7 +346,7 @@ impl RequestBuilder {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn basic_auth<U, P>(self, username: U, password: Option<P>) -> RequestBuilder
+    pub fn basic_auth<U, P>(self, username: U, password: Option<P>) -> Self
     where
         U: fmt::Display,
         P: fmt::Display,
@@ -362,7 +370,7 @@ impl RequestBuilder {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn bearer_auth<T>(self, token: T) -> RequestBuilder
+    pub fn bearer_auth<T>(self, token: T) -> Self
     where
         T: fmt::Display,
     {
@@ -375,7 +383,7 @@ impl RequestBuilder {
     /// The timeout is applied from when the request starts connecting until the
     /// response body has finished. It affects only this request and overrides
     /// the timeout configured using `ClientBuilder::timeout()`.
-    pub fn timeout(mut self, timeout: Duration) -> RequestBuilder {
+    pub fn timeout(mut self, timeout: Duration) -> Self {
         if let Ok(ref mut req) = self.request {
             req.config_mut::<TimeoutOptions>()
                 .get_or_insert_default()
@@ -389,7 +397,7 @@ impl RequestBuilder {
     /// The read timeout is applied from when the response body starts being read
     /// until the response body has finished. It affects only this request and
     /// overrides the read timeout configured using `ClientBuilder::read_timeout()`.
-    pub fn read_timeout(mut self, timeout: Duration) -> RequestBuilder {
+    pub fn read_timeout(mut self, timeout: Duration) -> Self {
         if let Ok(ref mut req) = self.request {
             req.config_mut::<TimeoutOptions>()
                 .get_or_insert_default()
@@ -399,7 +407,7 @@ impl RequestBuilder {
     }
 
     /// Sets the global (end-to-end) timeout for this request.
-    pub fn timeout_global(mut self, timeout: Option<Duration>) -> RequestBuilder {
+    pub fn timeout_global(mut self, timeout: Option<Duration>) -> Self {
         if let Ok(ref mut req) = self.request {
             req.config_mut::<TimeoutOptions>()
                 .get_or_insert_default()
@@ -409,7 +417,7 @@ impl RequestBuilder {
     }
 
     /// Sets the per-call timeout for this request (resets on redirect).
-    pub fn timeout_per_call(mut self, timeout: Option<Duration>) -> RequestBuilder {
+    pub fn timeout_per_call(mut self, timeout: Option<Duration>) -> Self {
         if let Ok(ref mut req) = self.request {
             req.config_mut::<TimeoutOptions>()
                 .get_or_insert_default()
@@ -419,7 +427,7 @@ impl RequestBuilder {
     }
 
     /// Sets the DNS resolution timeout for this request.
-    pub fn timeout_resolve(mut self, timeout: Option<Duration>) -> RequestBuilder {
+    pub fn timeout_resolve(mut self, timeout: Option<Duration>) -> Self {
         if let Ok(ref mut req) = self.request {
             req.config_mut::<TimeoutOptions>()
                 .get_or_insert_default()
@@ -429,7 +437,7 @@ impl RequestBuilder {
     }
 
     /// Sets the connect (TCP + TLS handshake) timeout for this request.
-    pub fn timeout_connect(mut self, timeout: Option<Duration>) -> RequestBuilder {
+    pub fn timeout_connect(mut self, timeout: Option<Duration>) -> Self {
         if let Ok(ref mut req) = self.request {
             req.config_mut::<TimeoutOptions>()
                 .get_or_insert_default()
@@ -439,7 +447,7 @@ impl RequestBuilder {
     }
 
     /// Sets the send-request-headers timeout for this request.
-    pub fn timeout_send_request(mut self, timeout: Option<Duration>) -> RequestBuilder {
+    pub fn timeout_send_request(mut self, timeout: Option<Duration>) -> Self {
         if let Ok(ref mut req) = self.request {
             req.config_mut::<TimeoutOptions>()
                 .get_or_insert_default()
@@ -449,7 +457,7 @@ impl RequestBuilder {
     }
 
     /// Sets the 100-continue await timeout for this request.
-    pub fn timeout_await_100(mut self, timeout: Option<Duration>) -> RequestBuilder {
+    pub fn timeout_await_100(mut self, timeout: Option<Duration>) -> Self {
         if let Ok(ref mut req) = self.request {
             req.config_mut::<TimeoutOptions>()
                 .get_or_insert_default()
@@ -459,7 +467,7 @@ impl RequestBuilder {
     }
 
     /// Sets the send-body timeout for this request.
-    pub fn timeout_send_body(mut self, timeout: Option<Duration>) -> RequestBuilder {
+    pub fn timeout_send_body(mut self, timeout: Option<Duration>) -> Self {
         if let Ok(ref mut req) = self.request {
             req.config_mut::<TimeoutOptions>()
                 .get_or_insert_default()
@@ -469,7 +477,7 @@ impl RequestBuilder {
     }
 
     /// Sets the receive-response-headers timeout for this request.
-    pub fn timeout_recv_response(mut self, timeout: Option<Duration>) -> RequestBuilder {
+    pub fn timeout_recv_response(mut self, timeout: Option<Duration>) -> Self {
         if let Ok(ref mut req) = self.request {
             req.config_mut::<TimeoutOptions>()
                 .get_or_insert_default()
@@ -479,7 +487,7 @@ impl RequestBuilder {
     }
 
     /// Sets the receive-body timeout for this request.
-    pub fn timeout_recv_body(mut self, timeout: Option<Duration>) -> RequestBuilder {
+    pub fn timeout_recv_body(mut self, timeout: Option<Duration>) -> Self {
         if let Ok(ref mut req) = self.request {
             req.config_mut::<TimeoutOptions>()
                 .get_or_insert_default()
@@ -489,7 +497,7 @@ impl RequestBuilder {
     }
 
     /// Set the request body.
-    pub fn body<T: Into<Body>>(mut self, body: T) -> RequestBuilder {
+    pub fn body<T: Into<Body>>(mut self, body: T) -> Self {
         if let Ok(ref mut req) = self.request {
             *req.body_mut() = Some(body.into());
         }
@@ -513,7 +521,7 @@ impl RequestBuilder {
     /// ```
     #[cfg(feature = "multipart")]
     #[cfg_attr(docsrs, doc(cfg(feature = "multipart")))]
-    pub fn multipart(mut self, mut multipart: multipart::Form) -> RequestBuilder {
+    pub fn multipart(mut self, mut multipart: multipart::Form) -> Self {
         let mut error = None;
         if let Ok(ref mut req) = self.request {
             match HeaderValue::from_maybe_shared(Bytes::from(format!(
@@ -531,12 +539,12 @@ impl RequestBuilder {
                             .or_insert(HeaderValue::from(length));
                     }
 
-                    *req.body_mut() = Some(multipart.stream())
+                    *req.body_mut() = Some(multipart.stream());
                 }
                 Err(err) => {
                     error = Some(Error::builder(err));
                 }
-            };
+            }
         }
         if let Some(err) = error {
             self.set_error(err);
@@ -565,7 +573,7 @@ impl RequestBuilder {
     /// into a query string.
     #[cfg(feature = "query")]
     #[cfg_attr(docsrs, doc(cfg(feature = "query")))]
-    pub fn query<T: Serialize + ?Sized>(mut self, query: &T) -> RequestBuilder {
+    pub fn query<T: Serialize + ?Sized>(mut self, query: &T) -> Self {
         let mut error = None;
         if let Ok(ref mut req) = self.request {
             match serde_urlencoded::to_string(query) {
@@ -612,7 +620,7 @@ impl RequestBuilder {
     /// uri encoded format
     #[cfg(feature = "form")]
     #[cfg_attr(docsrs, doc(cfg(feature = "form")))]
-    pub fn form<T: Serialize + ?Sized>(mut self, form: &T) -> RequestBuilder {
+    pub fn form<T: Serialize + ?Sized>(mut self, form: &T) -> Self {
         let mut error = None;
         if let Ok(ref mut req) = self.request {
             match serde_urlencoded::to_string(form) {
@@ -645,7 +653,7 @@ impl RequestBuilder {
     /// fail, or if `T` contains a map with non-string keys.
     #[cfg(feature = "json")]
     #[cfg_attr(docsrs, doc(cfg(feature = "json")))]
-    pub fn json<T: Serialize + ?Sized>(mut self, json: &T) -> RequestBuilder {
+    pub fn json<T: Serialize + ?Sized>(mut self, json: &T) -> Self {
         let mut error = None;
         if let Ok(ref mut req) = self.request {
             match serde_json::to_vec(json) {
@@ -666,7 +674,7 @@ impl RequestBuilder {
     }
 
     /// Set HTTP version
-    pub fn version(mut self, version: Version) -> RequestBuilder {
+    pub fn version(mut self, version: Version) -> Self {
         if let Ok(ref mut req) = self.request {
             req.version_mut().replace(version);
         }
@@ -674,7 +682,7 @@ impl RequestBuilder {
     }
 
     /// Set the redirect policy for this request.
-    pub fn redirect(mut self, policy: redirect::Policy) -> RequestBuilder {
+    pub fn redirect(mut self, policy: redirect::Policy) -> Self {
         if let Ok(ref mut req) = self.request {
             req.config_mut::<redirect::Policy>().replace(policy);
         }
@@ -684,7 +692,7 @@ impl RequestBuilder {
     /// Set the persistent cookie store for the request.
     #[cfg(feature = "cookies")]
     #[cfg_attr(docsrs, doc(cfg(feature = "cookies")))]
-    pub fn cookie_provider<C>(mut self, cookie_store: C) -> RequestBuilder
+    pub fn cookie_provider<C>(mut self, cookie_store: C) -> Self
     where
         C: IntoCookieStore,
     {
@@ -698,7 +706,7 @@ impl RequestBuilder {
     /// Sets if this request will announce that it accepts gzip encoding.
     #[cfg(feature = "gzip")]
     #[cfg_attr(docsrs, doc(cfg(feature = "gzip")))]
-    pub fn gzip(mut self, gzip: bool) -> RequestBuilder {
+    pub fn gzip(mut self, gzip: bool) -> Self {
         if let Ok(ref mut req) = self.request {
             req.config_mut::<AcceptEncoding>()
                 .get_or_insert_default()
@@ -710,7 +718,7 @@ impl RequestBuilder {
     /// Sets if this request will announce that it accepts brotli encoding.
     #[cfg(feature = "brotli")]
     #[cfg_attr(docsrs, doc(cfg(feature = "brotli")))]
-    pub fn brotli(mut self, brotli: bool) -> RequestBuilder {
+    pub fn brotli(mut self, brotli: bool) -> Self {
         if let Ok(ref mut req) = self.request {
             req.config_mut::<AcceptEncoding>()
                 .get_or_insert_default()
@@ -722,7 +730,7 @@ impl RequestBuilder {
     /// Sets if this request will announce that it accepts deflate encoding.
     #[cfg(feature = "deflate")]
     #[cfg_attr(docsrs, doc(cfg(feature = "deflate")))]
-    pub fn deflate(mut self, deflate: bool) -> RequestBuilder {
+    pub fn deflate(mut self, deflate: bool) -> Self {
         if let Ok(ref mut req) = self.request {
             req.config_mut::<AcceptEncoding>()
                 .get_or_insert_default()
@@ -734,7 +742,7 @@ impl RequestBuilder {
     /// Sets if this request will announce that it accepts zstd encoding.
     #[cfg(feature = "zstd")]
     #[cfg_attr(docsrs, doc(cfg(feature = "zstd")))]
-    pub fn zstd(mut self, zstd: bool) -> RequestBuilder {
+    pub fn zstd(mut self, zstd: bool) -> Self {
         if let Ok(ref mut req) = self.request {
             req.config_mut::<AcceptEncoding>()
                 .get_or_insert_default()
@@ -744,7 +752,7 @@ impl RequestBuilder {
     }
 
     /// Set the proxy for this request.
-    pub fn proxy(mut self, proxy: Proxy) -> RequestBuilder {
+    pub fn proxy(mut self, proxy: Proxy) -> Self {
         if let Ok(ref mut req) = self.request {
             req.config_mut::<RequestOptions>()
                 .get_or_insert_default()
@@ -755,7 +763,7 @@ impl RequestBuilder {
     }
 
     /// Set the local address for this request.
-    pub fn local_address<V>(mut self, local_address: V) -> RequestBuilder
+    pub fn local_address<V>(mut self, local_address: V) -> Self
     where
         V: Into<Option<IpAddr>>,
     {
@@ -769,7 +777,7 @@ impl RequestBuilder {
     }
 
     /// Set the local addresses for this request.
-    pub fn local_addresses<V4, V6>(mut self, ipv4: V4, ipv6: V6) -> RequestBuilder
+    pub fn local_addresses<V4, V6>(mut self, ipv4: V4, ipv6: V6) -> Self
     where
         V4: Into<Option<Ipv4Addr>>,
         V6: Into<Option<Ipv6Addr>>,
@@ -811,7 +819,7 @@ impl RequestBuilder {
             target_os = "watchos",
         )))
     )]
-    pub fn interface<I>(mut self, interface: I) -> RequestBuilder
+    pub fn interface<I>(mut self, interface: I) -> Self
     where
         I: Into<std::borrow::Cow<'static, str>>,
     {
@@ -825,7 +833,7 @@ impl RequestBuilder {
     }
 
     /// Set the emulation for this request.
-    pub fn emulation<P>(mut self, factory: P) -> RequestBuilder
+    pub fn emulation<P>(mut self, factory: P) -> Self
     where
         P: EmulationFactory,
     {
@@ -900,12 +908,12 @@ impl RequestBuilder {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn try_clone(&self) -> Option<RequestBuilder> {
+    pub fn try_clone(&self) -> Option<Self> {
         self.request
             .as_ref()
             .ok()
             .and_then(|req| req.try_clone())
-            .map(|req| RequestBuilder {
+            .map(|req| Self {
                 client: self.client.clone(),
                 request: Ok(req),
             })
@@ -940,14 +948,14 @@ fn extract_authority(uri: &mut Uri) -> Option<(String, Option<String>)> {
 
 impl<T: Into<Body>> From<HttpRequest<T>> for Request {
     #[inline]
-    fn from(req: HttpRequest<T>) -> Request {
-        Request(req.map(Into::into).map(Some))
+    fn from(req: HttpRequest<T>) -> Self {
+        Self(req.map(Into::into).map(Some))
     }
 }
 
 impl From<Request> for HttpRequest<Body> {
     #[inline]
-    fn from(req: Request) -> HttpRequest<Body> {
+    fn from(req: Request) -> Self {
         req.0.map(|body| body.unwrap_or_else(Body::empty))
     }
 }

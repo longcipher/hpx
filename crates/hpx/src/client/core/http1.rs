@@ -45,7 +45,7 @@ pub struct Http1Options {
 impl Http1OptionsBuilder {
     /// Set the `http09_responses` field.
     #[inline]
-    pub fn http09_responses(mut self, enabled: bool) -> Self {
+    pub const fn http09_responses(mut self, enabled: bool) -> Self {
         self.opts.h09_responses = enabled;
         self
     }
@@ -63,7 +63,7 @@ impl Http1OptionsBuilder {
     /// Default is `auto`. In this mode crate::core: will try to guess which
     /// mode to use
     #[inline]
-    pub fn writev(mut self, writev: Option<bool>) -> Self {
+    pub const fn writev(mut self, writev: Option<bool>) -> Self {
         self.opts.h1_writev = writev;
         self
     }
@@ -82,7 +82,7 @@ impl Http1OptionsBuilder {
     ///
     /// Default is 100.
     #[inline]
-    pub fn max_headers(mut self, max_headers: usize) -> Self {
+    pub const fn max_headers(mut self, max_headers: usize) -> Self {
         self.opts.h1_max_headers = Some(max_headers);
         self
     }
@@ -93,7 +93,7 @@ impl Http1OptionsBuilder {
     ///
     /// Default is an adaptive read buffer.
     #[inline]
-    pub fn read_buf_exact_size(mut self, sz: Option<usize>) -> Self {
+    pub const fn read_buf_exact_size(mut self, sz: Option<usize>) -> Self {
         self.opts.h1_read_buf_exact_size = sz;
         self.opts.h1_max_buf_size = None;
         self
@@ -139,7 +139,7 @@ impl Http1OptionsBuilder {
     ///
     /// [RFC 7230 Section 3.2.4.]: https://tools.ietf.org/html/rfc7230#section-3.2.4
     #[inline]
-    pub fn allow_spaces_after_header_name_in_responses(mut self, enabled: bool) -> Self {
+    pub const fn allow_spaces_after_header_name_in_responses(mut self, enabled: bool) -> Self {
         self.opts.allow_spaces_after_header_name_in_responses = enabled;
         self
     }
@@ -152,14 +152,14 @@ impl Http1OptionsBuilder {
     ///
     /// Default is false.
     #[inline]
-    pub fn ignore_invalid_headers_in_responses(mut self, enabled: bool) -> Self {
+    pub const fn ignore_invalid_headers_in_responses(mut self, enabled: bool) -> Self {
         self.opts.ignore_invalid_headers_in_responses = enabled;
         self
     }
 
     /// Set the `allow_obsolete_multiline_headers_in_responses` field.
     #[inline]
-    pub fn allow_obsolete_multiline_headers_in_responses(mut self, value: bool) -> Self {
+    pub const fn allow_obsolete_multiline_headers_in_responses(mut self, value: bool) -> Self {
         self.opts.allow_obsolete_multiline_headers_in_responses = value;
         self
     }
@@ -180,7 +180,7 @@ impl Http1OptionsBuilder {
 
     /// Build the [`Http1Options`] instance.
     #[inline]
-    pub fn build(self) -> Http1Options {
+    pub const fn build(self) -> Http1Options {
         self.opts
     }
 }
@@ -189,7 +189,7 @@ impl Http1Options {
     /// Create a new [`Http1OptionsBuilder`].
     pub fn builder() -> Http1OptionsBuilder {
         Http1OptionsBuilder {
-            opts: Http1Options::default(),
+            opts: Self::default(),
         }
     }
 }

@@ -57,7 +57,7 @@ pub struct Upgraded {
 ///
 /// If no upgrade was available, or it doesn't succeed, yields an `Error`.
 #[derive(Clone)]
-pub struct OnUpgrade {
+pub(crate) struct OnUpgrade {
     rx: Option<Arc<Mutex<oneshot::Receiver<Result<Upgraded>>>>>,
 }
 
@@ -70,7 +70,7 @@ pub struct OnUpgrade {
 /// - `&mut http::Request<B>`
 /// - `&mut http::Response<B>`
 #[inline]
-pub fn on<T: sealed::CanUpgrade>(msg: T) -> OnUpgrade {
+pub(crate) fn on<T: sealed::CanUpgrade>(msg: T) -> OnUpgrade {
     msg.on_upgrade()
 }
 
@@ -96,7 +96,7 @@ impl Upgraded {
     where
         T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
-        Upgraded {
+        Self {
             io: Rewind::new_buffered(Box::new(io), read_buf),
         }
     }
@@ -158,12 +158,12 @@ impl fmt::Debug for Upgraded {
 
 impl OnUpgrade {
     #[inline]
-    pub(super) fn none() -> Self {
-        OnUpgrade { rx: None }
+    pub(super) const fn none() -> Self {
+        Self { rx: None }
     }
 
     #[inline]
-    pub(super) fn is_none(&self) -> bool {
+    pub(super) const fn is_none(&self) -> bool {
         self.rx.is_none()
     }
 }
@@ -229,7 +229,7 @@ impl dyn Io + Send {}
 mod sealed {
     use super::OnUpgrade;
 
-    pub trait CanUpgrade {
+    pub(crate) trait CanUpgrade {
         fn on_upgrade(self) -> OnUpgrade;
     }
 

@@ -78,7 +78,7 @@ mod test {
     }
 
     #[test]
-    pub fn text_json() -> crate::Result<()> {
+    fn text_json() -> crate::Result<()> {
         let content = Content::default();
         let message = Message::text_from_json(&content)?;
         assert!(matches!(message, Message::Text(_)));
@@ -88,7 +88,7 @@ mod test {
     }
 
     #[test]
-    pub fn binary_json() -> crate::Result<()> {
+    fn binary_json() -> crate::Result<()> {
         let content = Content::default();
         let message = Message::binary_from_json(&content)?;
         assert!(matches!(message, Message::Binary(_)));

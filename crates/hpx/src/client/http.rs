@@ -1,12 +1,13 @@
-pub mod client;
+pub(super) mod client;
 mod config_groups;
-pub mod future;
+pub(super) mod future;
 
 mod builder;
 
 use std::{
     borrow::Cow,
     collections::HashMap,
+    fmt,
     future::Future,
     net::SocketAddr,
     num::NonZeroU32,
@@ -25,7 +26,7 @@ use tower::{
 #[cfg(any(feature = "boring-tls", feature = "openssl-tls"))]
 pub(crate) use self::client::extra::ConnectIdentity;
 pub(crate) use self::client::{ConnectRequest, HttpClient, extra::ConnectExtra};
-pub use self::config_groups::{
+pub(super) use self::config_groups::{
     HttpVersionPreference, PoolConfigOptions, ProtocolConfigOptions, ProxyConfigOptions,
     TlsConfigOptions, TransportConfigOptions,
 };
@@ -133,14 +134,14 @@ type BaseClientService = ResponseBodyTimeout<
 >;
 
 /// The complete HTTP client service stack with all middleware layers.
-pub type ClientService = Timeout<ResponseRecovery<BaseClientService>>;
+pub(super) type ClientService = Timeout<ResponseRecovery<BaseClientService>>;
 
 /// Hooks-enabled client service path that remains statically dispatched.
 type HookedClientService =
     Timeout<super::layer::hooks::HooksService<ResponseRecovery<BaseClientService>>>;
 
 /// Type-erased client service for dynamic middleware composition.
-pub type BoxedClientService =
+pub(super) type BoxedClientService =
     BoxCloneSyncService<http::Request<Body>, http::Response<super::ClientResponseBody>, BoxError>;
 
 /// Layer type for wrapping boxed client services with additional middleware.
@@ -225,7 +226,7 @@ pub struct Client {
 
 impl Clone for Client {
     fn clone(&self) -> Self {
-        Client {
+        Self {
             inner: self.inner.clone(),
             #[cfg(feature = "http3")]
             alt_svc_cache: self.alt_svc_cache.clone(),
@@ -235,10 +236,22 @@ impl Clone for Client {
     }
 }
 
+impl fmt::Debug for Client {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Client").finish_non_exhaustive()
+    }
+}
+
 /// A [`ClientBuilder`] can be used to create a [`Client`] with custom configuration.
 #[must_use]
 pub struct ClientBuilder {
     config: CoreConfig,
+}
+
+impl fmt::Debug for ClientBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ClientBuilder").finish_non_exhaustive()
+    }
 }
 
 /// The HTTP version preference for the client.
@@ -261,7 +274,7 @@ enum HttpVersionPref {
     /// Per constraint C-06, the TCP ALPN list for `Http3` is empty — h3 is
     /// QUIC-only and is never proposed over TCP TLS. Alt-Svc (RFC 7838,
     /// Phase 2) is the only h3 discovery mechanism over TCP responses.
-    #[cfg_attr(not(feature = "http3"), allow(dead_code))]
+    #[cfg_attr(all(not(feature = "http3"), not(test)), expect(dead_code))]
     Http3,
     /// Propose `["h2", "http/1.1"]` over TCP TLS. `All` does NOT
     /// automatically attempt h3 (Alt-Svc upgrade is Phase 2 scope).
@@ -397,7 +410,7 @@ struct CoreConfig {
 }
 
 impl CoreConfig {
-    fn sync_connect_timeout(&mut self) {
+    const fn sync_connect_timeout(&mut self) {
         self.protocol
             .timeout_options
             .timeout_connect(self.transport.connect_timeout);
@@ -421,7 +434,6 @@ impl TransportConfig {
     }
 }
 
-#[allow(deprecated)]
 impl From<TransportConfigOptions> for TransportConfig {
     fn from(value: TransportConfigOptions) -> Self {
         Self {
@@ -443,7 +455,6 @@ impl From<TransportConfigOptions> for TransportConfig {
     }
 }
 
-#[allow(deprecated)]
 impl From<PoolConfigOptions> for PoolConfig {
     fn from(value: PoolConfigOptions) -> Self {
         Self {
@@ -454,7 +465,6 @@ impl From<PoolConfigOptions> for PoolConfig {
     }
 }
 
-#[allow(deprecated)]
 impl From<TlsConfigOptions> for TlsConfig {
     fn from(value: TlsConfigOptions) -> Self {
         Self {
@@ -471,7 +481,6 @@ impl From<TlsConfigOptions> for TlsConfig {
     }
 }
 
-#[allow(deprecated)]
 impl From<ProtocolConfigOptions> for ProtocolConfig {
     fn from(value: ProtocolConfigOptions) -> Self {
         Self {
@@ -486,7 +495,6 @@ impl From<ProtocolConfigOptions> for ProtocolConfig {
     }
 }
 
-#[allow(deprecated)]
 impl From<ProxyConfigOptions> for ProxyConfig {
     fn from(value: ProxyConfigOptions) -> Self {
         Self {
@@ -515,8 +523,12 @@ impl Client {
     /// Use [`Client::builder()`] if you wish to handle the failure as an [`Error`]
     /// instead of panicking.
     #[inline]
-    pub fn new() -> Client {
-        Client::builder().build().expect(
+    #[expect(
+        clippy::expect_used,
+        reason = "Client::new() is documented to panic on build failure; use Client::builder() for fallible API"
+    )]
+    pub fn new() -> Self {
+        Self::builder().build().expect(
             "Client::new() failed to build — use Client::builder().build() for error handling",
         )
     }
@@ -735,11 +747,8 @@ impl Client {
     /// (`crates/hpx/tests/http3.rs`). Not part of the stable public API.
     #[cfg(feature = "http3")]
     #[doc(hidden)]
-    pub async fn __test_alt_svc_cache_has_entry(&self, host: &str, port: u16) -> bool {
-        self.alt_svc_cache
-            .get(&(host.to_string(), port))
-            .await
-            .is_some()
+    pub fn __test_alt_svc_cache_has_entry(&self, host: &str, port: u16) -> bool {
+        self.alt_svc_cache.get(&(host.to_string(), port)).is_some()
     }
 
     /// Test helper: checks whether the H3 failure tracker has blocked
@@ -749,10 +758,9 @@ impl Client {
     /// (`crates/hpx/tests/http3.rs`). Not part of the stable public API.
     #[cfg(feature = "http3")]
     #[doc(hidden)]
-    pub async fn __test_h3_failure_tracker_is_blocked(&self, host: &str, port: u16) -> bool {
+    pub fn __test_h3_failure_tracker_is_blocked(&self, host: &str, port: u16) -> bool {
         self.h3_failure_tracker
             .is_blocked(&(host.to_string(), port))
-            .await
     }
 }
 
@@ -761,12 +769,12 @@ impl tower::Service<Request> for Client {
     type Error = Error;
     type Future = Pending;
 
-    #[inline(always)]
+    #[inline]
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    #[inline(always)]
+    #[inline]
     fn call(&mut self, req: Request) -> Self::Future {
         self.execute(req)
     }
@@ -777,12 +785,12 @@ impl tower::Service<Request> for &'_ Client {
     type Error = Error;
     type Future = Pending;
 
-    #[inline(always)]
+    #[inline]
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    #[inline(always)]
+    #[inline]
     fn call(&mut self, req: Request) -> Self::Future {
         self.execute(req)
     }
@@ -816,7 +824,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn transport_config_options_override_transport_defaults() {
         let connect_timeout = Duration::from_secs(3);
         let builder = Client::builder().transport_config(
@@ -860,7 +867,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn reusable_protocol_config_can_be_applied_to_multiple_builders() {
         let protocol = ProtocolConfigOptions::new().https_only(true).referer(false);
 
@@ -874,7 +880,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn protocol_config_preserves_transport_connect_timeout() {
         let connect_timeout = Duration::from_secs(11);
 
@@ -904,7 +909,6 @@ mod tests {
 
     #[cfg(feature = "http1")]
     #[test]
-    #[allow(deprecated)]
     fn transport_config_preserves_existing_http1_transport_options() {
         let builder = Client::builder()
             .max_poll_iterations(7)

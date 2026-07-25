@@ -44,12 +44,13 @@ impl Default for WebSocketConfig {
 
 /// Wrapper for [`RequestBuilder`] that performs the
 /// websocket handshake when sent.
+#[derive(Debug)]
 pub struct WebSocketRequestBuilder {
     inner: RequestBuilder,
     proxy: Option<Proxy>,
     unsupported: UnsupportedSettings,
     config: WebSocketConfig,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     custom_headers: Vec<(String, String)>,
     /// Whether to request permessage-deflate extension.
     deflate_request: bool,
@@ -85,7 +86,7 @@ impl WebSocketRequestBuilder {
     ///
     /// The yawc backend only performs the standard WebSocket upgrade flow.
     #[inline]
-    pub fn force_http2(mut self) -> Self {
+    pub const fn force_http2(mut self) -> Self {
         self.unsupported.force_http2 = true;
         self
     }
@@ -106,21 +107,21 @@ impl WebSocketRequestBuilder {
 
     /// Sets the websocket max_message_size configuration.
     #[inline]
-    pub fn max_message_size(mut self, max_message_size: usize) -> Self {
+    pub const fn max_message_size(mut self, max_message_size: usize) -> Self {
         self.config.max_message_size = Some(max_message_size);
         self
     }
 
     /// Sets whether to automatically close the connection when a close frame is received.
     #[inline]
-    pub fn auto_close(mut self, auto_close: bool) -> Self {
+    pub const fn auto_close(mut self, auto_close: bool) -> Self {
         self.config.auto_close = auto_close;
         self
     }
 
     /// Sets whether to automatically send a pong when a ping frame is received.
     #[inline]
-    pub fn auto_pong(mut self, auto_pong: bool) -> Self {
+    pub const fn auto_pong(mut self, auto_pong: bool) -> Self {
         self.config.auto_pong = auto_pong;
         self
     }
@@ -134,7 +135,7 @@ impl WebSocketRequestBuilder {
     /// proceeds uncompressed. Use [`WebSocket::compression_accepted`] or
     /// [`WebSocketResponse::extensions`] to inspect the negotiated result.
     #[inline]
-    pub fn deflate_request(mut self, deflate_request: bool) -> Self {
+    pub const fn deflate_request(mut self, deflate_request: bool) -> Self {
         self.deflate_request = deflate_request;
         self
     }
@@ -371,7 +372,7 @@ impl WebSocketRequestBuilder {
                             let base = format!(
                                 "{}://{}",
                                 uri.scheme_str().unwrap_or("http"),
-                                uri.authority().map(|a| a.as_str()).unwrap_or("")
+                                uri.authority().map_or("", |a| a.as_str())
                             );
                             let full = format!("{base}{location}");
                             Uri::try_from(full).map_err(Error::builder)?
@@ -486,7 +487,7 @@ impl WebSocketRequestBuilder {
 /// the connection proceeds uncompressed.
 pub struct WebSocketResponse {
     ws: Option<hpx_yawc::TcpWebSocket>,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     config: WebSocketConfig,
     /// Whether the server accepted permessage-deflate compression.
     compression_accepted: bool,
@@ -496,18 +497,19 @@ impl fmt::Debug for WebSocketResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("WebSocketResponse")
             .field("connected", &self.ws.is_some())
-            .finish()
+            .field("compression_accepted", &self.compression_accepted)
+            .finish_non_exhaustive()
     }
 }
 
 impl WebSocketResponse {
     /// Returns the HTTP version (always HTTP/1.1 for yawc).
-    pub fn version(&self) -> Version {
+    pub const fn version(&self) -> Version {
         Version::HTTP_11
     }
 
     /// Returns the HTTP status (always 101 for a successful connection).
-    pub fn status(&self) -> http::StatusCode {
+    pub const fn status(&self) -> http::StatusCode {
         http::StatusCode::SWITCHING_PROTOCOLS
     }
 
@@ -519,7 +521,7 @@ impl WebSocketResponse {
 
     /// Returns `true` if the server accepted permessage-deflate compression.
     #[inline]
-    pub fn compression_accepted(&self) -> bool {
+    pub const fn compression_accepted(&self) -> bool {
         self.compression_accepted
     }
 
@@ -531,14 +533,14 @@ impl WebSocketResponse {
     /// compression is active. Use [`Self::compression_accepted`] for a
     /// simple boolean check.
     pub fn extensions(&self) -> Option<WebSocketExtensions> {
-        if self.compression_accepted {
-            Some(WebSocketExtensions::default())
-        } else {
-            None
-        }
+        self.compression_accepted.then(WebSocketExtensions::default)
     }
 
     /// Turns the response into a websocket.
+    #[expect(
+        clippy::unused_async_trait_impl,
+        reason = "public async API stability; removing async would change the public signature"
+    )]
     pub async fn into_websocket(mut self) -> Result<WebSocket, Error> {
         let ws = self
             .ws
@@ -555,7 +557,7 @@ impl WebSocketResponse {
 
 /// Convert a yawc Frame to our Message type.
 fn frame_to_message(frame: hpx_yawc::Frame) -> Message {
-    let (opcode, _is_fin, payload) = frame.clone().into_parts();
+    let (opcode, _is_fin, payload) = frame.into_parts();
     match opcode {
         hpx_yawc::OpCode::Text => {
             let s = String::from_utf8_lossy(&payload).to_string();
@@ -601,10 +603,18 @@ fn message_to_frame(msg: Message) -> hpx_yawc::Frame {
 /// yawc layer when negotiated with the server.
 pub struct WebSocket {
     inner: hpx_yawc::TcpWebSocket,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     protocol: Option<HeaderValue>,
     /// Whether the server accepted permessage-deflate compression.
     compression_accepted: bool,
+}
+
+impl fmt::Debug for WebSocket {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WebSocket")
+            .field("compression_accepted", &self.compression_accepted)
+            .finish_non_exhaustive()
+    }
 }
 
 impl WebSocket {
@@ -616,7 +626,7 @@ impl WebSocket {
     /// agreed to it. Compression is then handled transparently by the underlying
     /// yawc layer.
     #[inline]
-    pub fn compression_accepted(&self) -> bool {
+    pub const fn compression_accepted(&self) -> bool {
         self.compression_accepted
     }
 
@@ -680,6 +690,14 @@ pub struct WebSocketRead {
     compression_accepted: bool,
 }
 
+impl fmt::Debug for WebSocketRead {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WebSocketRead")
+            .field("compression_accepted", &self.compression_accepted)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Stream for WebSocketRead {
     type Item = Result<Message, Error>;
 
@@ -695,7 +713,7 @@ impl Stream for WebSocketRead {
 impl WebSocketRead {
     /// Returns `true` if the server accepted permessage-deflate compression.
     #[inline]
-    pub fn compression_accepted(&self) -> bool {
+    pub const fn compression_accepted(&self) -> bool {
         self.compression_accepted
     }
 
@@ -715,10 +733,18 @@ pub struct WebSocketWrite {
     compression_accepted: bool,
 }
 
+impl fmt::Debug for WebSocketWrite {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WebSocketWrite")
+            .field("compression_accepted", &self.compression_accepted)
+            .finish_non_exhaustive()
+    }
+}
+
 impl WebSocketWrite {
     /// Returns `true` if the server accepted permessage-deflate compression.
     #[inline]
-    pub fn compression_accepted(&self) -> bool {
+    pub const fn compression_accepted(&self) -> bool {
         self.compression_accepted
     }
 

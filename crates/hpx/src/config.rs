@@ -42,7 +42,7 @@ pub(crate) struct RequestConfig<T: RequestConfigValue>(Option<T::Value>);
 impl<T: RequestConfigValue> Default for RequestConfig<T> {
     #[inline]
     fn default() -> Self {
-        RequestConfig(None)
+        Self(None)
     }
 }
 
@@ -53,7 +53,7 @@ where
     /// Creates a new `RequestConfig` with the provided value.
     #[inline]
     pub(crate) const fn new(v: Option<T::Value>) -> Self {
-        RequestConfig(v)
+        Self(v)
     }
 
     /// Returns a reference to the inner value of this request-scoped configuration.
@@ -68,9 +68,7 @@ where
     /// current instance (typically a client instance).
     #[inline]
     pub(crate) fn fetch<'a>(&'a self, ext: &'a Extensions) -> Option<&'a T::Value> {
-        ext.get::<RequestConfig<T>>()
-            .and_then(Self::as_ref)
-            .or(self.as_ref())
+        ext.get::<Self>().and_then(Self::as_ref).or(self.as_ref())
     }
 
     /// Stores this value into the given [`http::Extensions`], if a value of the same type is not
@@ -91,7 +89,7 @@ where
     /// the removed value. If not, the internal value remains unchanged.
     #[inline]
     pub(crate) fn load(&mut self, ext: &mut Extensions) -> Option<&T::Value> {
-        if let Some(value) = RequestConfig::<T>::remove(ext) {
+        if let Some(value) = Self::remove(ext) {
             self.0.replace(value);
         }
         self.as_ref()
@@ -103,7 +101,7 @@ where
     /// Internally fetches [`RequestConfig<T>`] and returns a reference to its inner value, if set.
     #[inline]
     pub(crate) fn get(ext: &Extensions) -> Option<&T::Value> {
-        ext.get::<RequestConfig<T>>()?.0.as_ref()
+        ext.get::<Self>()?.0.as_ref()
     }
 
     /// Returns a mutable reference to the inner value in [`http::Extensions`], inserting a default
@@ -113,7 +111,7 @@ where
     /// `Option<T::Value>`.
     #[inline]
     pub(crate) fn get_mut(ext: &mut Extensions) -> &mut Option<T::Value> {
-        &mut ext.get_or_insert_default::<RequestConfig<T>>().0
+        &mut ext.get_or_insert_default::<Self>().0
     }
 
     /// Removes and returns the stored value from the given [`http::Extensions`], if present.
@@ -121,12 +119,11 @@ where
     /// This consumes the [`RequestConfig<T>`] entry and extracts its inner value.
     #[inline]
     pub(crate) fn remove(ext: &mut Extensions) -> Option<T::Value> {
-        ext.remove::<RequestConfig<T>>()?.0
+        ext.remove::<Self>()?.0
     }
 }
 
 /// Implements [`RequestConfigValue`] for a given type.
-#[allow(unused_macro_rules)]
 macro_rules! impl_request_config_value {
     ($type:ty) => {
         impl crate::config::RequestConfigValue for $type {

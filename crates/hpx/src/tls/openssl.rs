@@ -182,7 +182,7 @@ impl Inner {
         cfg.set_use_server_name_indication(self.config.tls_sni);
         cfg.set_verify_hostname(self.config.verify_hostname);
         let host = uri.host().ok_or("URI missing host")?;
-        let host = Self::normalize_host(host);
+        let host = super::normalize_host(host);
         let ssl = cfg.into_ssl(host)?;
         Ok(ssl)
     }
@@ -210,7 +210,7 @@ impl Inner {
 
         let uri = req.uri().clone();
         let host = uri.host().ok_or("URI missing host")?;
-        let host = Self::normalize_host(host);
+        let host = super::normalize_host(host);
 
         if let Some(ref cache) = self.cache {
             let key = SessionKey(req.identify());
@@ -221,7 +221,7 @@ impl Inner {
                 // Safety: `session` was obtained from a prior `set_new_session_callback`
                 // invoked by OpenSSL on the same `SslContext`, so the session handle is
                 // valid for the lifetime of the `SslConnectConfiguration`.
-                #[allow(unsafe_code)]
+                #[expect(unsafe_code)]
                 unsafe { cfg.set_session(&session) }?;
             }
 
@@ -232,54 +232,34 @@ impl Inner {
         let ssl = cfg.into_ssl(host)?;
         Ok(ssl)
     }
-
-    /// If `host` is an IPv6 address, we must strip away the square brackets that surround
-    /// it (otherwise, OpenSSL will fail to parse the host as an IP address, eventually
-    /// causing the handshake to fail due a hostname verification error).
-    fn normalize_host(host: &str) -> &str {
-        if host.is_empty() {
-            return host;
-        }
-
-        let last = host.len() - 1;
-        let mut chars = host.chars();
-
-        if let (Some('['), Some(']')) = (chars.next(), chars.last())
-            && host[1..last].parse::<std::net::Ipv6Addr>().is_ok()
-        {
-            return &host[1..last];
-        }
-
-        host
-    }
 }
 
 // ====== impl TlsConnectorBuilder =====
 
 impl TlsConnectorBuilder {
     /// Sets the alpn protocol to be used.
-    #[inline(always)]
+    #[inline]
     pub fn alpn_protocol(mut self, protocol: Option<AlpnProtocol>) -> Self {
         self.alpn_protocol = protocol;
         self
     }
 
     /// Sets the TLS keylog policy.
-    #[inline(always)]
+    #[inline]
     pub fn keylog(mut self, keylog: Option<KeyLog>) -> Self {
         self.keylog = keylog;
         self
     }
 
     /// Sets the identity to be used for client certificate authentication.
-    #[inline(always)]
+    #[inline]
     pub fn identity(mut self, identity: Option<Identity>) -> Self {
         self.identity = identity;
         self
     }
 
     /// Sets the certificate store used for TLS verification.
-    #[inline(always)]
+    #[inline]
     pub fn cert_store<T>(mut self, cert_store: T) -> Self
     where
         T: Into<Option<CertStore>>,
@@ -289,14 +269,14 @@ impl TlsConnectorBuilder {
     }
 
     /// Sets the certificate verification flag.
-    #[inline(always)]
+    #[inline]
     pub fn cert_verification(mut self, enabled: bool) -> Self {
         self.cert_verification = enabled;
         self
     }
 
     /// Sets the minimum TLS version to use.
-    #[inline(always)]
+    #[inline]
     pub fn min_version<T>(mut self, version: T) -> Self
     where
         T: Into<Option<TlsVersion>>,
@@ -306,7 +286,7 @@ impl TlsConnectorBuilder {
     }
 
     /// Sets the maximum TLS version to use.
-    #[inline(always)]
+    #[inline]
     pub fn max_version<T>(mut self, version: T) -> Self
     where
         T: Into<Option<TlsVersion>>,
@@ -316,14 +296,14 @@ impl TlsConnectorBuilder {
     }
 
     /// Sets the Server Name Indication (SNI) flag.
-    #[inline(always)]
+    #[inline]
     pub fn tls_sni(mut self, enabled: bool) -> Self {
         self.tls_sni = enabled;
         self
     }
 
     /// Sets the hostname verification flag.
-    #[inline(always)]
+    #[inline]
     pub fn verify_hostname(mut self, enabled: bool) -> Self {
         self.verify_hostname = enabled;
         self
@@ -475,7 +455,7 @@ impl<T> MaybeHttpsStream<T> {
 }
 
 impl<T> fmt::Debug for MaybeHttpsStream<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             MaybeHttpsStream::Http(..) => f.pad("Http(..)"),
             MaybeHttpsStream::Https(..) => f.pad("Https(..)"),

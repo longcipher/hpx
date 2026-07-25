@@ -18,7 +18,7 @@ use crate::{error::BoxError, ext::UriExt};
 /// another connector, and after getting an underlying connection, it creates
 /// an HTTP CONNECT tunnel over it.
 #[derive(Debug)]
-pub struct TunnelConnector<C> {
+pub(crate) struct TunnelConnector<C> {
     headers: Headers,
     inner: C,
     proxy_dst: Uri,
@@ -32,7 +32,7 @@ enum Headers {
 }
 
 #[derive(Debug)]
-pub enum TunnelError {
+pub(crate) enum TunnelError {
     ConnectFailed(BoxError),
     Io(std::io::Error),
     MissingHost,
@@ -51,7 +51,7 @@ impl<C> TunnelConnector<C> {
     /// A `TunnelConnector` can then be called with any destination. The `proxy_dst` passed to
     /// `call` will not be used to create the underlying connection, but will
     /// be used in an HTTP CONNECT request sent to the proxy destination.
-    pub fn new(proxy_dst: Uri, connector: C) -> Self {
+    pub(crate) const fn new(proxy_dst: Uri, connector: C) -> Self {
         Self {
             headers: Headers::Empty,
             inner: connector,
@@ -60,7 +60,7 @@ impl<C> TunnelConnector<C> {
     }
 
     /// Add `proxy-authorization` header value to the CONNECT request.
-    pub fn with_auth(mut self, mut auth: HeaderValue) -> Self {
+    pub(crate) fn with_auth(mut self, mut auth: HeaderValue) -> Self {
         // just in case the user forgot
         auth.set_sensitive(true);
         match self.headers {
@@ -81,7 +81,7 @@ impl<C> TunnelConnector<C> {
     /// Add extra headers to be sent with the CONNECT request.
     ///
     /// If existing headers have been set, these will be merged.
-    pub fn with_headers(mut self, mut headers: HeaderMap) -> Self {
+    pub(crate) fn with_headers(mut self, mut headers: HeaderMap) -> Self {
         match self.headers {
             Headers::Empty => {
                 self.headers = Headers::Extra(headers);
@@ -231,13 +231,13 @@ impl std::fmt::Display for TunnelError {
         f.write_str("tunnel error: ")?;
 
         f.write_str(match self {
-            TunnelError::MissingHost => "missing destination host",
-            TunnelError::ProxyAuthRequired => "proxy authorization required",
-            TunnelError::ProxyHeadersTooLong => "proxy response headers too long",
-            TunnelError::TunnelUnexpectedEof => "unexpected end of file",
-            TunnelError::TunnelUnsuccessful => "unsuccessful",
-            TunnelError::ConnectFailed(_) => "failed to create underlying connection",
-            TunnelError::Io(_) => "io error establishing tunnel",
+            Self::MissingHost => "missing destination host",
+            Self::ProxyAuthRequired => "proxy authorization required",
+            Self::ProxyHeadersTooLong => "proxy response headers too long",
+            Self::TunnelUnexpectedEof => "unexpected end of file",
+            Self::TunnelUnsuccessful => "unsuccessful",
+            Self::ConnectFailed(_) => "failed to create underlying connection",
+            Self::Io(_) => "io error establishing tunnel",
         })
     }
 }
@@ -245,8 +245,8 @@ impl std::fmt::Display for TunnelError {
 impl std::error::Error for TunnelError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            TunnelError::Io(e) => Some(e),
-            TunnelError::ConnectFailed(e) => Some(&**e),
+            Self::Io(e) => Some(e),
+            Self::ConnectFailed(e) => Some(&**e),
             _ => None,
         }
     }

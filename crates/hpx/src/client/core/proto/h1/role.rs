@@ -45,7 +45,7 @@ macro_rules! header_name {
 macro_rules! header_value {
     ($bytes:expr) => {{
         {
-            #[allow(unsafe_code)]
+            #[expect(unsafe_code)]
             unsafe {
                 HeaderValue::from_maybe_shared_unchecked($bytes)
             }
@@ -127,6 +127,10 @@ impl Http1Transaction for Client {
     #[cfg(feature = "tracing")]
     const LOG: &'static str = "{role=client}";
 
+    #[expect(
+        clippy::unwrap_used,
+        reason = "httparse::Status::Complete guarantees code, reason, and version are Some"
+    )]
     fn parse(buf: &mut BytesMut, ctx: ParseContext<'_>) -> ParseResult<StatusCode> {
         debug_assert!(!buf.is_empty(), "parse called with empty buf");
 
@@ -162,11 +166,8 @@ impl Http1Transaction for Client {
                         let reason = {
                             let reason = res.reason.unwrap();
                             // Only save the reason phrase if it isn't the canonical reason
-                            if Some(reason) != status.canonical_reason() {
-                                Some(Bytes::copy_from_slice(reason.as_bytes()))
-                            } else {
-                                None
-                            }
+                            (Some(reason) != status.canonical_reason())
+                                .then(|| Bytes::copy_from_slice(reason.as_bytes()))
                         };
 
                         let version = if res.version.unwrap() == 1 {
@@ -196,9 +197,9 @@ impl Http1Transaction for Client {
             {
                 for header in &mut headers_indices[..headers_len] {
                     // SAFETY: array is valid up to `headers_len`
-                    #[allow(unsafe_code)]
+                    #[expect(unsafe_code)]
                     let header = unsafe { header.assume_init_mut() };
-                    Client::obs_fold_line(&mut slice, header);
+                    Self::obs_fold_line(&mut slice, header);
                 }
             }
 
@@ -211,12 +212,12 @@ impl Http1Transaction for Client {
             headers.reserve(headers_len);
             for header in &headers_indices[..headers_len] {
                 // SAFETY: array is valid up to `headers_len`
-                #[allow(unsafe_code)]
+                #[expect(unsafe_code)]
                 let header = unsafe { header.assume_init_ref() };
                 let name = header_name!(&slice[header.name.0..header.name.1]);
                 let value = header_value!(slice.slice(header.value.0..header.value.1));
 
-                if let header::CONNECTION = name {
+                if name == header::CONNECTION {
                     // keep_alive was previously set to default for Version
                     if keep_alive {
                         // HTTP/1.1
@@ -245,7 +246,7 @@ impl Http1Transaction for Client {
                 headers,
                 extensions,
             };
-            if let Some((decode, is_upgrade)) = Client::decoder(&head, ctx.req_method)? {
+            if let Some((decode, is_upgrade)) = Self::decoder(&head, ctx.req_method)? {
                 return Ok(Some(ParsedMessage {
                     head,
                     decode,
@@ -276,7 +277,7 @@ impl Http1Transaction for Client {
 
         *msg.req_method = Some(msg.head.subject.0.clone());
 
-        let body = Client::set_length(msg.head, msg.body);
+        let body = Self::set_length(msg.head, msg.body);
 
         let init_cap = 30 + msg.head.headers.len() * AVERAGE_HEADER_SIZE;
         dst.reserve(init_cap);
@@ -293,7 +294,12 @@ impl Http1Transaction for Client {
                 debug!("request with HTTP2 version coerced to HTTP/1.1");
                 extend(dst, b"HTTP/1.1");
             }
-            other => panic!("unexpected request version: {other:?}"),
+            other => {
+                return Err(Error::new_io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("unexpected request version: {other:?}"),
+                )));
+            }
         }
         extend(dst, b"\r\n");
 
@@ -325,7 +331,7 @@ impl Client {
     /// Returns None if this message head should be skipped (like a 100 status).
     fn decoder(
         inc: &MessageHead<StatusCode>,
-        method: &mut Option<Method>,
+        method: &Option<Method>,
     ) -> Result<Option<(DecodedLength, bool)>, Parse> {
         // According to https://tools.ietf.org/html/rfc7230#section-3.3.3
         // 1. HEAD responses, and Status 1xx, 204, and 304 cannot have a body.
@@ -452,9 +458,7 @@ impl Client {
         let encoder = match headers.entry(header::TRANSFER_ENCODING) {
             Entry::Occupied(te) => {
                 should_remove_con_len = true;
-                if headers::is_chunked(te.iter()) {
-                    Some(Encoder::chunked())
-                } else {
+                if !headers::is_chunked(te.iter()) {
                     warn!("user provided transfer-encoding does not end in 'chunked'");
 
                     // There's a Transfer-Encoding, but it doesn't end in 'chunked'!
@@ -473,13 +477,13 @@ impl Client {
                     // We can try to repair this, by adding `chunked` ourselves.
 
                     headers::add_chunked(te);
-                    Some(Encoder::chunked())
                 }
+                Some(Encoder::chunked())
             }
             Entry::Vacant(te) => {
                 if let Some(len) = existing_con_len {
                     Some(Encoder::length(len))
-                } else if let BodyLength::Unknown = body {
+                } else if matches!(body, BodyLength::Unknown) {
                     // GET, HEAD, and CONNECT almost never have bodies.
                     //
                     // So instead of sending a "chunked" body with a 0-chunk,
@@ -554,7 +558,7 @@ impl Client {
         };
 
         // not on standard slices because whatever, sigh
-        fn trim_start(mut s: &[u8]) -> &[u8] {
+        const fn trim_start(mut s: &[u8]) -> &[u8] {
             while let [first, rest @ ..] = s {
                 if first.is_ascii_whitespace() {
                     s = rest;
@@ -565,7 +569,7 @@ impl Client {
             s
         }
 
-        fn trim_end(mut s: &[u8]) -> &[u8] {
+        const fn trim_end(mut s: &[u8]) -> &[u8] {
             while let [rest @ .., last] = s {
                 if last.is_ascii_whitespace() {
                     s = rest;
@@ -576,7 +580,7 @@ impl Client {
             s
         }
 
-        fn trim(s: &[u8]) -> &[u8] {
+        const fn trim(s: &[u8]) -> &[u8] {
             trim_start(trim_end(s))
         }
 

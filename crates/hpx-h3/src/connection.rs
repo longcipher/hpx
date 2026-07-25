@@ -408,7 +408,14 @@ where
         }
 
         for stream in self.pending_recv_streams.iter_mut().filter(|s| s.is_some()) {
-            let resolved = match stream.as_mut().expect("this cannot be None").poll_type(cx) {
+            // Defensive: the `filter` above guarantees `Some`, but use a match
+            // instead of `expect` so a vendored fork cannot panic if the
+            // invariant ever breaks.
+            let poll_result = match stream.as_mut() {
+                Some(s) => s.poll_type(cx),
+                None => continue,
+            };
+            let resolved = match poll_result {
                 Poll::Ready(Err(stream::PollTypeError::IncomingError(e))) => {
                     return Err(self.handle_connection_error(e));
                 }
@@ -425,7 +432,12 @@ where
                     let _ = stream.take();
                     continue;
                 }
-                Poll::Ready(Ok(())) => stream.take().expect("this cannot be None"),
+                // Defensive: `filter` guarantees `Some`, so `take` returns the
+                // value. Guard against `None` defensively instead of `expect`.
+                Poll::Ready(Ok(())) => match stream.take() {
+                    Some(r) => r,
+                    None => continue,
+                },
                 Poll::Pending => continue,
             };
 

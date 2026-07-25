@@ -42,13 +42,13 @@ pub struct Response {
 }
 
 impl Response {
-    pub(super) fn new<B>(res: http::Response<B>, uri: Uri) -> Response
+    pub(super) fn new<B>(res: http::Response<B>, uri: Uri) -> Self
     where
         B: HttpBody + Send + Sync + 'static,
         B::Data: Into<Bytes>,
         B::Error: Into<BoxError>,
     {
-        Response {
+        Self {
             uri,
             res: res.map(Body::wrap),
         }
@@ -60,17 +60,17 @@ impl Response {
     /// [`TowerServiceExt::into_tower_service()`](crate::tower_compat::TowerServiceExt), the
     /// returned service yields `http::Response<ClientResponseBody>`. Use this method to
     /// convert it back to `hpx::Response` for the convenience API.
-    pub fn from_http<B>(uri: Uri, res: http::Response<B>) -> Response
+    pub fn from_http<B>(uri: Uri, res: http::Response<B>) -> Self
     where
         B: HttpBody + Send + Sync + 'static,
         B::Data: Into<Bytes>,
         B::Error: Into<BoxError>,
     {
-        Response::new(res, uri)
+        Self::new(res, uri)
     }
 
     pub(crate) fn from_client_response(uri: Uri, res: http::Response<ClientResponseBody>) -> Self {
-        Response {
+        Self {
             uri,
             res: res.map(Body::from),
         }
@@ -78,7 +78,7 @@ impl Response {
 
     /// Get the final [`Uri`] of this [`Response`].
     #[inline]
-    pub fn uri(&self) -> &Uri {
+    pub const fn uri(&self) -> &Uri {
         &self.uri
     }
 
@@ -246,7 +246,7 @@ impl Response {
         let encoding_name = content_type
             .as_ref()
             .and_then(|mime| mime.get_param("charset").map(|charset| charset.as_str()))
-            .unwrap_or(default_encoding.as_ref());
+            .unwrap_or_else(|| default_encoding.as_ref());
         let encoding = Encoding::for_label(encoding_name.as_bytes()).unwrap_or(UTF_8);
 
         let full = self.bytes().await?;
@@ -587,7 +587,7 @@ impl Response {
     /// inner response, such as extracting protocol-specific extensions
     /// (e.g. [`crate::http3::H3WebSocket::from_response`]).
     #[inline]
-    pub fn inner(&mut self) -> &mut http::Response<Body> {
+    pub const fn inner(&mut self) -> &mut http::Response<Body> {
         &mut self.res
     }
 
@@ -670,20 +670,20 @@ impl Response {
 /// I'm not sure this conversion is that useful... People should be encouraged
 /// to use [`http::Response`], not `hpx::Response`.
 impl<T: Into<Body>> From<http::Response<T>> for Response {
-    fn from(r: http::Response<T>) -> Response {
+    fn from(r: http::Response<T>) -> Self {
         let mut res = r.map(Into::into);
         let uri = res
             .extensions_mut()
             .remove::<RequestUri>()
             .unwrap_or_else(|| RequestUri(Uri::from_static("http://no.url.provided.local")));
-        Response { res, uri: uri.0 }
+        Self { res, uri: uri.0 }
     }
 }
 
 /// A [`Response`] can be converted into a [`http::Response`].
 // It's supposed to be the inverse of the conversion above.
 impl From<Response> for http::Response<Body> {
-    fn from(r: Response) -> http::Response<Body> {
+    fn from(r: Response) -> Self {
         let mut res = r.res;
         res.extensions_mut().insert(RequestUri(r.uri));
         res
@@ -692,7 +692,7 @@ impl From<Response> for http::Response<Body> {
 
 /// A [`Response`] can be piped as the [`Body`] of another request.
 impl From<Response> for Body {
-    fn from(r: Response) -> Body {
+    fn from(r: Response) -> Self {
         r.res.into_body()
     }
 }

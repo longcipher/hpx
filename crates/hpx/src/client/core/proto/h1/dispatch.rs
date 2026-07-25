@@ -52,7 +52,7 @@ pub(crate) trait Dispatch {
     type PollError;
     type RecvItem;
 
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     fn poll_msg(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -86,7 +86,7 @@ where
     Bs: Body + 'static,
     Bs::Error: Into<BoxError>,
 {
-    #[allow(dead_code)] // used in tests
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn new(dispatch: D, conn: Conn<I, Bs::Data, T>) -> Self {
         Self::new_with_config(dispatch, conn, PollConfig::default())
     }
@@ -96,7 +96,7 @@ where
         conn: Conn<I, Bs::Data, T>,
         poll_config: PollConfig,
     ) -> Self {
-        Dispatcher {
+        Self {
             conn,
             dispatch,
             body_tx: None,
@@ -118,7 +118,7 @@ where
     ) -> Poll<Result<Dispatched>> {
         Poll::Ready(ready!(self.poll_inner(cx, should_shutdown)).or_else(|e| {
             // Be sure to alert a streaming body of the failure.
-            if let Some(mut body) = self.body_tx.take() {
+            if let Some(body) = self.body_tx.take() {
                 body.send_error(Error::new_body("connection error"));
             }
             // An error means we're shutting down either way.
@@ -270,13 +270,11 @@ where
 
     fn poll_read_head(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
         // can dispatch receive, or does it still care about other incoming message?
-        match ready!(self.dispatch.poll_ready(cx)) {
-            Ok(()) => (),
-            Err(()) => {
-                trace!("dispatch no longer receiving messages");
-                self.close();
-                return Poll::Ready(Ok(()));
-            }
+        if let Ok(()) = ready!(self.dispatch.poll_ready(cx)) {
+        } else {
+            trace!("dispatch no longer receiving messages");
+            self.close();
+            return Poll::Ready(Ok(()));
         }
 
         // dispatch is ready for a message, try to read one
@@ -409,7 +407,6 @@ where
                             );
                         } else {
                             trace!("discarding unknown frame");
-                            continue;
                         }
                     } else {
                         *clear_body = true;
@@ -486,7 +483,7 @@ where
 struct OptGuard<'a, T>(Pin<&'a mut Option<T>>, bool);
 
 impl<'a, T> OptGuard<'a, T> {
-    fn new(pin: Pin<&'a mut Option<T>>) -> Self {
+    const fn new(pin: Pin<&'a mut Option<T>>) -> Self {
         OptGuard(pin, false)
     }
 
@@ -508,8 +505,8 @@ impl<T> Drop for OptGuard<'_, T> {
 use std::convert::Infallible;
 
 impl<B> Client<B> {
-    pub(crate) fn new(rx: ClientRx<B>) -> Client<B> {
-        Client {
+    pub(crate) const fn new(rx: ClientRx<B>) -> Self {
+        Self {
             callback: None,
             rx,
             rx_closed: false,

@@ -26,7 +26,7 @@ type Dispatcher<T, B> =
     proto::dispatch::Dispatcher<proto::dispatch::Client<B>, B, T, proto::h1::ClientTransaction>;
 
 /// The sender side of an established connection.
-pub struct SendRequest<B> {
+pub(crate) struct SendRequest<B> {
     dispatch: dispatch::Sender<Request<B>, Response<IncomingBody>>,
 }
 
@@ -36,7 +36,7 @@ pub struct SendRequest<B> {
 /// reclaim the IO object, and additional related pieces.
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct Parts<T> {
+pub(crate) struct Parts<T> {
     /// The original IO object used in the handshake.
     pub io: T,
     /// A buffer of bytes that have been read but not processed as HTTP.
@@ -55,7 +55,7 @@ pub struct Parts<T> {
 /// In most cases, this should just be spawned into an executor, so that it
 /// can process incoming and outgoing messages, notice hangups, and the like.
 #[must_use = "futures do nothing unless polled"]
-pub struct Connection<T, B>
+pub(crate) struct Connection<T, B>
 where
     T: AsyncRead + AsyncWrite,
     B: Body + 'static,
@@ -72,7 +72,7 @@ where
     /// Return the inner IO object, and additional information.
     ///
     /// Only works for HTTP/1 connections. HTTP/2 connections will panic.
-    pub fn into_parts(self) -> Parts<T> {
+    pub(crate) fn into_parts(self) -> Parts<T> {
         let (io, read_buf, _) = self.inner.into_inner();
         Parts { io, read_buf }
     }
@@ -85,7 +85,7 @@ where
 /// **Note**: The default values of options are *not considered stable*. They
 /// are subject to change at any time.
 #[derive(Clone, Debug)]
-pub struct Builder {
+pub(crate) struct Builder {
     opts: Http1Options,
 }
 
@@ -95,14 +95,14 @@ impl<B> SendRequest<B> {
     /// Polls to determine whether this sender can be used yet for a request.
     ///
     /// If the associated connection is closed, this returns an Error.
-    pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
+    pub(crate) fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
         self.dispatch.poll_ready(cx)
     }
 
     /// Waits until the dispatcher is ready
     ///
     /// If the associated connection is closed, this returns an Error.
-    pub async fn ready(&mut self) -> Result<()> {
+    pub(crate) async fn ready(&mut self) -> Result<()> {
         std::future::poll_fn(|cx| self.poll_ready(cx)).await
     }
 
@@ -113,7 +113,7 @@ impl<B> SendRequest<B> {
     /// This is mostly a hint. Due to inherent latency of networks, it is
     /// possible that even after checking this is ready, sending a request
     /// may still fail because the connection was closed in the meantime.
-    pub fn is_ready(&self) -> bool {
+    pub(crate) fn is_ready(&self) -> bool {
         self.dispatch.is_ready()
     }
 }
@@ -130,8 +130,8 @@ where
     ///
     /// If there was an error before trying to serialize the request to the
     /// connection, the message will be returned as part of this error.
-    #[allow(clippy::result_large_err)]
-    pub fn try_send_request(
+    #[expect(clippy::result_large_err)]
+    pub(crate) fn try_send_request(
         &mut self,
         req: Request<B>,
     ) -> impl Future<Output = std::result::Result<Response<IncomingBody>, TrySendError<Request<B>>>>
@@ -142,8 +142,14 @@ where
                 Ok(rx) => match rx.await {
                     Ok(Ok(res)) => Ok(res),
                     Ok(Err(err)) => Err(err),
-                    // this is definite bug if it happens, but it shouldn't happen!
-                    Err(_) => panic!("dispatch dropped without returning error"),
+                    // The dispatch task dropped its callback sender without
+                    // returning a result. This indicates a bug in the
+                    // connection lifecycle; surface it as a closed-connection
+                    // error rather than panicking.
+                    Err(_) => Err(TrySendError {
+                        error: Error::new_closed().with("dispatch dropped without result"),
+                        message: None,
+                    }),
                 },
                 Err(req) => {
                     debug!("connection was not ready");
@@ -173,7 +179,7 @@ where
     B::Error: Into<BoxError>,
 {
     /// Enable this connection to support higher-level HTTP upgrades.
-    pub fn with_upgrades(self) -> upgrades::UpgradeableConnection<T, B> {
+    pub(crate) const fn with_upgrades(self) -> upgrades::UpgradeableConnection<T, B> {
         upgrades::UpgradeableConnection { inner: Some(self) }
     }
 }
@@ -223,15 +229,15 @@ impl Default for Builder {
 impl Builder {
     /// Creates a new connection builder.
     #[inline]
-    pub fn new() -> Builder {
-        Builder {
+    pub(crate) fn new() -> Self {
+        Self {
             opts: Default::default(),
         }
     }
 
     /// Provide a options configuration for the HTTP/1 connection.
     #[inline]
-    pub fn options(&mut self, opts: Http1Options) {
+    pub(crate) const fn options(&mut self, opts: Http1Options) {
         self.opts = opts;
     }
 
@@ -239,7 +245,11 @@ impl Builder {
     ///
     /// Note, if [`Connection`] is not `await`-ed, [`SendRequest`] will
     /// do nothing.
-    pub async fn handshake<T, B>(self, io: T) -> Result<(SendRequest<B>, Connection<T, B>)>
+    #[expect(
+        clippy::unused_async_trait_impl,
+        reason = "async signature kept for API symmetry with HTTP/2 handshake"
+    )]
+    pub(crate) async fn handshake<T, B>(self, io: T) -> Result<(SendRequest<B>, Connection<T, B>)>
     where
         T: AsyncRead + AsyncWrite + Unpin,
         B: Body + 'static,
@@ -312,14 +322,17 @@ impl Builder {
 }
 
 mod upgrades {
-    use super::*;
+    use super::{
+        AsyncRead, AsyncWrite, Body, BoxError, Connection, Context, Future, Parts, Pin, Poll,
+        Result, proto, ready,
+    };
     use crate::client::core::upgrade::Upgraded;
 
     // A future binding a connection with a Service with Upgrade support.
     //
     // This type is unnameable outside the crate.
     #[must_use = "futures do nothing unless polled"]
-    pub struct UpgradeableConnection<T, B>
+    pub(crate) struct UpgradeableConnection<T, B>
     where
         T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
         B: Body + 'static,
@@ -337,6 +350,10 @@ mod upgrades {
     {
         type Output = Result<()>;
 
+        #[expect(
+            clippy::unwrap_used,
+            reason = "UpgradeableConnection state machine: inner is Some until poll consumes it"
+        )]
         fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             match ready!(Pin::new(&mut self.inner.as_mut().unwrap().inner).poll(cx)) {
                 Ok(proto::Dispatched::Shutdown) => Poll::Ready(Ok(())),

@@ -24,7 +24,8 @@ impl WebWorker {
         let (tx, rx) = mpsc::channel(100);
 
         let dom = Dom::new();
-        let mut runtime = BrowserJsRuntime::new(dom);
+        let mut runtime = BrowserJsRuntime::new(dom)
+            .map_err(|e| crate::js_runtime::JsError::Execution(e.to_string()))?;
 
         // Set up worker global scope
         runtime.execute_script(

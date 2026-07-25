@@ -68,7 +68,7 @@ use crate::{
 impl ClientBuilder {
     /// Replace the transport-layer configuration as a reusable group.
     #[inline]
-    pub fn transport_config(mut self, config: TransportConfigOptions) -> ClientBuilder {
+    pub fn transport_config(mut self, config: TransportConfigOptions) -> Self {
         let transport_options = self.config.transport.transport_options.clone();
         self.config.transport =
             TransportConfig::from(config).with_transport_options(transport_options);
@@ -78,21 +78,21 @@ impl ClientBuilder {
 
     /// Replace the connection-pool configuration as a reusable group.
     #[inline]
-    pub fn pool_config(mut self, config: PoolConfigOptions) -> ClientBuilder {
+    pub fn pool_config(mut self, config: PoolConfigOptions) -> Self {
         self.config.pool = config.into();
         self
     }
 
     /// Replace the TLS configuration as a reusable group.
     #[inline]
-    pub fn tls_config(mut self, config: TlsConfigOptions) -> ClientBuilder {
+    pub fn tls_config(mut self, config: TlsConfigOptions) -> Self {
         self.config.tls = config.into();
         self
     }
 
     /// Replace the protocol configuration as a reusable group.
     #[inline]
-    pub fn protocol_config(mut self, config: ProtocolConfigOptions) -> ClientBuilder {
+    pub fn protocol_config(mut self, config: ProtocolConfigOptions) -> Self {
         self.config.protocol = config.into();
         self.config.sync_connect_timeout();
         self
@@ -100,7 +100,7 @@ impl ClientBuilder {
 
     /// Replace the proxy configuration as a reusable group.
     #[inline]
-    pub fn proxy_config(mut self, config: ProxyConfigOptions) -> ClientBuilder {
+    pub fn proxy_config(mut self, config: ProxyConfigOptions) -> Self {
         self.config.proxy = config.into();
         self
     }
@@ -198,7 +198,6 @@ impl ClientBuilder {
                 .build(config.middleware.connector_layers)?;
 
             // Build client
-            #[allow(unused_mut)]
             let mut builder = HttpClient::builder(TokioExecutor::new());
 
             #[cfg(feature = "http1")]
@@ -368,7 +367,7 @@ impl ClientBuilder {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn user_agent<V>(mut self, value: V) -> ClientBuilder
+    pub fn user_agent<V>(mut self, value: V) -> Self
     where
         V: TryInto<HeaderValue>,
         V::Error: Into<http::Error>,
@@ -382,7 +381,7 @@ impl ClientBuilder {
                 // time without polluting CoreConfig with an error field.
                 self.config.pending_user_agent = Some(Cow::Owned(err.into().to_string()));
             }
-        };
+        }
         self
     }
 
@@ -427,14 +426,14 @@ impl ClientBuilder {
     /// # }
     /// ```
     #[inline]
-    pub fn default_headers(mut self, headers: HeaderMap) -> ClientBuilder {
+    pub fn default_headers(mut self, headers: HeaderMap) -> Self {
         crate::util::replace_headers(&mut self.config.headers, headers);
         self
     }
 
     /// Sets the original headers for every request.
     #[inline]
-    pub fn orig_headers(mut self, orig_headers: OrigHeaderMap) -> ClientBuilder {
+    pub fn orig_headers(mut self, orig_headers: OrigHeaderMap) -> Self {
         self.config.orig_headers.extend(orig_headers);
         self
     }
@@ -452,7 +451,7 @@ impl ClientBuilder {
     #[inline]
     #[cfg(feature = "cookies")]
     #[cfg_attr(docsrs, doc(cfg(feature = "cookies")))]
-    pub fn cookie_store(mut self, enable: bool) -> ClientBuilder {
+    pub fn cookie_store(mut self, enable: bool) -> Self {
         if enable {
             self.cookie_provider(Arc::new(cookie::Jar::default()))
         } else {
@@ -474,7 +473,7 @@ impl ClientBuilder {
     #[inline]
     #[cfg(feature = "cookies")]
     #[cfg_attr(docsrs, doc(cfg(feature = "cookies")))]
-    pub fn cookie_provider<C>(mut self, cookie_store: C) -> ClientBuilder
+    pub fn cookie_provider<C>(mut self, cookie_store: C) -> Self
     where
         C: cookie::IntoCookieStore,
     {
@@ -501,7 +500,7 @@ impl ClientBuilder {
     #[inline]
     #[cfg(feature = "gzip")]
     #[cfg_attr(docsrs, doc(cfg(feature = "gzip")))]
-    pub fn gzip(mut self, enable: bool) -> ClientBuilder {
+    pub const fn gzip(mut self, enable: bool) -> Self {
         self.config.middleware.accept_encoding.gzip = enable;
         self
     }
@@ -525,7 +524,7 @@ impl ClientBuilder {
     #[inline]
     #[cfg(feature = "brotli")]
     #[cfg_attr(docsrs, doc(cfg(feature = "brotli")))]
-    pub fn brotli(mut self, enable: bool) -> ClientBuilder {
+    pub const fn brotli(mut self, enable: bool) -> Self {
         self.config.middleware.accept_encoding.brotli = enable;
         self
     }
@@ -549,7 +548,7 @@ impl ClientBuilder {
     #[inline]
     #[cfg(feature = "zstd")]
     #[cfg_attr(docsrs, doc(cfg(feature = "zstd")))]
-    pub fn zstd(mut self, enable: bool) -> ClientBuilder {
+    pub const fn zstd(mut self, enable: bool) -> Self {
         self.config.middleware.accept_encoding.zstd = enable;
         self
     }
@@ -573,7 +572,7 @@ impl ClientBuilder {
     #[inline]
     #[cfg(feature = "deflate")]
     #[cfg_attr(docsrs, doc(cfg(feature = "deflate")))]
-    pub fn deflate(mut self, enable: bool) -> ClientBuilder {
+    pub const fn deflate(mut self, enable: bool) -> Self {
         self.config.middleware.accept_encoding.deflate = enable;
         self
     }
@@ -584,7 +583,7 @@ impl ClientBuilder {
     /// This can be used to ensure a `Client` doesn't use zstd decompression
     /// even if another dependency were to enable the optional `zstd` feature.
     #[inline]
-    pub fn no_zstd(self) -> ClientBuilder {
+    pub const fn no_zstd(self) -> Self {
         #[cfg(feature = "zstd")]
         {
             self.zstd(false)
@@ -602,7 +601,7 @@ impl ClientBuilder {
     /// This can be used to ensure a `Client` doesn't use gzip decompression
     /// even if another dependency were to enable the optional `gzip` feature.
     #[inline]
-    pub fn no_gzip(self) -> ClientBuilder {
+    pub const fn no_gzip(self) -> Self {
         #[cfg(feature = "gzip")]
         {
             self.gzip(false)
@@ -620,7 +619,7 @@ impl ClientBuilder {
     /// This can be used to ensure a `Client` doesn't use brotli decompression
     /// even if another dependency were to enable the optional `brotli` feature.
     #[inline]
-    pub fn no_brotli(self) -> ClientBuilder {
+    pub const fn no_brotli(self) -> Self {
         #[cfg(feature = "brotli")]
         {
             self.brotli(false)
@@ -638,7 +637,7 @@ impl ClientBuilder {
     /// This can be used to ensure a `Client` doesn't use deflate decompression
     /// even if another dependency were to enable the optional `deflate` feature.
     #[inline]
-    pub fn no_deflate(self) -> ClientBuilder {
+    pub const fn no_deflate(self) -> Self {
         #[cfg(feature = "deflate")]
         {
             self.deflate(false)
@@ -659,7 +658,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch protocol configuration, see
     /// [`ProtocolConfigOptions`].
     #[inline]
-    pub fn redirect(mut self, policy: redirect::Policy) -> ClientBuilder {
+    pub fn redirect(mut self, policy: redirect::Policy) -> Self {
         self.config.protocol.redirect_policy = policy;
         self
     }
@@ -671,7 +670,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch protocol configuration, see
     /// [`ProtocolConfigOptions`].
     #[inline]
-    pub fn referer(mut self, enable: bool) -> ClientBuilder {
+    pub const fn referer(mut self, enable: bool) -> Self {
         self.config.protocol.referer = enable;
         self
     }
@@ -682,7 +681,7 @@ impl ClientBuilder {
     ///
     /// This is a convenience method. For batch protocol configuration, see
     /// [`ProtocolConfigOptions`].
-    pub fn retry(mut self, policy: retry::Policy) -> ClientBuilder {
+    pub fn retry(mut self, policy: retry::Policy) -> Self {
         self.config.protocol.retry_policy = policy;
         self
     }
@@ -695,7 +694,7 @@ impl ClientBuilder {
     ///
     /// This is a convenience method. For batch protocol configuration, see
     /// [`ProtocolConfigOptions`].
-    pub fn max_retries_per_request(mut self, max: u32) -> ClientBuilder {
+    pub fn max_retries_per_request(mut self, max: u32) -> Self {
         self.config.protocol.retry_policy = self
             .config
             .protocol
@@ -721,7 +720,7 @@ impl ClientBuilder {
     /// let client = hpx::Client::builder().system_proxy().build().unwrap();
     /// ```
     #[inline]
-    pub fn system_proxy(mut self) -> ClientBuilder {
+    pub const fn system_proxy(mut self) -> Self {
         self.config.proxy.auto_sys_proxy = true;
         self
     }
@@ -743,7 +742,7 @@ impl ClientBuilder {
     /// let client = Client::builder().proxy(proxy).build().unwrap();
     /// ```
     #[inline]
-    pub fn proxy(mut self, proxy: Proxy) -> ClientBuilder {
+    pub fn proxy(mut self, proxy: Proxy) -> Self {
         self.config.proxy.proxies.push(proxy.into_matcher());
         self.config.proxy.auto_sys_proxy = false;
         self
@@ -755,7 +754,7 @@ impl ClientBuilder {
     /// [`crate::proxy_pool::ProxyPoolStrategy`]. When this is set, automatic
     /// system proxy detection is disabled.
     #[inline]
-    pub fn proxy_pool(mut self, pool: crate::proxy_pool::ProxyPool) -> ClientBuilder {
+    pub fn proxy_pool(mut self, pool: crate::proxy_pool::ProxyPool) -> Self {
         self.config
             .middleware
             .layers
@@ -775,7 +774,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch proxy configuration, see
     /// [`ProxyConfigOptions`].
     #[inline]
-    pub fn no_proxy(mut self) -> ClientBuilder {
+    pub fn no_proxy(mut self) -> Self {
         self.config.proxy.proxies.clear();
         self.config.proxy.auto_sys_proxy = false;
         self
@@ -790,7 +789,7 @@ impl ClientBuilder {
     ///
     /// Default is no timeout.
     #[inline]
-    pub fn timeout(mut self, timeout: Duration) -> ClientBuilder {
+    pub const fn timeout(mut self, timeout: Duration) -> Self {
         self.config.protocol.timeout_options.total_timeout(timeout);
         self
     }
@@ -799,7 +798,7 @@ impl ClientBuilder {
     ///
     /// Default is `None`.
     #[inline]
-    pub fn read_timeout(mut self, timeout: Duration) -> ClientBuilder {
+    pub const fn read_timeout(mut self, timeout: Duration) -> Self {
         self.config.protocol.timeout_options.read_timeout(timeout);
         self
     }
@@ -816,7 +815,7 @@ impl ClientBuilder {
     /// This **requires** the futures be executed in a tokio runtime with
     /// a tokio timer enabled.
     #[inline]
-    pub fn connect_timeout(mut self, timeout: Duration) -> ClientBuilder {
+    pub const fn connect_timeout(mut self, timeout: Duration) -> Self {
         self.config.transport.connect_timeout = Some(timeout);
         self.config.sync_connect_timeout();
         self
@@ -829,7 +828,7 @@ impl ClientBuilder {
     ///
     /// Default is `None`.
     #[inline]
-    pub fn timeout_global(mut self, timeout: Option<Duration>) -> ClientBuilder {
+    pub const fn timeout_global(mut self, timeout: Option<Duration>) -> Self {
         self.config.protocol.timeout_options.timeout_global(timeout);
         self
     }
@@ -840,7 +839,7 @@ impl ClientBuilder {
     ///
     /// Default is `None`.
     #[inline]
-    pub fn timeout_per_call(mut self, timeout: Option<Duration>) -> ClientBuilder {
+    pub const fn timeout_per_call(mut self, timeout: Option<Duration>) -> Self {
         self.config
             .protocol
             .timeout_options
@@ -852,7 +851,7 @@ impl ClientBuilder {
     ///
     /// Default is `None`.
     #[inline]
-    pub fn timeout_resolve(mut self, timeout: Option<Duration>) -> ClientBuilder {
+    pub const fn timeout_resolve(mut self, timeout: Option<Duration>) -> Self {
         self.config
             .protocol
             .timeout_options
@@ -864,7 +863,7 @@ impl ClientBuilder {
     ///
     /// Default is `None`.
     #[inline]
-    pub fn timeout_send_request(mut self, timeout: Option<Duration>) -> ClientBuilder {
+    pub const fn timeout_send_request(mut self, timeout: Option<Duration>) -> Self {
         self.config
             .protocol
             .timeout_options
@@ -876,7 +875,7 @@ impl ClientBuilder {
     ///
     /// Default is 1 second.
     #[inline]
-    pub fn timeout_await_100(mut self, timeout: Option<Duration>) -> ClientBuilder {
+    pub const fn timeout_await_100(mut self, timeout: Option<Duration>) -> Self {
         self.config
             .protocol
             .timeout_options
@@ -888,7 +887,7 @@ impl ClientBuilder {
     ///
     /// Default is `None`.
     #[inline]
-    pub fn timeout_send_body(mut self, timeout: Option<Duration>) -> ClientBuilder {
+    pub const fn timeout_send_body(mut self, timeout: Option<Duration>) -> Self {
         self.config
             .protocol
             .timeout_options
@@ -900,7 +899,7 @@ impl ClientBuilder {
     ///
     /// Default is `None`.
     #[inline]
-    pub fn timeout_recv_response(mut self, timeout: Option<Duration>) -> ClientBuilder {
+    pub const fn timeout_recv_response(mut self, timeout: Option<Duration>) -> Self {
         self.config
             .protocol
             .timeout_options
@@ -912,7 +911,7 @@ impl ClientBuilder {
     ///
     /// Default is `None`.
     #[inline]
-    pub fn timeout_recv_body(mut self, timeout: Option<Duration>) -> ClientBuilder {
+    pub const fn timeout_recv_body(mut self, timeout: Option<Duration>) -> Self {
         self.config
             .protocol
             .timeout_options
@@ -925,7 +924,7 @@ impl ClientBuilder {
     /// This protects against servers sending unreasonably large response headers.
     /// Default is 64KB (65536 bytes). Set to `None` to disable the limit.
     #[inline]
-    pub fn max_response_header_size(mut self, size: Option<usize>) -> ClientBuilder {
+    pub const fn max_response_header_size(mut self, size: Option<usize>) -> Self {
         self.config
             .protocol
             .timeout_options
@@ -943,7 +942,7 @@ impl ClientBuilder {
     ///
     /// [log]: https://crates.io/crates/log
     #[inline]
-    pub fn connection_verbose(mut self, verbose: bool) -> ClientBuilder {
+    pub const fn connection_verbose(mut self, verbose: bool) -> Self {
         self.config.transport.connection_verbose = verbose;
         self
     }
@@ -959,7 +958,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch pool configuration, see
     /// [`PoolConfigOptions`].
     #[inline]
-    pub fn pool_idle_timeout<D>(mut self, val: D) -> ClientBuilder
+    pub fn pool_idle_timeout<D>(mut self, val: D) -> Self
     where
         D: Into<Option<Duration>>,
     {
@@ -972,7 +971,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch pool configuration, see
     /// [`PoolConfigOptions`].
     #[inline]
-    pub fn pool_max_idle_per_host(mut self, max: usize) -> ClientBuilder {
+    pub const fn pool_max_idle_per_host(mut self, max: usize) -> Self {
         self.config.pool.max_idle_per_host = max;
         self
     }
@@ -982,7 +981,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch pool configuration, see
     /// [`PoolConfigOptions`].
     #[inline]
-    pub fn pool_max_size(mut self, max: u32) -> ClientBuilder {
+    pub const fn pool_max_size(mut self, max: u32) -> Self {
         self.config.pool.max_size = NonZeroU32::new(max);
         self
     }
@@ -994,21 +993,21 @@ impl ClientBuilder {
     /// This is a convenience method. For batch protocol configuration, see
     /// [`ProtocolConfigOptions`].
     #[inline]
-    pub fn https_only(mut self, enabled: bool) -> ClientBuilder {
+    pub const fn https_only(mut self, enabled: bool) -> Self {
         self.config.protocol.https_only = enabled;
         self
     }
 
     /// Only use HTTP/1.
     #[inline]
-    pub fn http1_only(mut self) -> ClientBuilder {
+    pub const fn http1_only(mut self) -> Self {
         self.config.protocol.http_version_pref = HttpVersionPref::Http1;
         self
     }
 
     /// Only use HTTP/2.
     #[inline]
-    pub fn http2_only(mut self) -> ClientBuilder {
+    pub const fn http2_only(mut self) -> Self {
         self.config.protocol.http_version_pref = HttpVersionPref::Http2;
         self
     }
@@ -1016,7 +1015,7 @@ impl ClientBuilder {
     /// Sets the HTTP/1 options for the client.
     #[cfg(feature = "http1")]
     #[inline]
-    pub fn http1_options(mut self, options: Http1Options) -> ClientBuilder {
+    pub const fn http1_options(mut self, options: Http1Options) -> Self {
         *self.config.transport.transport_options.http1_options_mut() = Some(options);
         self
     }
@@ -1027,7 +1026,7 @@ impl ClientBuilder {
     /// task yields back to the runtime scheduler.
     #[cfg(feature = "http1")]
     #[inline]
-    pub fn max_poll_iterations(mut self, max_iterations: usize) -> ClientBuilder {
+    pub fn max_poll_iterations(mut self, max_iterations: usize) -> Self {
         assert!(
             max_iterations > 0,
             "max_poll_iterations must be greater than zero"
@@ -1048,7 +1047,7 @@ impl ClientBuilder {
     /// Sets the HTTP/2 options for the client.
     #[cfg(feature = "http2")]
     #[inline]
-    pub fn http2_options(mut self, options: Http2Options) -> ClientBuilder {
+    pub fn http2_options(mut self, options: Http2Options) -> Self {
         *self.config.transport.transport_options.http2_options_mut() = Some(options);
         self
     }
@@ -1062,7 +1061,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch transport configuration, see
     /// [`TransportConfigOptions`].
     #[inline]
-    pub fn tcp_nodelay(mut self, enabled: bool) -> ClientBuilder {
+    pub const fn tcp_nodelay(mut self, enabled: bool) -> Self {
         self.config.transport.tcp_nodelay = enabled;
         self
     }
@@ -1076,7 +1075,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch transport configuration, see
     /// [`TransportConfigOptions`].
     #[inline]
-    pub fn tcp_keepalive<D>(mut self, val: D) -> ClientBuilder
+    pub fn tcp_keepalive<D>(mut self, val: D) -> Self
     where
         D: Into<Option<Duration>>,
     {
@@ -1093,7 +1092,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch transport configuration, see
     /// [`TransportConfigOptions`].
     #[inline]
-    pub fn tcp_keepalive_interval<D>(mut self, val: D) -> ClientBuilder
+    pub fn tcp_keepalive_interval<D>(mut self, val: D) -> Self
     where
         D: Into<Option<Duration>>,
     {
@@ -1110,7 +1109,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch transport configuration, see
     /// [`TransportConfigOptions`].
     #[inline]
-    pub fn tcp_keepalive_retries<C>(mut self, retries: C) -> ClientBuilder
+    pub fn tcp_keepalive_retries<C>(mut self, retries: C) -> Self
     where
         C: Into<Option<u32>>,
     {
@@ -1148,7 +1147,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch transport configuration, see
     /// [`TransportConfigOptions`].
     #[inline]
-    pub fn tcp_reuse_address(mut self, enabled: bool) -> ClientBuilder {
+    pub const fn tcp_reuse_address(mut self, enabled: bool) -> Self {
         self.config.transport.tcp_reuse_address = enabled;
         self
     }
@@ -1160,7 +1159,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch transport configuration, see
     /// [`TransportConfigOptions`].
     #[inline]
-    pub fn tcp_send_buffer_size<S>(mut self, size: S) -> ClientBuilder
+    pub fn tcp_send_buffer_size<S>(mut self, size: S) -> Self
     where
         S: Into<Option<usize>>,
     {
@@ -1175,7 +1174,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch transport configuration, see
     /// [`TransportConfigOptions`].
     #[inline]
-    pub fn tcp_recv_buffer_size<S>(mut self, size: S) -> ClientBuilder
+    pub fn tcp_recv_buffer_size<S>(mut self, size: S) -> Self
     where
         S: Into<Option<usize>>,
     {
@@ -1199,7 +1198,7 @@ impl ClientBuilder {
     ///
     /// [RFC 6555]: https://tools.ietf.org/html/rfc6555
     #[inline]
-    pub fn tcp_happy_eyeballs_timeout<D>(mut self, val: D) -> ClientBuilder
+    pub fn tcp_happy_eyeballs_timeout<D>(mut self, val: D) -> Self
     where
         D: Into<Option<Duration>>,
     {
@@ -1220,7 +1219,7 @@ impl ClientBuilder {
     ///     .unwrap();
     /// ```
     #[inline]
-    pub fn local_address<T>(mut self, addr: T) -> ClientBuilder
+    pub fn local_address<T>(mut self, addr: T) -> Self
     where
         T: Into<Option<IpAddr>>,
     {
@@ -1246,7 +1245,7 @@ impl ClientBuilder {
     ///     .unwrap();
     /// ```
     #[inline]
-    pub fn local_addresses<V4, V6>(mut self, ipv4: V4, ipv6: V6) -> ClientBuilder
+    pub fn local_addresses<V4, V6>(mut self, ipv4: V4, ipv6: V6) -> Self
     where
         V4: Into<Option<Ipv4Addr>>,
         V6: Into<Option<Ipv6Addr>>,
@@ -1316,7 +1315,7 @@ impl ClientBuilder {
             target_os = "watchos",
         )))
     )]
-    pub fn interface<T>(mut self, interface: T) -> ClientBuilder
+    pub fn interface<T>(mut self, interface: T) -> Self
     where
         T: Into<std::borrow::Cow<'static, str>>,
     {
@@ -1334,7 +1333,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch TLS configuration, see
     /// [`TlsConfigOptions`].
     #[inline]
-    pub fn identity(mut self, identity: Identity) -> ClientBuilder {
+    pub fn identity(mut self, identity: Identity) -> Self {
         self.config.tls.identity = Some(identity);
         self
     }
@@ -1347,7 +1346,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch TLS configuration, see
     /// [`TlsConfigOptions`].
     #[inline]
-    pub fn cert_store(mut self, store: CertStore) -> ClientBuilder {
+    pub fn cert_store(mut self, store: CertStore) -> Self {
         self.config.tls.cert_store = store;
         self
     }
@@ -1367,7 +1366,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch TLS configuration, see
     /// [`TlsConfigOptions`].
     #[inline]
-    pub fn cert_verification(mut self, cert_verification: bool) -> ClientBuilder {
+    pub const fn cert_verification(mut self, cert_verification: bool) -> Self {
         self.config.tls.cert_verification = cert_verification;
         self
     }
@@ -1384,7 +1383,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch TLS configuration, see
     /// [`TlsConfigOptions`].
     #[inline]
-    pub fn verify_hostname(mut self, verify_hostname: bool) -> ClientBuilder {
+    pub const fn verify_hostname(mut self, verify_hostname: bool) -> Self {
         self.config.tls.verify_hostname = verify_hostname;
         self
     }
@@ -1396,7 +1395,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch TLS configuration, see
     /// [`TlsConfigOptions`].
     #[inline]
-    pub fn tls_sni(mut self, tls_sni: bool) -> ClientBuilder {
+    pub const fn tls_sni(mut self, tls_sni: bool) -> Self {
         self.config.tls.tls_sni = tls_sni;
         self
     }
@@ -1406,7 +1405,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch TLS configuration, see
     /// [`TlsConfigOptions`].
     #[inline]
-    pub fn keylog(mut self, keylog: KeyLog) -> ClientBuilder {
+    pub const fn keylog(mut self, keylog: KeyLog) -> Self {
         self.config.tls.keylog = Some(keylog);
         self
     }
@@ -1418,7 +1417,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch TLS configuration, see
     /// [`TlsConfigOptions`].
     #[inline]
-    pub fn min_tls_version(mut self, version: TlsVersion) -> ClientBuilder {
+    pub const fn min_tls_version(mut self, version: TlsVersion) -> Self {
         self.config.tls.min_version = Some(version);
         self
     }
@@ -1430,7 +1429,7 @@ impl ClientBuilder {
     /// This is a convenience method. For batch TLS configuration, see
     /// [`TlsConfigOptions`].
     #[inline]
-    pub fn max_tls_version(mut self, version: TlsVersion) -> ClientBuilder {
+    pub const fn max_tls_version(mut self, version: TlsVersion) -> Self {
         self.config.tls.max_version = Some(version);
         self
     }
@@ -1444,14 +1443,14 @@ impl ClientBuilder {
     /// This is a convenience method. For batch TLS configuration, see
     /// [`TlsConfigOptions`].
     #[inline]
-    pub fn tls_info(mut self, tls_info: bool) -> ClientBuilder {
+    pub const fn tls_info(mut self, tls_info: bool) -> Self {
         self.config.tls.tls_info = tls_info;
         self
     }
 
     /// Sets the TLS options for the client.
     #[inline]
-    pub fn tls_options(mut self, options: TlsOptions) -> ClientBuilder {
+    pub fn tls_options(mut self, options: TlsOptions) -> Self {
         *self.config.transport.transport_options.tls_options_mut() = Some(options);
         self
     }
@@ -1466,7 +1465,7 @@ impl ClientBuilder {
     #[inline]
     #[cfg(feature = "hickory-dns")]
     #[cfg_attr(docsrs, doc(cfg(feature = "hickory-dns")))]
-    pub fn no_hickory_dns(mut self) -> ClientBuilder {
+    pub const fn no_hickory_dns(mut self) -> Self {
         self.config.dns.hickory_dns = false;
         self
     }
@@ -1480,7 +1479,7 @@ impl ClientBuilder {
     /// itself, any port in the overridden addr will be ignored and traffic sent
     /// to the conventional port for the given scheme (e.g. 80 for http).
     #[inline]
-    pub fn resolve<D>(self, domain: D, addr: SocketAddr) -> ClientBuilder
+    pub fn resolve<D>(self, domain: D, addr: SocketAddr) -> Self
     where
         D: Into<Cow<'static, str>>,
     {
@@ -1496,7 +1495,7 @@ impl ClientBuilder {
     /// itself, any port in the overridden addresses will be ignored and traffic sent
     /// to the conventional port for the given scheme (e.g. 80 for http).
     #[inline]
-    pub fn resolve_to_addrs<D, A>(mut self, domain: D, addrs: A) -> ClientBuilder
+    pub fn resolve_to_addrs<D, A>(mut self, domain: D, addrs: A) -> Self
     where
         D: Into<Cow<'static, str>>,
         A: IntoIterator<Item = SocketAddr>,
@@ -1514,7 +1513,7 @@ impl ClientBuilder {
     /// Overrides for specific names passed to `resolve` and `resolve_to_addrs` will
     /// still be applied on top of this resolver.
     #[inline]
-    pub fn dns_resolver<R>(mut self, resolver: R) -> ClientBuilder
+    pub fn dns_resolver<R>(mut self, resolver: R) -> Self
     where
         R: IntoResolve,
     {
@@ -1544,17 +1543,14 @@ impl ClientBuilder {
     /// let client = hpx::Client::builder().hooks(hooks).build().unwrap();
     /// ```
     #[inline]
-    pub fn hooks(mut self, hooks: super::super::layer::hooks::Hooks) -> ClientBuilder {
+    pub fn hooks(mut self, hooks: super::super::layer::hooks::Hooks) -> Self {
         self.config.middleware.hooks = Some(hooks);
         self
     }
 
     /// Adds response recovery hooks to the client.
     #[inline]
-    pub fn recoveries(
-        mut self,
-        recoveries: super::super::layer::recovery::Recoveries,
-    ) -> ClientBuilder {
+    pub fn recoveries(mut self, recoveries: super::super::layer::recovery::Recoveries) -> Self {
         self.config.protocol.recoveries = recoveries;
         self
     }
@@ -1581,7 +1577,7 @@ impl ClientBuilder {
     ///     .unwrap();
     /// ```
     #[inline]
-    pub fn on_request<F>(mut self, hook: F) -> ClientBuilder
+    pub fn on_request<F>(mut self, hook: F) -> Self
     where
         F: Fn(&mut http::Request<Body>) -> Result<(), Error> + Send + Sync + 'static,
     {
@@ -1626,7 +1622,7 @@ impl ClientBuilder {
     ///     .unwrap();
     /// ```
     #[inline]
-    pub fn on_response<F>(mut self, hook: F) -> ClientBuilder
+    pub fn on_response<F>(mut self, hook: F) -> Self
     where
         F: Fn(http::StatusCode, &http::HeaderMap) -> Result<(), Error> + Send + Sync + 'static,
     {
@@ -1658,7 +1654,7 @@ impl ClientBuilder {
 
     /// Adds a status-based response recovery hook using a closure.
     #[inline]
-    pub fn on_status<F, Fut>(mut self, status: http::StatusCode, hook: F) -> ClientBuilder
+    pub fn on_status<F, Fut>(mut self, status: http::StatusCode, hook: F) -> Self
     where
         F: Fn(super::super::layer::recovery::StatusRecoveryContext) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<Option<http::Request<Body>>, Error>> + Send + 'static,
@@ -1710,7 +1706,7 @@ impl ClientBuilder {
     ///     .unwrap();
     /// ```
     #[inline]
-    pub fn layer<L>(mut self, layer: L) -> ClientBuilder
+    pub fn layer<L>(mut self, layer: L) -> Self
     where
         L: Layer<BoxedClientService> + Clone + Send + Sync + 'static,
         L::Service: Service<
@@ -1750,7 +1746,7 @@ impl ClientBuilder {
     ///     .unwrap();
     /// ```
     #[inline]
-    pub fn connector_layer<L>(mut self, layer: L) -> ClientBuilder
+    pub fn connector_layer<L>(mut self, layer: L) -> Self
     where
         L: Layer<BoxedConnectorService> + Clone + Send + Sync + 'static,
         L::Service:
@@ -1782,7 +1778,7 @@ impl ClientBuilder {
     #[inline]
     #[cfg(feature = "auth")]
     #[cfg_attr(docsrs, doc(cfg(feature = "auth")))]
-    pub fn auth(mut self, auth: super::super::layer::auth::AuthMethod) -> ClientBuilder {
+    pub fn auth(mut self, auth: super::super::layer::auth::AuthMethod) -> Self {
         self.config
             .middleware
             .layers
@@ -1815,7 +1811,7 @@ impl ClientBuilder {
     pub fn circuit_breaker(
         mut self,
         config: super::super::layer::circuit_breaker::CircuitBreakerConfig,
-    ) -> ClientBuilder {
+    ) -> Self {
         self.config
             .middleware
             .layers
@@ -1849,7 +1845,7 @@ impl ClientBuilder {
     ///     .unwrap();
     /// ```
     #[inline]
-    pub fn emulation<P>(mut self, factory: P) -> ClientBuilder
+    pub fn emulation<P>(mut self, factory: P) -> Self
     where
         P: EmulationFactory,
     {
@@ -1885,7 +1881,7 @@ impl ClientBuilder {
     /// runtime.
     #[cfg(feature = "http3")]
     #[inline]
-    pub fn http3_only(mut self) -> ClientBuilder {
+    pub const fn http3_only(mut self) -> Self {
         self.config.protocol.http_version_pref = HttpVersionPref::Http3;
         self
     }
@@ -1896,7 +1892,7 @@ impl ClientBuilder {
     /// calling `http3_only()`.
     #[cfg(feature = "http3")]
     #[inline]
-    pub fn http3_prior_knowledge(self) -> ClientBuilder {
+    pub const fn http3_prior_knowledge(self) -> Self {
         self.http3_only()
     }
 
@@ -1910,7 +1906,7 @@ impl ClientBuilder {
     #[cfg(feature = "http3")]
     #[doc(hidden)]
     #[inline]
-    pub fn is_http3_only(&self) -> bool {
+    pub const fn is_http3_only(&self) -> bool {
         matches!(
             self.config.protocol.http_version_pref,
             HttpVersionPref::Http3
@@ -1933,7 +1929,7 @@ impl ClientBuilder {
     /// responses.
     #[cfg(feature = "http3")]
     #[inline]
-    pub fn prefer_http3(mut self) -> ClientBuilder {
+    pub const fn prefer_http3(mut self) -> Self {
         self.config.protocol.http_version_pref = HttpVersionPref::All;
         self
     }
@@ -1945,7 +1941,7 @@ impl ClientBuilder {
     /// `QuicConnector`. When `None`, the default is used.
     #[cfg(feature = "http3")]
     #[inline]
-    pub fn http3_options(mut self, options: Http3Options) -> ClientBuilder {
+    pub fn http3_options(mut self, options: Http3Options) -> Self {
         self.config.http3_options = Some(options);
         self
     }
@@ -1954,7 +1950,7 @@ impl ClientBuilder {
     /// [`http3_options()`](Self::http3_options) was not called.
     #[cfg(feature = "http3")]
     #[inline]
-    pub fn http3_options_ref(&self) -> Option<&Http3Options> {
+    pub const fn http3_options_ref(&self) -> Option<&Http3Options> {
         self.config.http3_options.as_ref()
     }
 
@@ -1963,7 +1959,7 @@ impl ClientBuilder {
     /// precedence over the transport config derived from `http3_options`.
     #[cfg(feature = "http3")]
     #[inline]
-    pub fn quic_config(mut self, config: QuicConfig) -> ClientBuilder {
+    pub fn quic_config(mut self, config: QuicConfig) -> Self {
         self.config.quic_config = Some(config);
         self
     }
@@ -1971,7 +1967,7 @@ impl ClientBuilder {
     /// Returns the stored [`QuicConfig`] override, or `None` if not set.
     #[cfg(feature = "http3")]
     #[inline]
-    pub fn quic_config_ref(&self) -> Option<&QuicConfig> {
+    pub const fn quic_config_ref(&self) -> Option<&QuicConfig> {
         self.config.quic_config.as_ref()
     }
 
@@ -1990,7 +1986,7 @@ impl ClientBuilder {
     pub fn __test_with_quic_connector(
         mut self,
         connector: crate::client::conn::quic::QuicConnector,
-    ) -> ClientBuilder {
+    ) -> Self {
         self.config.test_quic_connector = Some(connector);
         self
     }

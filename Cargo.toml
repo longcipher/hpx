@@ -3,7 +3,7 @@ members = ["bin/*", "crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "2.5.11"
+version = "2.5.12"
 edition = "2024"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license = "Apache-2.0"
@@ -11,12 +11,19 @@ repository = "https://github.com/longcipher/hpx"
 
 [workspace.metadata.cargo-shear]
 ignored = [
+    # Re-exported by futures crate, used indirectly via re-exports
     "futures-core",
+    # Used by hpx-browser CSS engine via re-exports
     "selectors",
+    # Used by hpx-browser layout engine via re-exports
     "stylo",
+    # Binary crate; cargo-shear false positives on bin deps
     "hpx-cli",
+    # Used via re-export in hpx::emulation
     "hpx-emulation",
+    # Used via re-export in hpx::streams
     "hpx-streams",
+    # Binary crate; cargo-shear false positives on bin deps
     "hpxless",
 ]
 
@@ -192,15 +199,15 @@ all = "warn"
 
 [workspace.dependencies]
 # local crates
-hpx = { path = "crates/hpx", version = "2.5.11" }
-hpx-browser = { path = "crates/hpx-browser", version = "2.5.11" }
-hpx-cli = { path = "bin/hpx-cli", version = "2.5.11" }
-hpx-dl = { path = "crates/hpx-dl", version = "2.5.11" }
-hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.11" }
-hpx-h3 = { path = "crates/hpx-h3", version = "2.5.11" }
-hpx-streams = { path = "crates/hpx-streams", version = "2.5.11" }
-hpx-yawc = { path = "crates/yawc", version = "2.5.11" }
-hpxless = { path = "bin/hpxless", version = "2.5.11" }
+hpx = { path = "crates/hpx", version = "2.5.12" }
+hpx-browser = { path = "crates/hpx-browser", version = "2.5.12" }
+hpx-cli = { path = "bin/hpx-cli", version = "2.5.12" }
+hpx-dl = { path = "crates/hpx-dl", version = "2.5.12" }
+hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.12" }
+hpx-h3 = { path = "crates/hpx-h3", version = "2.5.12" }
+hpx-streams = { path = "crates/hpx-streams", version = "2.5.12" }
+hpx-yawc = { path = "crates/yawc", version = "2.5.12" }
+hpxless = { path = "bin/hpxless", version = "2.5.12" }
 
 # external crates
 ahash = "0.8.12"
@@ -229,7 +236,6 @@ cucumber = "0.23.0"
 deno_core = "0.409.0"
 der = "0.8.1"
 digest = "0.11.3"
-ecdysis = "1.1.1"
 encoding_rs = "0.8.35"
 eyre = "0.6.12"
 faster-hex = "0.10.0"

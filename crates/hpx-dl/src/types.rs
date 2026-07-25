@@ -44,6 +44,8 @@ impl From<uuid::Uuid> for DownloadId {
 
 /// Current state of a download job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlite", derive(sqlx::Type))]
+#[cfg_attr(feature = "sqlite", sqlx(type_name = "TEXT", rename_all = "lowercase"))]
 pub enum DownloadState {
     /// Download is queued but not yet started.
     Queued,

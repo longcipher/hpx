@@ -7,7 +7,6 @@ pub(crate) mod resolve;
 
 pub use resolve::{Addrs, IntoResolve, Name, Resolve, Resolving};
 
-#[allow(unused_imports)]
 pub(crate) use self::{
     gai::{GaiResolver, SocketAddrs},
     resolve::{DnsResolverWithOverrides, DynResolver},
@@ -31,7 +30,7 @@ mod sealed {
     /// This trait provides a unified interface for different resolver implementations,
     /// allowing both custom [`super::Resolve`] types and Tower [`Service`] implementations
     /// to be used interchangeably within the connector.
-    pub trait InternalResolve {
+    pub(crate) trait InternalResolve {
         type Addrs: Iterator<Item = SocketAddr>;
         type Error: Into<BoxError>;
         type Future: Future<Output = Result<Self::Addrs, Self::Error>>;
@@ -60,7 +59,7 @@ mod sealed {
         }
     }
 
-    pub async fn resolve<R>(resolver: &mut R, name: Name) -> Result<R::Addrs, R::Error>
+    pub(crate) async fn resolve<R>(resolver: &mut R, name: Name) -> Result<R::Addrs, R::Error>
     where
         R: InternalResolve,
     {

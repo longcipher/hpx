@@ -27,6 +27,7 @@
 //! ```
 
 use std::{
+    fmt,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -70,7 +71,7 @@ impl Default for CircuitBreakerConfig {
 
 impl CircuitBreakerConfig {
     /// Create a new config with the given failure threshold.
-    pub fn new(failure_threshold: u32) -> Self {
+    pub const fn new(failure_threshold: u32) -> Self {
         Self {
             failure_threshold,
             recovery_timeout: Duration::from_secs(30),
@@ -79,19 +80,20 @@ impl CircuitBreakerConfig {
     }
 
     /// Set the recovery timeout.
-    pub fn recovery_timeout(mut self, timeout: Duration) -> Self {
+    pub const fn recovery_timeout(mut self, timeout: Duration) -> Self {
         self.recovery_timeout = timeout;
         self
     }
 
     /// Set the number of probe requests in half-open state.
-    pub fn half_open_max_probes(mut self, probes: u32) -> Self {
+    pub const fn half_open_max_probes(mut self, probes: u32) -> Self {
         self.half_open_max_probes = probes;
         self
     }
 }
 
 /// Internal state of the circuit breaker.
+#[derive(Debug)]
 struct CircuitBreakerState {
     state: CircuitState,
     failure_count: u32,
@@ -100,7 +102,7 @@ struct CircuitBreakerState {
 }
 
 impl CircuitBreakerState {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             state: CircuitState::Closed,
             failure_count: 0,
@@ -130,7 +132,7 @@ impl CircuitBreakerState {
         }
     }
 
-    fn record_success(&mut self, config: &CircuitBreakerConfig) {
+    const fn record_success(&mut self, config: &CircuitBreakerConfig) {
         match self.state {
             CircuitState::Closed => {
                 self.failure_count = 0;
@@ -164,14 +166,14 @@ impl CircuitBreakerState {
 }
 
 /// Layer that adds circuit breaker functionality to a service.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CircuitBreakerLayer {
     config: CircuitBreakerConfig,
 }
 
 impl CircuitBreakerLayer {
     /// Create a new circuit breaker layer with the given config.
-    pub fn new(config: CircuitBreakerConfig) -> Self {
+    pub const fn new(config: CircuitBreakerConfig) -> Self {
         Self { config }
     }
 }
@@ -213,6 +215,15 @@ pub struct CircuitBreakerService<S> {
     inner: S,
     config: CircuitBreakerConfig,
     state: Arc<Mutex<CircuitBreakerState>>,
+}
+
+impl<S: fmt::Debug> fmt::Debug for CircuitBreakerService<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CircuitBreakerService")
+            .field("inner", &self.inner)
+            .field("config", &self.config)
+            .finish_non_exhaustive()
+    }
 }
 
 type BoxFut<T> = Pin<Box<dyn Future<Output = T> + Send>>;

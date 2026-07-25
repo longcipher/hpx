@@ -25,7 +25,7 @@ use crate::{
 
 const DEFAULT_SHARD_COUNT: usize = 16;
 
-pub struct Pool<T, K: Key> {
+pub(super) struct Pool<T, K: Key> {
     // If the pool is disabled, this is None.
     inner: Option<Arc<ShardedPool<T, K>>>,
 }
@@ -35,7 +35,7 @@ pub struct Pool<T, K: Key> {
 // This is a trait to allow the `client::pool::tests` to work for `i32`.
 //
 // See https://github.com/hyperium/hyper/issues/1429
-pub trait Poolable: Unpin + Send + Sized + 'static {
+pub(super) trait Poolable: Unpin + Send + Sized + 'static {
     fn is_open(&self) -> bool;
     /// Reserve this connection.
     ///
@@ -44,21 +44,19 @@ pub trait Poolable: Unpin + Send + Sized + 'static {
     fn can_share(&self) -> bool;
 }
 
-pub trait Key: Eq + Hash + Clone + Debug + Unpin + Send + Sync + 'static {}
+pub(super) trait Key: Eq + Hash + Clone + Debug + Unpin + Send + Sync + 'static {}
 
 impl<T> Key for T where T: Eq + Hash + Clone + Debug + Unpin + Send + Sync + 'static {}
 
 /// A marker to identify what version a pooled connection is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
-pub enum Ver {
+pub(super) enum Ver {
     Auto,
     Http2,
     /// HTTP/3 over QUIC. Uses `Shared` reservation semantics (one connection
     /// per authority serves many streams), mirroring `Ver::Http2` (C-05).
-    /// The actual h3 pool shard (`PoolTx::Http3` + `try_pool` validity check)
-    /// is wired in T1.7; until then, this variant exists so downstream code
-    /// can route on it.
+    /// Fully wired via `PoolTx::Http3` + `try_pool` validity check.
     Http3,
 }
 
@@ -67,7 +65,7 @@ pub enum Ver {
 ///
 /// Specifically, HTTP/1 requires a unique reservation, but HTTP/2 can be
 /// used for multiple requests.
-pub enum Reservation<T> {
+pub(super) enum Reservation<T> {
     /// This connection could be used multiple times, the first one will be
     /// reinserted into the `idle` pool, and the second will be given to
     /// the `Checkout`.
@@ -118,14 +116,14 @@ struct ShardedPool<T, K: Key> {
 struct WeakOpt<T>(Option<Weak<T>>);
 
 #[derive(Clone, Copy, Debug)]
-pub struct Config {
+pub(super) struct Config {
     pub idle_timeout: Option<Duration>,
     pub max_idle_per_host: usize,
     pub max_pool_size: Option<NonZero<u32>>,
 }
 
 impl Config {
-    pub fn is_enabled(&self) -> bool {
+    pub(super) const fn is_enabled(&self) -> bool {
         self.max_idle_per_host > 0
     }
 }
@@ -163,32 +161,25 @@ impl<T, K: Key> ShardedPool<T, K> {
 }
 
 impl<T: Send + 'static, K: Key> Pool<T, K> {
-    pub fn new<E, M>(config: Config, executor: E, timer: Option<M>) -> Pool<T, K>
+    pub(super) fn new<E, M>(config: Config, executor: E, timer: Option<M>) -> Self
     where
         E: Executor<exec::BoxSendFuture> + Send + Sync + Clone + 'static,
         M: Timer + Send + Sync + Clone + 'static,
     {
-        let inner = if config.is_enabled() {
+        let inner = config.is_enabled().then(|| {
             // Preserve global max_pool_size semantics when a cap is configured.
             let shard_count = if config.max_pool_size.is_some() {
                 1
             } else {
                 DEFAULT_SHARD_COUNT
             };
-            Some(Arc::new(ShardedPool::new(
-                &config,
-                executor,
-                timer,
-                shard_count,
-            )))
-        } else {
-            None
-        };
+            Arc::new(ShardedPool::new(&config, executor, timer, shard_count))
+        });
 
-        Pool { inner }
+        Self { inner }
     }
 
-    pub(crate) fn is_enabled(&self) -> bool {
+    pub(crate) const fn is_enabled(&self) -> bool {
         self.inner.is_some()
     }
 }
@@ -196,7 +187,7 @@ impl<T: Send + 'static, K: Key> Pool<T, K> {
 impl<T: Poolable, K: Key> Pool<T, K> {
     /// Returns a `Checkout` which is a future that resolves if an idle
     /// connection becomes available.
-    pub fn checkout(&self, key: K) -> Checkout<T, K> {
+    pub(super) fn checkout(&self, key: K) -> Checkout<T, K> {
         Checkout {
             key,
             pool: self.clone(),
@@ -210,7 +201,7 @@ impl<T: Poolable, K: Key> Pool<T, K> {
     /// For HTTP/3, the same dedup logic applies (C-05): one QUIC connection
     /// per authority serves many concurrent streams, so we collapse concurrent
     /// connect attempts into a single in-flight task, mirroring HTTP/2.
-    pub fn connecting(&self, key: K, ver: Ver) -> Option<Connecting<T, K>> {
+    pub(super) fn connecting(&self, key: K, ver: Ver) -> Option<Connecting<T, K>> {
         if (ver == Ver::Http2 || ver == Ver::Http3)
             && let Some(ref enabled) = self.inner
         {
@@ -237,7 +228,7 @@ impl<T: Poolable, K: Key> Pool<T, K> {
         })
     }
 
-    pub fn pooled(&self, mut connecting: Connecting<T, K>, value: T) -> Pooled<T, K> {
+    pub(super) fn pooled(&self, mut connecting: Connecting<T, K>, value: T) -> Pooled<T, K> {
         let (value, pool_ref) = if let Some(ref enabled) = self.inner {
             match value.reserve() {
                 Reservation::Shared(to_insert, to_return) => {
@@ -292,10 +283,11 @@ impl<T: Poolable, K: Key> Pool<T, K> {
             "Unique reservation on a connection but pool is not enabled"
         );
 
-        let mut pool_ref = WeakOpt::none();
-        if needs_pool_ref && let Some(ref enabled) = self.inner {
-            pool_ref = WeakOpt::downgrade(enabled);
-        }
+        let pool_ref = if needs_pool_ref && let Some(ref enabled) = self.inner {
+            WeakOpt::downgrade(enabled)
+        } else {
+            WeakOpt::none()
+        };
 
         Pooled {
             is_reused: true,
@@ -372,7 +364,9 @@ impl<T: Send + 'static, K: Key> PoolShard<T, K> {
         E: Executor<exec::BoxSendFuture> + Send + Sync + Clone + 'static,
         M: Timer + Send + Sync + Clone + 'static,
     {
-        let max_capacity = config.max_pool_size.map_or(u64::MAX, |n| n.get() as u64);
+        let max_capacity = config
+            .max_pool_size
+            .map_or(u64::MAX, |n| u64::from(n.get()));
         Self {
             connecting: HashSet::with_hasher(HASHER),
             idle: Cache::builder()
@@ -402,7 +396,10 @@ impl<T: Poolable, K: Key> PoolShard<T, K> {
         if let Some(waiters) = self.waiters.get_mut(key) {
             while let Some(tx) = waiters.pop_front() {
                 if !tx.is_closed() {
-                    let reserved = value.take().expect("value already sent");
+                    let reserved = match value.take() {
+                        Some(v) => v,
+                        None => break,
+                    };
                     let reserved = match reserved.reserve() {
                         Reservation::Shared(to_keep, to_send) => {
                             value = Some(to_keep);
@@ -414,9 +411,8 @@ impl<T: Poolable, K: Key> PoolShard<T, K> {
                         Ok(()) => {
                             if value.is_none() {
                                 break;
-                            } else {
-                                continue;
                             }
+                            continue;
                         }
                         Err(e) => {
                             value = Some(e);
@@ -436,14 +432,13 @@ impl<T: Poolable, K: Key> PoolShard<T, K> {
         if let Some(value) = value {
             // borrow-check scope...
             {
-                let idle_list = match self.idle.get(key) {
-                    Some(list) => list,
-                    None => {
-                        let new_list = Arc::new(Mutex::new(Vec::new()));
-                        self.idle.insert(key.clone(), new_list.clone());
-                        self.idle_keys.push(key.clone());
-                        new_list
-                    }
+                let idle_list = if let Some(list) = self.idle.get(key) {
+                    list
+                } else {
+                    let new_list = Arc::new(Mutex::new(Vec::new()));
+                    self.idle.insert(key.clone(), new_list.clone());
+                    self.idle_keys.push(key.clone());
+                    new_list
                 };
                 let mut idle_guard = idle_list.lock();
 
@@ -464,7 +459,7 @@ impl<T: Poolable, K: Key> PoolShard<T, K> {
 
             self.spawn_idle_interval(pool_ref, shard_index);
         } else {
-            trace!("put; found waiter for {:?}", key)
+            trace!("put; found waiter for {:?}", key);
         }
     }
 
@@ -517,7 +512,7 @@ impl<T: Poolable, K: Key> PoolShard<T, K> {
         self.idle_interval_ref = Some(tx);
 
         let interval = IdleTask {
-            timer: timer.clone(),
+            timer,
             duration: dur,
             pool: WeakOpt::downgrade(pool_ref),
             shard_index,
@@ -534,11 +529,12 @@ impl<T, K: Key> PoolShard<T, K> {
     /// connection. If a user ever dropped that future, we need to clean out
     /// those parked senders.
     fn clean_waiters(&mut self, key: &K) {
-        let mut remove_waiters = false;
-        if let Some(waiters) = self.waiters.get_mut(key) {
+        let remove_waiters = if let Some(waiters) = self.waiters.get_mut(key) {
             waiters.retain(|tx| !tx.is_closed());
-            remove_waiters = waiters.is_empty();
-        }
+            waiters.is_empty()
+        } else {
+            false
+        };
         if remove_waiters {
             self.waiters.remove(key);
         }
@@ -548,7 +544,10 @@ impl<T, K: Key> PoolShard<T, K> {
 impl<T: Poolable, K: Key> PoolShard<T, K> {
     /// This should *only* be called by the IdleTask
     fn clear_expired(&mut self) {
-        let dur = self.timeout.expect("interval assumes timeout");
+        let Some(dur) = self.timeout else {
+            // No timeout configured; nothing to expire.
+            return;
+        };
         let now = Instant::now();
 
         self.idle_keys.retain(|key| {
@@ -587,8 +586,8 @@ impl<T: Poolable, K: Key> PoolShard<T, K> {
 }
 
 impl<T, K: Key> Clone for Pool<T, K> {
-    fn clone(&self) -> Pool<T, K> {
-        Pool {
+    fn clone(&self) -> Self {
+        Self {
             inner: self.inner.clone(),
         }
     }
@@ -596,7 +595,7 @@ impl<T, K: Key> Clone for Pool<T, K> {
 
 /// A wrapped poolable value that tries to reinsert to the Pool on Drop.
 // Note: The bounds `T: Poolable` is needed for the Drop impl.
-pub struct Pooled<T: Poolable, K: Key> {
+pub(super) struct Pooled<T: Poolable, K: Key> {
     value: Option<T>,
     is_reused: bool,
     key: K,
@@ -604,20 +603,30 @@ pub struct Pooled<T: Poolable, K: Key> {
 }
 
 impl<T: Poolable, K: Key> Pooled<T, K> {
-    pub fn is_reused(&self) -> bool {
+    pub(super) const fn is_reused(&self) -> bool {
         self.is_reused
     }
 
-    pub fn is_pool_enabled(&self) -> bool {
+    pub(super) const fn is_pool_enabled(&self) -> bool {
         self.pool.0.is_some()
     }
 
     fn as_ref(&self) -> &T {
-        self.value.as_ref().expect("not dropped")
+        if let Some(v) = self.value.as_ref() {
+            v
+        } else {
+            debug_assert!(false, "Pooled value dropped while borrowed");
+            std::process::abort();
+        }
     }
 
     fn as_mut(&mut self) -> &mut T {
-        self.value.as_mut().expect("not dropped")
+        if let Some(v) = self.value.as_mut() {
+            v
+        } else {
+            debug_assert!(false, "Pooled value dropped while borrowed");
+            std::process::abort();
+        }
     }
 }
 
@@ -658,7 +667,9 @@ impl<T: Poolable, K: Key> Drop for Pooled<T, K> {
 
 impl<T: Poolable, K: Key> Debug for Pooled<T, K> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Pooled").field("key", &self.key).finish()
+        f.debug_struct("Pooled")
+            .field("key", &self.key)
+            .finish_non_exhaustive()
     }
 }
 
@@ -667,7 +678,7 @@ struct Idle<T> {
     value: T,
 }
 
-pub struct Checkout<T, K: Key> {
+pub(super) struct Checkout<T, K: Key> {
     key: K,
     pool: Pool<T, K>,
     waiter: Option<oneshot::Receiver<T>>,
@@ -675,24 +686,24 @@ pub struct Checkout<T, K: Key> {
 
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum Error {
+pub(super) enum Error {
     PoolDisabled,
     CheckoutNoLongerWanted,
     CheckedOutClosedValue,
 }
 
 impl Error {
-    pub(super) fn is_canceled(&self) -> bool {
-        matches!(self, Error::CheckedOutClosedValue)
+    pub(super) const fn is_canceled(&self) -> bool {
+        matches!(self, Self::CheckedOutClosedValue)
     }
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Error::PoolDisabled => "pool is disabled",
-            Error::CheckedOutClosedValue => "checked out connection was closed",
-            Error::CheckoutNoLongerWanted => "request was canceled",
+            Self::PoolDisabled => "pool is disabled",
+            Self::CheckedOutClosedValue => "checked out connection was closed",
+            Self::CheckoutNoLongerWanted => "request was canceled",
         })
     }
 }
@@ -771,7 +782,7 @@ impl<T: Poolable, K: Key> Checkout<T, K> {
                     .push_back(tx);
 
                 // register the waker with this oneshot
-                assert!(Pin::new(&mut rx).poll(cx).is_pending());
+                debug_assert!(Pin::new(&mut rx).poll(cx).is_pending());
                 self.waiter = Some(rx);
             }
 
@@ -815,13 +826,13 @@ impl<T, K: Key> Drop for Checkout<T, K> {
     }
 }
 
-pub struct Connecting<T: Poolable, K: Key> {
+pub(super) struct Connecting<T: Poolable, K: Key> {
     key: K,
     pool: WeakOpt<ShardedPool<T, K>>,
 }
 
 impl<T: Poolable, K: Key> Connecting<T, K> {
-    pub fn alpn_h2(self, pool: &Pool<T, K>) -> Option<Self> {
+    pub(super) fn alpn_h2(self, pool: &Pool<T, K>) -> Option<Self> {
         debug_assert!(
             self.pool.0.is_none(),
             "Connecting::alpn_h2 but already Http2"
@@ -845,8 +856,8 @@ impl<T: Poolable, K: Key> Drop for Connecting<T, K> {
 struct Expiration(Option<Duration>);
 
 impl Expiration {
-    fn new(dur: Option<Duration>) -> Expiration {
-        Expiration(dur)
+    const fn new(dur: Option<Duration>) -> Self {
+        Self(dur)
     }
 
     fn expires(&self, instant: Instant) -> bool {
@@ -900,12 +911,12 @@ impl<T: Poolable + 'static, K: Key> IdleTask<T, K> {
 }
 
 impl<T> WeakOpt<T> {
-    fn none() -> Self {
-        WeakOpt(None)
+    const fn none() -> Self {
+        Self(None)
     }
 
     fn downgrade(arc: &Arc<T>) -> Self {
-        WeakOpt(Some(Arc::downgrade(arc)))
+        Self(Some(Arc::downgrade(arc)))
     }
 
     fn upgrade(&self) -> Option<Arc<T>> {
@@ -1169,7 +1180,7 @@ mod tests {
 
     #[derive(Debug)]
     struct CanClose {
-        #[allow(unused)]
+        #[expect(unused)]
         val: i32,
         closed: bool,
     }

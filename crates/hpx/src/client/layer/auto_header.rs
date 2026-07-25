@@ -44,13 +44,13 @@ impl AutoHeaderValue {
 
     /// Returns `true` if this is the `None` variant.
     #[must_use]
-    pub fn is_none(&self) -> bool {
+    pub const fn is_none(&self) -> bool {
         matches!(self, Self::None)
     }
 
     /// Returns `true` if this is the `Default` variant.
     #[must_use]
-    pub fn is_default(&self) -> bool {
+    pub const fn is_default(&self) -> bool {
         matches!(self, Self::Default)
     }
 }

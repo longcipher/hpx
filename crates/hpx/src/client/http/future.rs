@@ -32,7 +32,7 @@ impl Pending {
     /// Creates a new [`Pending`] with a request future and its associated URI.
     #[inline]
     pub(crate) fn request(uri: Uri, fut: ResponseFuture) -> Self {
-        Pending::Request {
+        Self::Request {
             uri,
             fut: Box::pin(fut),
         }
@@ -40,14 +40,18 @@ impl Pending {
 
     /// Creates a new [`Pending`] with an error.
     #[inline]
-    pub(crate) fn error(error: Error) -> Self {
-        Pending::Error { error: Some(error) }
+    pub(crate) const fn error(error: Error) -> Self {
+        Self::Error { error: Some(error) }
     }
 }
 
 impl Future for Pending {
     type Output = Result<Response, Error>;
 
+    #[expect(
+        clippy::expect_used,
+        reason = "Pending::Error state machine: error is Some until first poll consumes it"
+    )]
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let (uri, res) = match self.project() {
             PendingProj::Request { uri, fut } => (uri, fut.as_mut().poll(cx)),

@@ -127,5 +127,13 @@ async fn test_wss_proxy(proxy_url: &str) -> Result<()> {
 }
 
 fn truncate(s: &str, max: usize) -> &str {
-    if s.len() > max { &s[..max] } else { s }
+    if s.len() <= max {
+        return s;
+    }
+    // Find the largest char boundary <= max to avoid slicing mid-codepoint.
+    let mut end = max;
+    while !s.is_char_boundary(end) && end > 0 {
+        end -= 1;
+    }
+    &s[..end]
 }

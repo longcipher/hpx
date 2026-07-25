@@ -22,8 +22,8 @@ pub struct Name {
 impl Name {
     /// Creates a new [`Name`] from a string slice.
     #[inline]
-    pub fn new(host: Box<str>) -> Name {
-        Name { host }
+    pub const fn new(host: Box<str>) -> Self {
+        Self { host }
     }
 
     /// View the hostname as a string slice.
@@ -35,7 +35,7 @@ impl Name {
 
 impl From<&str> for Name {
     fn from(value: &str) -> Self {
-        Name::new(value.into())
+        Self::new(value.into())
     }
 }
 
@@ -160,7 +160,7 @@ impl DnsResolverWithOverrides {
         dns_resolver: Arc<dyn Resolve>,
         overrides: HashMap<Cow<'static, str>, Vec<SocketAddr>>,
     ) -> Self {
-        DnsResolverWithOverrides {
+        Self {
             dns_resolver,
             overrides: Arc::new(overrides),
         }

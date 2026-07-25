@@ -16,7 +16,7 @@ const DEFAULT_SHARD_COUNT: usize = 16;
 /// This wrapper provides type safety and allows different key types
 /// (e.g., hostname, connection parameters) to be used for session lookup.
 #[derive(Hash, PartialEq, Eq, Clone)]
-pub struct SessionKey<T>(pub T);
+pub(super) struct SessionKey<T>(pub T);
 
 /// A hashable wrapper around `SslSession` for use in hash-based collections.
 ///
@@ -26,7 +26,7 @@ pub struct SessionKey<T>(pub T);
 struct HashSession(SslSession);
 
 impl PartialEq for HashSession {
-    fn eq(&self, other: &HashSession) -> bool {
+    fn eq(&self, other: &Self) -> bool {
         self.0.id() == other.0.id()
     }
 }
@@ -52,7 +52,7 @@ impl Borrow<[u8]> for HashSession {
 ///
 /// Maintains both forward (key → sessions) and reverse (session → key) lookups
 /// for efficient session storage, retrieval, and cleanup operations.
-pub struct SessionCache<T> {
+pub(super) struct SessionCache<T> {
     shards: Vec<Mutex<SessionCacheShard<T>>>,
     shard_count: usize,
 }
@@ -67,7 +67,7 @@ impl<T> SessionCacheShard<T>
 where
     T: Hash + Eq + Clone,
 {
-    fn new(per_host_session_capacity: usize) -> Self {
+    const fn new(per_host_session_capacity: usize) -> Self {
         Self {
             per_host_sessions: HashMap::with_hasher(HASHER),
             reverse: HashMap::with_hasher(HASHER),
@@ -123,27 +123,24 @@ impl<T> SessionCache<T>
 where
     T: Hash + Eq + Clone,
 {
-    pub fn with_capacity(per_host_session_capacity: usize) -> SessionCache<T> {
+    pub(super) fn with_capacity(per_host_session_capacity: usize) -> Self {
         Self::with_capacity_and_shards(per_host_session_capacity, DEFAULT_SHARD_COUNT)
     }
 
-    fn with_capacity_and_shards(
-        per_host_session_capacity: usize,
-        shard_count: usize,
-    ) -> SessionCache<T> {
+    fn with_capacity_and_shards(per_host_session_capacity: usize, shard_count: usize) -> Self {
         let shard_count = shard_count.max(1);
         let shards = (0..shard_count)
             .map(|_| Mutex::new(SessionCacheShard::new(per_host_session_capacity)))
             .collect();
 
-        SessionCache {
+        Self {
             shards,
             shard_count,
         }
     }
 
-    #[allow(dead_code)] // used in tests
-    fn shard_count(&self) -> usize {
+    #[cfg_attr(not(test), expect(dead_code))]
+    const fn shard_count(&self) -> usize {
         self.shard_count
     }
 
@@ -151,12 +148,12 @@ where
         (HASHER.hash_one(key) as usize) % self.shard_count
     }
 
-    pub fn insert(&self, key: SessionKey<T>, session: SslSession) {
+    pub(super) fn insert(&self, key: SessionKey<T>, session: SslSession) {
         let shard_index = self.shard_index(&key);
         self.shards[shard_index].lock().insert(key, session);
     }
 
-    pub fn get(&self, key: &SessionKey<T>) -> Option<SslSession> {
+    pub(super) fn get(&self, key: &SessionKey<T>) -> Option<SslSession> {
         let shard_index = self.shard_index(key);
         self.shards[shard_index].lock().get(key)
     }

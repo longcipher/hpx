@@ -2,9 +2,9 @@
 use std::{error::Error as StdError, fmt};
 
 /// Result type often returned from methods that can have crate::core: `Error`s.
-pub type Result<T> = std::result::Result<T, Error>;
+pub(crate) type Result<T> = std::result::Result<T, Error>;
 
-pub type BoxError = Box<dyn StdError + Send + Sync>;
+pub(crate) type BoxError = Box<dyn StdError + Send + Sync>;
 
 type Cause = BoxError;
 
@@ -159,13 +159,13 @@ impl Error {
         self.find_source::<TimedOut>().is_some()
     }
 
-    pub(super) fn new(kind: Kind) -> Error {
-        Error {
+    pub(super) fn new(kind: Kind) -> Self {
+        Self {
             inner: Box::new(ErrorImpl { kind, cause: None }),
         }
     }
 
-    pub(super) fn with<C: Into<Cause>>(mut self, cause: C) -> Error {
+    pub(super) fn with<C: Into<Cause>>(mut self, cause: C) -> Self {
         self.inner.cause = Some(cause.into());
         self
     }
@@ -192,84 +192,88 @@ impl Error {
             .unwrap_or(http2::Reason::INTERNAL_ERROR)
     }
 
-    pub(super) fn new_canceled() -> Error {
-        Error::new(Kind::Canceled)
+    pub(super) fn new_canceled() -> Self {
+        Self::new(Kind::Canceled)
     }
 
-    pub(super) fn new_incomplete() -> Error {
-        Error::new(Kind::IncompleteMessage)
+    pub(super) fn new_incomplete() -> Self {
+        Self::new(Kind::IncompleteMessage)
     }
 
-    pub(super) fn new_too_large() -> Error {
-        Error::new(Kind::Parse(Parse::TooLarge))
+    pub(super) fn new_too_large() -> Self {
+        Self::new(Kind::Parse(Parse::TooLarge))
     }
 
-    pub(super) fn new_version_h2() -> Error {
-        Error::new(Kind::Parse(Parse::VersionH2))
+    pub(super) fn new_version_h2() -> Self {
+        Self::new(Kind::Parse(Parse::VersionH2))
     }
 
-    pub(super) fn new_unexpected_message() -> Error {
-        Error::new(Kind::UnexpectedMessage)
+    pub(super) fn new_unexpected_message() -> Self {
+        Self::new(Kind::UnexpectedMessage)
     }
 
-    pub(crate) fn new_io(cause: std::io::Error) -> Error {
-        Error::new(Kind::Io).with(cause)
+    pub(crate) fn new_io(cause: std::io::Error) -> Self {
+        Self::new(Kind::Io).with(cause)
     }
 
-    pub(super) fn new_closed() -> Error {
-        Error::new(Kind::ChannelClosed)
+    pub(super) fn new_closed() -> Self {
+        Self::new(Kind::ChannelClosed)
     }
 
-    pub(super) fn new_body<E: Into<Cause>>(cause: E) -> Error {
-        Error::new(Kind::Body).with(cause)
+    pub(super) fn new_body<E: Into<Cause>>(cause: E) -> Self {
+        Self::new(Kind::Body).with(cause)
     }
 
-    pub(super) fn new_body_write<E: Into<Cause>>(cause: E) -> Error {
-        Error::new(Kind::BodyWrite).with(cause)
+    pub(super) fn new_body_write<E: Into<Cause>>(cause: E) -> Self {
+        Self::new(Kind::BodyWrite).with(cause)
     }
 
-    pub(super) fn new_body_write_aborted() -> Error {
-        Error::new(Kind::User(User::BodyWriteAborted))
+    pub(super) fn new_body_write_aborted() -> Self {
+        Self::new(Kind::User(User::BodyWriteAborted))
     }
 
-    fn new_user(user: User) -> Error {
-        Error::new(Kind::User(user))
+    fn new_user(user: User) -> Self {
+        Self::new(Kind::User(user))
     }
 
-    pub(super) fn new_user_no_upgrade() -> Error {
-        Error::new_user(User::NoUpgrade)
+    pub(super) fn new_user_no_upgrade() -> Self {
+        Self::new_user(User::NoUpgrade)
     }
 
-    pub(super) fn new_user_manual_upgrade() -> Error {
-        Error::new_user(User::ManualUpgrade)
+    pub(super) fn new_user_manual_upgrade() -> Self {
+        Self::new_user(User::ManualUpgrade)
     }
 
-    pub(crate) fn new_user_service<E: Into<Cause>>(cause: E) -> Error {
-        Error::new_user(User::Service).with(cause)
+    pub(crate) fn new_user_service<E: Into<Cause>>(cause: E) -> Self {
+        Self::new_user(User::Service).with(cause)
     }
 
-    pub(super) fn new_user_body<E: Into<Cause>>(cause: E) -> Error {
-        Error::new_user(User::Body).with(cause)
+    pub(super) fn new_user_body<E: Into<Cause>>(cause: E) -> Self {
+        Self::new_user(User::Body).with(cause)
     }
 
-    pub(super) fn new_user_invalid_connect() -> Error {
-        Error::new_user(User::InvalidConnectWithBody)
+    pub(super) fn new_user_invalid_connect() -> Self {
+        Self::new_user(User::InvalidConnectWithBody)
     }
 
-    pub(super) fn new_shutdown(cause: std::io::Error) -> Error {
-        Error::new(Kind::Shutdown).with(cause)
+    pub(super) fn new_shutdown(cause: std::io::Error) -> Self {
+        Self::new(Kind::Shutdown).with(cause)
     }
 
-    pub(super) fn new_user_dispatch_gone() -> Error {
-        Error::new(Kind::User(User::DispatchGone))
+    pub(super) fn new_user_dispatch_gone() -> Self {
+        Self::new(Kind::User(User::DispatchGone))
     }
 
     #[cfg(feature = "http2")]
-    pub(super) fn new_h2(cause: ::http2::Error) -> Error {
+    #[expect(
+        clippy::expect_used,
+        reason = "into_io() returns Some when is_io() is true (h2 invariant)"
+    )]
+    pub(super) fn new_h2(cause: ::http2::Error) -> Self {
         if cause.is_io() {
-            Error::new_io(cause.into_io().expect("http2::Error::is_io"))
+            Self::new_io(cause.into_io().expect("http2::Error::is_io"))
         } else {
-            Error::new(Kind::Http2).with(cause)
+            Self::new(Kind::Http2).with(cause)
         }
     }
 
@@ -349,65 +353,65 @@ impl StdError for Error {
 
 #[doc(hidden)]
 impl From<Parse> for Error {
-    fn from(err: Parse) -> Error {
-        Error::new(Kind::Parse(err))
+    fn from(err: Parse) -> Self {
+        Self::new(Kind::Parse(err))
     }
 }
 
 impl Parse {
-    pub(crate) fn content_length_invalid() -> Self {
-        Parse::Header(Header::ContentLengthInvalid)
+    pub(crate) const fn content_length_invalid() -> Self {
+        Self::Header(Header::ContentLengthInvalid)
     }
 
-    pub(crate) fn transfer_encoding_unexpected() -> Self {
-        Parse::Header(Header::TransferEncodingUnexpected)
+    pub(crate) const fn transfer_encoding_unexpected() -> Self {
+        Self::Header(Header::TransferEncodingUnexpected)
     }
 
-    pub(crate) fn transfer_encoding_and_content_length() -> Self {
-        Parse::Header(Header::TransferEncodingAndContentLength)
+    pub(crate) const fn transfer_encoding_and_content_length() -> Self {
+        Self::Header(Header::TransferEncodingAndContentLength)
     }
 
-    pub(crate) fn duplicate_chunked_in_transfer_encoding() -> Self {
-        Parse::Header(Header::DuplicateChunkedInTransferEncoding)
+    pub(crate) const fn duplicate_chunked_in_transfer_encoding() -> Self {
+        Self::Header(Header::DuplicateChunkedInTransferEncoding)
     }
 }
 
 #[cfg(feature = "http1")]
 impl From<httparse::Error> for Parse {
-    fn from(err: httparse::Error) -> Parse {
+    fn from(err: httparse::Error) -> Self {
         match err {
             httparse::Error::HeaderName
             | httparse::Error::HeaderValue
             | httparse::Error::NewLine
-            | httparse::Error::Token => Parse::Header(Header::Token),
-            httparse::Error::Status => Parse::Status,
-            httparse::Error::TooManyHeaders => Parse::TooLarge,
-            httparse::Error::Version => Parse::Version,
+            | httparse::Error::Token => Self::Header(Header::Token),
+            httparse::Error::Status => Self::Status,
+            httparse::Error::TooManyHeaders => Self::TooLarge,
+            httparse::Error::Version => Self::Version,
         }
     }
 }
 
 impl From<http::method::InvalidMethod> for Parse {
-    fn from(_: http::method::InvalidMethod) -> Parse {
-        Parse::Method
+    fn from(_: http::method::InvalidMethod) -> Self {
+        Self::Method
     }
 }
 
 impl From<http::status::InvalidStatusCode> for Parse {
-    fn from(_: http::status::InvalidStatusCode) -> Parse {
-        Parse::Status
+    fn from(_: http::status::InvalidStatusCode) -> Self {
+        Self::Status
     }
 }
 
 impl From<http::uri::InvalidUri> for Parse {
-    fn from(_: http::uri::InvalidUri) -> Parse {
-        Parse::Uri
+    fn from(_: http::uri::InvalidUri) -> Self {
+        Self::Uri
     }
 }
 
 impl From<http::uri::InvalidUriParts> for Parse {
-    fn from(_: http::uri::InvalidUriParts) -> Parse {
-        Parse::Uri
+    fn from(_: http::uri::InvalidUriParts) -> Self {
+        Self::Uri
     }
 }
 

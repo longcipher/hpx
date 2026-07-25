@@ -7,13 +7,14 @@
 //! - Timers
 //! - IO transports
 
-pub mod bounds;
+pub(crate) mod bounds;
 mod timer;
 mod tokio;
 
-#[allow(unused_imports)]
-pub use self::timer::{ArcTimer, Sleep, Time, Timer};
-pub use self::tokio::{TokioExecutor, TokioTimer};
+pub(crate) use self::{
+    timer::{ArcTimer, Sleep, Time, Timer},
+    tokio::{TokioExecutor, TokioTimer},
+};
 
 /// An executor of futures.
 ///

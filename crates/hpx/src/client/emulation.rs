@@ -104,7 +104,7 @@ pub struct Emulation {
 impl Default for Emulation {
     #[inline]
     fn default() -> Self {
-        Emulation {
+        Self {
             headers: HeaderMap::default(),
             orig_headers: OrigHeaderMap::default(),
             transport: TransportOptions::default(),
@@ -120,7 +120,7 @@ impl EmulationBuilder {
     /// Sets the  HTTP/1 options configuration.
     #[cfg(feature = "http1")]
     #[inline]
-    pub fn http1_options(mut self, opts: Http1Options) -> Self {
+    pub const fn http1_options(mut self, opts: Http1Options) -> Self {
         *self.emulation.http1_options_mut() = Some(opts);
         self
     }
@@ -176,46 +176,46 @@ impl Emulation {
     #[inline]
     pub fn builder() -> EmulationBuilder {
         EmulationBuilder {
-            emulation: Emulation::default(),
+            emulation: Self::default(),
         }
     }
 
     /// Returns a mutable reference to the TLS options, if set.
     #[inline]
-    pub fn tls_options_mut(&mut self) -> &mut Option<TlsOptions> {
+    pub const fn tls_options_mut(&mut self) -> &mut Option<TlsOptions> {
         self.transport.tls_options_mut()
     }
 
     /// Returns a mutable reference to the HTTP/1 options, if set.
     #[cfg(feature = "http1")]
     #[inline]
-    pub fn http1_options_mut(&mut self) -> &mut Option<Http1Options> {
+    pub const fn http1_options_mut(&mut self) -> &mut Option<Http1Options> {
         self.transport.http1_options_mut()
     }
 
     /// Returns a mutable reference to the HTTP/2 options, if set.
     #[cfg(feature = "http2")]
     #[inline]
-    pub fn http2_options_mut(&mut self) -> &mut Option<Http2Options> {
+    pub const fn http2_options_mut(&mut self) -> &mut Option<Http2Options> {
         self.transport.http2_options_mut()
     }
 
     /// Returns a mutable reference to the emulation headers, if set.
     #[inline]
-    pub fn headers_mut(&mut self) -> &mut HeaderMap {
+    pub const fn headers_mut(&mut self) -> &mut HeaderMap {
         &mut self.headers
     }
 
     /// Returns a mutable reference to the original headers, if set.
     #[inline]
-    pub fn orig_headers_mut(&mut self) -> &mut OrigHeaderMap {
+    pub const fn orig_headers_mut(&mut self) -> &mut OrigHeaderMap {
         &mut self.orig_headers
     }
 
     /// Returns a reference to the HTTP/3 options, if set.
     #[cfg(feature = "http3")]
     #[inline]
-    pub(crate) fn http3_options(&self) -> Option<&Http3Options> {
+    pub(crate) const fn http3_options(&self) -> Option<&Http3Options> {
         self.http3_options.as_ref()
     }
 
@@ -248,12 +248,12 @@ impl EmulationFactory for BrowserProfile {
         );
 
         match self {
-            BrowserProfile::Chrome | BrowserProfile::Edge | BrowserProfile::Safari => {
+            Self::Chrome | Self::Edge | Self::Safari => {
                 headers.insert("sec-fetch-dest", HeaderValue::from_static("document"));
                 headers.insert("sec-fetch-mode", HeaderValue::from_static("navigate"));
                 headers.insert("sec-fetch-site", HeaderValue::from_static("none"));
             }
-            BrowserProfile::Firefox | BrowserProfile::OkHttp => {}
+            Self::Firefox | Self::OkHttp => {}
         }
 
         Emulation::builder().headers(headers).build()

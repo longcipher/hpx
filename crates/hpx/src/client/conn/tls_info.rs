@@ -20,7 +20,7 @@ use crate::tls::{TlsInfo, conn::MaybeHttpsStream};
 ///
 /// Implementors can provide access to peer certificate data or other TLS-related metadata.
 /// For non-TLS connections, this typically returns `None`.
-pub trait TlsInfoFactory {
+pub(crate) trait TlsInfoFactory {
     fn tls_info(&self) -> Option<TlsInfo>;
 }
 
@@ -98,8 +98,8 @@ impl TlsInfoFactory for TlsStream<TcpStream> {
 impl TlsInfoFactory for MaybeHttpsStream<TcpStream> {
     fn tls_info(&self) -> Option<TlsInfo> {
         match self {
-            MaybeHttpsStream::Https(tls) => tls.tls_info(),
-            MaybeHttpsStream::Http(_) => None,
+            Self::Https(tls) => tls.tls_info(),
+            Self::Http(_) => None,
         }
     }
 }
@@ -171,8 +171,8 @@ impl TlsInfoFactory for TlsStream<UnixStream> {
 impl TlsInfoFactory for MaybeHttpsStream<UnixStream> {
     fn tls_info(&self) -> Option<TlsInfo> {
         match self {
-            MaybeHttpsStream::Https(tls) => tls.tls_info(),
-            MaybeHttpsStream::Http(_) => None,
+            Self::Https(tls) => tls.tls_info(),
+            Self::Http(_) => None,
         }
     }
 }

@@ -4,7 +4,7 @@
 //! implemented by implementing another trait.
 
 #[cfg(feature = "http2")]
-pub use self::h2_client::Http2ClientConnExec;
+pub(crate) use self::h2_client::Http2ClientConnExec;
 
 #[cfg(feature = "http2")]
 mod h2_client {
@@ -20,7 +20,7 @@ mod h2_client {
     /// trait for any future.
     ///
     /// This trait is sealed and cannot be implemented for types outside this crate.
-    pub trait Http2ClientConnExec<B, T>: sealed_client::Sealed<(B, T)>
+    pub(crate) trait Http2ClientConnExec<B, T>: sealed_client::Sealed<(B, T)>
     where
         B: http_body::Body,
         B::Error: Into<BoxError>,
@@ -39,7 +39,7 @@ mod h2_client {
         T: AsyncRead + AsyncWrite + Unpin,
     {
         fn execute_h2_future(&mut self, future: H2ClientFuture<B, T>) {
-            self.execute(future)
+            self.execute(future);
         }
     }
 
@@ -54,6 +54,6 @@ mod h2_client {
     }
 
     mod sealed_client {
-        pub trait Sealed<X> {}
+        pub(crate) trait Sealed<X> {}
     }
 }
