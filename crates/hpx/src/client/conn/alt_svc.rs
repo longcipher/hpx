@@ -140,6 +140,7 @@ impl AltSvcCache {
     }
 
     /// Remove all entries for an authority.
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn invalidate(&self, authority: &(String, u16)) {
         self.entries.remove_sync(authority);
     }
