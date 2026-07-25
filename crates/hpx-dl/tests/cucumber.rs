@@ -189,7 +189,7 @@ async fn handle_mock_connection(stream: tokio::net::TcpStream, store: FileStore)
 
     let _ = stream.write_all(header.as_bytes()).await;
     if !response.body.is_empty() {
-        let chunk_size = response.chunk_size.max(response.body.len()).max(1);
+        let chunk_size = response.chunk_size.max(1).min(response.body.len());
         for chunk in response.body.chunks(chunk_size) {
             let _ = stream.write_all(chunk).await;
             if response.chunk_delay > Duration::ZERO {
@@ -828,14 +828,24 @@ async fn download_reaches_progress(world: &mut DownloadWorld, percent: u64) {
             .expect("engine configured")
             .status(id)
             .expect("download status");
+        if status.state == hpx_dl::DownloadState::Completed {
+            panic!(
+                "download completed before reaching {percent}% progress (got {}/{})",
+                status.bytes_downloaded,
+                status.total_bytes.unwrap_or(0)
+            );
+        }
+        if status.state == hpx_dl::DownloadState::Failed {
+            panic!("download failed before reaching {percent}% progress");
+        }
         let reached = status
             .total_bytes
             .map(|total| {
                 total > 0 && status.bytes_downloaded.saturating_mul(100) / total >= percent
             })
             .unwrap_or(false);
-        if reached || status.state == hpx_dl::DownloadState::Completed {
-            if reached && let Some(engine) = &world.engine {
+        if reached {
+            if let Some(engine) = &world.engine {
                 let _ = engine.pause(id);
             }
             return;

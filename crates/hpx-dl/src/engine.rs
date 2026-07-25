@@ -510,18 +510,28 @@ impl EngineInner {
     }
 
     async fn complete_download(&self, id: DownloadId, bytes: u64) -> Result<(), DownloadError> {
-        self.update_entry(id, |entry| {
-            entry.state = DownloadState::Completed;
-            entry.bytes_downloaded = bytes;
-            entry.last_error = None;
-            for segment in &mut entry.segments {
-                segment.state = SegmentStatus::Completed;
-                segment.bytes_downloaded = segment.end - segment.start + 1;
-            }
-        })
-        .await?;
+        let entry = self
+            .downloads
+            .update_sync(&id, |_, entry| {
+                if entry.state == DownloadState::Paused {
+                    return entry.clone();
+                }
+                entry.state = DownloadState::Completed;
+                entry.bytes_downloaded = bytes;
+                entry.last_error = None;
+                for segment in &mut entry.segments {
+                    segment.state = SegmentStatus::Completed;
+                    segment.bytes_downloaded = segment.end - segment.start + 1;
+                }
+                entry.clone()
+            })
+            .ok_or(DownloadError::NotFound(id.0))?;
 
-        let _ = self.events.emit(DownloadEvent::Completed { id });
+        if entry.state == DownloadState::Completed {
+            let record = entry.to_record(id);
+            Arc::clone(&self.persistence).upsert_async(record).await?;
+            let _ = self.events.emit(DownloadEvent::Completed { id });
+        }
         Ok(())
     }
 
@@ -531,15 +541,25 @@ impl EngineInner {
         error: &DownloadError,
     ) -> Result<(), DownloadError> {
         let message = error.to_string();
-        self.update_entry(id, |entry| {
-            entry.state = DownloadState::Failed;
-            entry.last_error = Some(message.clone());
-        })
-        .await?;
+        let entry = self
+            .downloads
+            .update_sync(&id, |_, entry| {
+                if entry.state == DownloadState::Paused {
+                    return entry.clone();
+                }
+                entry.state = DownloadState::Failed;
+                entry.last_error = Some(message.clone());
+                entry.clone()
+            })
+            .ok_or(DownloadError::NotFound(id.0))?;
 
-        let _ = self
-            .events
-            .emit(DownloadEvent::Failed { id, error: message });
+        if entry.state == DownloadState::Failed {
+            let record = entry.to_record(id);
+            Arc::clone(&self.persistence).upsert_async(record).await?;
+            let _ = self
+                .events
+                .emit(DownloadEvent::Failed { id, error: message });
+        }
         Ok(())
     }
 
