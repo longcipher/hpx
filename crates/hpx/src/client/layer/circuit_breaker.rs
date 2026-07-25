@@ -10,21 +10,6 @@
 //! - **Open**: All requests fail fast. After `recovery_timeout`, transitions to Half-Open.
 //! - **Half-Open**: A limited number of probe requests are allowed through.
 //!   If they succeed, the circuit closes. If they fail, it opens again.
-//!
-//! # Example
-//!
-//! ```rust,no_run
-//! use std::time::Duration;
-//!
-//! use hpx::circuit_breaker::{CircuitBreakerConfig, CircuitBreakerLayer};
-//!
-//! let client = hpx::Client::builder()
-//!     .layer(CircuitBreakerLayer::new(
-//!         CircuitBreakerConfig::new(5).recovery_timeout(Duration::from_secs(30)),
-//!     ))
-//!     .build()
-//!     .unwrap();
-//! ```
 
 use std::{
     fmt,

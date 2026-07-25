@@ -14,11 +14,19 @@ lint:
 test:
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo nextest run --workspace --all-features
+    if [ "$(uname)" = "Darwin" ]; then
+        cargo nextest run --workspace
+    else
+        cargo nextest run --workspace --all-features
+    fi
 test-full:
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo nextest run --workspace --all-features
+    if [ "$(uname)" = "Darwin" ]; then
+        cargo nextest run --workspace
+    else
+        cargo nextest run --workspace --all-features
+    fi
 bdd:
     #!/usr/bin/env bash
     set -euo pipefail

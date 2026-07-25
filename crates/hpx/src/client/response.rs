@@ -585,7 +585,7 @@ impl Response {
     ///
     /// This is useful for advanced use cases that need direct access to the
     /// inner response, such as extracting protocol-specific extensions
-    /// (e.g. [`crate::http3::H3WebSocket::from_response`]).
+    /// (e.g. `H3WebSocket::from_response` when the `http3` feature is enabled).
     #[inline]
     pub const fn inner(&mut self) -> &mut http::Response<Body> {
         &mut self.res

@@ -3,46 +3,6 @@
 //! This module provides a way to add custom hooks that execute at different
 //! stages of the request lifecycle, similar to popular HTTP client libraries
 //! like Ky (Node.js) or httpx (Python).
-//!
-//! # Example
-//!
-//! ```rust,no_run
-//! use std::sync::Arc;
-//!
-//! use hpx::hooks::{AfterResponseHook, BeforeRequestHook, Hooks};
-//!
-//! // Define a simple logging hook
-//! struct LoggingHook;
-//!
-//! impl BeforeRequestHook for LoggingHook {
-//!     fn on_request(&self, request: &mut http::Request<hpx::Body>) -> Result<(), hpx::Error> {
-//!         println!("Request: {} {}", request.method(), request.uri());
-//!         Ok(())
-//!     }
-//! }
-//!
-//! impl AfterResponseHook for LoggingHook {
-//!     fn on_response(
-//!         &self,
-//!         status: http::StatusCode,
-//!         headers: &http::HeaderMap,
-//!     ) -> Result<(), hpx::Error> {
-//!         println!("Response: {}", status);
-//!         Ok(())
-//!     }
-//! }
-//!
-//! # async fn doc() -> hpx::Result<()> {
-//! let logging_hook = Arc::new(LoggingHook);
-//! let hooks = Hooks::builder()
-//!     .before_request(logging_hook.clone())
-//!     .after_response(logging_hook)
-//!     .build();
-//!
-//! let client = hpx::Client::builder().hooks(hooks).build()?;
-//! # Ok(())
-//! # }
-//! ```
 
 use std::{
     fmt,

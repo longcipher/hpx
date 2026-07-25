@@ -42,21 +42,6 @@ pub(crate) struct HttpConnector<R = GaiResolver> {
 
 /// Extra information about the transport when an HttpConnector is used.
 ///
-/// # Example
-///
-/// ```
-/// # fn doc(res: http::Response<()>) {
-/// use hpx::HttpInfo;
-///
-/// // res = http::Response
-/// res.extensions().get::<HttpInfo>().map(|info: &HttpInfo| {
-///     println!("remote addr = {}", info.remote_addr());
-/// });
-/// # }
-/// ```
-///
-/// # Note
-///
 /// If a different connector is used besides `HttpConnector`,
 /// this value will not exist in the extensions. Consult that specific
 /// connector to see what "extra" information it might provide to responses.

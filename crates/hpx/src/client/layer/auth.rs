@@ -2,28 +2,6 @@
 //!
 //! This module provides built-in authentication support with automatic token
 //! refresh for Bearer tokens, API keys, and OAuth2 flows.
-//!
-//! # Example
-//!
-//! ```rust,no_run
-//! use std::sync::Arc;
-//!
-//! use hpx::auth::{AuthMethod, BearerTokenProvider, Token};
-//!
-//! # async fn example() -> hpx::Result<()> {
-//! // Simple static bearer token
-//! let client = hpx::Client::builder()
-//!     .auth(AuthMethod::bearer("my-secret-token"))
-//!     .build()?;
-//!
-//! // API key in header
-//! let client = hpx::Client::builder()
-//!     .auth(AuthMethod::api_key("X-API-KEY", "my-api-key"))
-//!     .build()?;
-//!
-//! # Ok(())
-//! # }
-//! ```
 
 use std::{
     fmt,

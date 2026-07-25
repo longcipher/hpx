@@ -407,7 +407,7 @@ fn parse_authority(authority: &str) -> Option<(String, u16)> {
 /// Check whether `s` is a valid HTTP `token` per RFC 7230 §3.2.6.
 ///
 /// A token is a non-empty sequence of characters from the `tchar` set:
-/// `!#$%&'*+-.^_`|~` plus digits and letters.
+/// `!#$%&'*+-.^_`\|~` plus digits and letters.
 fn is_token(s: &str) -> bool {
     if s.is_empty() {
         return false;

@@ -15,7 +15,7 @@ use crate::{
 /// This is the public-facing enum used in [`ProtocolConfigOptions`]. Internally,
 /// the client converts it to the richer [`HttpVersionPref`](super::HttpVersionPref)
 /// which additionally carries an `Http3` variant (set via
-/// [`ClientBuilder::http3_only()`](crate::ClientBuilder::http3_only)).
+/// `ClientBuilder::http3_only()` when the `http3` feature is enabled).
 #[derive(Clone, Copy, Default, Eq, PartialEq, Debug)]
 pub enum HttpVersionPreference {
     /// Only negotiate HTTP/1.
