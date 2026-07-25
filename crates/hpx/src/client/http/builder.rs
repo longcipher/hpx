@@ -1134,7 +1134,7 @@ impl ClientBuilder {
         docsrs,
         doc(cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))
     )]
-    pub fn tcp_user_timeout<D>(mut self, val: D) -> ClientBuilder
+    pub fn tcp_user_timeout<D>(mut self, val: D) -> Self
     where
         D: Into<Option<Duration>>,
     {
