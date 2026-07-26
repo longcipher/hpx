@@ -35,7 +35,6 @@ hotpath = ["dep:hotpath"]
 proxy = []
 rustls-aws-lc-rs = ["tokio-rustls/aws-lc-rs"]
 rustls-ring = ["tokio-rustls/ring"]
-simd = ["simdutf8"]
 smol = ["dep:smol"]
 socks = ["proxy", "dep:tokio-socks"]
 zlib = ["flate2/any_zlib", "flate2/zlib-rs"]
@@ -77,8 +76,12 @@ percent-encoding = { workspace = true }
 pin-project-lite = { workspace = true }
 sha1 = { workspace = true }
 
+# UTF-8 validation with SIMD acceleration (non-optional on native targets;
+# the `simd` feature gate has been removed so simdutf8 is always available
+# outside wasm32, matching tokio-websockets' default behavior).
+simdutf8 = { workspace = true }
+
 # Optional dependencies
-simdutf8 = { workspace = true, optional = true }
 smol = { workspace = true, optional = true }
 
 # Async runtime and utilities

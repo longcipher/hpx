@@ -1228,12 +1228,18 @@ where
         };
 
         if frame.opcode == OpCode::Text && self.check_utf8 {
-            #[cfg(not(feature = "simd"))]
-            if std::str::from_utf8(&frame.payload).is_err() {
+            // Use simdutf8 on native targets (non-optional since the `simd`
+            // feature gate was removed). simdutf8 dispatches to SIMD
+            // acceleration (SSE4.2/AVX2 on x86_64, NEON on aarch64) when
+            // available and falls back to a scalar SIMD-shaped loop otherwise,
+            // typically outperforming stdlib `from_utf8` on larger payloads.
+            // On wasm32 simdutf8 is not available, so fall back to stdlib.
+            #[cfg(not(target_arch = "wasm32"))]
+            if simdutf8::basic::from_utf8(&frame.payload).is_err() {
                 return Err(WebSocketError::InvalidUTF8);
             }
-            #[cfg(feature = "simd")]
-            if simdutf8::basic::from_utf8(&frame.payload).is_err() {
+            #[cfg(target_arch = "wasm32")]
+            if std::str::from_utf8(&frame.payload).is_err() {
                 return Err(WebSocketError::InvalidUTF8);
             }
         }
