@@ -412,9 +412,7 @@ impl Dom {
         let blitz_attrs: Vec<BlitzAttribute> = attrs.iter().map(|a| a.to_blitz()).collect();
         let h5_name = name.to_h5();
         let elem_data = BlitzElementData::new(h5_name, blitz_attrs);
-        let id = self
-            .inner
-            .create_node(BlitzNodeData::Element(elem_data));
+        let id = self.inner.create_node(BlitzNodeData::Element(elem_data));
         NodeId::from_blitz(id)
     }
 
@@ -429,16 +427,12 @@ impl Dom {
     }
 
     pub fn create_document_fragment(&mut self) -> NodeId {
-        let id = self
-            .inner
-            .create_node(BlitzNodeData::Document);
+        let id = self.inner.create_node(BlitzNodeData::Document);
         NodeId::from_blitz(id)
     }
 
     pub fn create_shadow_root(&mut self, _host: NodeId, _mode: ShadowRootMode) -> NodeId {
-        let id = self
-            .inner
-            .create_node(BlitzNodeData::Document);
+        let id = self.inner.create_node(BlitzNodeData::Document);
         NodeId::from_blitz(id)
     }
 
@@ -453,9 +447,7 @@ impl Dom {
         _public_id: String,
         _system_id: String,
     ) -> NodeId {
-        let id = self
-            .inner
-            .create_node(BlitzNodeData::Document);
+        let id = self.inner.create_node(BlitzNodeData::Document);
         NodeId::from_blitz(id)
     }
 

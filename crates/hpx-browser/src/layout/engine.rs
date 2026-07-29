@@ -87,11 +87,7 @@ impl LayoutEngine {
         self.node_position(dom, node_id).0
     }
 
-    fn absolute_position(
-        &self,
-        inner: &blitz_dom::BaseDocument,
-        node_id: usize,
-    ) -> (f32, f32) {
+    fn absolute_position(&self, inner: &blitz_dom::BaseDocument, node_id: usize) -> (f32, f32) {
         let mut x = 0.0f32;
         let mut y = 0.0f32;
         let mut current_id = node_id;
