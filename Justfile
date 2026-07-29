@@ -103,7 +103,8 @@ publish:
     echo "Publishing workspace crates v$VERSION..."
     echo ""
     # Dependency order: hpx-yawc, hpx-h3 → hpx → {hpx-browser, hpx-dl, hpx-emulation, hpx-streams} → {hpxless, hpx-cli}
-    CRATES="hpx-yawc hpx-h3 hpx hpx-browser hpx-dl hpx-emulation hpx-streams hpxless hpx-cli"
+    # hpx-browser, hpxless, hpx-cli: skipped — blitz-dom git rev has API changes not yet on crates.io
+    CRATES="hpx-yawc hpx-h3 hpx hpx-dl hpx-emulation hpx-streams"
     for crate in $CRATES; do
     	# Check if already published at this version
     	if cargo search "$crate" --limit 1 2>/dev/null | grep -q "^$crate = \"$VERSION\""; then
