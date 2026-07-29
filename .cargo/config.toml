@@ -2,10 +2,10 @@
 # Pin rustc to the rustup nightly proxy so the correct toolchain is always
 # used regardless of PATH ordering (the IDE may prepend /usr/bin which
 # contains the system stable rustc).
-rustc = "/home/akagi201/.cargo/bin/rustc"
+# rustc = "$HOME/.cargo/bin/rustc"
 
 # Disable global kache wrapper which bypasses rustup proxy and breaks nightly.
-rustc-wrapper = ""
+rustc-wrapper = "kache"
 
 # Enable Polonius next-generation borrow checker for all crates.
 # `polonius=next` is the newer, more compatible Polonius implementation that
