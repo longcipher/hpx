@@ -1,6 +1,5 @@
 #![allow(missing_docs)]
 use hpx_browser::{
-    dom::NodeId,
     html_parser::parse_html,
     page::Page,
     resource_loader::{ResourceType, extract_resource_urls, filter_by_block_types},
@@ -110,7 +109,7 @@ async fn stylesheets_injected_into_head() {
 
     page.apply_stylesheets(&styles);
 
-    let dom_html = page.dom().serialize_html(NodeId::DOCUMENT);
+    let dom_html = page.dom().serialize_html(page.dom().document());
     assert!(dom_html.contains("<style>"), "should have <style> tag");
     assert!(dom_html.contains("margin"), "should contain CSS content");
 }
@@ -139,7 +138,7 @@ async fn multiple_stylesheets_all_injected() {
 
     page.apply_stylesheets(&styles);
 
-    let dom_html = page.dom().serialize_html(NodeId::DOCUMENT);
+    let dom_html = page.dom().serialize_html(page.dom().document());
     assert!(
         dom_html.contains("color: red"),
         "first CSS should be injected"

@@ -429,9 +429,10 @@ impl Client {
         // If the user already set specific headers, we should respect them, regardless
         // of what the Body knows about itself. They set them for a reason.
 
-        // Because of the borrow checker, we can't check the for an existing
-        // Content-Length header while holding an `Entry` for the Transfer-Encoding
-        // header, so unfortunately, we must do the check here, first.
+        // Polonius (next-gen borrow checker) can track that the shared borrow from
+        // `content_length_parse_all` ends before `headers.entry()`, but we keep the
+        // early read + flag pattern for clarity and to avoid coupling the two header
+        // operations into a single complex expression.
 
         let existing_con_len = headers::content_length_parse_all(headers);
         let mut should_remove_con_len = false;
@@ -515,8 +516,8 @@ impl Client {
             enc
         });
 
-        // This is because we need a second mutable borrow to remove
-        // content-length header.
+        // With Polonius, the borrow from `headers.entry()` above is dead here,
+        // so we can safely reborrow `headers` to remove the content-length header.
         if let Some(encoder) = encoder {
             if should_remove_con_len && existing_con_len.is_some() {
                 headers.remove(header::CONTENT_LENGTH);

@@ -113,7 +113,7 @@ impl ChildIframe {
 /// Find all `<iframe>` elements in the DOM.
 pub fn find_iframes(dom: &Dom) -> Vec<IframeInfo> {
     let mut iframes = Vec::new();
-    collect_iframes(dom, NodeId::DOCUMENT, &mut iframes);
+    collect_iframes(dom, dom.document(), &mut iframes);
     iframes
 }
 

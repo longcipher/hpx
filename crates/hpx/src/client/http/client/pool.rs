@@ -430,29 +430,28 @@ impl<T: Poolable, K: Key> PoolShard<T, K> {
         }
 
         if let Some(value) = value {
-            // borrow-check scope...
-            {
-                let idle_list = if let Some(list) = self.idle.get(key) {
-                    list
-                } else {
-                    let new_list = Arc::new(Mutex::new(Vec::new()));
-                    self.idle.insert(key.clone(), new_list.clone());
-                    self.idle_keys.push(key.clone());
-                    new_list
-                };
-                let mut idle_guard = idle_list.lock();
+            // Polonius: borrow from `self.idle.get()` is dead in the else branch,
+            // so the explicit scope block is no longer needed.
+            let idle_list = if let Some(list) = self.idle.get(key) {
+                list
+            } else {
+                let new_list = Arc::new(Mutex::new(Vec::new()));
+                self.idle.insert(key.clone(), new_list.clone());
+                self.idle_keys.push(key.clone());
+                new_list
+            };
+            let mut idle_guard = idle_list.lock();
 
-                if self.max_idle_per_host <= idle_guard.len() {
-                    trace!("max idle per host for {:?}, dropping connection", key);
-                    return;
-                }
-
-                debug!("pooling idle connection for {:?}", key);
-                idle_guard.push(Idle {
-                    value,
-                    idle_at: Instant::now(),
-                });
+            if self.max_idle_per_host <= idle_guard.len() {
+                trace!("max idle per host for {:?}, dropping connection", key);
+                return;
             }
+
+            debug!("pooling idle connection for {:?}", key);
+            idle_guard.push(Idle {
+                value,
+                idle_at: Instant::now(),
+            });
 
             // Flush pending moka operations so capacity eviction is visible.
             self.idle.run_pending_tasks();

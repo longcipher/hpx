@@ -1,3 +1,17 @@
+[build]
+# Pin rustc to the rustup nightly proxy so the correct toolchain is always
+# used regardless of PATH ordering (the IDE may prepend /usr/bin which
+# contains the system stable rustc).
+rustc = "/home/akagi201/.cargo/bin/rustc"
+
+# Disable global kache wrapper which bypasses rustup proxy and breaks nightly.
+rustc-wrapper = ""
+
+# Enable Polonius next-generation borrow checker for all crates.
+# `polonius=next` is the newer, more compatible Polonius implementation that
+# does not ICE on third-party code (e.g. hashbrown 0.17.x).
+rustflags = ["-Zpolonius=next"]
+
 [target.aarch64-apple-darwin]
 linker = "clang"
-rustflags = ["-C", "link-arg=-fuse-ld=/opt/homebrew/bin/ld64.lld", "-A", "linker_messages"]
+rustflags = ["-Zpolonius=next", "-C", "link-arg=-fuse-ld=/opt/homebrew/bin/ld64.lld", "-A", "linker_messages"]

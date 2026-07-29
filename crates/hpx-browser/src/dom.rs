@@ -5,35 +5,66 @@ use blitz_dom::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct NodeId(pub(crate) usize);
+pub struct NodeId(pub(crate) u64);
 
 impl NodeId {
-    pub const DOCUMENT: NodeId = NodeId(0);
-
     #[must_use]
     pub fn from_raw(v: u32) -> Self {
-        Self(v as usize)
+        // JS-side raw IDs are slot indices (low 32 bits) with no version.
+        // Reconstruct a blitz NodeId using only the index; the version is
+        // resolved at lookup time by `BaseDocument::get_node` (returns None
+        // for stale versions).
+        Self(u64::from(v))
     }
 
     #[must_use]
     pub fn to_raw(self) -> u32 {
-        #[expect(clippy::expect_used, reason = "NodeId fits in u32")]
+        // Expose only the slot index to JS. The version lives in the high
+        // 32 bits and is an internal detail of the blitz DOM.
+        #[expect(clippy::cast_possible_truncation, reason = "extracting slot index")]
         {
-            u32::try_from(self.0).expect("NodeId value exceeds u32 range")
+            self.0 as u32
         }
+    }
+
+    /// Convert to `f64` for JS interop. Carries the full 64-bit value
+    /// (slot index + version) so versioned NodeIds round-trip through JS
+    /// numbers, which can represent integers up to 2^53 exactly. Use this
+    /// instead of [`to_raw`](Self::to_raw) when the version must survive a
+    /// hop through JavaScript (e.g. the document node has a non-zero
+    /// version and `from_raw(0)` would not resolve).
+    #[must_use]
+    pub fn to_f64(self) -> f64 {
+        self.0 as f64
+    }
+
+    /// Reconstruct a NodeId from an `f64` produced by [`to_f64`](Self::to_f64).
+    #[must_use]
+    pub fn from_f64(v: f64) -> Self {
+        Self(v as u64)
+    }
+
+    /// Convert to the blitz-dom `NodeId` type.
+    pub(crate) fn to_blitz(self) -> blitz_dom::NodeId {
+        blitz_dom::NodeId::from_u64(self.0)
+    }
+
+    /// Wrap a blitz-dom `NodeId` in our local newtype.
+    pub(crate) fn from_blitz(id: blitz_dom::NodeId) -> Self {
+        Self(id.as_u64())
     }
 }
 
 /// Iterator over the children of a node, reading directly from the
 /// underlying `BaseDocument` children vec without allocating.
 pub struct ChildrenIter<'a> {
-    iter: std::slice::Iter<'a, usize>,
+    iter: std::slice::Iter<'a, blitz_dom::NodeId>,
 }
 
 impl<'a> Iterator for ChildrenIter<'a> {
     type Item = NodeId;
     fn next(&mut self) -> Option<NodeId> {
-        self.iter.next().map(|&id| NodeId(id))
+        self.iter.next().map(|&id| NodeId::from_blitz(id))
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.iter.size_hint()
@@ -42,7 +73,7 @@ impl<'a> Iterator for ChildrenIter<'a> {
 
 impl<'a> DoubleEndedIterator for ChildrenIter<'a> {
     fn next_back(&mut self) -> Option<NodeId> {
-        self.iter.next_back().map(|&id| NodeId(id))
+        self.iter.next_back().map(|&id| NodeId::from_blitz(id))
     }
 }
 
@@ -203,7 +234,7 @@ impl<'a> NodeRef<'a> {
     }
 
     fn blitz_data(&self) -> Option<&'a BlitzNodeData> {
-        self.dom.inner.get_node(self.id.0).map(|n| &n.data)
+        self.dom.inner.get_node(self.id.to_blitz()).map(|n| &n.data)
     }
 
     pub fn is_element(&self) -> bool {
@@ -222,7 +253,7 @@ impl<'a> NodeRef<'a> {
     }
 
     pub fn is_document(&self) -> bool {
-        matches!(self.blitz_data(), Some(BlitzNodeData::Document))
+        matches!(self.blitz_data(), Some(BlitzNodeData::Document(_)))
     }
 
     pub fn text(&self) -> Option<&'a str> {
@@ -260,23 +291,26 @@ impl<'a> NodeRef<'a> {
     pub fn first_child(&self) -> Option<NodeId> {
         self.dom
             .inner
-            .get_node(self.id.0)
-            .and_then(|n| n.children.first().map(|&c| NodeId(c)))
+            .get_node(self.id.to_blitz())
+            .and_then(|n| n.children.first().map(|&c| NodeId::from_blitz(c)))
     }
 
     pub fn next_sibling(&self) -> Option<NodeId> {
-        let node = self.dom.inner.get_node(self.id.0)?;
+        let node = self.dom.inner.get_node(self.id.to_blitz())?;
         let parent_id = node.parent?;
         let parent = self.dom.inner.get_node(parent_id)?;
-        let pos = parent.children.iter().position(|&c| c == self.id.0)?;
-        parent.children.get(pos + 1).map(|&c| NodeId(c))
+        let pos = parent
+            .children
+            .iter()
+            .position(|&c| c == self.id.to_blitz())?;
+        parent.children.get(pos + 1).map(|&c| NodeId::from_blitz(c))
     }
 
     pub fn parent(&self) -> Option<NodeId> {
         self.dom
             .inner
-            .get_node(self.id.0)
-            .and_then(|n| n.parent.map(NodeId))
+            .get_node(self.id.to_blitz())
+            .and_then(|n| n.parent.map(NodeId::from_blitz))
     }
 
     pub fn node_type(&self) -> u32 {
@@ -284,7 +318,7 @@ impl<'a> NodeRef<'a> {
             Some(BlitzNodeData::Element(_)) | Some(BlitzNodeData::AnonymousBlock(_)) => 1,
             Some(BlitzNodeData::Text(_)) => 3,
             Some(BlitzNodeData::Comment) => 8,
-            Some(BlitzNodeData::Document) => 9,
+            Some(BlitzNodeData::Document(_)) => 9,
             None => 0,
         }
     }
@@ -302,7 +336,7 @@ impl<'a> std::fmt::Debug for NodeRef<'a> {
             }
             Some(BlitzNodeData::Text(t)) => write!(f, "Text({:?})", t.content),
             Some(BlitzNodeData::Comment) => write!(f, "Comment"),
-            Some(BlitzNodeData::Document) => write!(f, "Document"),
+            Some(BlitzNodeData::Document(_)) => write!(f, "Document"),
             None => write!(f, "NodeRef(<invalid {}>)", self.id.0),
         }
     }
@@ -328,7 +362,7 @@ impl Dom {
     }
 
     pub fn document(&self) -> NodeId {
-        NodeId::DOCUMENT
+        NodeId::from_blitz(self.inner.root_node().id)
     }
 
     pub fn inner(&self) -> &BaseDocument {
@@ -349,7 +383,7 @@ impl Dom {
     pub fn children_of(&self, id: NodeId) -> ChildrenIter<'_> {
         let slice = self
             .inner
-            .get_node(id.0)
+            .get_node(id.to_blitz())
             .map(|n| n.children.as_slice())
             .unwrap_or(&[]);
         ChildrenIter { iter: slice.iter() }
@@ -357,12 +391,12 @@ impl Dom {
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn get(&self, id: NodeId) -> Option<Node> {
-        let blitz_node = self.inner.get_node(id.0)?;
+        let blitz_node = self.inner.get_node(id.to_blitz())?;
         Some(self.convert_node(blitz_node))
     }
 
     pub fn get_mut(&mut self, id: NodeId) -> Option<&mut BaseDocument> {
-        self.inner.get_node_mut(id.0)?;
+        self.inner.get_node_mut(id.to_blitz())?;
         Some(&mut self.inner)
     }
 
@@ -378,33 +412,39 @@ impl Dom {
         let blitz_attrs: Vec<BlitzAttribute> = attrs.iter().map(|a| a.to_blitz()).collect();
         let h5_name = name.to_h5();
         let elem_data = BlitzElementData::new(h5_name, blitz_attrs);
-        let id = self.inner.create_node(BlitzNodeData::Element(elem_data));
-        NodeId(id)
+        let id = self
+            .inner
+            .create_node(BlitzNodeData::Element(Box::new(elem_data)));
+        NodeId::from_blitz(id)
     }
 
     pub fn create_text(&mut self, text: String) -> NodeId {
         let id = self.inner.create_text_node(&text);
-        NodeId(id)
+        NodeId::from_blitz(id)
     }
 
     pub fn create_comment(&mut self, _text: String) -> NodeId {
         let id = self.inner.create_node(BlitzNodeData::Comment);
-        NodeId(id)
+        NodeId::from_blitz(id)
     }
 
     pub fn create_document_fragment(&mut self) -> NodeId {
-        let id = self.inner.create_node(BlitzNodeData::Document);
-        NodeId(id)
+        let id = self
+            .inner
+            .create_node(BlitzNodeData::Document(Box::default()));
+        NodeId::from_blitz(id)
     }
 
     pub fn create_shadow_root(&mut self, _host: NodeId, _mode: ShadowRootMode) -> NodeId {
-        let id = self.inner.create_node(BlitzNodeData::Document);
-        NodeId(id)
+        let id = self
+            .inner
+            .create_node(BlitzNodeData::Document(Box::default()));
+        NodeId::from_blitz(id)
     }
 
     pub fn allocate_pi(&mut self, _target: String, _data: String) -> NodeId {
         let id = self.inner.create_node(BlitzNodeData::Comment);
-        NodeId(id)
+        NodeId::from_blitz(id)
     }
 
     pub fn create_doctype(
@@ -413,82 +453,86 @@ impl Dom {
         _public_id: String,
         _system_id: String,
     ) -> NodeId {
-        let id = self.inner.create_node(BlitzNodeData::Document);
-        NodeId(id)
+        let id = self
+            .inner
+            .create_node(BlitzNodeData::Document(Box::default()));
+        NodeId::from_blitz(id)
     }
 
     pub fn append_child(&mut self, parent: NodeId, child: NodeId) {
-        if self.inner.get_node(parent.0).is_none() || self.inner.get_node(child.0).is_none() {
-            return;
-        }
-        self.detach(child);
-        if let Some(parent_node) = self.inner.get_node_mut(parent.0) {
-            parent_node.children.push(child.0);
-        }
-        if let Some(child_node) = self.inner.get_node_mut(child.0) {
-            child_node.parent = Some(parent.0);
-        }
-    }
-
-    pub fn insert_before(&mut self, parent: NodeId, child: NodeId, reference: NodeId) {
-        if self.inner.get_node(parent.0).is_none()
-            || self.inner.get_node(child.0).is_none()
-            || self.inner.get_node(reference.0).is_none()
+        if self.inner.get_node(parent.to_blitz()).is_none()
+            || self.inner.get_node(child.to_blitz()).is_none()
         {
             return;
         }
         self.detach(child);
-        if let Some(parent_node) = self.inner.get_node_mut(parent.0) {
+        if let Some(parent_node) = self.inner.get_node_mut(parent.to_blitz()) {
+            parent_node.children.push(child.to_blitz());
+        }
+        if let Some(child_node) = self.inner.get_node_mut(child.to_blitz()) {
+            child_node.parent = Some(parent.to_blitz());
+        }
+    }
+
+    pub fn insert_before(&mut self, parent: NodeId, child: NodeId, reference: NodeId) {
+        if self.inner.get_node(parent.to_blitz()).is_none()
+            || self.inner.get_node(child.to_blitz()).is_none()
+            || self.inner.get_node(reference.to_blitz()).is_none()
+        {
+            return;
+        }
+        self.detach(child);
+        if let Some(parent_node) = self.inner.get_node_mut(parent.to_blitz()) {
             if let Some(idx) = parent_node
                 .children
                 .iter()
-                .position(|&id| id == reference.0)
+                .position(|&id| id == reference.to_blitz())
             {
-                parent_node.children.insert(idx, child.0);
+                parent_node.children.insert(idx, child.to_blitz());
             } else {
-                parent_node.children.push(child.0);
+                parent_node.children.push(child.to_blitz());
             }
         }
-        if let Some(child_node) = self.inner.get_node_mut(child.0) {
-            child_node.parent = Some(parent.0);
+        if let Some(child_node) = self.inner.get_node_mut(child.to_blitz()) {
+            child_node.parent = Some(parent.to_blitz());
         }
     }
 
     pub fn detach(&mut self, id: NodeId) {
-        let parent_id = match self.inner.get_node(id.0) {
+        let parent_id = match self.inner.get_node(id.to_blitz()) {
             Some(n) => n.parent,
             None => return,
         };
         if let Some(pid) = parent_id {
             if let Some(parent) = self.inner.get_node_mut(pid) {
-                parent.children.retain(|&c| c != id.0);
+                parent.children.retain(|&c| c != id.to_blitz());
             }
         }
-        if let Some(node) = self.inner.get_node_mut(id.0) {
+        if let Some(node) = self.inner.get_node_mut(id.to_blitz()) {
             node.parent = None;
         }
     }
 
     pub fn remove(&mut self, id: NodeId) {
         self.detach(id);
-        let children: Vec<usize> = self
+        let children: Vec<blitz_dom::NodeId> = self
             .inner
-            .get_node(id.0)
-            .map(|n| n.children.clone())
+            .get_node(id.to_blitz())
+            .map(|n| n.children.to_vec())
             .unwrap_or_default();
         for child_id in children {
-            self.remove(NodeId(child_id));
+            self.remove(NodeId::from_blitz(child_id));
         }
     }
 
     pub fn reparent_children(&mut self, source: NodeId, target: NodeId) {
-        let children: Vec<usize> = self
+        let children: Vec<blitz_dom::NodeId> = self
             .inner
-            .get_node(source.0)
-            .map(|n| n.children.clone())
+            .get_node(source.to_blitz())
+            .map(|n| n.children.to_vec())
             .unwrap_or_default();
         for child_id in children {
-            self.append_child(target, NodeId(child_id));
+            self.append_child(target, NodeId::from_blitz(child_id));
         }
     }
 
@@ -543,7 +587,7 @@ impl Dom {
     }
 
     pub fn get_element_by_id(&self, id_value: &str) -> Option<NodeId> {
-        self.find_element(NodeId::DOCUMENT, &|nr| nr.get_attr("id") == Some(id_value))
+        self.find_element(self.document(), &|nr| nr.get_attr("id") == Some(id_value))
     }
 
     pub fn get_elements_by_tag_name(&self, root: NodeId, tag: &str) -> Vec<NodeId> {
@@ -570,7 +614,7 @@ impl Dom {
 
     pub fn serialize_inner_html(&self, id: NodeId) -> String {
         let mut out = String::new();
-        if self.inner.get_node(id.0).is_none() {
+        if self.inner.get_node(id.to_blitz()).is_none() {
             return out;
         }
         for c in self.children_of(id) {
@@ -596,7 +640,7 @@ impl Dom {
         while let Some(work) = stack.pop() {
             match work {
                 SerWork::Close(id) => {
-                    if let Some(blitz_node) = self.inner.get_node(id.0) {
+                    if let Some(blitz_node) = self.inner.get_node(id.to_blitz()) {
                         if let BlitzNodeData::Element(e) | BlitzNodeData::AnonymousBlock(e) =
                             &blitz_node.data
                         {
@@ -614,7 +658,7 @@ impl Dom {
                     if steps > WALK_LIMIT {
                         break;
                     }
-                    let blitz_node = match self.inner.get_node(id.0) {
+                    let blitz_node = match self.inner.get_node(id.to_blitz()) {
                         Some(n) => n,
                         None => continue,
                     };
@@ -652,7 +696,7 @@ impl Dom {
                             out.push_str("<!--");
                             out.push_str("-->");
                         }
-                        BlitzNodeData::Document => {
+                        BlitzNodeData::Document(_) => {
                             for c in self.children_of(id).rev() {
                                 stack.push(SerWork::Open(c));
                             }
@@ -771,9 +815,13 @@ impl Dom {
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn convert_node(&self, blitz_node: &BlitzNode) -> Node {
-        let id = NodeId(blitz_node.id);
-        let parent = blitz_node.parent.map(NodeId);
-        let children: Vec<NodeId> = blitz_node.children.iter().map(|&c| NodeId(c)).collect();
+        let id = NodeId::from_blitz(blitz_node.id);
+        let parent = blitz_node.parent.map(NodeId::from_blitz);
+        let children: Vec<NodeId> = blitz_node
+            .children
+            .iter()
+            .map(|&c| NodeId::from_blitz(c))
+            .collect();
         let first_child = children.first().copied();
         let last_child = children.last().copied();
         let prev_sibling = blitz_node
@@ -782,7 +830,7 @@ impl Dom {
             .and_then(|parent| {
                 let pos = parent.children.iter().position(|&c| c == blitz_node.id)?;
                 if pos > 0 {
-                    parent.children.get(pos - 1).map(|&c| NodeId(c))
+                    parent.children.get(pos - 1).map(|&c| NodeId::from_blitz(c))
                 } else {
                     None
                 }
@@ -792,10 +840,10 @@ impl Dom {
             .and_then(|pid| self.inner.get_node(pid))
             .and_then(|parent| {
                 let pos = parent.children.iter().position(|&c| c == blitz_node.id)?;
-                parent.children.get(pos + 1).map(|&c| NodeId(c))
+                parent.children.get(pos + 1).map(|&c| NodeId::from_blitz(c))
             });
         let data = match &blitz_node.data {
-            BlitzNodeData::Document => NodeData::Document,
+            BlitzNodeData::Document(_) => NodeData::Document,
             BlitzNodeData::Element(e) => {
                 let name = QualName::from_h5(&e.name);
                 let attrs = e

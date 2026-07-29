@@ -1,14 +1,17 @@
+# Ensure rustup-managed nightly cargo is used (system /usr/bin cargo is stable)
+export PATH := home_directory() / ".cargo/bin" + ":" + env("PATH", "")
+
 format:
     rumdl fmt .
     cargo sort -w -g
-    cargo +nightly fmt --all
+    cargo fmt --all
 fix:
     rumdl check --fix .
 lint:
     rumdl check .
     cargo sort -w -g -c
-    cargo +nightly fmt --all -- --check
-    cargo +nightly clippy --all -- -D warnings
+    cargo fmt --all -- --check
+    cargo clippy --all -- -D warnings
     cargo shear
     just check-agents-md
 test:

@@ -5,7 +5,7 @@ use std::{
 };
 
 use eyre::Context;
-use hpx_browser::{dom::NodeId, page::Page};
+use hpx_browser::page::Page;
 use tokio::sync::Semaphore;
 
 use crate::cli::DumpFormat;
@@ -190,7 +190,7 @@ fn write_output(path: &Option<PathBuf>, data: &[u8]) -> eyre::Result<()> {
 
 fn extract_links(html: &str) -> Vec<(String, String)> {
     let dom = hpx_browser::html_parser::parse_html(html);
-    let anchors = dom.get_elements_by_tag_name(NodeId::DOCUMENT, "a");
+    let anchors = dom.get_elements_by_tag_name(dom.document(), "a");
     let mut results = Vec::with_capacity(anchors.len());
     for &id in &anchors {
         let Some(node) = dom.get(id) else {
@@ -215,7 +215,7 @@ fn extract_assets(html: &str) -> Vec<(String, String)> {
     let dom = hpx_browser::html_parser::parse_html(html);
     let mut results = Vec::new();
 
-    for &id in &dom.get_elements_by_tag_name(NodeId::DOCUMENT, "script") {
+    for &id in &dom.get_elements_by_tag_name(dom.document(), "script") {
         let Some(node) = dom.get(id) else { continue };
         let Some(elem) = node.as_element() else {
             continue;
@@ -225,7 +225,7 @@ fn extract_assets(html: &str) -> Vec<(String, String)> {
         }
     }
 
-    for &id in &dom.get_elements_by_tag_name(NodeId::DOCUMENT, "link") {
+    for &id in &dom.get_elements_by_tag_name(dom.document(), "link") {
         let Some(node) = dom.get(id) else { continue };
         let Some(elem) = node.as_element() else {
             continue;
@@ -235,7 +235,7 @@ fn extract_assets(html: &str) -> Vec<(String, String)> {
         }
     }
 
-    for &id in &dom.get_elements_by_tag_name(NodeId::DOCUMENT, "img") {
+    for &id in &dom.get_elements_by_tag_name(dom.document(), "img") {
         let Some(node) = dom.get(id) else { continue };
         let Some(elem) = node.as_element() else {
             continue;

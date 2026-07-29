@@ -8,16 +8,16 @@ use crate::{
 // --- Read ops ---
 
 #[op2(fast)]
-#[smi]
-pub(crate) fn op_dom_document_node() -> i32 {
-    NodeId::DOCUMENT.to_raw() as i32
+pub(crate) fn op_dom_document_node(state: &mut OpState) -> f64 {
+    let state = state.borrow::<DomState>();
+    state.dom.document().to_f64()
 }
 
 #[op2]
 #[string]
-pub(crate) fn op_dom_get_tag_name(state: &mut OpState, #[smi] node_id: i32) -> String {
+pub(crate) fn op_dom_get_tag_name(state: &mut OpState, node_id: f64) -> String {
     let state = state.borrow::<DomState>();
-    let id = NodeId::from_raw(node_id as u32);
+    let id = NodeId::from_f64(node_id);
     match state.dom.get(id) {
         Some(n) => n.as_element().map(|e| e.name.local.clone()),
         None => None,
@@ -27,43 +27,41 @@ pub(crate) fn op_dom_get_tag_name(state: &mut OpState, #[smi] node_id: i32) -> S
 
 #[op2(fast)]
 #[smi]
-pub(crate) fn op_dom_get_node_type(state: &mut OpState, #[smi] node_id: i32) -> i32 {
+pub(crate) fn op_dom_get_node_type(state: &mut OpState, node_id: f64) -> i32 {
     let state = state.borrow::<DomState>();
-    state.dom.node_type(NodeId::from_raw(node_id as u32)) as i32
+    state.dom.node_type(NodeId::from_f64(node_id)) as i32
 }
 
 #[op2]
 #[string]
-pub(crate) fn op_dom_get_text_content(state: &mut OpState, #[smi] node_id: i32) -> String {
+pub(crate) fn op_dom_get_text_content(state: &mut OpState, node_id: f64) -> String {
     let state = state.borrow::<DomState>();
-    state.dom.text_content(NodeId::from_raw(node_id as u32))
+    state.dom.text_content(NodeId::from_f64(node_id))
 }
 
 #[op2]
 #[string]
-pub(crate) fn op_dom_get_inner_html(state: &mut OpState, #[smi] node_id: i32) -> String {
+pub(crate) fn op_dom_get_inner_html(state: &mut OpState, node_id: f64) -> String {
     let state = state.borrow::<DomState>();
-    state
-        .dom
-        .serialize_inner_html(NodeId::from_raw(node_id as u32))
+    state.dom.serialize_inner_html(NodeId::from_f64(node_id))
 }
 
 #[op2]
 #[string]
-pub(crate) fn op_dom_get_outer_html(state: &mut OpState, #[smi] node_id: i32) -> String {
+pub(crate) fn op_dom_get_outer_html(state: &mut OpState, node_id: f64) -> String {
     let state = state.borrow::<DomState>();
-    state.dom.serialize_html(NodeId::from_raw(node_id as u32))
+    state.dom.serialize_html(NodeId::from_f64(node_id))
 }
 
 #[op2]
 #[string]
 pub(crate) fn op_dom_get_attribute(
     state: &mut OpState,
-    #[smi] node_id: i32,
+    node_id: f64,
     #[string] name: &str,
 ) -> String {
     let state = state.borrow::<DomState>();
-    let id = NodeId::from_raw(node_id as u32);
+    let id = NodeId::from_f64(node_id);
     match state.dom.get(id) {
         Some(n) => n.as_element().and_then(|e| {
             e.attrs
@@ -79,11 +77,11 @@ pub(crate) fn op_dom_get_attribute(
 #[op2(fast)]
 pub(crate) fn op_dom_has_attribute(
     state: &mut OpState,
-    #[smi] node_id: i32,
+    node_id: f64,
     #[string] name: &str,
 ) -> bool {
     let state = state.borrow::<DomState>();
-    let id = NodeId::from_raw(node_id as u32);
+    let id = NodeId::from_f64(node_id);
     match state.dom.get(id) {
         Some(n) => n.as_element().is_some_and(|e| {
             e.attrs
@@ -96,9 +94,9 @@ pub(crate) fn op_dom_has_attribute(
 
 #[op2]
 #[serde]
-pub(crate) fn op_dom_get_attribute_names(state: &mut OpState, #[smi] node_id: i32) -> Vec<String> {
+pub(crate) fn op_dom_get_attribute_names(state: &mut OpState, node_id: f64) -> Vec<String> {
     let state = state.borrow::<DomState>();
-    let id = NodeId::from_raw(node_id as u32);
+    let id = NodeId::from_f64(node_id);
     match state.dom.get(id) {
         Some(n) => n
             .as_element()
@@ -109,186 +107,165 @@ pub(crate) fn op_dom_get_attribute_names(state: &mut OpState, #[smi] node_id: i3
 }
 
 #[op2(fast)]
-#[smi]
-pub(crate) fn op_dom_get_parent(state: &mut OpState, #[smi] node_id: i32) -> i32 {
+pub(crate) fn op_dom_get_parent(state: &mut OpState, node_id: f64) -> f64 {
     let state = state.borrow::<DomState>();
-    let id = NodeId::from_raw(node_id as u32);
+    let id = NodeId::from_f64(node_id);
     state
         .dom
         .get(id)
         .and_then(|n| n.parent)
-        .map(|p| p.to_raw() as i32)
-        .unwrap_or(-1)
+        .map(|p| p.to_f64())
+        .unwrap_or(-1.0)
 }
 
 #[op2]
 #[serde]
-pub(crate) fn op_dom_get_children(state: &mut OpState, #[smi] node_id: i32) -> Vec<i32> {
+pub(crate) fn op_dom_get_children(state: &mut OpState, node_id: f64) -> Vec<f64> {
     let state = state.borrow::<DomState>();
     state
         .dom
-        .children(NodeId::from_raw(node_id as u32))
+        .children(NodeId::from_f64(node_id))
         .iter()
-        .map(|id| id.to_raw() as i32)
+        .map(|id| id.to_f64())
         .collect()
 }
 
 #[op2]
 #[serde]
-pub(crate) fn op_dom_get_child_elements(state: &mut OpState, #[smi] node_id: i32) -> Vec<i32> {
+pub(crate) fn op_dom_get_child_elements(state: &mut OpState, node_id: f64) -> Vec<f64> {
     let state = state.borrow::<DomState>();
     state
         .dom
-        .child_elements(NodeId::from_raw(node_id as u32))
+        .child_elements(NodeId::from_f64(node_id))
         .iter()
-        .map(|id| id.to_raw() as i32)
+        .map(|id| id.to_f64())
         .collect()
 }
 
 #[op2(fast)]
-#[smi]
-pub(crate) fn op_dom_get_first_child(state: &mut OpState, #[smi] node_id: i32) -> i32 {
+pub(crate) fn op_dom_get_first_child(state: &mut OpState, node_id: f64) -> f64 {
     let state = state.borrow::<DomState>();
     state
         .dom
-        .get(NodeId::from_raw(node_id as u32))
+        .get(NodeId::from_f64(node_id))
         .and_then(|n| n.first_child)
-        .map(|id| id.to_raw() as i32)
-        .unwrap_or(-1)
+        .map(|id| id.to_f64())
+        .unwrap_or(-1.0)
 }
 
 #[op2(fast)]
-#[smi]
-pub(crate) fn op_dom_get_last_child(state: &mut OpState, #[smi] node_id: i32) -> i32 {
+pub(crate) fn op_dom_get_last_child(state: &mut OpState, node_id: f64) -> f64 {
     let state = state.borrow::<DomState>();
     state
         .dom
-        .get(NodeId::from_raw(node_id as u32))
+        .get(NodeId::from_f64(node_id))
         .and_then(|n| n.last_child)
-        .map(|id| id.to_raw() as i32)
-        .unwrap_or(-1)
+        .map(|id| id.to_f64())
+        .unwrap_or(-1.0)
 }
 
 #[op2(fast)]
-#[smi]
-pub(crate) fn op_dom_get_next_sibling(state: &mut OpState, #[smi] node_id: i32) -> i32 {
+pub(crate) fn op_dom_get_next_sibling(state: &mut OpState, node_id: f64) -> f64 {
     let state = state.borrow::<DomState>();
     state
         .dom
-        .get(NodeId::from_raw(node_id as u32))
+        .get(NodeId::from_f64(node_id))
         .and_then(|n| n.next_sibling)
-        .map(|id| id.to_raw() as i32)
-        .unwrap_or(-1)
+        .map(|id| id.to_f64())
+        .unwrap_or(-1.0)
 }
 
 #[op2(fast)]
-#[smi]
-pub(crate) fn op_dom_get_prev_sibling(state: &mut OpState, #[smi] node_id: i32) -> i32 {
+pub(crate) fn op_dom_get_prev_sibling(state: &mut OpState, node_id: f64) -> f64 {
     let state = state.borrow::<DomState>();
     state
         .dom
-        .get(NodeId::from_raw(node_id as u32))
+        .get(NodeId::from_f64(node_id))
         .and_then(|n| n.prev_sibling)
-        .map(|id| id.to_raw() as i32)
-        .unwrap_or(-1)
+        .map(|id| id.to_f64())
+        .unwrap_or(-1.0)
 }
 
 // --- Query ops ---
 
 #[op2(fast)]
-#[smi]
-pub(crate) fn op_dom_get_element_by_id(state: &mut OpState, #[string] id: &str) -> i32 {
+pub(crate) fn op_dom_get_element_by_id(state: &mut OpState, #[string] id: &str) -> f64 {
     let state = state.borrow::<DomState>();
     state
         .dom
         .get_element_by_id(id)
-        .map(|n| n.to_raw() as i32)
-        .unwrap_or(-1)
+        .map(|n| n.to_f64())
+        .unwrap_or(-1.0)
 }
 
 #[op2]
 #[serde]
 pub(crate) fn op_dom_get_elements_by_tag_name(
     state: &mut OpState,
-    #[smi] node_id: i32,
+    node_id: f64,
     #[string] tag: String,
-) -> Vec<i32> {
+) -> Vec<f64> {
     let state = state.borrow::<DomState>();
     state
         .dom
-        .get_elements_by_tag_name(NodeId::from_raw(node_id as u32), &tag)
+        .get_elements_by_tag_name(NodeId::from_f64(node_id), &tag)
         .iter()
-        .map(|id| id.to_raw() as i32)
+        .map(|id| id.to_f64())
         .collect()
 }
 
 // --- Mutation ops ---
 
 #[op2(fast)]
-#[smi]
-pub(crate) fn op_dom_create_element(state: &mut OpState, #[string] tag: &str) -> i32 {
+pub(crate) fn op_dom_create_element(state: &mut OpState, #[string] tag: &str) -> f64 {
     let state = state.borrow_mut::<DomState>();
     state
         .dom
         .create_element(QualName::new(tag), vec![])
-        .to_raw() as i32
+        .to_f64()
 }
 
 #[op2(fast)]
-#[smi]
-pub(crate) fn op_dom_create_text_node(state: &mut OpState, #[string] text: &str) -> i32 {
+pub(crate) fn op_dom_create_text_node(state: &mut OpState, #[string] text: &str) -> f64 {
     let state = state.borrow_mut::<DomState>();
-    state.dom.create_text(text.to_string()).to_raw() as i32
+    state.dom.create_text(text.to_string()).to_f64()
 }
 
 #[op2(fast)]
-#[smi]
-pub(crate) fn op_dom_create_document_fragment(state: &mut OpState) -> i32 {
+pub(crate) fn op_dom_create_document_fragment(state: &mut OpState) -> f64 {
     let state = state.borrow_mut::<DomState>();
-    state.dom.create_document_fragment().to_raw() as i32
+    state.dom.create_document_fragment().to_f64()
 }
 
 #[op2(fast)]
-pub(crate) fn op_dom_append_child(state: &mut OpState, #[smi] parent: i32, #[smi] child: i32) {
-    let state = state.borrow_mut::<DomState>();
-    state.dom.append_child(
-        NodeId::from_raw(parent as u32),
-        NodeId::from_raw(child as u32),
-    );
-}
-
-#[op2(fast)]
-pub(crate) fn op_dom_insert_before(
-    state: &mut OpState,
-    #[smi] parent: i32,
-    #[smi] child: i32,
-    #[smi] reference: i32,
-) {
-    let state = state.borrow_mut::<DomState>();
-    state.dom.insert_before(
-        NodeId::from_raw(parent as u32),
-        NodeId::from_raw(child as u32),
-        NodeId::from_raw(reference as u32),
-    );
-}
-
-#[op2(fast)]
-pub(crate) fn op_dom_remove_child(state: &mut OpState, #[smi] parent: i32, #[smi] child: i32) {
-    let state = state.borrow_mut::<DomState>();
-    let _ = parent; // ponytail: detach is simpler, matches browser_oxide pattern
-    state.dom.detach(NodeId::from_raw(child as u32));
-}
-
-#[op2(fast)]
-pub(crate) fn op_dom_set_text_content(
-    state: &mut OpState,
-    #[smi] node_id: i32,
-    #[string] text: String,
-) {
+pub(crate) fn op_dom_append_child(state: &mut OpState, parent: f64, child: f64) {
     let state = state.borrow_mut::<DomState>();
     state
         .dom
-        .set_text_content(NodeId::from_raw(node_id as u32), &text);
+        .append_child(NodeId::from_f64(parent), NodeId::from_f64(child));
+}
+
+#[op2(fast)]
+pub(crate) fn op_dom_insert_before(state: &mut OpState, parent: f64, child: f64, reference: f64) {
+    let state = state.borrow_mut::<DomState>();
+    state.dom.insert_before(
+        NodeId::from_f64(parent),
+        NodeId::from_f64(child),
+        NodeId::from_f64(reference),
+    );
+}
+
+#[op2(fast)]
+pub(crate) fn op_dom_remove_child(state: &mut OpState, parent: f64, child: f64) {
+    let state = state.borrow_mut::<DomState>();
+    let _ = parent; // ponytail: detach is simpler, matches browser_oxide pattern
+    state.dom.detach(NodeId::from_f64(child));
+}
+
+#[op2(fast)]
+pub(crate) fn op_dom_set_text_content(state: &mut OpState, node_id: f64, #[string] text: String) {
+    let state = state.borrow_mut::<DomState>();
+    state.dom.set_text_content(NodeId::from_f64(node_id), &text);
 }
 
 #[op2]

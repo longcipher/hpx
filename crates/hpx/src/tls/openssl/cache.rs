@@ -90,10 +90,8 @@ where
     }
 
     fn get(&mut self, key: &SessionKey<T>) -> Option<SslSession> {
-        let session = {
-            let per_host_sessions = self.per_host_sessions.get_mut(key)?;
-            per_host_sessions.front()?.clone().0
-        };
+        // Polonius: borrow from `get_mut()` ends after extracting the owned value.
+        let session = self.per_host_sessions.get_mut(key)?.front()?.clone().0;
 
         if session.protocol_version() == SslVersion::TLS1_3 {
             self.remove(&session);

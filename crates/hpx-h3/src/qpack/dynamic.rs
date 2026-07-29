@@ -191,7 +191,7 @@ impl<'a> DynamicTableEncoder<'a> {
             return DynamicLookupResult::Static(index);
         }
 
-        self.lookup_result(self.table.name_map.get(name).cloned())
+        self.lookup_result(self.table.name_map.get(name).copied())
     }
 
     fn track_ref(&mut self, reference: usize) {

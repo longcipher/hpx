@@ -438,12 +438,12 @@ impl Page {
     /// Collect text content of inline `<script>` elements (no `src` attribute)
     /// in document order.
     pub fn collect_inline_scripts(&self) -> Vec<String> {
-        use crate::dom::{DomElement, NodeId};
+        use crate::dom::DomElement;
 
         let mut scripts = Vec::new();
         for script_id in self
             .dom
-            .get_elements_by_tag_name(NodeId::DOCUMENT, "script")
+            .get_elements_by_tag_name(self.dom.document(), "script")
         {
             if let Some(el) = DomElement::new(&self.dom, script_id) {
                 if el.attr("src").is_none() {
@@ -500,7 +500,7 @@ impl Page {
     }
 
     pub async fn text_content(&self) -> Result<String, PageError> {
-        Ok(self.dom.text_content(crate::dom::NodeId::DOCUMENT))
+        Ok(self.dom.text_content(self.dom.document()))
     }
 
     pub async fn text_of(&self, selector: &str) -> Result<String, PageError> {
@@ -532,11 +532,11 @@ impl Page {
 
     /// Apply external stylesheets by injecting them as `<style>` tags in `<head>`.
     pub fn apply_stylesheets(&mut self, styles: &[crate::resource_loader::LoadedResource]) {
-        use crate::{dom::NodeId, resource_loader::ResourceType};
+        use crate::resource_loader::ResourceType;
 
         let html_el = self
             .dom
-            .child_elements(NodeId::DOCUMENT)
+            .child_elements(self.dom.document())
             .into_iter()
             .find(|&id| {
                 self.dom
@@ -595,7 +595,7 @@ impl Page {
         self.execute_scripts(&scripts)?;
 
         // Sync html field with DOM state (stylesheets injected as <style> tags).
-        self.html = self.dom.serialize_html(crate::dom::NodeId::DOCUMENT);
+        self.html = self.dom.serialize_html(self.dom.document());
 
         Ok(())
     }
@@ -635,7 +635,7 @@ fn query_selector(dom: &Dom, selector: &str) -> Option<NodeId> {
 
     if let Some(class_val) = sel.strip_prefix('.') {
         return dom
-            .get_elements_by_class_name(NodeId::DOCUMENT, class_val)
+            .get_elements_by_class_name(dom.document(), class_val)
             .into_iter()
             .next();
     }
@@ -650,7 +650,7 @@ fn query_selector(dom: &Dom, selector: &str) -> Option<NodeId> {
         return None;
     }
 
-    let candidates = dom.get_elements_by_tag_name(NodeId::DOCUMENT, tag);
+    let candidates = dom.get_elements_by_tag_name(dom.document(), tag);
     match rest {
         Some(r) if r.starts_with('#') => {
             let id_val = &r[1..];
@@ -905,10 +905,7 @@ Checking your browser before accessing the site...
 
     #[tokio::test]
     async fn apply_stylesheets_injects_style_tags() {
-        use crate::{
-            dom::NodeId,
-            resource_loader::{LoadedResource, ResourceType},
-        };
+        use crate::resource_loader::{LoadedResource, ResourceType};
 
         let mut page = Page::from_html("<html><head></head><body></body></html>", false)
             .await
@@ -923,7 +920,7 @@ Checking your browser before accessing the site...
 
         page.apply_stylesheets(&styles);
 
-        let html = page.dom().child_elements(NodeId::DOCUMENT)[0];
+        let html = page.dom().child_elements(page.dom().document())[0];
         let head = page.dom().get_elements_by_tag_name(html, "head")[0];
         let style_tags = page.dom().get_elements_by_tag_name(head, "style");
         assert_eq!(style_tags.len(), 1);
@@ -935,10 +932,7 @@ Checking your browser before accessing the site...
 
     #[tokio::test]
     async fn apply_stylesheets_skips_non_stylesheet_resources() {
-        use crate::{
-            dom::NodeId,
-            resource_loader::{LoadedResource, ResourceType},
-        };
+        use crate::resource_loader::{LoadedResource, ResourceType};
 
         let mut page = Page::from_html("<html><head></head><body></body></html>", false)
             .await
@@ -961,7 +955,7 @@ Checking your browser before accessing the site...
 
         page.apply_stylesheets(&styles);
 
-        let html = page.dom().child_elements(NodeId::DOCUMENT)[0];
+        let html = page.dom().child_elements(page.dom().document())[0];
         let head = page.dom().get_elements_by_tag_name(html, "head")[0];
         let style_tags = page.dom().get_elements_by_tag_name(head, "style");
         assert_eq!(style_tags.len(), 1);

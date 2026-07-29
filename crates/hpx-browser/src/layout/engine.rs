@@ -42,11 +42,11 @@ impl LayoutEngine {
     pub fn get_bounding_rect(&mut self, dom: &mut Dom, node_id: NodeId) -> DOMRect {
         self.ensure_computed(dom);
         let inner = dom.inner();
-        let Some(node) = inner.get_node(node_id.0) else {
+        let Some(node) = inner.get_node(node_id.to_blitz()) else {
             return DOMRect::default();
         };
-        let layout = &node.final_layout;
-        let (abs_x, abs_y) = self.absolute_position(inner, node_id.0);
+        let layout = node.final_layout();
+        let (abs_x, abs_y) = self.absolute_position(inner, node_id.to_blitz());
         DOMRect::new(
             abs_x as f64,
             abs_y as f64,
@@ -87,13 +87,18 @@ impl LayoutEngine {
         self.node_position(dom, node_id).0
     }
 
-    fn absolute_position(&self, inner: &blitz_dom::BaseDocument, node_id: usize) -> (f32, f32) {
+    fn absolute_position(
+        &self,
+        inner: &blitz_dom::BaseDocument,
+        node_id: blitz_dom::NodeId,
+    ) -> (f32, f32) {
         let mut x = 0.0f32;
         let mut y = 0.0f32;
         let mut current_id = node_id;
         while let Some(node) = inner.get_node(current_id) {
-            x += node.final_layout.location.x;
-            y += node.final_layout.location.y;
+            let layout = node.final_layout();
+            x += layout.location.x;
+            y += layout.location.y;
             match node.parent {
                 Some(pid) => current_id = pid,
                 None => break,
@@ -104,36 +109,34 @@ impl LayoutEngine {
 
     fn node_size(&self, dom: &Dom, node_id: NodeId) -> (f64, f64) {
         let inner = dom.inner();
-        let Some(node) = inner.get_node(node_id.0) else {
+        let Some(node) = inner.get_node(node_id.to_blitz()) else {
             return (0.0, 0.0);
         };
-        (
-            node.final_layout.size.width as f64,
-            node.final_layout.size.height as f64,
-        )
+        let layout = node.final_layout();
+        (layout.size.width as f64, layout.size.height as f64)
     }
 
     fn node_position(&self, dom: &Dom, node_id: NodeId) -> (f64, f64) {
         let inner = dom.inner();
-        let Some(node) = inner.get_node(node_id.0) else {
+        let Some(node) = inner.get_node(node_id.to_blitz()) else {
             return (0.0, 0.0);
         };
-        (
-            node.final_layout.location.x as f64,
-            node.final_layout.location.y as f64,
-        )
+        let layout = node.final_layout();
+        (layout.location.x as f64, layout.location.y as f64)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use blitz_dom::NodeData as BlitzNodeData;
+
     use super::*;
     use crate::dom::{Attribute, Dom, QualName};
 
     fn make_dom_with_styled_div(style: &str) -> Dom {
         let mut dom = Dom::new();
         let html = dom.create_element(QualName::new("html"), vec![]);
-        dom.append_child(NodeId::DOCUMENT, html);
+        dom.append_child(dom.document(), html);
         let body = dom.create_element(QualName::new("body"), vec![]);
         dom.append_child(html, body);
         let div = dom.create_element(
@@ -154,7 +157,7 @@ mod tests {
         let mut engine = LayoutEngine::new(viewport);
         engine.compute(&mut dom);
 
-        let html = dom.child_elements(NodeId::DOCUMENT)[0];
+        let html = dom.child_elements(dom.document())[0];
         let body = dom.child_elements(html)[0];
         let div = dom.child_elements(body)[0];
 
@@ -473,13 +476,23 @@ mod tests {
                 .unwrap_or_else(|| format!("{:?}", node.data));
             let rect = dom
                 .inner()
-                .get_node(id.0)
+                .get_node(id.to_blitz())
                 .map(|n| {
-                    let l = &n.final_layout;
-                    format!(
-                        "({:.0},{:.0} {:.0}x{:.0})",
-                        l.location.x, l.location.y, l.size.width, l.size.height
-                    )
+                    // `final_layout()` panics on Text/Comment nodes (no ElementData).
+                    if matches!(
+                        n.data,
+                        BlitzNodeData::Element(_)
+                            | BlitzNodeData::AnonymousBlock(_)
+                            | BlitzNodeData::Document(_)
+                    ) {
+                        let l = n.final_layout();
+                        format!(
+                            "({:.0},{:.0} {:.0}x{:.0})",
+                            l.location.x, l.location.y, l.size.width, l.size.height
+                        )
+                    } else {
+                        String::new()
+                    }
                 })
                 .unwrap_or_default();
             println!("{}{} {}", indent, tag, rect);
@@ -488,11 +501,11 @@ mod tests {
             }
         }
 
-        print_tree(&dom, NodeId::DOCUMENT, 0);
+        print_tree(&dom, dom.document(), 0);
     }
 
     fn find_body(dom: &Dom) -> NodeId {
-        let html = dom.child_elements(NodeId::DOCUMENT)[0];
+        let html = dom.child_elements(dom.document())[0];
         dom.child_elements(html)
             .iter()
             .find(|&&id| {

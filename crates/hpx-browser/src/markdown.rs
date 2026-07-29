@@ -3,7 +3,7 @@ use crate::dom::{Dom, NodeData, NodeId};
 /// Convert HTML to Markdown.
 pub fn html_to_markdown(html: &str) -> String {
     let dom = crate::html_parser::parse_html(html);
-    let md = dom_to_markdown(&dom, NodeId::DOCUMENT, 0);
+    let md = dom_to_markdown(&dom, dom.document(), 0);
     md.trim().to_string()
 }
 

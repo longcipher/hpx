@@ -1,6 +1,5 @@
 #![allow(missing_docs)]
 use hpx_browser::{
-    dom::NodeId,
     page::Page,
     resource_loader::{LoadedResource, ResourceType},
 };
@@ -20,7 +19,7 @@ async fn apply_stylesheets_injects_style_tags() {
     page.apply_stylesheets(&styles);
 
     // Verify via DOM serialization (content() returns the raw html field).
-    let dom_html = page.dom().serialize_html(NodeId::DOCUMENT);
+    let dom_html = page.dom().serialize_html(page.dom().document());
     assert!(
         dom_html.contains("color: red"),
         "CSS should be injected as <style> tag in DOM: {dom_html}"

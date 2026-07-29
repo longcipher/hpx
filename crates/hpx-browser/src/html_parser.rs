@@ -32,14 +32,14 @@ mod tests {
     #[test]
     fn parse_basic_html() {
         let dom = parse_html("<html><body><h1>Hello</h1></body></html>");
-        let children = dom.children(NodeId::DOCUMENT);
+        let children = dom.children(dom.document());
         assert!(!children.is_empty(), "Document should have children");
     }
 
     #[test]
     fn parse_has_html_element() {
         let dom = parse_html("<html><head></head><body><p>Test</p></body></html>");
-        let doc_children = dom.child_elements(NodeId::DOCUMENT);
+        let doc_children = dom.child_elements(dom.document());
         assert!(!doc_children.is_empty());
 
         let html_el = DomElement::new(&dom, doc_children[0]).unwrap();
@@ -49,7 +49,7 @@ mod tests {
     #[test]
     fn parse_text_content() {
         let dom = parse_html("<html><body><p>Hello world</p></body></html>");
-        let html = dom.child_elements(NodeId::DOCUMENT)[0];
+        let html = dom.child_elements(dom.document())[0];
         let body = find_child_by_tag(&dom, html, "body");
         let p = dom.child_elements(body)[0];
         assert_eq!(dom.text_content(p), "Hello world");
@@ -58,7 +58,7 @@ mod tests {
     #[test]
     fn parse_attributes() {
         let dom = parse_html("<div id=\"main\" class=\"container\">test</div>");
-        let html = dom.child_elements(NodeId::DOCUMENT)[0];
+        let html = dom.child_elements(dom.document())[0];
         let body = find_child_by_tag(&dom, html, "body");
         let div = dom.child_elements(body)[0];
         let el = DomElement::new(&dom, div).unwrap();
@@ -70,7 +70,7 @@ mod tests {
     #[test]
     fn parse_nested_structure() {
         let dom = parse_html("<html><body><div><span>a</span><span>b</span></div></body></html>");
-        let html = dom.child_elements(NodeId::DOCUMENT)[0];
+        let html = dom.child_elements(dom.document())[0];
         let body = find_child_by_tag(&dom, html, "body");
         let div = find_child_by_tag(&dom, body, "div");
 
@@ -82,9 +82,9 @@ mod tests {
     #[test]
     fn bdd_parse_simple_html_via_parser() {
         let dom = parse_html("<html><body><h1>Hello</h1></body></html>");
-        assert!(dom.get(NodeId::DOCUMENT).is_some());
+        assert!(dom.get(dom.document()).is_some());
 
-        let html = dom.child_elements(NodeId::DOCUMENT)[0];
+        let html = dom.child_elements(dom.document())[0];
         let body = find_child_by_tag(&dom, html, "body");
         let h1 = find_child_by_tag(&dom, body, "h1");
 
@@ -94,7 +94,7 @@ mod tests {
     #[test]
     fn bdd_query_elements_via_parser() {
         let dom = parse_html("<div class='content'><p>First</p><p>Second</p></div>");
-        let ps = dom.get_elements_by_tag_name(NodeId::DOCUMENT, "p");
+        let ps = dom.get_elements_by_tag_name(dom.document(), "p");
         assert_eq!(ps.len(), 2);
         assert_eq!(dom.text_content(ps[0]), "First");
     }
@@ -102,7 +102,7 @@ mod tests {
     #[test]
     fn bdd_mutate_dom_via_parser() {
         let dom = parse_html("<div><span>Old</span></div>");
-        let html = dom.child_elements(NodeId::DOCUMENT)[0];
+        let html = dom.child_elements(dom.document())[0];
         let body = find_child_by_tag(&dom, html, "body");
         let div = find_child_by_tag(&dom, body, "div");
 

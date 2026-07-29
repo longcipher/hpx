@@ -90,7 +90,7 @@ fn extract_from_element(dom: &Dom, id: NodeId) -> Option<ResourceUrl> {
 pub fn extract_resource_urls(dom: &Dom) -> Vec<ResourceUrl> {
     let mut results = Vec::new();
     let mut seen = AHashSet::new();
-    let mut stack = vec![NodeId::DOCUMENT];
+    let mut stack = vec![dom.document()];
     let mut visited = AHashSet::new();
 
     while let Some(id) = stack.pop() {
