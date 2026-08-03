@@ -3,9 +3,14 @@
 //! Tests the CDP protocol end-to-end: server lifecycle, navigation,
 //! evaluation, events, and multi-page support.
 
-#![allow(clippy::print_stdout)]
-#![allow(clippy::print_stderr)]
-#![allow(missing_docs)]
+#![expect(
+    clippy::print_stdout,
+    reason = "integration test prints server logs to stdout"
+)]
+#![expect(
+    clippy::print_stderr,
+    reason = "integration test prints server logs to stderr"
+)]
 
 use futures_util::{SinkExt, StreamExt};
 use hpx_browser::protocol::CdpServer;

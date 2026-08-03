@@ -228,23 +228,21 @@ impl Inner {
         // Set ECH grease
         cfg.set_enable_ech_grease(self.config.enable_ech_grease);
 
-        // Set random AES hardware override
-        if self.config.random_aes_hw_override {
-            let _random = (rand::random::<u64>() & 1) == 0;
-            // cfg.set_aes_hw_override(random);
-        }
+        // `set_aes_hw_override` is not available in upstream `boring` 5.x
+        // (fork-only API); `random_aes_hw_override` is currently inert.
+        let _ = self.config.random_aes_hw_override;
 
-        // Set ALPS protos
-        if let Some(ref alps_values) = self.config.alps_protocols {
-            for _alps in alps_values.iter() {
-                // cfg.add_application_settings(alps.0)?;
-            }
-
-            // By default, the old endpoint is used.
-            if !alps_values.is_empty() && self.config.alps_use_new_codepoint {
-                // cfg.set_alps_use_new_codepoint(true);
-            }
-        }
+        // ALPS (application_settings) is intentionally not applied here.
+        //
+        // The upstream `boring` 5.x crate exposes `ExtensionType::APPLICATION_SETTINGS`
+        // but no `add_application_settings()` / `set_alps_use_new_codepoint()` setter --
+        // those exist only in downstream BoringSSL forks. `self.config.alps_protocols`
+        // and `alps_use_new_codepoint` are therefore inert on the wire; they are still
+        // retained because `TlsOptions` hashes them into the connection-pool key.
+        //
+        // See `AlpsProtocol`'s documentation for details.
+        let _ = &self.config.alps_protocols;
+        let _ = self.config.alps_use_new_codepoint;
 
         // Set ALPN protocols
         if let Some(alpn) = req.extra().alpn_protocol() {

@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::panic, clippy::match_wild_err_arm)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::panic,
+    clippy::match_wild_err_arm,
+    reason = "integration tests exercise error paths with unwrap/panic"
+)]
 
 //! Integration tests for WebSocket CLI commands using a mock axum server.
 

@@ -20,14 +20,26 @@ use tracing::debug;
 use crate::{CompositeLimiter, error::DownloadError, storage::SegmentStatus};
 
 /// Internal progress updates emitted by [`SegmentDownloader`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SegmentProgressUpdate {
+    /// A segment started downloading.
+    Started {
+        /// Zero-based segment index.
+        index: u32,
+    },
     /// A segment finished successfully.
     Completed {
         /// Zero-based segment index.
         index: u32,
         /// Bytes downloaded for the completed segment.
         bytes_downloaded: u64,
+    },
+    /// A segment failed after exhausting all retries.
+    Failed {
+        /// Zero-based segment index.
+        index: u32,
+        /// Human-readable error description.
+        error: String,
     },
 }
 
@@ -763,6 +775,11 @@ impl SegmentDownloader {
             let segment_index = segment_index as u32;
 
             join_set.spawn(async move {
+                if let Some(segment_tx) = &segment_tx {
+                    let _ = segment_tx.send(SegmentProgressUpdate::Started {
+                        index: segment_index,
+                    });
+                }
                 let result = with_retry(max_retries, initial_delay, max_delay, jitter, || {
                     let client = client.clone();
                     let url = url.clone();
@@ -803,12 +820,20 @@ impl SegmentDownloader {
                         }
                         Ok(seg.len())
                     }
-                    Err(err) => Err(DownloadError::SegmentRetryExhausted {
-                        start: seg.start,
-                        end: seg.end,
-                        attempts: max_retries + 1,
-                        source: Box::new(err),
-                    }),
+                    Err(err) => {
+                        if let Some(segment_tx) = &segment_tx {
+                            let _ = segment_tx.send(SegmentProgressUpdate::Failed {
+                                index: segment_index,
+                                error: err.to_string(),
+                            });
+                        }
+                        Err(DownloadError::SegmentRetryExhausted {
+                            start: seg.start,
+                            end: seg.end,
+                            attempts: max_retries + 1,
+                            source: Box::new(err),
+                        })
+                    }
                 }
             });
         }

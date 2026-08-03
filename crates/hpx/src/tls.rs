@@ -188,7 +188,27 @@ impl AlpnProtocol {
     }
 }
 
-/// A TLS ALPS protocol.
+/// A TLS ALPS (Application-Layer Protocol Settings) protocol.
+///
+/// # Unstable: currently inert
+///
+/// ALPS is **not negotiated by any backend at present**. The values configured
+/// via [`TlsOptions::alps_protocols`] are stored and hashed (so they still
+/// participate in connection-pool keying and fingerprint identity), but no
+/// `application_settings` extension is emitted on the wire.
+///
+/// Reason: the upstream `boring` crate (5.x) exposes only the
+/// `ExtensionType::APPLICATION_SETTINGS` constant and provides no
+/// `add_application_settings()` / `set_alps_use_new_codepoint()` setter; those
+/// APIs exist solely in downstream BoringSSL forks. The `openssl` backend
+/// dropped ALPS entirely (see `specs/2026-07-05-01-openssl-tls-backend`), and
+/// rustls has no ALPS support.
+///
+/// This type is kept as a stable placeholder so browser-emulation profiles can
+/// keep declaring their intended ALPS settings. Treat its wire-level effect as
+/// unspecified and subject to change.
+///
+/// [`TlsOptions::alps_protocols`]: crate::tls::TlsOptions::alps_protocols
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct AlpsProtocol(&'static [u8]);
 
@@ -201,6 +221,22 @@ impl AlpsProtocol {
 
     /// Prefer HTTP/3
     pub const HTTP3: Self = Self(b"h3");
+
+    /// Create a new [`AlpsProtocol`] from a static byte slice.
+    ///
+    /// Mirrors [`AlpnProtocol::new`] for symmetry.
+    #[inline]
+    pub const fn new(value: &'static [u8]) -> Self {
+        Self(value)
+    }
+
+    /// Returns the raw protocol name bytes (e.g. `b"h2"`, `b"http/1.1"`).
+    ///
+    /// Mirrors [`AlpnProtocol::as_wire_bytes`].
+    #[inline]
+    pub const fn as_wire_bytes(&self) -> &'static [u8] {
+        self.0
+    }
 }
 
 #[cfg(test)]

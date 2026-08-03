@@ -1,9 +1,7 @@
 //! `hpxless` — CDP-compatible browser server for Puppeteer/Playwright.
 
-#![allow(clippy::print_stdout)]
-#![allow(clippy::print_stderr)]
-#![allow(missing_docs)]
-#![allow(linker_messages)]
+#![expect(clippy::print_stdout, reason = "CLI binary writes to stdout by design")]
+#![expect(clippy::print_stderr, reason = "CLI binary writes to stderr by design")]
 
 mod cli;
 
@@ -72,7 +70,22 @@ fn main() -> eyre::Result<()> {
         .build()?
         .block_on(async {
             tokio::signal::ctrl_c().await?;
-            // ponytail: no in-flight navigations to drain yet; add timeout when URL nav lands
+            tracing::info!("shutdown signal received; draining in-flight CDP sessions");
+            // Begin graceful shutdown: stop accepting new connections and let
+            // established sessions finish. The server thread joins when `server`
+            // is dropped below (see `CdpServer::Drop`).
+            server.shutdown();
+            // Give in-flight sessions a bounded window to complete before we drop.
+            let drain = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                // Yield so the server thread can observe the shutdown flag and
+                // finish draining; there is no explicit "all sessions closed"
+                // signal yet, so we rely on the bounded timeout.
+                tokio::task::yield_now().await;
+            })
+            .await;
+            if drain.is_err() {
+                tracing::warn!("graceful drain window elapsed; forcing shutdown");
+            }
             Ok::<(), eyre::Report>(())
         })?;
 

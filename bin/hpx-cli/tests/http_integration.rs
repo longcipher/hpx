@@ -1,4 +1,8 @@
-#![allow(clippy::unwrap_used, clippy::panic)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "integration tests exercise error paths with unwrap/panic"
+)]
 
 //! Integration tests for HTTP CLI commands using a mock axum server.
 

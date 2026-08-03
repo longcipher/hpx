@@ -11,7 +11,7 @@ use tokio::net::UnixStream;
 use tokio_boring::SslStream;
 #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
 use tokio_openssl::SslStream;
-#[cfg(feature = "rustls-tls")]
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 use tokio_rustls::client::TlsStream;
 
 use crate::tls::{TlsInfo, conn::MaybeHttpsStream};

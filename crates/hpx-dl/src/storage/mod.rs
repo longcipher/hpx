@@ -72,16 +72,16 @@ pub enum SegmentStatus {
     Pending,
     /// Segment is actively downloading.
     ///
-    /// Currently unused by the engine — segments transition directly from
-    /// `Pending` to `Completed`. Reserved for future per-segment progress
-    /// tracking.
+    /// Emitted by the engine via `SegmentProgressUpdate::Started` when a segment's
+    /// download task begins; used for live progress and as a resume boundary.
     Downloading,
     /// Segment finished successfully.
     Completed,
     /// Segment failed.
     ///
-    /// Currently unused by the engine — failures are tracked at the download
-    /// level. Reserved for future per-segment error handling.
+    /// Emitted by the engine via `SegmentProgressUpdate::Failed` when a segment's
+    /// retries are exhausted; persisted so a later resume re-attempts only
+    /// non-completed segments.
     Failed,
 }
 

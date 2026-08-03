@@ -509,6 +509,64 @@ impl EngineInner {
         Ok(())
     }
 
+    /// Mark a segment as actively downloading.
+    ///
+    /// Updates only the in-memory state to avoid a full persistence round-trip on
+    /// every segment start; the `Completed`/`Failed` transitions persist explicitly.
+    fn mark_segment_downloading(&self, id: DownloadId, index: u32) -> Result<(), DownloadError> {
+        self.downloads
+            .update_sync(&id, |_, entry| {
+                if let Some(segment) = entry.segments.get_mut(index as usize) {
+                    segment.state = SegmentStatus::Downloading;
+                }
+                entry.touch();
+            })
+            .ok_or(DownloadError::NotFound(id.0))?;
+        Ok(())
+    }
+
+    /// Mark a segment as failed after exhausting its retries, persisting the state
+    /// so a later resume can skip completed segments and re-attempt failed ones.
+    async fn mark_segment_failed(
+        &self,
+        id: DownloadId,
+        index: u32,
+        error: &str,
+    ) -> Result<(), DownloadError> {
+        self.update_entry(id, |entry| {
+            if let Some(segment) = entry.segments.get_mut(index as usize) {
+                segment.state = SegmentStatus::Failed;
+                entry.last_error = Some(error.to_string());
+            }
+        })
+        .await?;
+        Ok(())
+    }
+
+    /// Apply a segment progress update, routing each variant to its state transition.
+    async fn apply_segment_update(&self, id: DownloadId, update: SegmentProgressUpdate) {
+        match update {
+            SegmentProgressUpdate::Started { index } => {
+                let _ = self.mark_segment_downloading(id, index);
+            }
+            SegmentProgressUpdate::Completed {
+                index,
+                bytes_downloaded,
+            } => {
+                let _ = self
+                    .mark_segment_completed(id, index, bytes_downloaded)
+                    .await;
+            }
+            SegmentProgressUpdate::Failed { index, error } => {
+                // NOTE: per-segment retry re-queue into the scheduler is a future
+                // enhancement; for now the failed segment is recorded so a resume
+                // can re-attempt only the non-completed segments instead of the
+                // whole file.
+                let _ = self.mark_segment_failed(id, index, &error).await;
+            }
+        }
+    }
+
     async fn complete_download(&self, id: DownloadId, bytes: u64) -> Result<(), DownloadError> {
         let entry = self
             .downloads
@@ -902,11 +960,7 @@ impl EngineInner {
             tokio::select! {
                 result = &mut download_result => {
                     while let Ok(update) = segment_rx.try_recv() {
-                        let SegmentProgressUpdate::Completed {
-                            index,
-                            bytes_downloaded,
-                        } = update;
-                        let _ = self.mark_segment_completed(id, index, bytes_downloaded).await;
+                        self.apply_segment_update(id, update).await;
                     }
 
                     match result {
@@ -929,8 +983,8 @@ impl EngineInner {
                     }
                 }
                 maybe_update = segment_rx.recv() => {
-                    if let Some(SegmentProgressUpdate::Completed { index, bytes_downloaded }) = maybe_update {
-                        let _ = self.mark_segment_completed(id, index, bytes_downloaded).await;
+                    if let Some(update) = maybe_update {
+                        self.apply_segment_update(id, update).await;
                     }
                 }
             }

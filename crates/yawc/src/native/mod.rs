@@ -517,6 +517,19 @@ impl FragmentLayer {
         !self.outgoing_fragments.is_empty()
     }
 
+    /// Clears any partially-received inbound fragment state.
+    ///
+    /// Must be called whenever the connection enters an error or closed state so
+    /// the buffered `VecDeque<Bytes>` parts are released immediately instead of
+    /// lingering until the whole `WebSocket` is dropped. It also guarantees that a
+    /// reused `FragmentLayer` does not reject the next `Text`/`Binary` frame with
+    /// `InvalidFragment` because of a half-finished message left over from a prior
+    /// failure (see `assemble_incoming`).
+    #[inline]
+    fn reset_incoming(&mut self) {
+        self.incoming_fragment = None;
+    }
+
     /// Processes an incoming frame, handling fragmentation and reassembly.
     ///
     /// Returns:
@@ -534,15 +547,16 @@ impl FragmentLayer {
             frame.payload.len()
         );
 
-        match frame.opcode {
+        let result = match frame.opcode {
             OpCode::Text | OpCode::Binary => {
-                // Check for invalid fragmentation state
+                // Check for invalid fragmentation state: a prior unfinished message is
+                // still buffered. That stale state is now unrecoverable (this frame is not
+                // a continuation), so clear it before reporting the protocol violation.
                 if self.incoming_fragment.is_some() {
-                    return Err(WebSocketError::InvalidFragment);
-                }
-
-                // Handle fragmented messages
-                if !frame.fin {
+                    self.reset_incoming();
+                    Err(WebSocketError::InvalidFragment)
+                } else if !frame.fin {
+                    // Handle fragmented messages
                     let fragmentation = FragmentationState {
                         started: Instant::now(),
                         opcode: frame.opcode,
@@ -552,11 +566,11 @@ impl FragmentLayer {
                     };
                     self.incoming_fragment = Some(fragmentation);
 
-                    return Ok(None);
+                    Ok(None)
+                } else {
+                    // Non-fragmented message - return as-is
+                    Ok(Some(frame))
                 }
-
-                // Non-fragmented message - return as-is
-                Ok(Some(frame))
             }
             OpCode::Continuation => {
                 let mut fragment = self
@@ -606,7 +620,14 @@ impl FragmentLayer {
                 // Control frames pass through unchanged
                 Ok(Some(frame))
             }
+        };
+
+        // On any error, drop the partially-received fragment buffer so the connection
+        // can recover and a reused FragmentLayer does not reject the next message.
+        if result.is_err() {
+            self.reset_incoming();
         }
+        result
     }
 }
 
@@ -1177,10 +1198,20 @@ where
     /// Polls for the next frame in the WebSocket stream.
     pub fn poll_next_frame(&mut self, cx: &mut Context<'_>) -> Poll<Result<Frame>> {
         loop {
-            let frame = ready!(self.streaming.poll_next_frame(cx))?;
-            match self.on_frame(frame)? {
-                Some(ok) => break Poll::Ready(Ok(ok)),
-                None => continue,
+            let frame = match ready!(self.streaming.poll_next_frame(cx)) {
+                Ok(frame) => frame,
+                // Connection closed or transport error: drop any partially-received
+                // fragment so a subsequent reconnect does not inherit stale state.
+                Err(e) => {
+                    self.fragment_layer.reset_incoming();
+                    return Poll::Ready(Err(e));
+                }
+            };
+            match self.on_frame(frame) {
+                Ok(Some(ok)) => break Poll::Ready(Ok(ok)),
+                Ok(None) => continue,
+                // `on_frame` already clears the fragment buffer on error; propagate.
+                Err(e) => return Poll::Ready(Err(e)),
             }
         }
     }
@@ -1426,6 +1457,62 @@ mod tests {
 
     use super::*;
     use crate::close::{self, CloseCode};
+
+    /// Regression test for H-2: an error while receiving a fragmented message must
+    /// drop the buffered fragment state so a subsequently received complete frame is
+    /// not misclassified as `InvalidFragment` (stale half-finished message).
+    #[test]
+    fn fragment_state_cleared_after_error() {
+        let mut layer = FragmentLayer::new(None, 1, None);
+
+        // First fragment of a message (FIN=false).
+        let first = Frame::text("partial").with_fin(false);
+        assert!(
+            layer
+                .assemble_incoming(first)
+                .expect("first fragment")
+                .is_none()
+        );
+        assert!(
+            layer.incoming_fragment.is_some(),
+            "fragment should be buffered"
+        );
+
+        // A non-fragment (Text with FIN=true) arriving while a fragment is pending is a
+        // protocol violation; the error path must clear the stale buffer.
+        let bad = Frame::text("oops").with_fin(true);
+        let err = layer.assemble_incoming(bad);
+        assert!(err.is_err(), "expected InvalidFragment error");
+        assert!(
+            layer.incoming_fragment.is_none(),
+            "buffered fragment must be cleared after error"
+        );
+
+        // A fresh complete message must now succeed instead of being rejected.
+        let good = Frame::text("complete").with_fin(true);
+        let ok = layer.assemble_incoming(good).expect("recovered frame");
+        assert!(ok.is_some());
+        assert_eq!(ok.unwrap().payload.as_ref(), b"complete");
+    }
+
+    /// Regression test for H-2: a timeout/overflow error during continuation must not
+    /// leak the partially-received buffer across reuse.
+    #[test]
+    fn fragment_state_cleared_on_fragment_timeout() {
+        // max_read_buffer = 1 byte forces FrameTooLarge on the second continuation.
+        let mut layer = FragmentLayer::new(None, 1, None);
+
+        let first = Frame::binary(bytes::Bytes::from_static(b"a")).with_fin(false);
+        assert!(layer.assemble_incoming(first).expect("first").is_none());
+
+        let continuation = Frame::binary(bytes::Bytes::from_static(b"b")).with_fin(false);
+        let err = layer.assemble_incoming(continuation);
+        assert!(err.is_err(), "expected buffer overflow error");
+        assert!(
+            layer.incoming_fragment.is_none(),
+            "buffered fragment must be cleared after overflow error"
+        );
+    }
 
     /// A mock duplex stream that wraps tokio's DuplexStream for testing.
     struct MockStream {

@@ -17,17 +17,20 @@ use crate::{
 /// concurrently on the same thread (as happens with `spawn_local` tasks in the
 /// CDP server's `LocalSet`), they corrupt each other's HandleScope state,
 /// triggering `Cannot create a handle without a HandleScope` fatal errors.
-/// This global mutex ensures only one isolate is active at a time.
+/// This mutex ensures only one isolate is active at a time.
 ///
 /// The lock is held across `.await` points (inside `handle_request`), so it
-/// must be `tokio::sync::Mutex`, not `parking_lot::Mutex`.
-static V8_SERIALIZE: std::sync::LazyLock<tokio::sync::Mutex<()>> =
-    std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
+/// must be `tokio::sync::Mutex`, not `parking_lot::Mutex`. It is owned per
+/// `CdpServer` instance (rather than a process-global `static`) so the lock
+/// lifetime is tied to the server and a future per-isolate refinement only needs
+/// to swap this single `Arc` for a per-`Page` lock.
+type V8Serialize = Arc<tokio::sync::Mutex<()>>;
 
 /// A running CDP server. Stops when dropped.
 pub struct CdpServer {
     port: u16,
     shutdown: Arc<std::sync::atomic::AtomicBool>,
+    v8_serialize: V8Serialize,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -43,6 +46,8 @@ impl CdpServer {
         let html = html.to_string();
         let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let shutdown_clone = shutdown.clone();
+        let v8_serialize = Arc::new(tokio::sync::Mutex::new(()));
+        let v8_serialize_clone = v8_serialize.clone();
         let (port_tx, port_rx) = std::sync::mpsc::channel();
 
         let thread = std::thread::spawn(move || {
@@ -73,7 +78,15 @@ impl CdpServer {
                     .port();
                 port_tx.send(actual_port).ok();
 
-                accept_loop(listener, html, stealth, profile, shutdown_clone).await;
+                accept_loop(
+                    listener,
+                    html,
+                    stealth,
+                    profile,
+                    shutdown_clone,
+                    v8_serialize_clone,
+                )
+                .await;
             }));
         });
 
@@ -93,6 +106,7 @@ impl CdpServer {
         Ok(Self {
             port: actual_port,
             shutdown,
+            v8_serialize,
             thread: Some(thread),
         })
     }
@@ -110,6 +124,14 @@ impl CdpServer {
     /// WebSocket URL for CDP clients.
     pub fn ws_url(&self) -> String {
         format!("ws://127.0.0.1:{}", self.port)
+    }
+
+    /// Signal the server to stop accepting new connections and begin a graceful
+    /// shutdown. Already-established WebSocket sessions are allowed to finish; the
+    /// server thread joins when the returned guard is dropped (see [`Drop`]).
+    pub fn shutdown(&self) {
+        self.shutdown
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -129,6 +151,7 @@ async fn accept_loop(
     stealth: bool,
     profile: Option<StealthProfile>,
     shutdown: Arc<std::sync::atomic::AtomicBool>,
+    v8_serialize: V8Serialize,
 ) {
     let html = Arc::new(html);
     loop {
@@ -143,8 +166,11 @@ async fn accept_loop(
             Ok(Ok((stream, addr))) => {
                 let html = html.clone();
                 let profile = profile.clone();
+                let v8_serialize = v8_serialize.clone();
                 tokio::task::spawn_local(async move {
-                    if let Err(e) = handle_connection(stream, &html, stealth, profile).await {
+                    if let Err(e) =
+                        handle_connection(stream, &html, stealth, profile, v8_serialize).await
+                    {
                         tracing::warn!("CDP connection from {} error: {}", addr, e);
                     }
                 });
@@ -169,6 +195,7 @@ async fn handle_connection(
     html: &str,
     stealth: bool,
     profile: Option<StealthProfile>,
+    v8_serialize: V8Serialize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use hyper_util::rt::TokioIo;
 
@@ -189,6 +216,10 @@ async fn handle_connection(
         hyper::service::service_fn(move |mut req: hyper::Request<hyper::body::Incoming>| {
             let html = html.clone();
             let profile = profile.clone();
+            // Clone the shared V8 serialize lock per call so the `Fn` service
+            // closure stays callable multiple times (each connection gets its own
+            // `Arc` handle; the inner `async move` block takes ownership of it).
+            let v8_serialize = v8_serialize.clone();
             async move {
                 if req
                     .headers()
@@ -216,10 +247,13 @@ async fn handle_connection(
                     }
                 };
 
+                let v8_serialize = v8_serialize.clone();
                 tokio::task::spawn_local(async move {
                     match upgrade_fut.await {
                         Ok(ws) => {
-                            if let Err(e) = handle_ws_connection(ws, &html, stealth, profile).await
+                            if let Err(e) =
+                                handle_ws_connection(ws, &html, stealth, profile, v8_serialize)
+                                    .await
                             {
                                 tracing::warn!("CDP websocket error: {}", e);
                             }
@@ -246,6 +280,7 @@ async fn handle_ws_connection(
     html: &str,
     stealth: bool,
     profile: Option<StealthProfile>,
+    v8_serialize: V8Serialize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut page = crate::page::Page::from_html(html, stealth)
         .await
@@ -275,10 +310,10 @@ async fn handle_ws_connection(
                 };
 
                 // Serialize V8-critical CDP request handling across all connections.
-                // The global lock has no borrow on `session`, so the subsequent
+                // The lock has no borrow on `session`, so the subsequent
                 // `&mut session` call to `handle_request` compiles cleanly.
                 let (response, events) = {
-                    let _v8_lock = V8_SERIALIZE.lock().await;
+                    let _v8_lock = v8_serialize.lock().await;
                     session.handle_request(&mut page, &req).await
                 };
 

@@ -2,9 +2,18 @@
 //!
 //! Run with: `cargo test -p hpxless --test cucumber`
 
-#![allow(clippy::print_stdout)]
-#![allow(clippy::print_stderr)]
-#![allow(missing_docs)]
+#![expect(
+    clippy::print_stdout,
+    reason = "BDD test harness prints step output to stdout"
+)]
+#![expect(
+    clippy::print_stderr,
+    reason = "BDD test harness prints step output to stderr"
+)]
+#![expect(
+    missing_docs,
+    reason = "test world struct is part of BDD harness public API"
+)]
 
 use cucumber::{World, given, then, when};
 use futures_util::{SinkExt, StreamExt};

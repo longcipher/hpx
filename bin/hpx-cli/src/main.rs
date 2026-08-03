@@ -1,9 +1,7 @@
 //! `hpx` — CLI for high-performance HTTP client and download engine.
 
-#![allow(clippy::print_stdout)]
-#![allow(clippy::print_stderr)]
-#![allow(missing_docs)]
-#![allow(linker_messages)]
+#![expect(clippy::print_stdout, reason = "CLI binary writes to stdout by design")]
+#![expect(clippy::print_stderr, reason = "CLI binary writes to stderr by design")]
 
 mod browser;
 mod cli;
@@ -32,6 +30,24 @@ fn main() -> eyre::Result<()> {
     if let Some(tz) = &cli.timezone {
         // SAFETY: called early in main, before any threads read TZ
         unsafe { std::env::set_var("TZ", tz) };
+    }
+
+    // Warn about globally-declared flags that are parsed but not yet wired into
+    // any code path, so users are not silently misled by --help.
+    if cli.follow {
+        tracing::warn!("--follow/-L is not yet implemented, ignoring");
+    }
+    if cli.redirects.is_some() {
+        tracing::warn!("--redirects is not yet implemented, ignoring");
+    }
+    if cli.obey_robots {
+        tracing::warn!("--obey-robots is not yet implemented, ignoring");
+    }
+    if cli.v8_flags.is_some() {
+        tracing::warn!("--v8-flags is not yet implemented, ignoring");
+    }
+    if cli.storage_dir.is_some() {
+        tracing::warn!("--storage-dir is not yet implemented, ignoring");
     }
 
     if cli.version {
@@ -68,8 +84,11 @@ fn main() -> eyre::Result<()> {
             eval,
             output,
             quiet,
-            block: _,
+            block,
         }) => {
+            if !block.is_empty() {
+                tracing::warn!("--block is not yet implemented, ignoring");
+            }
             let runtime = build_runtime()?;
             let config = browser::FetchConfig {
                 url,
@@ -110,10 +129,16 @@ fn main() -> eyre::Result<()> {
             host,
             stealth,
             workers,
-            allow_file_access: _,
-            storage_dir: _,
+            allow_file_access,
+            storage_dir,
             quiet,
         }) => {
+            if allow_file_access {
+                tracing::warn!("--allow-file-access is not yet implemented, ignoring");
+            }
+            if storage_dir.is_some() {
+                tracing::warn!("--storage-dir (serve) is not yet implemented, ignoring");
+            }
             let runtime = build_runtime()?;
             let config = browser::ServeConfig {
                 port,
