@@ -302,6 +302,8 @@ use sha2 as _;
 use smallvec as _;
 #[cfg(feature = "openssl-tls")]
 use tokio_openssl as _;
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
+use tokio_rustls as _;
 #[cfg(feature = "webpki-roots")]
 use webpki_root_certs as _;
 #[cfg(feature = "rustls-tls")]
