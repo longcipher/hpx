@@ -224,7 +224,7 @@ impl Connector {
             config: Config {
                 proxies: Arc::new(proxies),
                 verbose: Verbose::OFF,
-                tcp_nodelay: false,
+                tcp_nodelay: true,
                 tls_info: false,
                 timeout: None,
             },

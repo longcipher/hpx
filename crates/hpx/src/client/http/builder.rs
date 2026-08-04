@@ -249,8 +249,15 @@ impl ClientBuilder {
                 .pool_max_idle_per_host(config.pool.max_idle_per_host)
                 .pool_max_size(config.pool.max_size)
                 .build(connector)
-                .map_err(Into::into as _)
         };
+
+        // Retain a clone of the underlying `HttpClient` so `Client::warm_up`
+        // can prime the connection pool. The pool is shared (Arc) with the
+        // service stack below, so warming here populates the same pool that
+        // serves real requests.
+        let warmup_client = Arc::new(service.clone());
+
+        let service = service.map_err(Into::into as _);
 
         // Configured client service with layers
         let client = {
@@ -344,6 +351,7 @@ impl ClientBuilder {
 
         Ok(Client {
             inner: Arc::new(client),
+            http_client: warmup_client,
             #[cfg(feature = "http3")]
             alt_svc_cache,
             #[cfg(feature = "http3")]

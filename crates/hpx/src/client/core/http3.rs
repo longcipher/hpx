@@ -146,8 +146,9 @@ pub struct Http3Options {
     /// Connection-level flow-control send window enforced locally.
     pub send_window: Option<u64>,
 
-    /// Whether to use BBR congestion control. `false` selects CUBIC (the
-    /// `quinn` default).
+    /// Whether to use BBR congestion control. `true` prefers BBR for lower
+    /// latency under lossy/congested networks (at the cost of more aggressive
+    /// throughput). `false` selects CUBIC (the `quinn` default).
     pub congestion_bbr: bool,
 
     /// QUIC `initial_max_streams_bidi` transport parameter — maximum
@@ -415,7 +416,7 @@ impl Default for Http3Options {
             stream_receive_window: Some(8 * 1024 * 1024),
             conn_receive_window: Some(8 * 1024 * 1024),
             send_window: Some(8 * 1024 * 1024),
-            congestion_bbr: false,
+            congestion_bbr: true,
             max_concurrent_bidi_streams: Some(100),
             max_concurrent_uni_streams: Some(100),
             initial_max_data: Some(10 * 1024 * 1024),
@@ -460,7 +461,7 @@ mod tests {
         assert_eq!(opts.stream_receive_window, Some(8 * 1024 * 1024));
         assert_eq!(opts.conn_receive_window, Some(8 * 1024 * 1024));
         assert_eq!(opts.send_window, Some(8 * 1024 * 1024));
-        assert!(!opts.congestion_bbr);
+        assert!(opts.congestion_bbr);
         assert_eq!(opts.max_concurrent_bidi_streams, Some(100));
         assert_eq!(opts.max_concurrent_uni_streams, Some(100));
         assert_eq!(opts.initial_max_data, Some(10 * 1024 * 1024));

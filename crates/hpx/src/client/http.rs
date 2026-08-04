@@ -17,7 +17,7 @@ use std::{
     time::Duration,
 };
 
-use http::header::HeaderMap;
+use http::{Uri, header::HeaderMap};
 use tower::{
     retry::Retry,
     util::{BoxCloneSyncService, BoxCloneSyncServiceLayer, MapErr, Oneshot},
@@ -212,6 +212,9 @@ impl tower::Service<http::Request<Body>> for ClientRef {
 /// [`Rc`]: std::rc::Rc
 pub struct Client {
     inner: Arc<ClientRef>,
+    /// Retained handle to the underlying connection pool so that [`Client::warm_up`]
+    /// can pre-establish connections before the first real request.
+    http_client: Arc<HttpClient<Connector, Body>>,
     /// RFC 7838 Alt-Svc cache shared with the inner `HttpClient`.
     /// Populated from `alt-svc` response headers; used by the HTTP/3
     /// upgrade path to discover QUIC endpoints.
@@ -228,6 +231,7 @@ impl Clone for Client {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
+            http_client: self.http_client.clone(),
             #[cfg(feature = "http3")]
             alt_svc_cache: self.alt_svc_cache.clone(),
             #[cfg(feature = "http3")]
@@ -728,6 +732,44 @@ impl Client {
         let uri = req.uri().clone();
         let fut = Oneshot::new(self.inner.as_ref().clone(), req);
         Pending::request(uri, fut)
+    }
+
+    /// Pre-establish and pool connections to the given authorities so that the
+    /// first real request to each host hits an already-warm connection (no
+    /// connect / TLS / HTTP handshake latency on the critical path).
+    ///
+    /// Connections are established in the background and kept alive by the pool
+    /// (subject to the configured idle timeout). This is a low-latency
+    /// optimization: it trades a small amount of upfront connection traffic for
+    /// dramatically lower tail latency on the first request. Failed warm-up
+    /// attempts are logged and ignored — this method is best-effort and never
+    /// blocks the caller.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn doc() -> hpx::Result<()> {
+    /// let client = hpx::Client::builder().build()?;
+    /// client.warm_up(["https://www.rust-lang.org", "https://example.com"]);
+    /// // Subsequent requests to these hosts reuse the pre-established pool.
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn warm_up<I>(&self, authorities: I)
+    where
+        I: IntoIterator,
+        I::Item: TryInto<Uri>,
+        <I::Item as TryInto<Uri>>::Error: std::fmt::Debug,
+        I::IntoIter: Send + 'static,
+    {
+        let mut converted = Vec::new();
+        for item in authorities {
+            match item.try_into() {
+                Ok(uri) => converted.push(uri),
+                Err(e) => trace!("warm_up: skipping invalid authority: {e:?}"),
+            }
+        }
+        self.http_client.warm_up(converted);
     }
 
     /// Consume the client and return the inner tower::Service.

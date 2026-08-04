@@ -57,7 +57,7 @@ pub type CompressionLevel = flate2::Compression;
 ///     .with_limits(128 * 1024, 256 * 1024) // Small payload/buffer limits
 ///     .without_compression(); // Avoid compression overhead
 /// ```
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Options {
     /// Maximum allowed payload size for incoming messages, in bytes.
     ///
@@ -106,7 +106,7 @@ pub struct Options {
     /// If `true`, outgoing WebSocket messages will be sent immediately without waiting
     /// for additional data to be buffered, potentially improving latency.
     ///
-    /// Default: `false`
+    /// Default: `true`
     pub no_delay: bool,
 
     /// Backpressure boundary for the write buffer in bytes.
@@ -117,6 +117,20 @@ pub struct Options {
     ///
     /// Default: `None` (uses tokio-util default)
     pub max_backpressure_write_boundary: Option<usize>,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            max_payload_read: None,
+            max_read_buffer: None,
+            compression: None,
+            fragmentation: None,
+            check_utf8: false,
+            no_delay: true,
+            max_backpressure_write_boundary: None,
+        }
+    }
 }
 
 /// Configuration for WebSocket message fragmentation.

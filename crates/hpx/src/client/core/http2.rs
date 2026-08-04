@@ -256,7 +256,7 @@ impl Http2OptionsBuilder {
     ///
     /// Pass `None` to disable HTTP2 keep-alive.
     ///
-    /// Default is currently disabled.
+    /// Default is 10 seconds (enabled).
     #[inline]
     pub fn keep_alive_interval(mut self, interval: impl Into<Option<Duration>>) -> Self {
         self.opts.keep_alive_interval = interval.into();
@@ -282,7 +282,7 @@ impl Http2OptionsBuilder {
     /// streams are active. Does nothing if `keep_alive_interval` is
     /// disabled.
     ///
-    /// Default is `false`.
+    /// Default is `true`.
     #[inline]
     pub const fn keep_alive_while_idle(mut self, enabled: bool) -> Self {
         self.opts.keep_alive_while_idle = enabled;
@@ -462,9 +462,13 @@ impl Default for Http2Options {
             initial_max_send_streams: DEFAULT_INITIAL_MAX_SEND_STREAMS,
             max_frame_size: None,
             max_header_list_size: None,
-            keep_alive_interval: None,
+            // Keep-alive pings keep idle connections warm so they stay usable in
+            // the pool (no re-handshake latency on the next request). 10s ping
+            // interval with a 20s acknowledgement timeout balances liveness
+            // detection against unnecessary traffic.
+            keep_alive_interval: Some(Duration::from_secs(10)),
             keep_alive_timeout: Duration::from_secs(20),
-            keep_alive_while_idle: false,
+            keep_alive_while_idle: true,
             max_concurrent_reset_streams: None,
             max_send_buffer_size: DEFAULT_MAX_SEND_BUF_SIZE,
             max_pending_accept_reset_streams: None,

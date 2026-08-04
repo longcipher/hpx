@@ -3,7 +3,7 @@ members = ["bin/*", "crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "2.5.15"
+version = "2.5.16"
 edition = "2024"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license = "Apache-2.0"
@@ -199,15 +199,15 @@ all = "warn"
 
 [workspace.dependencies]
 # local crates
-hpx = { path = "crates/hpx", version = "2.5.15" }
-hpx-browser = { path = "crates/hpx-browser", version = "2.5.15" }
-hpx-cli = { path = "bin/hpx-cli", version = "2.5.15" }
-hpx-dl = { path = "crates/hpx-dl", version = "2.5.15" }
-hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.15" }
-hpx-h3 = { path = "crates/hpx-h3", version = "2.5.15" }
-hpx-streams = { path = "crates/hpx-streams", version = "2.5.15" }
-hpx-yawc = { path = "crates/yawc", version = "2.5.15" }
-hpxless = { path = "bin/hpxless", version = "2.5.15" }
+hpx = { path = "crates/hpx", version = "2.5.16" }
+hpx-browser = { path = "crates/hpx-browser", version = "2.5.16" }
+hpx-cli = { path = "bin/hpx-cli", version = "2.5.16" }
+hpx-dl = { path = "crates/hpx-dl", version = "2.5.16" }
+hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.16" }
+hpx-h3 = { path = "crates/hpx-h3", version = "2.5.16" }
+hpx-streams = { path = "crates/hpx-streams", version = "2.5.16" }
+hpx-yawc = { path = "crates/yawc", version = "2.5.16" }
+hpxless = { path = "bin/hpxless", version = "2.5.16" }
 
 # external crates
 ahash = "0.8.12"
@@ -292,7 +292,7 @@ rustls-pemfile = "2.2.0"
 rustls-pki-types = "1.15.1"
 rustybuzz = "0.20.1"
 scc = "3.8.6"
-selectors = "0.39.0"
+selectors = "0.40.0"
 serde = "1.0.229"
 serde_json = "1.0.151"
 serde_urlencoded = "0.7.1"
@@ -307,7 +307,7 @@ socket2 = "0.6.5"
 sqlx = "0.9.0"
 strum = "0.28.0"
 strum_macros = "0.28.0"
-stylo = "0.19.0"
+stylo = "0.20.0"
 swash = "0.2.10"
 sync_wrapper = "1.0.2"
 system-configuration = "0.7.0"

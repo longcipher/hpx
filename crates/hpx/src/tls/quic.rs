@@ -17,6 +17,8 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
+use quinn::congestion::{BbrConfig, CubicConfig};
+
 use crate::{
     client::http3::Http3Options,
     error::Error,
@@ -112,12 +114,24 @@ pub fn build_quinn_endpoint(local_addr: SocketAddr) -> crate::Result<quinn::Endp
 /// | `max_concurrent_uni_streams`    | `max_concurrent_uni_streams(u32)`    |
 /// | `initial_max_data`              | `receive_window(u64)` (overrides conn_receive_window) |
 /// | `initial_max_stream_data_*`     | `stream_receive_window(u64)` (overrides stream_receive_window) |
+/// | `congestion_bbr`                | `congestion_controller_factory(BbrConfig)` vs `CubicConfig`    |
 ///
 /// `active_connection_id_limit` is managed internally by quinn (not
 /// configurable on `TransportConfig`). `max_udp_payload_size` is set on
 /// [`quinn::EndpointConfig`] via [`build_quinn_endpoint`].
 fn build_transport_config(h3_opts: &Http3Options) -> crate::Result<quinn::TransportConfig> {
     let mut transport = quinn::TransportConfig::default();
+
+    // Congestion control: BBR is preferred for lower latency under lossy or
+    // congested networks (at the cost of more aggressive throughput). CUBIC is
+    // the quinn default and is used when `congestion_bbr` is `false`.
+    let congestion_factory: Arc<dyn quinn::congestion::ControllerFactory + Send + Sync> =
+        if h3_opts.congestion_bbr {
+            Arc::new(BbrConfig::default())
+        } else {
+            Arc::new(CubicConfig::default())
+        };
+    transport.congestion_controller_factory(congestion_factory);
 
     if let Some(idle) = h3_opts.max_idle_timeout {
         // quinn expects milliseconds as a `VarInt`-backed `IdleTimeout`.

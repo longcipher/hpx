@@ -916,6 +916,39 @@ where
         })
     }
 
+    /// Pre-establish and pool connections to the given authorities so that
+    /// subsequent requests hit an already-warm connection (no connect/TLS/handshake
+    /// latency on the critical path).
+    ///
+    /// Each authority is connected in the background; the resulting pooled
+    /// connection is kept alive by the pool (subject to the idle-timeout
+    /// configured via [`crate::ClientBuilder::pool_idle_timeout`]) and reused by
+    /// later requests. Failures are logged and ignored —
+    /// warm-up is best-effort and never blocks the caller.
+    ///
+    /// This is a low-latency optimization: it trades a small amount of
+    /// upfront connection traffic for dramatically lower tail latency on the
+    /// first real request to each host.
+    pub fn warm_up<I>(&self, authorities: I)
+    where
+        I: IntoIterator<Item = Uri>,
+        I::IntoIter: Send + 'static,
+    {
+        for uri in authorities {
+            let req = ConnectRequest::new(uri, None::<RequestOptions>);
+            // `connect_to` returns a `Lazy` future that owns everything it
+            // needs; driving it to completion establishes the connection and
+            // (via `Pooled`'s `Drop`) reinserts it into the idle pool.
+            let connect = self.connect_to(req);
+            let executor = self.exec.clone();
+            executor.execute(Box::pin(async move {
+                if let Err(err) = connect.await {
+                    trace!("warm_up connection failed: {err}");
+                }
+            }));
+        }
+    }
+
     /// Drive the HTTP/3 (QUIC) connect path and return a pooled connection.
     ///
     /// This is the h3 routing helper extracted from [`Self::connect_to`].
