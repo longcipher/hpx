@@ -26,6 +26,26 @@ pub(crate) struct ConnectExtra {
     extra: Option<RequestOptions>,
 }
 
+/// Strips path/query from a URI so it can be used as a connection-pool key.
+///
+/// Keeps only `scheme` and `authority` (host[:port]) so that every request to
+/// the same origin shares the pooled connection(s) — critical for HTTP/2
+/// multiplexing and for avoiding per-path connection re-establishment on
+/// HTTP/1. Falls back to the original URI if the scheme/authority cannot be
+/// preserved (e.g. non-http schemes such as Unix sockets).
+#[inline]
+fn normalize_pool_key_uri(uri: &Uri) -> Uri {
+    // `Uri::from_parts` requires a path when scheme/authority is present, so
+    // normalize every origin to a single canonical "/" path — the key then
+    // collapses all paths/queries on the same host into one pooled entry.
+    let mut parts = uri.clone().into_parts();
+    parts.path_and_query = Some(http::uri::PathAndQuery::from_static("/"));
+    match Uri::from_parts(parts) {
+        Ok(normalized) => normalized,
+        Err(_) => uri.clone(),
+    }
+}
+
 impl ConnectExtra {
     /// Create a new [`ConnectExtra`] with the given URI and extra.
     #[inline]
@@ -33,6 +53,14 @@ impl ConnectExtra {
     where
         T: Into<Option<RequestOptions>>,
     {
+        // Low-latency optimization: normalize the connection-pool key to
+        // scheme + authority only (strip path/query). Without this, every
+        // distinct REST path/query produces a different pool key and forces a
+        // brand-new DNS + TCP + TLS connection, which dominates TTFB for
+        // short-lived API calls. The full URI (with path) is retained by
+        // `ConnectRequest::uri` for the actual request routing; here it is
+        // only used for hashing/sharing pooled connections.
+        let uri = normalize_pool_key_uri(&uri);
         Self {
             uri,
             extra: extra.into(),
@@ -118,5 +146,32 @@ mod tests {
         let b = ConnectExtra::new(uri, Some(opts_b));
         assert_ne!(hash_of(&a), hash_of(&b));
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn different_paths_on_same_origin_share_pool_identity() {
+        // Pool key is normalized to scheme+authority: distinct paths/queries on
+        // the same host must yield the same identity so the connection is reused.
+        let a: Uri = "https://example.com/v1/order/place".parse().unwrap();
+        let b: Uri = "https://example.com/v1/account/balance?x=1"
+            .parse()
+            .unwrap();
+        let c: Uri = "https://example.com".parse().unwrap();
+
+        let ia = ConnectExtra::new(a, None::<RequestOptions>);
+        let ib = ConnectExtra::new(b, None::<RequestOptions>);
+        let ic = ConnectExtra::new(c, None::<RequestOptions>);
+        assert_eq!(ia, ib);
+        assert_eq!(ia, ic);
+    }
+
+    #[test]
+    fn different_origins_produce_different_identity() {
+        let a: Uri = "https://api.example.com/v1/order/place".parse().unwrap();
+        let b: Uri = "https://alt.example.com/v1/order/place".parse().unwrap();
+
+        let ia = ConnectExtra::new(a, None::<RequestOptions>);
+        let ib = ConnectExtra::new(b, None::<RequestOptions>);
+        assert_ne!(ia, ib);
     }
 }

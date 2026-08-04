@@ -11,7 +11,9 @@ use super::{
     Certificate, CertificateInput,
     parser::{filter_map_certs, process_certs},
 };
-use crate::{Error, Result};
+#[cfg(any(feature = "boring-tls", feature = "openssl-tls"))]
+use crate::Error;
+use crate::Result;
 
 /// A builder for constructing a `CertStore`.
 pub struct CertStoreBuilder {
