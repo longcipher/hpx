@@ -28,8 +28,8 @@ pub(crate) struct ConnectExtra {
 
 /// Strips path/query from a URI so it can be used as a connection-pool key.
 ///
-/// Keeps only `scheme` and `authority` (host[:port]) so that every request to
-/// the same origin shares the pooled connection(s) — critical for HTTP/2
+/// Keeps only `scheme` and `authority` (`host[:port]`) so that every request
+/// to the same origin shares the pooled connection(s) — critical for HTTP/2
 /// multiplexing and for avoiding per-path connection re-establishment on
 /// HTTP/1. Falls back to the original URI if the scheme/authority cannot be
 /// preserved (e.g. non-http schemes such as Unix sockets).
