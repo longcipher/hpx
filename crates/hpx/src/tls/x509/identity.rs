@@ -127,7 +127,7 @@ impl Identity {
                 .map_err(|e| Error::tls(Box::new(e)))?
                 .ok_or_else(|| Error::builder("no private key found"))?;
 
-            Ok(Identity {
+            Ok(Self {
                 cert: certs,
                 key: std::sync::Arc::new(key),
             })
@@ -275,7 +275,7 @@ impl Identity {
                 .map_err(|e| Error::tls(Box::new(e)))?
                 .ok_or_else(|| Error::builder("no private key found"))?;
 
-            Ok(Identity {
+            Ok(Self {
                 cert: certs,
                 key: std::sync::Arc::new(key),
             })

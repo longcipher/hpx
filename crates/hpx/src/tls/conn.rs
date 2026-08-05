@@ -3,10 +3,10 @@ pub(crate) use tokio_boring::SslStream as TlsStream;
 #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
 pub use tokio_openssl::SslStream as TlsStream;
 #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
-pub use tokio_rustls::client::TlsStream;
+pub(crate) use tokio_rustls::client::TlsStream;
 
 #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
-pub use super::rustls::*;
+pub(crate) use super::rustls::*;
 #[cfg(feature = "boring-tls")]
 pub(crate) use crate::tls::boring::*;
 #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
