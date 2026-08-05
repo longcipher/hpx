@@ -1,4 +1,10 @@
-use std::{fmt::Debug, sync::Arc};
+use std::fmt::Debug;
+#[cfg(any(
+    feature = "boring-tls",
+    feature = "openssl-tls",
+    feature = "rustls-tls"
+))]
+use std::sync::Arc;
 
 #[cfg(feature = "boring-tls")]
 use boring::x509::store::{X509Store, X509StoreBuilder};
@@ -7,10 +13,13 @@ use openssl::x509::store::{X509Store, X509StoreBuilder};
 #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 use rustls::RootCertStore;
 
-use super::{
-    Certificate, CertificateInput,
-    parser::{filter_map_certs, process_certs},
-};
+#[cfg(any(
+    feature = "boring-tls",
+    feature = "openssl-tls",
+    feature = "rustls-tls"
+))]
+use super::parser::{filter_map_certs, process_certs};
+use super::{Certificate, CertificateInput};
 #[cfg(any(feature = "boring-tls", feature = "openssl-tls"))]
 use crate::Error;
 use crate::Result;
@@ -79,6 +88,14 @@ impl CertStoreBuilder {
     }
 
     /// Adds a PEM-encoded certificate stack to the certificate store.
+    #[cfg_attr(
+        not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )),
+        expect(unused_variables, unused_mut)
+    )]
     pub fn add_stack_pem_certs<C>(mut self, certs: C) -> Self
     where
         C: AsRef<[u8]>,
@@ -125,6 +142,14 @@ impl CertStoreBuilder {
     /// These locations are read from the `SSL_CERT_FILE` and `SSL_CERT_DIR`
     /// environment variables if present, or defaults specified at OpenSSL
     /// build time otherwise.
+    #[cfg_attr(
+        not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )),
+        expect(unused_mut)
+    )]
     pub fn set_default_paths(mut self) -> Self {
         #[cfg(any(
             feature = "boring-tls",
@@ -185,6 +210,14 @@ impl CertStoreBuilder {
         return Ok(CertStore(std::marker::PhantomData));
     }
 
+    #[cfg_attr(
+        not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )),
+        expect(unused_variables, unused_mut)
+    )]
     fn parse_cert<'c, C, F>(mut self, cert: C, parser: F) -> Self
     where
         C: Into<CertificateInput<'c>>,
@@ -206,6 +239,14 @@ impl CertStoreBuilder {
         self
     }
 
+    #[cfg_attr(
+        not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )),
+        expect(unused_variables, unused_mut)
+    )]
     fn parse_certs<'c, I, F>(mut self, certs: I, parser: F) -> Self
     where
         I: IntoIterator,

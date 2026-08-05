@@ -117,7 +117,7 @@ async fn main() -> hpx::Result<()> {
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `boring-tls` | **Yes** | BoringSSL TLS backend |
-| `boring-vendored` | No | BoringSSL with vendored static linking (FIPS) |
+| `boring-vendored` | No | BoringSSL with vendored static linking (non-FIPS; FIPS is unavailable on macOS because BoringSSL's FIPS build requires GNU `objcopy`) |
 | `http1` | **Yes** | HTTP/1.1 support |
 | `http2` | **Yes** | HTTP/2 support |
 | `rustls-tls` | No | Rustls TLS backend (pure Rust) |

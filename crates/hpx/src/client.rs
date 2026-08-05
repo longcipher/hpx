@@ -16,6 +16,12 @@ pub mod sse;
 #[cfg(feature = "ws-yawc")]
 pub mod ws;
 
+#[cfg(any(
+    feature = "boring-tls",
+    feature = "openssl-tls",
+    feature = "rustls-tls"
+))]
+pub(crate) use self::conn::{Connected, Connection};
 #[cfg(feature = "http1")]
 pub use self::core::http1;
 #[cfg(feature = "http2")]
@@ -33,7 +39,6 @@ pub use self::{
     response::Response,
 };
 pub(crate) use self::{
-    conn::{Connected, Connection},
     core::{Error as CoreError, ext},
     http::{ConnectRequest, client::error::Error},
 };

@@ -334,12 +334,21 @@ impl codec::Decoder for Decoder {
             None
         };
 
-        // Validate control frame requirements
+        // Validate control frame requirements (RFC 6455 Section 5.5).
+        // Control frames must not be fragmented and their payload is limited
+        // to 125 bytes, regardless of opcode (Close, Ping, or Pong).
         if opcode.is_control() && !fin {
             return Err(WebSocketError::ControlFrameFragmented);
         }
-        if opcode == OpCode::Ping && payload_len > 125 {
-            return Err(WebSocketError::PingFrameTooLarge);
+        if opcode.is_control() && payload_len > 125 {
+            // `PingFrameTooLarge` is retained for a Ping payload violation
+            // (source compatibility); Close/Pong report the generic control
+            // frame limit violation.
+            return if opcode == OpCode::Ping {
+                Err(WebSocketError::PingFrameTooLarge)
+            } else {
+                Err(WebSocketError::ControlFrameTooLarge)
+            };
         }
         if payload_len > self.max_payload_size {
             return Err(WebSocketError::FrameTooLarge);
@@ -405,6 +414,16 @@ impl codec::Encoder<Frame> for Encoder {
         if self.role == Role::Client {
             // ensure the mask is set
             frame.set_random_mask_if_not_set();
+        }
+
+        // Reject control frames (Close/Ping/Pong) whose payload exceeds the
+        // RFC 6455 Section 5.5 125-byte limit before serializing them.
+        if frame.opcode().is_control() && frame.payload.len() > 125 {
+            return if frame.opcode() == OpCode::Ping {
+                Err(WebSocketError::PingFrameTooLarge)
+            } else {
+                Err(WebSocketError::ControlFrameTooLarge)
+            };
         }
 
         // Calculate exact header size for optimal reservation
@@ -613,17 +632,82 @@ mod tests {
 
     #[test]
     fn ping_frame_exceeding_125_bytes_rejected() {
+        // Encoding a control frame with a >125-byte payload is now a protocol
+        // error (RFC 6455 Section 5.5) caught at the encoder.
         let mut encoder = Encoder::new(Role::Client);
         let mut buf = BytesMut::new();
         let frame = Frame::ping(vec![42u8; 126]);
-        encoder.encode(frame, &mut buf).unwrap();
+        assert!(matches!(
+            encoder.encode(frame, &mut buf),
+            Err(crate::WebSocketError::PingFrameTooLarge)
+        ));
 
+        // A malformed oversized ping frame arriving on the wire is rejected by
+        // the decoder too.
+        let mut raw = BytesMut::new();
+        raw.extend_from_slice(&[0x89, 126]); // FIN=1, Ping, extended len marker
+        raw.extend_from_slice(&126u16.to_be_bytes());
+        raw.extend_from_slice(&vec![0x00u8; 126]);
         let mut decoder = Decoder::new(Role::Server, 1 << 20);
-        let result = decoder.decode(&mut buf);
-        assert!(result.is_err());
+        let result = decoder.decode(&mut raw);
         assert!(matches!(
             result,
             Err(crate::WebSocketError::PingFrameTooLarge)
+        ));
+    }
+
+    #[test]
+    fn pong_frame_exceeding_125_bytes_rejected() {
+        let mut encoder = Encoder::new(Role::Client);
+        let mut buf = BytesMut::new();
+        let frame = Frame::pong(vec![42u8; 126]);
+        // Encoding a control frame with a >125-byte payload is a protocol error.
+        assert!(matches!(
+            encoder.encode(frame, &mut buf),
+            Err(crate::WebSocketError::ControlFrameTooLarge)
+        ));
+    }
+
+    #[test]
+    fn close_frame_exceeding_125_bytes_rejected() {
+        let mut encoder = Encoder::new(Role::Client);
+        let mut buf = BytesMut::new();
+        // A Close frame reason >123 bytes (plus the 2-byte code) exceeds 125.
+        let reason = vec![b'a'; 124];
+        let frame = Frame::close(crate::close::CloseCode::Normal, reason);
+        assert!(matches!(
+            encoder.encode(frame, &mut buf),
+            Err(crate::WebSocketError::ControlFrameTooLarge)
+        ));
+    }
+
+    #[test]
+    fn oversized_pong_decode_rejected() {
+        // Manually construct a Pong frame with a 126-byte payload (invalid).
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(&[0x8A, 126]); // FIN=1, Pong, extended len marker
+        buf.extend_from_slice(&126u16.to_be_bytes()); // payload length 126 (> 125 limit)
+        buf.extend_from_slice(&vec![0x00u8; 126]);
+
+        let mut decoder = Decoder::new(Role::Client, 1 << 20);
+        assert!(matches!(
+            decoder.decode(&mut buf),
+            Err(crate::WebSocketError::ControlFrameTooLarge)
+        ));
+    }
+
+    #[test]
+    fn oversized_close_decode_rejected() {
+        // Manually construct a Close frame with a 126-byte payload (invalid).
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(&[0x88, 126]); // FIN=1, Close, extended len marker
+        buf.extend_from_slice(&126u16.to_be_bytes()); // payload length 126 (> 125 limit)
+        buf.extend_from_slice(&vec![0x00u8; 126]);
+
+        let mut decoder = Decoder::new(Role::Client, 1 << 20);
+        assert!(matches!(
+            decoder.decode(&mut buf),
+            Err(crate::WebSocketError::ControlFrameTooLarge)
         ));
     }
 

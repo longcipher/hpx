@@ -165,6 +165,8 @@ pub struct Streaming<S> {
     deflate: Option<Compressor>,
     // decompressor
     inflate: Option<Decompressor>,
+    // connection role (client or server)
+    role: Role,
 }
 
 impl<S> Streaming<S>
@@ -193,6 +195,7 @@ where
             flush_sends: false,
             deflate: negotiated.compressor(role),
             inflate: negotiated.decompressor(role),
+            role,
         }
     }
 
@@ -259,6 +262,7 @@ where
                         WebSocketError::ReservedBitsNotZero
                         | WebSocketError::ControlFrameFragmented
                         | WebSocketError::PingFrameTooLarge
+                        | WebSocketError::ControlFrameTooLarge
                         | WebSocketError::InvalidFragment
                         | WebSocketError::FragmentTimeout
                         | WebSocketError::InvalidContinuationFrame
@@ -332,7 +336,14 @@ where
                     .ok_or(WebSocketError::InvalidCloseFrame)?;
                 let _ = frame.close_reason()?;
 
-                if !code.is_allowed() {
+                // The peer that sent this Close frame must be allowed to send
+                // the code: if we are the server the peer is a client, and vice
+                // versa (RFC 6455 Section 7.4.1).
+                let allowed = match self.role {
+                    Role::Server => code.is_allowed_by_client(),
+                    Role::Client => code.is_allowed_by_server(),
+                };
+                if !allowed {
                     self.emit_close(Frame::close(CloseCode::Protocol, &frame.payload[2..]));
                     return Err(WebSocketError::InvalidCloseCode);
                 }

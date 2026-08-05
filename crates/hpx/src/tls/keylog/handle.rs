@@ -46,7 +46,7 @@ impl Handle {
             }
         });
 
-        Ok(Handle { filepath, sender })
+        Ok(Self { filepath, sender })
     }
 
     /// Write a line to the keylogger.

@@ -24,6 +24,11 @@ pub enum CertificateInput<'c> {
     Parsed(Certificate),
 }
 
+#[cfg(any(
+    feature = "boring-tls",
+    feature = "openssl-tls",
+    feature = "rustls-tls"
+))]
 impl<'a> CertificateInput<'a> {
     pub(crate) fn with_parser<F>(self, parser: F) -> crate::Result<Certificate>
     where

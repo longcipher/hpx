@@ -99,7 +99,17 @@ sse = ["dep:memchr", "dep:fastrand", "stream"]
 boring-tls = ["dep:boring", "dep:tokio-boring", "dep:brotli", "dep:flate2"]
 
 # Enable vendored BoringSSL (static linking).
-boring-vendored = ["boring-tls", "boring/fips"]
+#
+# BoringSSL's FIPS `bcm` delocation step requires GNU `objcopy`, which is
+# absent from macOS toolchains, so FIPS is intentionally NOT enabled here.
+# This keeps `--all-features` builds working on macOS. Consumers that need
+# FIPS-validated BoringSSL can enable the `fips` feature on the `boring`
+# crate directly in their own dependency declaration.
+#
+# NOTE: the `boring` crate (>= 5.x) always compiles BoringSSL from source, so
+# this feature is now equivalent to `boring-tls` and is retained only for API
+# compatibility; it will be removed in the next major version.
+boring-vendored = ["boring-tls"]
 
 # Enable Rustls support.
 rustls-tls = [

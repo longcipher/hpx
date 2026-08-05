@@ -65,6 +65,15 @@ pub enum CloseCode {
     #[doc(hidden)]
     /// Indicates a TLS handshake failure. This is primarily used inside the library and not exposed to users.
     Tls,
+    /// Reserved by IANA for future use (code 1004).
+    ///
+    /// This code must not appear on the wire and is not allowed to be sent by
+    /// either endpoint (RFC 6455 Section 7.4.1).
+    Reserved1004,
+    /// Indicates that the server was acting as a gateway or proxy and received
+    /// an invalid response from the upstream server (code 1014, defined by
+    /// RFC 6455 errata / IANA).
+    BadGateway,
     #[doc(hidden)]
     /// Reserved status codes for future use. These are not meant for public use and are for internal consistency.
     Reserved(u16),
@@ -80,9 +89,38 @@ pub enum CloseCode {
 }
 
 impl CloseCode {
-    /// Check if this CloseCode is allowed.
+    /// Check if this CloseCode is allowed to be sent by either endpoint
+    /// (RFC 6455 Section 7.4.1).
+    ///
+    /// The client rules are the most permissive set shared by both roles
+    /// (only 1010 differs, and that is client-only), so this delegates to
+    /// [`Self::is_allowed_by_client`].
     pub const fn is_allowed(self) -> bool {
-        !matches!(self, Bad(_) | Reserved(_) | Status | Abnormal | Tls)
+        self.is_allowed_by_client()
+    }
+
+    /// Check if this CloseCode is allowed to be sent by a client.
+    ///
+    /// Per RFC 6455 Section 7.4.1, code 1010 (`Extension`) may only be sent by
+    /// a client, while 1005/1006/1015/1004 must never be put on the wire by
+    /// any endpoint.
+    pub const fn is_allowed_by_client(self) -> bool {
+        !matches!(
+            self,
+            Bad(_) | Reserved(_) | Reserved1004 | Status | Abnormal | Tls
+        )
+    }
+
+    /// Check if this CloseCode is allowed to be sent by a server.
+    ///
+    /// Per RFC 6455 Section 7.4.1, code 1010 (`Extension`) is a client-only
+    /// code; a server must use 1011 (`Error`) instead when it refuses an
+    /// extension.
+    pub const fn is_allowed_by_server(self) -> bool {
+        !matches!(
+            self,
+            Bad(_) | Reserved(_) | Reserved1004 | Status | Abnormal | Tls | Extension
+        )
     }
 }
 
@@ -93,6 +131,7 @@ impl From<u16> for CloseCode {
             1001 => Away,
             1002 => Protocol,
             1003 => Unsupported,
+            1004 => Reserved1004,
             1005 => Status,
             1006 => Abnormal,
             1007 => Invalid,
@@ -102,6 +141,7 @@ impl From<u16> for CloseCode {
             1011 => Error,
             1012 => Restart,
             1013 => Again,
+            1014 => BadGateway,
             1015 => Tls,
             1..=999 => Bad(code),
             1016..=2999 => Reserved(code),
@@ -128,6 +168,8 @@ impl From<CloseCode> for u16 {
             Error => 1011,
             Restart => 1012,
             Again => 1013,
+            Reserved1004 => 1004,
+            BadGateway => 1014,
             Tls => 1015,
             Reserved(code) => code,
             Iana(code) => code,

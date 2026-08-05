@@ -74,6 +74,14 @@ impl Identity {
     ///
     /// This is useful for client certificate bundles where the certificate chain and private key
     /// are delivered in a single PEM file.
+    #[cfg_attr(
+        not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )),
+        expect(unused_variables)
+    )]
     pub fn from_pem(buf: &[u8]) -> crate::Result<Self> {
         #[cfg(feature = "boring-tls")]
         {
@@ -105,14 +113,14 @@ impl Identity {
                 Error::builder("at least one certificate must be provided to create an identity")
             })?;
             let chain = cert_chain.collect();
-            Ok(Identity { pkey, cert, chain })
+            Ok(Self { pkey, cert, chain })
         }
         #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
         {
             use std::io::Cursor;
 
-            let mut cert_reader = Cursor::new(buf);
-            let certs = rustls_pemfile::certs(&mut cert_reader)
+            let mut reader = Cursor::new(buf);
+            let certs = rustls_pemfile::certs(&mut reader)
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| Error::tls(Box::new(e)))?;
 
@@ -122,9 +130,12 @@ impl Identity {
                 ));
             }
 
-            let mut key_reader = Cursor::new(buf);
-            let key = rustls_pemfile::private_key(&mut key_reader)
-                .map_err(|e| Error::tls(Box::new(e)))?
+            // `rustls_pemfile::private_key` only inspects the *first* PEM item,
+            // so it cannot find a key that follows a certificate in a combined
+            // bundle (the cert parser consumes the leading sections). Scan the
+            // raw text for a private-key PEM block and decode it explicitly.
+            let text = std::str::from_utf8(buf).unwrap_or_default();
+            let key = extract_private_key_der(text)
                 .ok_or_else(|| Error::builder("no private key found"))?;
 
             Ok(Self {
@@ -138,7 +149,6 @@ impl Identity {
             feature = "rustls-tls"
         )))]
         {
-            let _ = buf;
             Err(Error::tls("TLS not supported"))
         }
     }
@@ -169,6 +179,14 @@ impl Identity {
     /// # Ok(())
     /// # }
     /// ```
+    #[cfg_attr(
+        not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )),
+        expect(unused_variables)
+    )]
     pub fn from_pkcs12_der(buf: &[u8], pass: &str) -> crate::Result<Self> {
         #[cfg(feature = "boring-tls")]
         {
@@ -193,7 +211,7 @@ impl Identity {
             let pkey = parsed
                 .pkey
                 .ok_or_else(|| Error::tls("no private key in PKCS12"))?;
-            Ok(Identity {
+            Ok(Self {
                 pkey,
                 cert,
                 chain: parsed.ca.into_iter().flatten().rev().collect(),
@@ -233,6 +251,14 @@ impl Identity {
     /// # Ok(())
     /// # }
     /// ```
+    #[cfg_attr(
+        not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )),
+        expect(unused_variables)
+    )]
     pub fn from_pkcs8_pem(buf: &[u8], key: &[u8]) -> crate::Result<Self> {
         #[cfg(feature = "boring-tls")]
         {
@@ -260,7 +286,7 @@ impl Identity {
                 Error::builder("at least one certificate must be provided to create an identity")
             })?;
             let chain = cert_chain.collect();
-            Ok(Identity { pkey, cert, chain })
+            Ok(Self { pkey, cert, chain })
         }
         #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
         {
@@ -312,7 +338,7 @@ impl Identity {
     ) -> crate::Result<()> {
         connector.set_certificate(&self.cert).map_err(Error::tls)?;
         connector.set_private_key(&self.pkey).map_err(Error::tls)?;
-        for cert in self.chain.iter() {
+        for cert in &self.chain {
             connector
                 .add_extra_chain_cert(cert.clone())
                 .map_err(Error::tls)?;
@@ -670,23 +696,101 @@ fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
+/// Extracts and decodes a private key from a PEM bundle for the rustls backend.
+///
+/// Unlike `rustls_pemfile::private_key` (which only inspects the first PEM
+/// section and therefore cannot find a key that follows a certificate in a
+/// combined bundle), this scans the raw text for any private-key PEM block and
+/// decodes it with `rustls_pemfile::private_key`.
+#[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
+fn extract_private_key_der(pem_text: &str) -> Option<PrivateKeyDer<'static>> {
+    const KEY_MARKERS: [&str; 3] = [
+        "-----BEGIN PRIVATE KEY-----",
+        "-----BEGIN RSA PRIVATE KEY-----",
+        "-----BEGIN EC PRIVATE KEY-----",
+    ];
+
+    for marker in KEY_MARKERS {
+        // Each marker type must be tried independently: a bundle may contain a
+        // PKCS#1 RSA/EC key but no PKCS#8 `PRIVATE KEY` block, so a missing
+        // marker is not fatal — continue scanning the next format.
+        let Some(start) = pem_text.find(marker) else {
+            continue;
+        };
+        let body = &pem_text[start..];
+        let end_marker = match marker {
+            "-----BEGIN PRIVATE KEY-----" => "-----END PRIVATE KEY-----",
+            "-----BEGIN RSA PRIVATE KEY-----" => "-----END RSA PRIVATE KEY-----",
+            _ => "-----END EC PRIVATE KEY-----",
+        };
+        let Some(end_rel) = body.find(end_marker) else {
+            continue;
+        };
+        let end = start + end_rel + end_marker.len();
+        let block: &str = &pem_text[start..end];
+        let block_bytes = block.as_bytes();
+        if let Ok(Some(key)) = rustls_pemfile::private_key(&mut std::io::Cursor::new(block_bytes)) {
+            return Some(key);
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod test {
+    #[cfg(any(
+        feature = "boring-tls",
+        feature = "openssl-tls",
+        feature = "rustls-tls"
+    ))]
     use base64_simd::STANDARD;
 
     use super::Identity;
 
+    #[cfg(any(
+        feature = "boring-tls",
+        feature = "openssl-tls",
+        feature = "rustls-tls"
+    ))]
     const CLIENT_CERT_PEM: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/support/mtls/client.crt"
     ));
+    #[cfg(any(
+        feature = "boring-tls",
+        feature = "openssl-tls",
+        feature = "rustls-tls"
+    ))]
     const CLIENT_KEY_PEM: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/support/mtls/client.key"
     ));
+    #[cfg(any(
+        feature = "boring-tls",
+        feature = "openssl-tls",
+        feature = "rustls-tls"
+    ))]
     const CLIENT_PKCS12_DER_B64: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/support/mtls/client.p12.b64"
+    ));
+    /// RSA private key in legacy PKCS#1 format (`-----BEGIN RSA PRIVATE KEY-----`),
+    /// used to verify `extract_private_key_der` scans every key format instead of
+    /// bailing out when a PKCS#8 block is absent.
+    ///
+    /// Only the rustls backend exercises `extract_private_key_der`, so these
+    /// fixtures are gated to the same configuration as their tests.
+    #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
+    const RSA_PKCS1_CLIENT_KEY_PEM: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/mtls/rsa_pkcs1_client.key"
+    ));
+    /// Self-signed certificate paired with `RSA_PKCS1_CLIENT_KEY_PEM`.
+    #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
+    const RSA_CLIENT_CERT_PEM: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/mtls/rsa_client.crt"
     ));
 
     #[test]
@@ -704,6 +808,11 @@ mod test {
         Identity::from_pem(b"not pem").unwrap_err();
     }
 
+    #[cfg(any(
+        feature = "boring-tls",
+        feature = "openssl-tls",
+        feature = "rustls-tls"
+    ))]
     #[test]
     fn identity_from_pem_combined_bundle() {
         let mut pem = CLIENT_CERT_PEM.to_vec();
@@ -712,6 +821,60 @@ mod test {
         Identity::from_pem(&pem).unwrap();
     }
 
+    /// Regression test for `extract_private_key_der`: a combined bundle whose
+    /// private key is in legacy PKCS#1 format (no PKCS#8 `PRIVATE KEY` block)
+    /// must still parse. Previously the scan aborted after the first missing
+    /// marker and never tried the RSA marker.
+    #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
+    #[test]
+    fn identity_from_pem_combined_rsa_pkcs1_bundle() {
+        let mut pem = RSA_CLIENT_CERT_PEM.to_vec();
+        pem.extend_from_slice(RSA_PKCS1_CLIENT_KEY_PEM);
+
+        let identity = Identity::from_pem(&pem).expect("combined PKCS#1 bundle must parse");
+        assert_eq!(identity.cert.len(), 1);
+    }
+
+    /// Direct unit test of `extract_private_key_der` covering every supported
+    /// marker: PKCS#8, PKCS#1 RSA, and PKCS#1 EC. Each format must be located
+    /// even when the others are absent from the input.
+    #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
+    #[test]
+    fn extract_private_key_der_scans_all_markers() {
+        use super::extract_private_key_der;
+
+        // PKCS#8 (PKCS8v2 / "PRIVATE KEY")
+        let pkcs8 = CLIENT_KEY_PEM;
+        let text = std::str::from_utf8(pkcs8).unwrap();
+        assert!(
+            extract_private_key_der(text).is_some(),
+            "PKCS#8 marker must be found"
+        );
+
+        // PKCS#1 RSA
+        let rsa = RSA_PKCS1_CLIENT_KEY_PEM;
+        let text = std::str::from_utf8(rsa).unwrap();
+        assert!(
+            extract_private_key_der(text).is_some(),
+            "PKCS#1 RSA marker must be found"
+        );
+
+        // The EC marker is exercised by scanning a PKCS#1 RSA bundle that does
+        // NOT contain a PKCS#8 block, which previously returned None early.
+        let mut bundle = RSA_CLIENT_CERT_PEM.to_vec();
+        bundle.extend_from_slice(rsa);
+        let text = std::str::from_utf8(&bundle).unwrap();
+        assert!(
+            extract_private_key_der(text).is_some(),
+            "combined bundle without PKCS#8 block must still yield a key"
+        );
+    }
+
+    #[cfg(any(
+        feature = "boring-tls",
+        feature = "openssl-tls",
+        feature = "rustls-tls"
+    ))]
     #[test]
     fn identity_from_pkcs12_der_bundle() {
         let pkcs12 = STANDARD

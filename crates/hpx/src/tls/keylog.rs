@@ -40,18 +40,18 @@ pub struct KeyLog(Option<Arc<Path>>);
 #[cfg(feature = "keylog")]
 impl KeyLog {
     /// Creates a [`KeyLog`] based on the `SSLKEYLOGFILE` environment variable.
-    pub fn from_env() -> KeyLog {
+    pub fn from_env() -> Self {
         match std::env::var("SSLKEYLOGFILE") {
             Ok(ref s) if !s.trim().is_empty() => {
-                KeyLog(Some(Arc::from(normalize_path(Path::new(s)))))
+                Self(Some(Arc::from(normalize_path(Path::new(s)))))
             }
-            _ => KeyLog(None),
+            _ => Self(None),
         }
     }
 
     /// Creates a [`KeyLog`] that writes to the specified file path.
-    pub fn from_file<P: AsRef<Path>>(path: P) -> KeyLog {
-        KeyLog(Some(Arc::from(normalize_path(path.as_ref()))))
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Self {
+        Self(Some(Arc::from(normalize_path(path.as_ref()))))
     }
 
     /// Creates a new key log file [`Handle`] based on the policy.
@@ -102,6 +102,18 @@ impl KeyLog {
     }
 
     /// Returns a no-op [`Handle`].
+    ///
+    /// The TLS backends (boring/openssl/rustls) call this unconditionally, so
+    /// the stubs are only dead code when no TLS backend is compiled (no-TLS
+    /// placeholder build).
+    #[cfg_attr(
+        not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )),
+        expect(dead_code)
+    )]
     #[expect(
         clippy::unused_self,
         reason = "no-op stub mirrors the keylog-enabled API which consumes self"
@@ -115,12 +127,28 @@ impl KeyLog {
 ///
 /// All writes are silently discarded.
 #[cfg(not(feature = "keylog"))]
+#[cfg_attr(
+    not(any(
+        feature = "boring-tls",
+        feature = "openssl-tls",
+        feature = "rustls-tls"
+    )),
+    expect(dead_code)
+)]
 #[derive(Debug, Clone)]
 pub(crate) struct Handle;
 
 #[cfg(not(feature = "keylog"))]
 impl Handle {
     /// No-op: discards the line.
+    #[cfg_attr(
+        not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )),
+        expect(dead_code)
+    )]
     #[expect(
         clippy::unused_self,
         reason = "no-op stub mirrors the keylog-enabled API which reads self"
@@ -135,7 +163,7 @@ where
 {
     let path = path.into();
     let mut components = path.components().peekable();
-    let mut ret = if let Some(c @ Component::Prefix(..)) = components.peek().cloned() {
+    let mut ret = if let Some(c @ Component::Prefix(..)) = components.peek().copied() {
         components.next();
         PathBuf::from(c.as_os_str())
     } else {

@@ -351,7 +351,7 @@ impl ClientBuilder {
 
         Ok(Client {
             inner: Arc::new(client),
-            http_client: warmup_client,
+            http_pool: warmup_client,
             #[cfg(feature = "http3")]
             alt_svc_cache,
             #[cfg(feature = "http3")]

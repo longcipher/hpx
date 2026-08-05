@@ -6,7 +6,7 @@ use openssl::{
 use crate::{Error, tls::x509::CertStore};
 
 /// SslConnectorBuilderExt trait for `SslConnectorBuilder`.
-pub trait SslConnectorBuilderExt {
+pub(crate) trait SslConnectorBuilderExt {
     /// Configure the CertStore for the given `SslConnectorBuilder`.
     fn configure_cert_store(self, store: Option<&CertStore>) -> crate::Result<SslConnectorBuilder>;
 

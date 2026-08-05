@@ -214,7 +214,7 @@ pub struct Client {
     inner: Arc<ClientRef>,
     /// Retained handle to the underlying connection pool so that [`Client::warm_up`]
     /// can pre-establish connections before the first real request.
-    http_client: Arc<HttpClient<Connector, Body>>,
+    http_pool: Arc<HttpClient<Connector, Body>>,
     /// RFC 7838 Alt-Svc cache shared with the inner `HttpClient`.
     /// Populated from `alt-svc` response headers; used by the HTTP/3
     /// upgrade path to discover QUIC endpoints.
@@ -231,7 +231,7 @@ impl Clone for Client {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            http_client: self.http_client.clone(),
+            http_pool: self.http_pool.clone(),
             #[cfg(feature = "http3")]
             alt_svc_cache: self.alt_svc_cache.clone(),
             #[cfg(feature = "http3")]
@@ -769,7 +769,7 @@ impl Client {
                 Err(e) => trace!("warm_up: skipping invalid authority: {e:?}"),
             }
         }
-        self.http_client.warm_up(converted);
+        self.http_pool.warm_up(converted);
     }
 
     /// Consume the client and return the inner tower::Service.

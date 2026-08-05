@@ -531,6 +531,11 @@ impl RustlsKeyLog for KeyLogBridge {
 }
 
 /// A stream which may be wrapped with TLS.
+///
+/// The `Https` variant (a `tokio_rustls` client stream) carries substantially
+/// more state than the plain `Http(T)` variant; this is an inherent property of
+/// the TLS session state and is accepted here.
+#[expect(clippy::large_enum_variant)]
 pub(crate) enum MaybeHttpsStream<T> {
     /// A raw HTTP stream.
     Http(T),

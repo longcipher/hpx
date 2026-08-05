@@ -1,7 +1,7 @@
 #[cfg(feature = "boring-tls")]
 pub(crate) use tokio_boring::SslStream as TlsStream;
 #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
-pub use tokio_openssl::SslStream as TlsStream;
+pub(crate) use tokio_openssl::SslStream as TlsStream;
 #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 pub(crate) use tokio_rustls::client::TlsStream;
 
@@ -10,14 +10,14 @@ pub(crate) use super::rustls::*;
 #[cfg(feature = "boring-tls")]
 pub(crate) use crate::tls::boring::*;
 #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
-pub use crate::tls::openssl::*;
+pub(crate) use crate::tls::openssl::*;
 
 #[cfg(not(any(
     feature = "boring-tls",
     feature = "openssl-tls",
     feature = "rustls-tls"
 )))]
-pub mod no_tls {
+pub(crate) mod no_tls {
     use std::{
         future::Future,
         pin::Pin,
@@ -32,29 +32,31 @@ pub mod no_tls {
         error::BoxError,
     };
 
-    pub struct TlsStream<T>(pub T);
+    pub(crate) struct TlsStream<T>(pub(crate) T);
 
     impl<T> TlsStream<T> {
-        pub fn get_ref(&self) -> &T {
+        pub(crate) fn get_ref(&self) -> &T {
             &self.0
         }
-        pub fn get_mut(&mut self) -> &mut T {
+        #[expect(dead_code)]
+        pub(crate) fn get_mut(&mut self) -> &mut T {
             &mut self.0
         }
     }
 
-    pub struct HttpsConnector<T>(pub T);
-    pub struct TlsConnector;
+    pub(crate) struct HttpsConnector<T>(pub(crate) T);
+    pub(crate) struct TlsConnector;
     #[derive(Clone)]
-    pub struct TlsConnectorBuilder;
+    pub(crate) struct TlsConnectorBuilder;
 
-    pub struct EstablishedConn<IO> {
-        pub io: IO,
-        pub req: ConnectRequest,
+    pub(crate) struct EstablishedConn<IO> {
+        pub(crate) io: IO,
+        #[expect(dead_code)]
+        pub(crate) req: ConnectRequest,
     }
 
     impl<IO> EstablishedConn<IO> {
-        pub fn new(io: IO, req: ConnectRequest) -> Self {
+        pub(crate) fn new(io: IO, req: ConnectRequest) -> Self {
             Self { io, req }
         }
     }
@@ -64,15 +66,16 @@ pub mod no_tls {
         T: Clone,
     {
         fn clone(&self) -> Self {
-            HttpsConnector(self.0.clone())
+            Self(self.0.clone())
         }
     }
 
     impl<T> HttpsConnector<T> {
-        pub fn with_connector(connector: T, _tls: TlsConnector) -> Self {
-            HttpsConnector(connector)
+        pub(crate) fn with_connector(connector: T, _tls: TlsConnector) -> Self {
+            Self(connector)
         }
-        pub fn no_alpn(&mut self) {}
+        #[cfg_attr(not(test), expect(clippy::unused_self))]
+        pub(crate) fn no_alpn(&self) {}
     }
 
     // Implement Service<Uri>
@@ -146,46 +149,50 @@ pub mod no_tls {
     }
 
     impl TlsConnector {
-        pub fn builder() -> TlsConnectorBuilder {
+        pub(crate) fn builder() -> TlsConnectorBuilder {
             TlsConnectorBuilder
         }
     }
 
     impl Clone for TlsConnector {
         fn clone(&self) -> Self {
-            TlsConnector
+            Self
         }
     }
 
     impl TlsConnectorBuilder {
-        pub fn build(&self, _opts: &crate::tls::TlsOptions) -> Result<TlsConnector, crate::Error> {
+        #[cfg_attr(not(test), expect(clippy::unused_self))]
+        pub(crate) fn build(
+            &self,
+            _opts: &crate::tls::TlsOptions,
+        ) -> Result<TlsConnector, crate::Error> {
             Ok(TlsConnector)
         }
-        pub fn alpn_protocol(self, _proto: Option<crate::tls::AlpnProtocol>) -> Self {
+        pub(crate) fn alpn_protocol(self, _proto: Option<crate::tls::AlpnProtocol>) -> Self {
             self
         }
-        pub fn max_version(self, _version: Option<crate::tls::TlsVersion>) -> Self {
+        pub(crate) fn max_version(self, _version: Option<crate::tls::TlsVersion>) -> Self {
             self
         }
-        pub fn min_version(self, _version: Option<crate::tls::TlsVersion>) -> Self {
+        pub(crate) fn min_version(self, _version: Option<crate::tls::TlsVersion>) -> Self {
             self
         }
-        pub fn tls_sni(self, _enable: bool) -> Self {
+        pub(crate) fn tls_sni(self, _enable: bool) -> Self {
             self
         }
-        pub fn verify_hostname(self, _verify: bool) -> Self {
+        pub(crate) fn verify_hostname(self, _verify: bool) -> Self {
             self
         }
-        pub fn cert_verification(self, _verify: bool) -> Self {
+        pub(crate) fn cert_verification(self, _verify: bool) -> Self {
             self
         }
-        pub fn cert_store(self, _store: crate::tls::CertStore) -> Self {
+        pub(crate) fn cert_store(self, _store: crate::tls::CertStore) -> Self {
             self
         }
-        pub fn identity(self, _identity: Option<crate::tls::Identity>) -> Self {
+        pub(crate) fn identity(self, _identity: Option<crate::tls::Identity>) -> Self {
             self
         }
-        pub fn keylog(self, _keylog: Option<crate::tls::KeyLog>) -> Self {
+        pub(crate) fn keylog(self, _keylog: Option<crate::tls::KeyLog>) -> Self {
             self
         }
     }
@@ -225,22 +232,24 @@ pub mod no_tls {
         }
     }
 
-    pub enum MaybeHttpsStream<T> {
+    pub(crate) enum MaybeHttpsStream<T> {
         Http(T),
+        #[expect(dead_code)]
         Https(TlsStream<T>),
     }
 
     impl<T> MaybeHttpsStream<T> {
-        pub fn get_ref(&self) -> &T {
+        pub(crate) fn get_ref(&self) -> &T {
             match self {
-                MaybeHttpsStream::Http(s) => s,
-                MaybeHttpsStream::Https(s) => &s.0,
+                Self::Http(s) => s,
+                Self::Https(s) => &s.0,
             }
         }
-        pub fn get_mut(&mut self) -> &mut T {
+        #[expect(dead_code)]
+        pub(crate) fn get_mut(&mut self) -> &mut T {
             match self {
-                MaybeHttpsStream::Http(s) => s,
-                MaybeHttpsStream::Https(s) => &mut s.0,
+                Self::Http(s) => s,
+                Self::Https(s) => &mut s.0,
             }
         }
     }
@@ -252,8 +261,8 @@ pub mod no_tls {
             buf: &mut ReadBuf<'_>,
         ) -> Poll<std::io::Result<()>> {
             match self.get_mut() {
-                MaybeHttpsStream::Http(s) => Pin::new(s).poll_read(cx, buf),
-                MaybeHttpsStream::Https(s) => Pin::new(&mut s.0).poll_read(cx, buf),
+                Self::Http(s) => Pin::new(s).poll_read(cx, buf),
+                Self::Https(s) => Pin::new(&mut s.0).poll_read(cx, buf),
             }
         }
     }
@@ -265,22 +274,22 @@ pub mod no_tls {
             buf: &[u8],
         ) -> Poll<std::io::Result<usize>> {
             match self.get_mut() {
-                MaybeHttpsStream::Http(s) => Pin::new(s).poll_write(cx, buf),
-                MaybeHttpsStream::Https(s) => Pin::new(&mut s.0).poll_write(cx, buf),
+                Self::Http(s) => Pin::new(s).poll_write(cx, buf),
+                Self::Https(s) => Pin::new(&mut s.0).poll_write(cx, buf),
             }
         }
 
         fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
             match self.get_mut() {
-                MaybeHttpsStream::Http(s) => Pin::new(s).poll_flush(cx),
-                MaybeHttpsStream::Https(s) => Pin::new(&mut s.0).poll_flush(cx),
+                Self::Http(s) => Pin::new(s).poll_flush(cx),
+                Self::Https(s) => Pin::new(&mut s.0).poll_flush(cx),
             }
         }
 
         fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
             match self.get_mut() {
-                MaybeHttpsStream::Http(s) => Pin::new(s).poll_shutdown(cx),
-                MaybeHttpsStream::Https(s) => Pin::new(&mut s.0).poll_shutdown(cx),
+                Self::Http(s) => Pin::new(s).poll_shutdown(cx),
+                Self::Https(s) => Pin::new(&mut s.0).poll_shutdown(cx),
             }
         }
     }
@@ -288,8 +297,8 @@ pub mod no_tls {
     impl<T: Connection> Connection for MaybeHttpsStream<T> {
         fn connected(&self) -> crate::client::conn::Connected {
             match self {
-                MaybeHttpsStream::Http(s) => s.connected(),
-                MaybeHttpsStream::Https(s) => s.0.connected(),
+                Self::Http(s) => s.connected(),
+                Self::Https(s) => s.0.connected(),
             }
         }
     }
@@ -300,4 +309,4 @@ pub mod no_tls {
     feature = "openssl-tls",
     feature = "rustls-tls"
 )))]
-pub use self::no_tls::*;
+pub(crate) use self::no_tls::*;

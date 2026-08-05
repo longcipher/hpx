@@ -170,6 +170,12 @@ pub enum WebSocketError {
     #[cfg(not(target_arch = "wasm32"))]
     PingFrameTooLarge,
 
+    /// A control frame (Close, Ping, or Pong) exceeds the 125-byte payload
+    /// limit defined by RFC 6455 Section 5.5.
+    #[error("Control frame payload exceeds 125 bytes")]
+    #[cfg(not(target_arch = "wasm32"))]
+    ControlFrameTooLarge,
+
     /// Frame payload exceeds configured maximum.
     #[error("Frame too large")]
     #[cfg(not(target_arch = "wasm32"))]
@@ -238,6 +244,7 @@ impl WebSocketError {
                 | Self::ReservedBitsNotZero
                 | Self::ControlFrameFragmented
                 | Self::PingFrameTooLarge
+                | Self::ControlFrameTooLarge
                 | Self::InvalidOpCode(_)
                 | Self::CompressionNotSupported
         )

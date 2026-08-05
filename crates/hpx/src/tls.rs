@@ -129,7 +129,11 @@ impl TlsVersion {
             0x0302 => ::openssl::ssl::SslVersion::TLS1_1,
             0x0303 => ::openssl::ssl::SslVersion::TLS1_2,
             0x0304 => ::openssl::ssl::SslVersion::TLS1_3,
-            raw => ::openssl::ssl::SslVersion::from_raw(raw as i32),
+            // Unknown version: safely downgrade to TLS 1.3 rather than risk UB.
+            // The openssl `SslVersion` type only exposes named constants (it is
+            // a tuple struct with no `From<u32>`/`from_raw`), so an unknown wire
+            // value cannot be faithfully reconstructed.
+            _ => ::openssl::ssl::SslVersion::TLS1_3,
         }
     }
 }

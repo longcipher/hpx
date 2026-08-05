@@ -35,6 +35,11 @@ type StoreType = RootCertStore;
 )))]
 type StoreType = ();
 
+#[cfg(any(
+    feature = "boring-tls",
+    feature = "openssl-tls",
+    feature = "rustls-tls"
+))]
 pub(super) fn parse_certs<'c, I>(
     certs: I,
     parser: fn(&'c [u8]) -> crate::Result<Certificate>,
@@ -73,6 +78,11 @@ where
     return Ok(());
 }
 
+#[cfg(any(
+    feature = "boring-tls",
+    feature = "openssl-tls",
+    feature = "rustls-tls"
+))]
 pub(super) fn parse_certs_with_stack<C, F>(certs: C, parse: F) -> Result<StoreType>
 where
     C: AsRef<[u8]>,
@@ -108,6 +118,11 @@ where
     return Ok(());
 }
 
+#[cfg(any(
+    feature = "boring-tls",
+    feature = "openssl-tls",
+    feature = "rustls-tls"
+))]
 pub(super) fn process_certs<I>(iter: I, store: &mut StoreBuilder) -> Result<()>
 where
     I: Iterator<Item = Certificate>,
@@ -145,6 +160,11 @@ where
     Ok(())
 }
 
+#[cfg(any(
+    feature = "boring-tls",
+    feature = "openssl-tls",
+    feature = "rustls-tls"
+))]
 pub(super) fn filter_map_certs<I>(certs: I) -> impl Iterator<Item = Certificate>
 where
     I: IntoIterator<Item = Result<Certificate>>,

@@ -363,7 +363,7 @@ Default: `boring-tls`, `http1`, `http2`, `stream`, `tracing`.
 |---------|---------|-------------|
 | **TLS** | | |
 | `boring-tls` | **Yes** | BoringSSL TLS backend |
-| `boring-vendored` | No | BoringSSL with vendored static linking (FIPS) |
+| `boring-vendored` | No | BoringSSL with vendored static linking (non-FIPS; FIPS is unavailable on macOS because BoringSSL's FIPS build requires GNU `objcopy`) |
 | `rustls-tls` | No | Rustls TLS backend (pure Rust) |
 | `openssl-tls` | No | OpenSSL TLS backend |
 | `openssl-vendored` | No | OpenSSL with vendored static linking |
@@ -434,7 +434,8 @@ hpx = { version = "2", default-features = false, features = ["rustls-tls", "http
 # OpenSSL backend
 hpx = { version = "2", default-features = false, features = ["openssl-tls", "http1", "http2"] }
 
-# BoringSSL vendored (static linking, FIPS)
+# BoringSSL vendored (static linking; non-FIPS, buildable on all platforms
+# including macOS — FIPS requires GNU objcopy and is unavailable on macOS)
 hpx = { version = "2", default-features = false, features = ["boring-vendored", "http1", "http2"] }
 
 # OpenSSL vendored (static linking, no system OpenSSL needed)

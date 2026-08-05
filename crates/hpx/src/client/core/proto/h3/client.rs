@@ -55,10 +55,7 @@ pub(crate) type ClientRx<B> = dispatch::Receiver<Request<B>, Response<IncomingBo
 #[cfg_attr(not(test), expect(dead_code))]
 pub(crate) struct ConnTask<B>
 where
-    B: Body,
-    B: 'static,
-    B: Unpin,
-    B: Send,
+    B: Body + 'static + Unpin + Send,
     B::Data: Send,
 {
     /// Cloneable h3 `SendRequest` for opening new request streams.
