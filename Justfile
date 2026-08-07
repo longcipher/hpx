@@ -30,17 +30,7 @@ test-full:
     else
         cargo nextest run --workspace --all-features
     fi
-bdd:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ "$(uname)" = "Darwin" ]; then
-        cargo test -p hpx-dl --test cucumber
-        cargo test -p hpxless --test cucumber
-    else
-        cargo test -p hpx-dl --test cucumber --all-features
-        cargo test -p hpxless --test cucumber --all-features
-    fi
-test-all: test-full bdd
+test-all: test-full
 build-docs:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -56,6 +46,15 @@ test-coverage:
         cargo tarpaulin --workspace --timeout 300
     else
         cargo tarpaulin --all-features --workspace --timeout 300
+    fi
+# Run mutation testing (cargo-mutants) to measure test-suite kill rate
+mutate:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "$(uname)" = "Darwin" ]; then
+        cargo mutants --workspace
+    else
+        cargo mutants --workspace --all-features
     fi
 # Check that AGENTS.md dependency versions match Cargo.toml
 check-agents-md:

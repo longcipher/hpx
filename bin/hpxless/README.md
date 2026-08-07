@@ -73,7 +73,7 @@ with sync_playwright() as p:
 hpxless
 ├── cli.rs          — clap CLI definition
 ├── main.rs         — entry point, tracing, CDP server startup
-└── tests/          — BDD cucumber scenarios
+└── tests/          — CDP integration tests
 
 hpx-browser (library)
 ├── page.rs         — Page navigation, resource loading pipeline

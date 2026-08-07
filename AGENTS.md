@@ -162,11 +162,10 @@ When fixing failures, identify root cause first, then apply idiomatic fixes inst
 Use outside-in development for behavior changes:
 
 - **Git Restrictions:** NEVER use `git worktree`. All code modifications MUST be made directly on the current branch in the existing working directory.
-- start with a failing Gherkin scenario under `features/`,
-- drive implementation with failing crate-local unit tests and `proptest` properties in the affected crate,
+- start with failing crate-local unit tests and `proptest` properties in the affected crate,
 - keep `proptest` in the normal `cargo test` loop instead of creating a separate property-test command,
 - treat `cargo-fuzz` as conditional planning work rather than baseline template setup,
-- keep `cucumber-rs` steps thin and route business rules through shared Rust crates.
+- validate test effectiveness with mutation testing (`cargo-mutants`).
 
 After each feature or bug fix, run:
 
@@ -174,18 +173,16 @@ After each feature or bug fix, run:
 just format
 just lint
 just test
-just bdd
 just test-all
+just mutate
 ```
 
 If any command fails, report the failure and do not claim completion.
 
 ## Testing Requirements
 
-- BDD scenarios: place Gherkin features under crate-level `features/` directory
-  (e.g., `crates/hpx-dl/features/`, `bin/hpxless/features/`) and keep the runner
-  in crate-level `tests/` with `cucumber-rs`.
-- Use BDD to define acceptance behavior first, then use crate-local unit tests and `proptest` properties for the inner TDD loop.
+- TDD is the primary workflow: unit tests colocated with implementation (`#[cfg(test)]`), integration tests in crate-level `tests/`, and `proptest` properties for invariants.
+- Use mutation testing (`cargo-mutants`, config in `.cargo/mutants.toml`) to validate that the test suite actually detects injected faults; target a high kill rate.
 - Unit tests: colocate with implementation (`#[cfg(test)]`).
 - Prefer example-based unit tests for named business cases and edge cases, and reserve `proptest` for invariants that should hold across many generated inputs.
 - Property tests: colocate `proptest` coverage with the crate logic it exercises so it runs through the ordinary `cargo test` path.
@@ -237,8 +234,7 @@ If any command fails, report the failure and do not claim completion.
 │   │   └── tests/            # http_integration.rs, ws_integration.rs
 │   └── hpxless/              # Lightweight CDP server binary (Puppeteer/Playwright-compatible endpoint)
 │       ├── src/              # main.rs, cli.rs
-│       ├── tests/            # cucumber.rs, cdp_integration.rs
-│       └── features/         # Gherkin BDD scenarios
+│       └── tests/            # cdp_integration.rs
 ├── crates/
 │   ├── hpx/                  # Core HTTP client (browser emulation, TLS, connection pooling)
 │   ├── hpx-browser/          # Headless browser engine (DOM, JS runtime, CDP, canvas, layout)
@@ -249,10 +245,10 @@ If any command fails, report the failure and do not claim completion.
 │   └── yawc/                 # WebSocket client/server (RFC 6455, compression, proxy)
 ├── specs/                    # Feature design specs (pb-plan/pb-build)
 ├── docs/                     # Design docs, plans, task breakdowns
-├── features/                 # Gherkin BDD scenarios (crate-level)
 ├── .github/workflows/        # ci.yml, release.yml
+├── .cargo/mutants.toml       # cargo-mutants mutation testing config
 ├── Cargo.toml                # Workspace root
-├── Justfile                  # Task runner (format, lint, test, bdd)
+├── Justfile                  # Task runner (format, lint, test, mutate)
 └── AGENTS.md                 # This file
 ```
 

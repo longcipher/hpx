@@ -14,7 +14,7 @@ Consolidated audit findings covering correctness bugs (retry budget leak, redire
 
 ## Why this matters
 
-The hpx crate targets HFT crypto exchange workloads where correctness and security are non-negotiable. The retry budget bug silently disables retries for streaming bodies. The redirect panic crashes the client on misconfiguration. The compression UB violates Rust's safety contract. The CI misconfiguration means integration tests and BDD scenarios never run in CI, giving false green signals.
+The hpx crate targets HFT crypto exchange workloads where correctness and security are non-negotiable. The retry budget bug silently disables retries for streaming bodies. The redirect panic crashes the client on misconfiguration. The compression UB violates Rust's safety contract. The CI misconfiguration means integration tests never run in CI, giving false green signals.
 
 ## Approach
 
@@ -220,15 +220,9 @@ Before serializing, parse the proxy URL and strip `userinfo` (username:password@
 
 ---
 
-### Finding 10: CI skips integration and BDD tests (TEST-02)
-
-- **Category:** testing
-- **Impact:** MEDIUM
-- **Effort:** S
-
 #### Requirements (EARS Notation)
 
-- **[REQ-19]:** THE `just ci` target SHALL run lint, all unit tests, all integration tests, and BDD scenarios.
+- **[REQ-19]:** THE `just ci` target SHALL run lint, all unit tests, and all integration tests.
 - **[REQ-20]:** THE `just test` target SHALL run all workspace tests including hpx-dl.
 
 #### Current state
@@ -438,14 +432,6 @@ Add `#[deprecated]` to each config group struct. Keep the delegation code to avo
 - **Decision:** Deprecate config groups, keep ClientBuilder as primary API.
 - **Consequences:** Breaking warning for users of config groups. Simplified maintenance.
 
-## BDD/TDD Strategy
-
-- **Primary Language:** Rust
-- **BDD Runner:** cucumber-rs (`cargo test -p hpx-dl --test cucumber --all-features`)
-- **Unit Test Command:** `cargo nextest run --workspace --all-features`
-- **Feature Files:** `specs/2026-06-25-01-codebase-quality/features/*.feature`
-- **Outside-in Loop:** Each finding has a RED→GREEN→REFACTOR cycle driven by the feature scenarios
-
 ## Code Simplification Constraints
 
 **Ponytail Ladder (mandatory at every decision point):**
@@ -467,28 +453,6 @@ Add `#[deprecated]` to each config group struct. Keep the delegation code to avo
 - **Repo Standards:** Use only the coding standards established by `AGENTS.md` and the existing codebase.
 - **Refactor Scope:** Limit cleanup to touched modules unless the design explicitly justifies broader refactor.
 
-## BDD Scenario Inventory
-
-- `features/correctness.feature` — Retry budget preserved on clone failure → Task 1.1, 1.2
-- `features/correctness.feature` — Missing redirect policy returns error → Task 2.1, 2.2
-- `features/correctness.feature` — Safe compression buffer → Task 3.1, 3.2
-- `features/correctness.feature` — Scheduler race fix → Task 4.1, 4.2
-- `features/correctness.feature` — Queue remove performance → Task 5.1, 5.2
-- `features/security.feature` — Cookie jar saves all cookies → Task 6.1, 6.2
-- `features/security.feature` — NDJSON escaping → Task 7.1, 7.2
-- `features/security.feature` — CDP serve access control → Task 8.1, 8.2
-- `features/security.feature` — Proxy credential stripping → Task 9.1, 9.2
-- `features/test-coverage.feature` — CI runs all tests → Task 10.1, 10.2
-- `features/test-coverage.feature` — hpx-streams codec tests → Task 11.1, 11.2
-- `features/test-coverage.feature` — yawc codec tests → Task 12.1, 12.2
-- `features/test-coverage.feature` — Lint target cleanup → Task 13.1
-- `features/tech-debt.feature` — hpx dead_code allow removal → Task 14.1, 14.2
-- `features/tech-debt.feature` — hpx-browser lint enables → Task 15.1, 15.2
-- `features/tech-debt.feature` — Dead feature flags → Task 16.1
-- `features/tech-debt.feature` — fast_random removal → Task 17.1
-- `features/architecture.feature` — Error type consolidation → Task 18.1–18.4
-- `features/architecture.feature` — Config group deprecation → Task 19.1, 19.2
-
 ## Existing Components to Reuse
 
 - `url::Url` for proxy URL credential stripping (already a workspace dependency)
@@ -502,5 +466,4 @@ Add `#[deprecated]` to each config group struct. Keep the delegation code to avo
 | Format    | `cargo +nightly fmt --all`        | exit 0              |
 | Lint      | `cargo +nightly clippy --all -- -D warnings` | exit 0, no errors |
 | Tests     | `cargo nextest run --workspace --all-features` | all pass |
-| BDD       | `cargo test -p hpx-dl --test cucumber --all-features` | all pass |
 | All       | `just test-all`                   | all pass            |

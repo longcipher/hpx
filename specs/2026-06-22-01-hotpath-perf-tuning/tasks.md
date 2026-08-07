@@ -21,7 +21,6 @@ Planned at commit `b9b0830`. Execute via `/pb-build 2026-06-22-01-hotpath-perf-t
 - [x] Step 3: Add `hotpath = ["dep:hotpath"]` to `[features]`
 - [x] Step 4: Run `cargo check -p hpx --features hotpath` — compiles
 - [x] Step 5: Run `cargo check -p hpx` — still compiles without feature
-- [x] BDD Verification: N/A — Cargo.toml change only
 - [x] Advanced Test Verification: `cargo nextest run -p hpx --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly clippy -p hpx --all-features -- -D warnings`
 
@@ -42,7 +41,6 @@ Planned at commit `b9b0830`. Execute via `/pb-build 2026-06-22-01-hotpath-perf-t
 - [x] Step 5: Find and annotate the `Connector::connect` method in `crates/hpx/src/client/conn/connector.rs`
 - [x] Step 6: Run `cargo check -p hpx --features hotpath` — compiles
 - [x] Step 7: Run `cargo bench -p hpx --features hotpath --bench http_throughput -- --warm-up-time 1 --measurement-time 2` — hotpath output appears
-- [x] BDD Verification: N/A — instrumentation only
 - [x] Advanced Test Verification: `cargo nextest run -p hpx --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly clippy -p hpx --all-features -- -D warnings`
 
@@ -61,7 +59,6 @@ Planned at commit `b9b0830`. Execute via `/pb-build 2026-06-22-01-hotpath-perf-t
 - [x] Step 3: Add `hotpath = ["dep:hotpath"]` to `[features]`
 - [x] Step 4: Run `cargo check -p hpx-dl --features hotpath` — compiles
 - [x] Step 5: Run `cargo check -p hpx-dl` — still compiles without feature
-- [x] BDD Verification: N/A — Cargo.toml change only
 - [x] Advanced Test Verification: `cargo nextest run -p hpx-dl --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly clippy -p hpx-dl --all-features -- -D warnings`
 
@@ -83,7 +80,6 @@ Planned at commit `b9b0830`. Execute via `/pb-build 2026-06-22-01-hotpath-perf-t
 - [x] Step 6: Add `#[cfg_attr(feature = "hotpath", hotpath::measure)]` to `compute_checksum` in `crates/hpx-dl/src/checksum.rs:31`
 - [x] Step 7: Add `#[cfg_attr(feature = "hotpath", hotpath::measure)]` to `hash_file` in `crates/hpx-dl/src/checksum.rs:12`
 - [x] Step 8: Run `cargo check -p hpx-dl --features hotpath` — compiles
-- [x] BDD Verification: N/A — instrumentation only
 - [x] Advanced Test Verification: `cargo nextest run -p hpx-dl --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly clippy -p hpx-dl --all-features -- -D warnings`
 
@@ -108,7 +104,6 @@ Planned at commit `b9b0830`. Execute via `/pb-build 2026-06-22-01-hotpath-perf-t
 - [x] Step 5: Update `ProxyPool::with_strategy` to wrap matchers in `Arc::new()`
 - [x] Step 6: Update `ProxyPoolService::call` if it uses `selected.matcher` directly
 - [x] Step 7: Run `cargo nextest run -p hpx --all-features` — all pass
-- [x] BDD Verification: N/A — internal refactor
 - [x] Advanced Test Verification: `cargo nextest run --workspace --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly clippy -p hpx --all-features -- -D warnings`
 
@@ -129,7 +124,6 @@ Planned at commit `b9b0830`. Execute via `/pb-build 2026-06-22-01-hotpath-perf-t
 - [x] Step 1: Read `crates/hpx-dl/src/segment.rs:650-677` to confirm the double iteration
 - [x] Step 2: Replace with a single `for` loop that collects both `completed_segments` and `bytes_completed`
 - [x] Step 3: Run `cargo nextest run -p hpx-dl --all-features` — all pass
-- [x] BDD Verification: N/A — internal refactor
 - [x] Advanced Test Verification: `cargo nextest run --workspace --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly clippy -p hpx-dl --all-features -- -D warnings`
 
@@ -147,7 +141,6 @@ Planned at commit `b9b0830`. Execute via `/pb-build 2026-06-22-01-hotpath-perf-t
 - [x] Step 2: Check if `hpx-dl` has access to `hpx::hash::HashSet` or needs its own `ahash` import
 - [x] Step 3: Change `std::collections::HashSet<u32>` to use `ahash::HashSet` with the project's hasher
 - [x] Step 4: Run `cargo nextest run -p hpx-dl --all-features` — all pass
-- [x] BDD Verification: N/A — internal refactor
 - [x] Advanced Test Verification: `cargo nextest run --workspace --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly clippy -p hpx-dl --all-features -- -D warnings`
 
@@ -164,7 +157,6 @@ Planned at commit `b9b0830`. Execute via `/pb-build 2026-06-22-01-hotpath-perf-t
 - [x] Step 1: Read `crates/hpx-dl/src/checksum.rs:36` to confirm 8 KiB buffer
 - [x] Step 2: Change `let mut buf = [0u8; 8192]` to `let mut buf = [0u8; 65536]`
 - [x] Step 3: Run `cargo nextest run -p hpx-dl --all-features` — all checksum tests pass
-- [x] BDD Verification: N/A — constant change
 - [x] Advanced Test Verification: `cargo nextest run --workspace --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly clippy -p hpx-dl --all-features -- -D warnings`
 
@@ -185,8 +177,7 @@ Planned at commit `b9b0830`. Execute via `/pb-build 2026-06-22-01-hotpath-perf-t
 - [x] Step 1: Run `just format` — all files formatted
 - [x] Step 2: Run `just lint` — no warnings
 - [x] Step 3: Run `just test` — all tests pass
-- [x] Step 4: Run `just test-all` — all tests pass including BDD
-- [x] BDD Verification: `just bdd` — all pass
+- [x] Step 4: Run `just test-all`
 - [x] Advanced Test Verification: `cargo bench --workspace --all-features` — benchmarks run
 - [x] Runtime Verification: `cargo bench --package hpx-yawc --features hotpath --bench websocket_core -- --warm-up-time 1 --measurement-time 2` — hotpath output shows function timings
 
@@ -204,6 +195,5 @@ Planned at commit `b9b0830`. Execute via `/pb-build 2026-06-22-01-hotpath-perf-t
 - [x] Step 2: Run `cargo bench --package hpx --features hotpath,json --bench json_parsing -- --warm-up-time 1 --measurement-time 2` — verify hotpath output appears
 - [x] Step 3: Run `cargo bench --package hpx --features hotpath --bench http_throughput -- --warm-up-time 1 --measurement-time 2` — verify hotpath output shows hpx functions
 - [x] Step 4: Document the hotpath output in a comment or PR description
-- [x] BDD Verification: N/A — profiling validation
 - [x] Advanced Test Verification: N/A — profiling validation
 - [x] Runtime Verification: All benchmarks exit 0

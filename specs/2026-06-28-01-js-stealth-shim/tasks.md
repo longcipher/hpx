@@ -27,7 +27,7 @@ This spec adds JS-level stealth to hpx by porting obscura's anti-detection shims
 
 ---
 
-## Phase 1: BDD Harness & Scaffolding
+## Phase 1: Test Harness & Scaffolding
 
 ### Task 1.1: Create stealth_bootstrap.js scaffold
 
@@ -108,7 +108,7 @@ This spec adds JS-level stealth to hpx by porting obscura's anti-detection shims
 - **Scope:** JS stealth implementation
 - **Requirement Coverage:** R1-R5, R8-R9, R13, R16
 - **Scenario Coverage:** `stealth-js-shim.feature` Scenarios: Navigator identity, WebDriver hidden, Chrome object, Screen dimensions, sec-ch-ua tokens, userAgentData, Stub objects, Performance API
-- **Loop Type:** BDD+TDD
+- **Loop Type:** TDD
 - **Behavioral Contract:** Preserve existing behavior (additive only)
 - **Simplification Focus:** Each shim section independently testable
 - **Advanced Test Coverage:** Example-based only
@@ -123,7 +123,6 @@ This spec adds JS-level stealth to hpx by porting obscura's anti-detection shims
 - [x] **Step 8:** Implement stub objects — Notification, WebGLRenderingContext, WebGL2RenderingContext
 - [x] **Step 9:** Implement performance.memory and performance.timeOrigin
 - [x] **Step 10:** Write unit tests for each shim section
-- [x] **BDD Verification:** Run `stealth-js-shim.feature` scenarios for navigator, webdriver, chrome, screen, GREASE, userAgentData, stubs, performance
 - [x] **Verification:** `cargo test -p hpx-browser --all-features` passes
 - [x] **Advanced Test Verification:** N/A
 
@@ -136,7 +135,7 @@ This spec adds JS-level stealth to hpx by porting obscura's anti-detection shims
 - **Scope:** JS stealth implementation
 - **Requirement Coverage:** R6, R7
 - **Scenario Coverage:** `stealth-js-shim.feature` Scenarios: Canvas noise, Audio context
-- **Loop Type:** BDD+TDD
+- **Loop Type:** TDD
 - **Behavioral Contract:** Preserve existing behavior (additive only)
 - **Simplification Focus:** Use existing _fpRand for deterministic noise
 - **Advanced Test Coverage:** Property (proptest for noise uniqueness)
@@ -145,7 +144,6 @@ This spec adds JS-level stealth to hpx by porting obscura's anti-detection shims
 - [x] **Step 2:** Implement AudioContext constructor override — randomize sampleRate, baseLatency, compressor thresholds
 - [x] **Step 3:** Write unit tests: same seed → same canvas hash; different seeds → different hashes
 - [x] **Step 4:** Write proptest: canvas noise is unique per session seed
-- [x] **BDD Verification:** Run `stealth-js-shim.feature` scenarios for canvas and audio
 - [x] **Verification:** `cargo test -p hpx-browser --all-features` passes
 - [x] **Advanced Test Verification:** `cargo test -p hpx-browser -- proptest` passes
 
@@ -182,7 +180,7 @@ This spec adds JS-level stealth to hpx by porting obscura's anti-detection shims
 - **Scope:** CLI → CDP → JS runtime wiring
 - **Requirement Coverage:** R12
 - **Scenario Coverage:** `stealth-wiring.feature` Scenario: --stealth flag wired
-- **Loop Type:** BDD+TDD
+- **Loop Type:** TDD
 - **Behavioral Contract:** Preserve existing behavior (stealth=false by default)
 - **Simplification Focus:** Minimal change — pass bool through constructor chain
 - **Advanced Test Coverage:** Example-based only
@@ -193,7 +191,6 @@ This spec adds JS-level stealth to hpx by porting obscura's anti-detection shims
 - [x] **Step 4:** Update `handle_serve` to pass `_stealth` (rename to `stealth`) to `CdpServer::start()`
 - [x] **Step 5:** Add `stealth: bool` to CLI args on `serve` subcommand (already exists as `_stealth`, just wire it)
 - [x] **Step 6:** Write integration test: CDP server with stealth=true → evaluate navigator.webdriver
-- [x] **BDD Verification:** Run `stealth-wiring.feature` scenario
 - [x] **Verification:** `cargo test -p hpx-browser --all-features` and `cargo test -p hpx-cli --all-features` pass
 - [x] **Runtime Verification:** Start server with `cargo run -p hpx-cli -- serve --stealth`, connect via CDP, verify navigator.webdriver === false
 - [x] **Advanced Test Verification:** N/A
@@ -207,7 +204,7 @@ This spec adds JS-level stealth to hpx by porting obscura's anti-detection shims
 - **Scope:** Profile-to-globals bridge
 - **Requirement Coverage:** R10, R11
 - **Scenario Coverage:** `stealth-js-shim.feature` Scenario: Navigator identity consistency
-- **Loop Type:** BDD+TDD
+- **Loop Type:** TDD
 - **Behavioral Contract:** Preserve existing behavior (additive only)
 - **Simplification Focus:** Read profile fields directly, no intermediate mapping
 - **Advanced Test Coverage:** Example-based only
@@ -217,35 +214,12 @@ This spec adds JS-level stealth to hpx by porting obscura's anti-detection shims
 - [x] **Step 3:** Call `runtime.set_stealth(true)`
 - [x] **Step 4:** Call `runtime.run_page_init()`
 - [x] **Step 5:** Write test: Chrome 148 macOS profile → evaluate navigator.userAgent contains "Macintosh"
-- [x] **BDD Verification:** Run `stealth-js-shim.feature` scenarios
 - [x] **Verification:** `cargo test -p hpx-browser --all-features` passes
 - [x] **Advanced Test Verification:** N/A
 
 ---
 
 ## Phase 4: Polish, QA & Docs
-
-### Task 4.1: Add BDD feature files
-
-> **Context:** The existing `stealth-profile.feature` covers Rust-side validation only. We need `stealth-js-shim.feature` for JS shim behavior and `stealth-wiring.feature` for CLI integration.
-> **Verification:** BDD scenarios run and pass.
-
-- **Priority:** P1
-- **Scope:** BDD acceptance tests
-- **Requirement Coverage:** R1-R16
-- **Scenario Coverage:** All scenarios in stealth-js-shim.feature and stealth-wiring.feature
-- **Loop Type:** BDD+TDD
-- **Behavioral Contract:** Preserve existing behavior
-- **Simplification Focus:** Thin BDD steps, route through Rust unit tests
-- **Advanced Test Coverage:** Example-based only
-- **Status:** 🟢 DONE
-- [x] **Step 1:** Create `specs/2026-06-28-01-js-stealth-shim/features/stealth-js-shim.feature` with scenarios
-- [x] **Step 2:** Create `specs/2026-06-28-01-js-stealth-shim/features/stealth-wiring.feature` with scenarios
-- [x] **Step 3:** Add step definitions in `crates/hpx-browser/tests/` if cucumber-rs is set up
-- [x] **Step 4:** Run `cargo test -p hpx-browser --test cucumber --all-features` and verify all pass
-- [x] **BDD Verification:** All scenarios pass
-- [x] **Verification:** `just bdd` passes
-- [x] **Advanced Test Verification:** N/A
 
 ### Task 4.2: Lint, format, and final verification
 

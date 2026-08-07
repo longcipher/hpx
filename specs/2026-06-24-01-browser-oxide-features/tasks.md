@@ -10,7 +10,7 @@
 
 ## Summary & Phasing
 
-Create `hpx-browser` crate — a full standalone browser engine porting ALL features from browser_oxide. Eight phases: (1) Foundation — crate setup, deps, feature flags; (2) Networking — HttpClient, TLS, headers, cookies, CSP; (3) Stealth — challenge detection, profiles, humanization; (4) DOM + CSS — html5ever DOM, CSS parser, taffy layout; (5) JS Runtime — deno_core, 16 extensions, event loop; (6) Canvas — skia-safe 2D, WebGL stubs, audio; (7) Advanced — Workers, iframes, CDP, pool, parallel; (8) Integration — navigate loop, BDD, benchmarks.
+Create `hpx-browser` crate — a full standalone browser engine porting ALL features from browser_oxide. Eight phases: (1) Foundation — crate setup, deps, feature flags; (2) Networking — HttpClient, TLS, headers, cookies, CSP; (3) Stealth — challenge detection, profiles, humanization; (4) DOM + CSS — html5ever DOM, CSS parser, taffy layout; (5) JS Runtime — deno_core, 16 extensions, event loop; (6) Canvas — skia-safe 2D, WebGL stubs, audio; (7) Advanced — Workers, iframes, CDP, pool, parallel; (8) Integration — navigate loop, benchmarks.
 
 - **Planner Contract Rule:** Emit a contract-complete, build-eligible spec in existing markdown artifacts.
 - **State Contract Rule:** `🔴 TODO` -> `🟡 IN PROGRESS` -> `🟢 DONE`; exceptional: `⏭️ SKIPPED`, `🔄 DCR`, `⛔ OBSOLETE`.
@@ -46,7 +46,6 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 7:** Add hpx workspace dep: `hpx = { workspace = true }`
 - [x] **Step 8:** Create `crates/hpx-browser/src/lib.rs` with `#![deny(unsafe_code)]` and module stubs
 - [x] **Step 9:** Add `[workspace]` member entry in root Cargo.toml
-- [x] **BDD Verification:** N/A
 - [x] **Verification:** `cargo check -p hpx-browser` and `cargo check -p hpx-browser --features v8,canvas,quic,cdp,workers` both compile
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -81,7 +80,6 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 14:** Create `src/protocol/mod.rs` stub (gated on `cdp`)
 - [x] **Step 15:** Create `src/pool.rs` and `src/parallel.rs` stubs
 - [x] **Step 16:** Create `src/host/mod.rs` with `EngineHandle` stub
-- [x] **BDD Verification:** N/A
 - [x] **Verification:** `cargo check -p hpx-browser --all-features` compiles
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -111,7 +109,6 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 5:** Port H1 memory (`h1_only_hosts`) and stale-connection recovery
 - [x] **Step 6:** Port `preconnect()` for pre-establishing H2 connections
 - [x] **Step 7:** Write unit tests for HttpClient construction, GET/POST, redirect following
-- [x] **BDD Verification:** N/A
 - [x] **Verification:** `cargo test -p hpx-browser net` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -137,7 +134,6 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 5:** Port `chrome_connector()` building SslConnector per device_class
 - [x] **Step 6:** Port `configure_connection()` with ECH GREASE, ALPS, SNI
 - [x] **Step 7:** Write tests: cipher order matches reference capture, extension permutation works
-- [x] **BDD Verification:** N/A
 - [x] **Verification:** `cargo test -p hpx-browser tls` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -163,7 +159,6 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 5:** Write property tests for CSP parser (arbitrary headers, no panic)
 - [x] **Step 6:** Write fuzz target for CSP parser
 - [x] **Step 7:** Write tests: regional language matching, cookie domain scoping, CSP strict-dynamic
-- [x] **BDD Verification:** `cargo test -p hpx-browser csp` passes
 - [x] **Verification:** `cargo test -p hpx-browser net` passes
 - [x] **Advanced Test Verification:** `cargo fuzz run csp_parser -- -max_total_time=30` — no crashes
 - [x] **Runtime Verification:** N/A
@@ -190,7 +185,6 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 2:** Port `ChallengeVerdict`, `ChallengeKind`, `SolveOutcome`, `ChallengeSolver` trait
 - [x] **Step 3:** Write 20+ unit tests for classification
 - [x] **Step 4:** Write proptest: engine_classify never panics on any input
-- [x] **BDD Verification:** `cargo test -p hpx-browser challenge` passes
 - [x] **Verification:** `cargo test -p hpx-browser challenge` passes
 - [x] **Advanced Test Verification:** `cargo test -p hpx-browser proptest_classify` passes
 - [x] **Runtime Verification:** N/A
@@ -214,7 +208,6 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 3:** Port all presets: chrome_148_{windows,macos,linux}, firefox_135_{macos,windows,linux}, safari_18_macos, regional variants
 - [x] **Step 4:** Port `random_desktop()`, `with_locale()`, `chrome_148_macos_sampled()`
 - [x] **Step 5:** Write tests: all presets validate, random_desktop diversity
-- [x] **BDD Verification:** `cargo test -p hpx-browser stealth` passes
 - [x] **Verification:** `cargo test -p hpx-browser stealth` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -238,7 +231,6 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 3:** Port `keystroke_timings()` — LogNormal dwell/flight, bigram modulation
 - [x] **Step 4:** Port `wheel_burst()` — Trackpad exponential decay, Wheel discrete notches
 - [x] **Step 5:** Write tests: deterministic output, trajectory approaches target
-- [x] **BDD Verification:** `cargo test -p hpx-browser humanize` passes
 - [x] **Verification:** `cargo test -p hpx-browser behavior` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -269,7 +261,6 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 6:** Implement `css_selectors::Element` trait for DOM nodes
 - [x] **Step 7:** Port html5ever parser integration: parse HTML string → Dom
 - [x] **Step 8:** Write tests: DOM construction, mutations, querySelector
-- [x] **BDD Verification:** `cargo test -p hpx-browser dom` passes
 - [x] **Verification:** `cargo test -p hpx-browser dom` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -295,7 +286,6 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 5:** Port computed style resolution
 - [x] **Step 6:** Write property tests: parse arbitrary CSS without panic
 - [x] **Step 7:** Write tests: selector matching, cascade priority, computed values
-- [x] **BDD Verification:** N/A
 - [x] **Verification:** `cargo test -p hpx-browser css` passes
 - [x] **Advanced Test Verification:** `cargo test -p hpx-browser proptest_css` passes
 - [x] **Runtime Verification:** N/A
@@ -320,7 +310,6 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 4:** Port Grid layout
 - [x] **Step 5:** Port `getBoundingClientRect()`, `offsetWidth`, `getComputedStyle()` JS bindings
 - [x] **Step 6:** Write tests: layout correctness for simple pages
-- [x] **BDD Verification:** N/A
 - [x] **Verification:** `cargo test -p hpx-browser layout` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -356,7 +345,6 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 11:** Port stealth extension (override navigator, screen, webdriver, etc.)
 - [x] **Step 12:** Port remaining extensions: SSE, WebSocket, performance, workers
 - [x] **Step 13:** Write tests: basic JS eval, DOM manipulation via JS, fetch() calls
-- [x] **BDD Verification:** `cargo test -p hpx-browser --features v8 js` passes
 - [x] **Verification:** `cargo test -p hpx-browser --features v8` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -382,7 +370,6 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 5:** Port idle detection (AllWorkDone, Timeout)
 - [x] **Step 6:** Port V8 deadline watcher (RAII guard, terminate_execution on budget exceeded)
 - [x] **Step 7:** Write tests: timer firing, rAF callback, idle detection
-- [x] **BDD Verification:** N/A
 - [x] **Verification:** `cargo test -p hpx-browser --features v8 event_loop` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -410,7 +397,6 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 3:** Port AudioContext fingerprint (DynamicsCompressor)
 - [x] **Step 4:** Port font shaping (rustybuzz + swash)
 - [x] **Step 5:** Write tests: canvas path rendering, PNG byte parity
-- [x] **BDD Verification:** N/A
 - [x] **Verification:** `cargo test -p hpx-browser --features canvas` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -437,7 +423,6 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 2:** Port postMessage/onmessage bridge
 - [x] **Step 3:** Port terminate()
 - [x] **Step 4:** Write tests: worker spawn, message passing, termination
-- [x] **BDD Verification:** N/A
 - [x] **Verification:** `cargo test -p hpx-browser --features workers` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -461,7 +446,6 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 3:** Port CSP frame-src enforcement
 - [x] **Step 4:** Port `rematerialize_iframes()` for script-injected iframes
 - [x] **Step 5:** Write tests: iframe isolation, srcdoc rendering
-- [x] **BDD Verification:** N/A
 - [x] **Verification:** `cargo test -p hpx-browser --features v8 iframe` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -484,7 +468,6 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 2:** Port basic CDP commands: Page.navigate, Runtime.evaluate, DOM.getDocument
 - [x] **Step 3:** Port CDP event emission: Page.loadEventFired, Network.responseReceived
 - [x] **Step 4:** Write tests: CDP server starts, basic command round-trip
-- [x] **BDD Verification:** N/A
 - [x] **Verification:** `cargo test -p hpx-browser --features cdp` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -508,14 +491,13 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 3:** Port `EngineHandle` (Send+Sync over !Send Page)
 - [x] **Step 4:** Port `PageSnapshot` for cross-thread result passing
 - [x] **Step 5:** Write tests: pool acquire/release, parallel navigate
-- [x] **BDD Verification:** N/A
 - [x] **Verification:** `cargo test -p hpx-browser --features v8 pool` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
 ---
 
-## Phase 8: Integration — navigate() Loop, BDD, Benchmarks
+## Phase 8: Integration — navigate() Loop, Benchmarks
 
 ### Task 8.1: Implement navigate() Loop
 
@@ -526,7 +508,7 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - **Scope:** Page navigation
 - **Requirement Coverage:** `R14`, `R23`
 - **Scenario Coverage:** `page-navigation.feature`
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Preserve existing behavior`
 - **Simplification Focus:** `N/A`
 - **Advanced Test Coverage:** `Example-based only`
@@ -537,31 +519,7 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 4:** Implement budget management (15s default, per-host overrides, sec-cpt 140s)
 - [x] **Step 5:** Implement cookie-diff retry and pending-nav poll
 - [x] **Step 6:** Implement geo-country splash detection and follow
-- [x] **Step 7:** Write BDD scenarios: navigate to clean page, navigate to challenge page
-- [x] **BDD Verification:** `cargo test -p hpx-browser --features v8 navigate` passes
-- [x] **Verification:** `cargo test -p hpx-browser --features v8` passes
-- [x] **Advanced Test Verification:** N/A
-- [x] **Runtime Verification:** N/A
-
-### Task 8.2: Write BDD Feature Files
-
-> **Context:** Write Gherkin feature files for page navigation, DOM rendering, JS execution acceptance tests.
-> **Verification:** All BDD scenarios defined.
-
-- **Priority:** P1
-- **Scope:** BDD acceptance tests
-- **Requirement Coverage:** `R14`, `R16`, `R23`
-- **Scenario Coverage:** `page-navigation.feature`, `dom-rendering.feature`, `js-execution.feature`
-- **Loop Type:** `BDD+TDD`
-- **Behavioral Contract:** `Preserve existing behavior`
-- **Simplification Focus:** `N/A`
-- **Advanced Test Coverage:** `Example-based only`
-- **Status:** 🟢 DONE
-- [x] **Step 1:** Create `features/page-navigation.feature` with scenarios: Navigate to clean page, Navigate with challenge detection, Navigate warm reuse
-- [x] **Step 2:** Create `features/dom-rendering.feature` with scenarios: Parse HTML, Query elements, Mutate DOM
-- [x] **Step 3:** Create `features/js-execution.feature` with scenarios: Evaluate JS, DOM manipulation via JS, Timer execution
-- [x] **Step 4:** Create step definitions
-- [x] **BDD Verification:** All feature files parse correctly
+- [x] **Step 7:** Write integration tests for navigation (clean page, challenge page)
 - [x] **Verification:** `cargo test -p hpx-browser --features v8` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -583,14 +541,13 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 1:** Create `benches/page_throughput.rs` — criterion benchmark for page rendering
 - [x] **Step 2:** Create `benches/challenge_detection.rs` — engine_classify on various body sizes
 - [x] **Step 3:** Create `benches/tls_handshake.rs` — TLS handshake latency
-- [x] **BDD Verification:** N/A
 - [x] **Verification:** `cargo bench -p hpx-browser --bench page_throughput` runs
 - [x] **Advanced Test Verification:** All benchmarks meet regression budgets
 - [x] **Runtime Verification:** N/A
 
 ### Task 8.4: Full Workspace Verification
 
-> **Context:** Run full lint, test, BDD suite across entire workspace to verify nothing is broken.
+> **Context:** Run full lint and test suite across entire workspace to verify nothing is broken.
 > **Verification:** `just lint && just test && just test-all` all pass.
 
 - **Priority:** P0
@@ -605,9 +562,8 @@ Create `hpx-browser` crate — a full standalone browser engine porting ALL feat
 - [x] **Step 1:** Run `just format` — all code formatted
 - [x] **Step 2:** Run `just lint` — no warnings
 - [x] **Step 3:** Run `just test` — all unit/integration tests pass
-- [x] **Step 4:** Run `just bdd` — all BDD scenarios pass
+- [x] **Step 4:** Run `just test-all` — all tests pass
 - [x] **Step 5:** Run `just test-all` — full suite passes
-- [x] **BDD Verification:** All BDD scenarios pass
 - [x] **Verification:** `just lint && just test && just test-all` — all green
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A

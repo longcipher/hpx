@@ -217,36 +217,6 @@ hpx-cli can make HTTP requests, manage WebSocket connections, and run downloads,
 
 No template identity mismatches detected.
 
-### 5.6 BDD/TDD Strategy
-
-- **BDD Runner:** `cucumber` (Rust)
-- **BDD Command:** `cargo test -p hpx-cli --test cli_features`
-- **Unit Test Command:** `cargo test -p hpx-cli`
-- **Property Test Tool:** `proptest` for CLI argument parsing (already used in hpx-cli)
-- **Fuzz Test Tool:** N/A — CLI args are parsed by clap, not raw input
-- **Benchmark Tool:** N/A — CLI is not a hot path
-- **Outer Loop:** CLI subcommand scenarios prove end-to-end behavior
-- **Inner Loop:** Unit tests for dump format rendering, worker protocol, MCP tool dispatch
-- **Step Definition Location:** `bin/hpx-cli/tests/`
-
-### 5.7 BDD Scenario Inventory
-
-| Feature File | Scenario | Business Outcome | Primary Verification | Supporting TDD Focus |
-| :--- | :--- | :--- | :--- | :--- |
-| `features/fetch.feature` | Fetch page and dump HTML | User gets rendered HTML from JS-heavy page | `hpx fetch --dump html <url>` outputs HTML | Dump format dispatch |
-| `features/fetch.feature` | Fetch page and dump text | User gets readable text content | `hpx fetch --dump text <url>` outputs text | Text extraction |
-| `features/fetch.feature` | Fetch page and dump links | User gets all links as TSV | `hpx fetch --dump links <url>` outputs links | Link extraction |
-| `features/fetch.feature` | Fetch page and dump markdown | User gets Markdown | `hpx fetch --dump markdown <url>` outputs MD | HTML-to-Markdown |
-| `features/fetch.feature` | Fetch with --eval | User evaluates JS and gets result | `hpx fetch -e "document.title" <url>` | JS eval bridge |
-| `features/fetch.feature` | Fetch with --selector wait | User waits for element to appear | `hpx fetch --selector "#app" <url>` | Selector polling |
-| `features/fetch.feature` | Fetch raw bytes (dump original) | User gets raw HTTP response | `hpx fetch --dump original <url>` | Binary-safe output |
-| `features/scrape.feature` | Scrape multiple URLs | User scrapes N URLs in parallel | `hpx scrape <url1> <url2>` outputs JSON | Worker protocol |
-| `features/scrape.feature` | Scrape with concurrency limit | User controls parallelism | `hpx scrape --concurrency 3 <urls>` | Semaphore |
-| `features/serve.feature` | Start CDP server | Puppeteer can connect | `hpx serve --port 9222` accepts WS | CDP handshake |
-| `features/serve.feature` | Multi-worker serve | Load balancer distributes | `hpx serve --workers 4` spawns 4 workers | TCP round-robin |
-| `features/mcp.feature` | MCP stdio server | AI agent can list tools | `hpx mcp` responds to tools/list | MCP protocol |
-| `features/mcp.feature` | MCP HTTP server | HTTP client can call tools | `hpx mcp --http --port 3000` | HTTP transport |
-
 ### 5.8 Simplification Opportunities in Touched Code
 
 | Area | Current Complexity or Smell | Planned Simplification | Why It Preserves or Clarifies Behavior |
@@ -607,15 +577,6 @@ Existing env vars already supported: `HPX_PROXY`, `HPX_TIMEOUT`, `HPX_METHOD`, `
 - `hpx serve` with Puppeteer connecting via WebSocket
 - `hpx mcp` with MCP client sending tools/list
 
-### 7.4 BDD Acceptance Testing
-
-| Scenario ID | Feature File | Command | Success Criteria |
-| :--- | :--- | :--- | :--- |
-| **BDD-01** | `features/fetch.feature` | `cargo test -p hpx-cli --test fetch` | All fetch scenarios pass |
-| **BDD-02** | `features/scrape.feature` | `cargo test -p hpx-cli --test scrape` | All scrape scenarios pass |
-| **BDD-03** | `features/serve.feature` | `cargo test -p hpx-cli --test serve` | All serve scenarios pass |
-| **BDD-04** | `features/mcp.feature` | `cargo test -p hpx-mcp` | All MCP scenarios pass |
-
 ### 7.5 Robustness & Performance Testing
 
 | Test Type | When It Is Required | Tool / Command | Planned Coverage or Reason Not Needed |
@@ -643,4 +604,4 @@ Existing env vars already supported: `HPX_PROXY`, `HPX_TIMEOUT`, `HPX_METHOD`, `
 - [ ] **Phase 2: Fetch & Scrape** — Implement fetch handler (all dump formats), scrape handler (worker subprocess), hpx-worker binary
 - [ ] **Phase 3: Serve & MCP** — Wire CDP server to serve subcommand, create hpx-mcp crate, implement MCP tools
 - [ ] **Phase 4: Supporting Features** — SSRF guard, robots.txt, tracker blocklist, HTML-to-Markdown, env vars
-- [ ] **Phase 5: Testing & Polish** — Integration tests, BDD scenarios, clippy clean, docs
+- [ ] **Phase 5: Testing & Polish** — Integration tests, clippy clean, docs

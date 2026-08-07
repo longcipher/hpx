@@ -375,38 +375,12 @@ Implement a `redact()` helper on `Uri` or use `url::Url::password()` to strip cr
 - **Rationale:** Standard input validation prevents CRLF injection. The validation is cheap and the set of valid hostname characters is well-defined.
 - **Trade-off:** May reject unusual but technically valid IPv6 addresses in brackets — the regex `[a-zA-Z0-9.\-:\[\]]+` covers standard formats.
 
-## BDD/TDD Strategy
-
-- **Primary Language:** Rust
-- **BDD Runner:** cucumber-rs (existing in hpx-dl)
-- **BDD Command:** `cargo test -p hpx-dl --test cucumber --all-features`
-- **Unit Test Command:** `cargo nextest run --workspace --all-features`
-- **Feature Files:** `specs/2026-06-14-01-perf-security-hardening/features/*.feature`
-- **Outside-in Loop:** Performance scenarios are verified by existing integration tests + new unit tests. Security scenarios require new unit tests for validation functions.
-
 ## Code Simplification Constraints
 
 - **Behavioral Contract:** Preserve existing behavior unless a listed scenario explicitly changes it. The segment download produces identical output bytes. The WSS connection works identically. The persistence layer stores the same records.
 - **Repo Standards:** Use `thiserror` for library errors, `eyre` for app errors. Follow clippy pedantic + nursery. No `unwrap`/`expect` in non-test code.
 - **Readability Priorities:** Prefer explicit control flow, clear names, reduced nesting.
 - **Refactor Scope:** Limit cleanup to the touched functions/modules.
-
-## BDD Scenario Inventory
-
-> Complete list of ALL scenarios across ALL findings with task coverage.
-
-- `features/performance.feature` — Segment download avoids redundant seeks → Task 1.1, 1.2
-- `features/performance.feature` — TLS connector is cached across WSS connections → Task 2.1, 2.2
-- `features/performance.feature` — Segment filtering uses constant-time lookup → Task 3.1, 3.2
-- `features/performance.feature` — CSV stream reuses ReaderBuilder across rows → Task 4.1, 4.2
-- `features/performance.feature` — State transitions avoid unnecessary full-entry clones → Task 5.1, 5.2, 5.3
-- `features/performance.feature` — Persistence channel uses crossbeam-channel → Task 6.1, 6.2
-- `features/performance.feature` — Segment completion uses indexed lookup → Task 7.1, 7.2
-- `features/performance.feature` — Range header value avoids heap allocation → Task 8.1, 8.2
-- `features/correctness.feature` — Persistence worker drains pending commands on shutdown → Task 9.1, 9.2
-- `features/security.feature` — HTTP CONNECT tunnel rejects hosts with control characters → Task 10.1, 10.2
-- `features/security.feature` — Sensitive headers are redacted in request logging → Task 11.1, 11.2
-- `features/security.feature` — Proxy credentials are not logged in trace output → Task 12.1, 12.2
 
 ## Existing Components to Reuse
 
@@ -422,5 +396,4 @@ Implement a `redact()` helper on `Uri` or use `url::Url::password()` to strip cr
 | Format    | `cargo +nightly fmt --all`        | exit 0              |
 | Lint      | `cargo +nightly clippy --all -- -D warnings` | exit 0, no errors |
 | Tests     | `cargo nextest run --workspace --all-features` | all pass |
-| BDD       | `cargo test -p hpx-dl --test cucumber --all-features` | all pass |
 | Docs      | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items --all-features` | exit 0 |

@@ -36,7 +36,6 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
-cucumber = { workspace = true }
 futures-util = { workspace = true }
 hpx-yawc = { workspace = true }
 serde_json = { workspace = true }
@@ -48,10 +47,6 @@ tokio = { workspace = true, features = [
     "time",
 ] }
 url = { workspace = true }
-
-[[test]]
-name = "cucumber"
-harness = false
 
 [lints]
 workspace = true

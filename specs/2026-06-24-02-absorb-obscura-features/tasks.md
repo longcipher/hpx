@@ -34,7 +34,6 @@ Implementation adds obscura-cli's 4 subcommands (fetch/scrape/serve/mcp) to hpx-
 - [x] Step 3: Add global flags to `Cli` struct: `obey_robots`, `allow_private_network`, `v8_flags`, `storage_dir` (browser-specific)
 - [x] Step 4: Add proptest cases for new subcommand parsing (fetch with all flags, scrape with concurrency, serve with workers, mcp with http)
 - [x] Step 5: Route new subcommands in `main.rs` — match on new variants, call stub handlers
-- [x] BDD Verification: N/A — pure CLI parsing, no user-visible behavior yet
 - [x] Verification: `cargo test -p hpx-cli` — all existing + new parsing tests pass
 - [x] Advanced Test Verification: `cargo test -p hpx-cli proptest` — property tests pass
 - [x] Runtime Verification: N/A
@@ -53,7 +52,6 @@ Implementation adds obscura-cli's 4 subcommands (fetch/scrape/serve/mcp) to hpx-
 - [x] Step 2: Add `mod browser;` to `main.rs`
 - [x] Step 3: Route subcommands to handlers in `main.rs`
 - [x] Step 4: Add `GlobalFlags` struct to pass proxy, user-agent, storage-dir, etc. to handlers
-- [x] BDD Verification: N/A
 - [x] Verification: `cargo build -p hpx-cli` compiles. Running each subcommand prints stub message.
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: N/A
@@ -67,7 +65,7 @@ Implementation adds obscura-cli's 4 subcommands (fetch/scrape/serve/mcp) to hpx-
 > **Context:** Implement the full fetch handler in `browser.rs`. Uses hpx-browser's `Page` API for navigation, evaluation, and content extraction. Supports all 7 dump formats. Includes process-level hard deadline.
 > **Verification:** `hpx fetch --dump html https://example.com` outputs rendered HTML. `hpx fetch --dump text https://example.com` outputs text. `hpx fetch -e "document.title" https://example.com` outputs title.
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** New behavior — adds browser-based page fetching to hpx-cli
 - **Simplification Focus:** N/A — new code
 - **Advanced Test Coverage:** Example-based only
@@ -79,7 +77,6 @@ Implementation adds obscura-cli's 4 subcommands (fetch/scrape/serve/mcp) to hpx-
 - [x] Step 5: Implement `--selector` wait (poll with timeout)
 - [x] Step 6: Implement all dump formats: html (outer_html), text (text_content), links (extract `<a href>`), markdown (HTML-to-Markdown), assets (NDJSON of sub-resources), cookies (JSON array)
 - [x] Step 7: Write output to stdout or `--output` file
-- [x] BDD Verification: `features/fetch.feature` — fetch HTML, text, links, markdown, eval, selector scenarios pass
 - [x] Verification: `cargo test -p hpx-cli --test fetch` — all fetch integration tests pass
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: `hpx fetch --dump html https://httpbin.org/html` outputs valid HTML
@@ -89,7 +86,7 @@ Implementation adds obscura-cli's 4 subcommands (fetch/scrape/serve/mcp) to hpx-
 > **Context:** Implement parallel multi-URL scraping. Create `hpx-worker` binary that receives JSON commands via stdin and sends responses via stdout. The scrape handler spawns worker subprocesses with semaphore-based concurrency control.
 > **Verification:** `hpx scrape https://httpbin.org/html https://httpbin.org/json` outputs JSON results for both URLs.
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** New behavior — adds parallel scraping to hpx-cli
 - **Simplification Focus:** N/A — new code
 - **Advanced Test Coverage:** Example-based only
@@ -99,7 +96,6 @@ Implementation adds obscura-cli's 4 subcommands (fetch/scrape/serve/mcp) to hpx-
 - [x] Step 3: Implement `handle_scrape` in `browser.rs` — find hpx-worker binary, spawn subprocesses, semaphore concurrency control, collect results
 - [x] Step 4: Support `--eval`, `--concurrency`, `--format` (json/text), `--timeout`, `--quiet` flags
 - [x] Step 5: Add hpx-worker as a binary target in hpx-cli's Cargo.toml (or separate crate)
-- [x] BDD Verification: `features/scrape.feature` — scrape multiple URLs, concurrency limit scenarios pass
 - [x] Verification: `cargo test -p hpx-cli --test scrape` — all scrape integration tests pass
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: `hpx scrape https://httpbin.org/html https://httpbin.org/json` outputs valid JSON
@@ -109,7 +105,7 @@ Implementation adds obscura-cli's 4 subcommands (fetch/scrape/serve/mcp) to hpx-
 > **Context:** Wire hpx-browser's CDP protocol module to the serve subcommand. Support multi-worker load balancer when `--workers > 1`.
 > **Verification:** `hpx serve --port 9222` starts CDP server. `hpx serve --workers 4` spawns 4 worker processes with TCP load balancer.
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** New behavior — adds CDP server to hpx-cli
 - **Simplification Focus:** N/A — new code
 - **Advanced Test Coverage:** Example-based only
@@ -118,7 +114,6 @@ Implementation adds obscura-cli's 4 subcommands (fetch/scrape/serve/mcp) to hpx-
 - [x] Step 2: Implement multi-worker serve — spawn N hpx-worker serve processes on sequential ports, TCP load balancer on main port with round-robin routing (port from obscura-cli: peek first 4 bytes, route `/json` requests to first worker, route WebSocket to round-robin)
 - [x] Step 3: Implement banner print (version, CDP URL)
 - [x] Step 4: Handle graceful shutdown on Ctrl-C (save cookies)
-- [x] BDD Verification: `features/serve.feature` — CDP server starts, multi-worker scenarios pass
 - [x] Verification: `cargo test -p hpx-cli --test serve` — serve integration tests pass
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: `hpx serve --port 9222` starts and accepts connections
@@ -144,7 +139,6 @@ Implementation adds obscura-cli's 4 subcommands (fetch/scrape/serve/mcp) to hpx-
 - [x] Step 5: Define 32+ MCP tools in `tools.rs` — browser_navigate, browser_snapshot, browser_click, browser_fill, browser_type, browser_press_key, browser_select_option, browser_evaluate, browser_wait_for, browser_network_requests, browser_console_messages, browser_close, browser_markdown, browser_links, browser_interactive_elements, browser_back, browser_forward, browser_reload, browser_get_cookies, browser_set_cookie, browser_clear_cookies, browser_wait_for_text, browser_detect_forms, browser_fill_form, browser_scroll, browser_get_attribute, browser_count, browser_extract, browser_tab_new, browser_tab_list, browser_tab_switch, browser_tab_close, browser_search, browser_storage_state, browser_set_storage_state
 - [x] Step 6: Implement `BrowserState` in `state.rs` — multi-tab management, active tab, refs, console messages
 - [x] Step 7: Add `run_stdio()` and `run_http()` entry points
-- [x] BDD Verification: `features/mcp.feature` — MCP stdio and HTTP scenarios pass
 - [x] Verification: `cargo test -p hpx-mcp` — all MCP tests pass
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: N/A
@@ -162,7 +156,6 @@ Implementation adds obscura-cli's 4 subcommands (fetch/scrape/serve/mcp) to hpx-
 - [x] Step 1: Add `hpx-mcp` dependency to `bin/hpx-cli/Cargo.toml` (behind `mcp` feature)
 - [x] Step 2: Implement `handle_mcp` in `browser.rs` — parse args, call appropriate hpx-mcp entry point
 - [x] Step 3: Handle `--proxy`, `--user-agent`, `--stealth` flags passed to MCP server
-- [x] BDD Verification: N/A
 - [x] Verification: `cargo build -p hpx-cli --features mcp` compiles
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: `hpx mcp` responds to MCP initialize request
@@ -186,7 +179,6 @@ Implementation adds obscura-cli's 4 subcommands (fetch/scrape/serve/mcp) to hpx-
 - [x] Step 3: Integrate into hpx-browser's `net` module — check before every HTTP request
 - [x] Step 4: Add `--allow-private-network` bypass (reads `HPX_ALLOW_PRIVATE_NETWORK` env var too)
 - [x] Step 5: Add proptest cases for arbitrary IP strings — never panics, private IPs always blocked
-- [x] BDD Verification: N/A
 - [x] Verification: `cargo test -p hpx-browser --features net` — SSRF tests pass
 - [x] Advanced Test Verification: `cargo test -p hpx-browser proptest` — property tests pass
 - [x] Runtime Verification: N/A
@@ -205,7 +197,6 @@ Implementation adds obscura-cli's 4 subcommands (fetch/scrape/serve/mcp) to hpx-
 - [x] Step 2: Implement robots.txt parsing (User-agent, Allow, Disallow, Sitemap directives)
 - [x] Step 3: Implement cache with per-host storage (scc::HashMap)
 - [x] Step 4: Integrate into hpx-browser's navigation — check before fetch when obey_robots is enabled
-- [x] BDD Verification: N/A
 - [x] Verification: `cargo test -p hpx-browser --features net` — robots tests pass
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: N/A
@@ -223,7 +214,6 @@ Implementation adds obscura-cli's 4 subcommands (fetch/scrape/serve/mcp) to hpx-
 - [x] Step 1: Create `crates/hpx-browser/src/net/blocklist.rs` with embedded PGL domain list
 - [x] Step 2: Implement `is_blocked(domain: &str) -> bool` using a `HashSet` (lazy_static or once_cell)
 - [x] Step 3: Integrate into hpx-browser's HTTP client — check before every request when stealth is enabled
-- [x] BDD Verification: N/A
 - [x] Verification: `cargo test -p hpx-browser --features net` — blocklist tests pass
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: N/A
@@ -241,7 +231,6 @@ Implementation adds obscura-cli's 4 subcommands (fetch/scrape/serve/mcp) to hpx-
 - [x] Step 1: Create `crates/hpx-browser/src/markdown.rs` with `html_to_markdown(html: &str) -> String`
 - [x] Step 2: Implement conversion: headings, paragraphs, links, images, lists, code blocks, blockquotes, emphasis, tables
 - [x] Step 3: Integrate into Page API as `page.to_markdown()` method
-- [x] BDD Verification: N/A
 - [x] Verification: `cargo test -p hpx-browser` — markdown snapshot tests pass
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: N/A
@@ -260,7 +249,6 @@ Implementation adds obscura-cli's 4 subcommands (fetch/scrape/serve/mcp) to hpx-
 - [x] Step 2: Apply timezone in `main.rs` before any V8 initialization (set `TZ` env var)
 - [x] Step 3: Apply V8 flags via `hpx_browser::js_runtime::set_v8_flags()`
 - [x] Step 4: Wire `HPX_CDP_COMMAND_TIMEOUT_MS` and `HPX_SCRIPT_DEADLINE_MS` to hpx-browser config
-- [x] BDD Verification: N/A
 - [x] Verification: `cargo test -p hpx-cli` — env var parsing tests pass
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: N/A
@@ -285,7 +273,6 @@ Implementation adds obscura-cli's 4 subcommands (fetch/scrape/serve/mcp) to hpx-
 - [ ] Step 4: Test scrape with multiple URLs against test server
 - [ ] Step 5: Test serve (CDP server starts and accepts connections)
 - [ ] Step 6: Test mcp (stdio transport responds to initialize)
-- [x] BDD Verification: N/A
 - [x] Verification: `cargo test -p hpx-cli --test integration` — all pass
 - [ ] Advanced Test Verification: N/A
 - [ ] Runtime Verification: N/A
@@ -303,7 +290,6 @@ Implementation adds obscura-cli's 4 subcommands (fetch/scrape/serve/mcp) to hpx-
 - [x] Step 1: Run `cargo clippy --workspace -- -D warnings` and fix all issues
 - [x] Step 2: Run `just lint` and fix all issues
 - [x] Step 3: Run `just format` to apply formatting
-- [x] BDD Verification: N/A
 - [x] Verification: `just lint` exits 0
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: N/A
@@ -319,9 +305,8 @@ Implementation adds obscura-cli's 4 subcommands (fetch/scrape/serve/mcp) to hpx-
 - **Advanced Test Coverage:** N/A
 - **Status:** 🟢 DONE
 - [x] Step 1: Run `just test` — all unit tests pass
-- [x] Step 2: Run `just bdd` — all BDD tests pass
+- [x] Step 2: Run `just test-all` — all tests pass
 - [x] Step 3: Run `just test-all` — full suite passes
-- [x] BDD Verification: N/A
 - [x] Verification: `just test-all` exits 0
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: N/A
@@ -342,7 +327,7 @@ Implementation adds obscura-cli's 4 subcommands (fetch/scrape/serve/mcp) to hpx-
 ## Definition of Done
 
 1. [ ] **Linted:** `just lint` passes with no errors.
-2. [ ] **Tested:** `just test-all` passes — all unit, integration, and BDD tests green.
+2. [ ] **Tested:** `just test-all` passes — all unit and integration tests green.
 3. [ ] **Formatted:** `just format` applied.
 4. [ ] **Verified:** Each task's Verification criterion is met.
 5. [ ] **Behavior-Preserved:** All existing hpx-cli functionality unchanged.

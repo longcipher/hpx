@@ -187,15 +187,6 @@ Change to `[0u8; 65536]`. The buffer is stack-allocated, so 64 KiB is safe.
 - **Decision:** Wrap in `Arc` for O(1) clone. `Matcher` is read-only after pool construction.
 - **Consequences:** One extra indirection on access (negligible). No API change for callers.
 
-## BDD/TDD Strategy
-
-- **Primary Language:** Rust
-- **BDD Runner:** N/A (no new BDD scenarios — these are internal optimizations)
-- **Unit Test Command:** `cargo nextest run --workspace --all-features`
-- **Benchmark Command:** `cargo bench --workspace --all-features`
-- **Feature Files:** `specs/2026-06-22-01-hotpath-perf-tuning/features/performance.feature`
-- **Outside-in Loop:** hotpath feature enables profiling → benchmark → optimize → re-benchmark
-
 ## Verification
 
 | Purpose   | Command                           | Expected on success |

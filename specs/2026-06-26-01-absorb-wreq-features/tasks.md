@@ -37,7 +37,6 @@ Four phases: (1) Foundation fixes that don't depend on new profiles, (2) Browser
 - [x] Step 3: Implement `From<Platform> for EmulationOS` conversion.
 - [x] Step 4: Add `platform()` builder method to `EmulationOption`.
 - [x] Step 5: Unit tests: `is_mobile()` for each variant, `Platform→EmulationOS` conversion, `EmulationOption::builder().platform(Platform::Linux).build()`.
-- [x] **BDD Verification:** `cargo test -p hpx-emulation -- platform` — all platform tests pass
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
@@ -58,7 +57,6 @@ Four phases: (1) Foundation fixes that don't depend on new profiles, (2) Browser
 - [x] Step 2: Refactor `hpx::Error::is_connect()` to: check direct kind first, then walk chain looking for connect-related error types.
 - [x] Step 3: Add `hpx::Error::is_dns()` method that walks chain looking for DNS resolution errors.
 - [x] Step 4: Unit tests: 3-level nested timeout error, nested connect error, nested DNS error, direct match still works, non-matching chain returns false.
-- [x] **BDD Verification:** `cargo test -p hpx -- is_timeout` and `cargo test -p hpx -- is_connect` pass
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
@@ -79,7 +77,6 @@ Four phases: (1) Foundation fixes that don't depend on new profiles, (2) Browser
 - [x] Step 2: Ensure `PoisonPill` is accessible from `Response` (add to response extensions if needed).
 - [x] Step 3: Add `Response::forbid_recycle(&self)` method that sets the PoisonPill atomic flag.
 - [x] Step 4: Unit test: create response, call `forbid_recycle()`, verify PoisonPill is set.
-- [x] **BDD Verification:** `cargo test -p hpx -- forbid_recycle` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
@@ -104,7 +101,6 @@ Four phases: (1) Foundation fixes that don't depend on new profiles, (2) Browser
 - [x] Step 2: Create `chrome144` through `chrome149` modules using `mod_generator!` macro with appropriate TLS/HTTP2/header configs.
 - [x] Step 3: Add `Chrome144` through `Chrome149` variants to the `Emulation` enum via `define_enum!`.
 - [x] Step 4: Unit test: each variant produces a valid `hpx::Emulation` with non-empty headers.
-- [x] **BDD Verification:** `cargo test -p hpx-emulation -- chrome14` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
@@ -125,7 +121,6 @@ Four phases: (1) Foundation fixes that don't depend on new profiles, (2) Browser
 - [x] Step 2: Create `firefox137` through `firefox151` modules.
 - [x] Step 3: Add enum variants via `define_enum!`.
 - [x] Step 4: Unit tests.
-- [x] **BDD Verification:** `cargo test -p hpx-emulation -- firefox1` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
@@ -146,7 +141,6 @@ Four phases: (1) Foundation fixes that don't depend on new profiles, (2) Browser
 - [x] Step 2: Create `safari19` through `safari26_4` modules, plus iOS variants.
 - [x] Step 3: Add enum variants via `define_enum!`.
 - [x] Step 4: Unit tests.
-- [x] **BDD Verification:** `cargo test -p hpx-emulation -- safari` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
@@ -167,7 +161,6 @@ Four phases: (1) Foundation fixes that don't depend on new profiles, (2) Browser
 - [x] Step 2: Create `opera118` through `opera131` modules.
 - [x] Step 3: Add enum variants.
 - [x] Step 4: Unit tests.
-- [x] **BDD Verification:** `cargo test -p hpx-emulation -- opera` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
@@ -188,7 +181,6 @@ Four phases: (1) Foundation fixes that don't depend on new profiles, (2) Browser
 - [x] Step 2: Create `edge143` through `edge148` modules.
 - [x] Step 3: Add enum variants.
 - [x] Step 4: Unit tests.
-- [x] **BDD Verification:** `cargo test -p hpx-emulation -- edge` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
@@ -207,7 +199,6 @@ Four phases: (1) Foundation fixes that don't depend on new profiles, (2) Browser
 - **Status:** 🟢 DONE
 - [x] Step 1: Add variant count assertion test to `crates/hpx-emulation/src/emulation.rs #[cfg(test)]`.
 - [x] Step 2: Verify it passes after all profile additions.
-- [x] **BDD Verification:** `cargo test -p hpx-emulation -- variant_count` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
@@ -231,7 +222,6 @@ Four phases: (1) Foundation fixes that don't depend on new profiles, (2) Browser
 - [x] Step 1: Update `EmulationOption::into_emulation()` to use `self.platform` when resolving OS-specific configs.
 - [x] Step 2: Update `build_emulation()` functions to accept platform and adjust UA/sec-ch-ua headers accordingly.
 - [x] Step 3: Unit test: Chrome147 + Windows vs Chrome147 + Linux → different User-Agent strings.
-- [x] **BDD Verification:** `cargo test -p hpx-emulation -- platform` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
@@ -252,7 +242,6 @@ Four phases: (1) Foundation fixes that don't depend on new profiles, (2) Browser
 - [x] Step 2: Implement `Platform::sec_ch_ua_platform()` returning the `sec-ch-ua-platform` header value.
 - [x] Step 3: Wire into header generation for each browser family.
 - [x] Step 4: Unit tests per platform.
-- [x] **BDD Verification:** `cargo test -p hpx-emulation -- sec_ch_ua` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
@@ -272,7 +261,6 @@ Four phases: (1) Foundation fixes that don't depend on new profiles, (2) Browser
 - [x] Step 1: Define `const WEIGHTED_PROFILES: &[(fn() -> EmulationOption, f32)]` with market share weights.
 - [x] Step 2: Implement `Emulation::weighted_random()` — generate `rand::random::<f32>()`, walk cumulative weights, return matching profile paired with weighted platform.
 - [x] Step 3: Property test with proptest: 10000 samples, assert Chrome frequency in [0.66, 0.77].
-- [x] **BDD Verification:** `cargo test -p hpx-emulation -- weighted_random` passes
 - [x] **Advanced Test Verification:** `cargo test -p hpx-emulation -- weighted_distribution` — proptest distribution validation
 - [x] **Runtime Verification:** N/A
 
@@ -294,7 +282,6 @@ Four phases: (1) Foundation fixes that don't depend on new profiles, (2) Browser
 - [x] Step 3: Implement the `boring::ssl::CertificateCompressor` trait (or equivalent) for each.
 - [x] Step 4: Unit tests: round-trip compress/decompress for each compressor.
 - [x] Step 5: Wire compressors into Chrome (Brotli only), Firefox (all three), Safari (all three) profiles.
-- [x] **BDD Verification:** `cargo test -p hpx-emulation -- compress` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
@@ -314,7 +301,6 @@ Four phases: (1) Foundation fixes that don't depend on new profiles, (2) Browser
 - [x] Step 1: Extend pool `Key` type to include optional `emulation_hash: Option<u64>`.
 - [x] Step 2: When building the request, compute emulation hash from `RequestOptions` transport options if per-request emulation is set.
 - [x] Step 3: Unit test: same host + same emulation = same key; same host + different emulation = different key.
-- [x] **BDD Verification:** `cargo test -p hpx -- pool_group` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
@@ -338,7 +324,6 @@ Four phases: (1) Foundation fixes that don't depend on new profiles, (2) Browser
 - [x] Step 1: Run `cargo clippy -p hpx -p hpx-emulation -- -D warnings`.
 - [x] Step 2: Fix all warnings.
 - [x] Step 3: Run `cargo fmt -p hpx -p hpx-emulation`.
-- [x] **BDD Verification:** Clippy exits 0
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
@@ -358,7 +343,6 @@ Four phases: (1) Foundation fixes that don't depend on new profiles, (2) Browser
 - [x] Step 1: Run `cargo test --workspace`.
 - [x] Step 2: Fix any regressions.
 - [x] Step 3: Re-run to confirm.
-- [x] **BDD Verification:** `cargo test --workspace` — 0 failures
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
@@ -377,7 +361,6 @@ Four phases: (1) Foundation fixes that don't depend on new profiles, (2) Browser
 - **Status:** ⏭️ SKIPPED
 - [ ] Step 1: Run `cargo run -p hpx-cli -- get https://httpbin.org/headers -e chrome147` and verify response.
 - [ ] Step 2: Verify User-Agent and sec-ch-ua headers in response.
-- [ ] **BDD Verification:** HTTP 200 with correct headers
 - [ ] **Advanced Test Verification:** N/A
 - [ ] **Runtime Verification:** Response headers match Chrome 147 profile
 

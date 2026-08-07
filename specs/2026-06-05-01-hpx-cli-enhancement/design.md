@@ -108,15 +108,6 @@ Consumed:
 - **SRP**: `cli.rs` handles argument parsing, `http.rs` handles HTTP execution, `ws.rs` handles WebSocket, `output.rs` handles formatting, `main.rs` orchestrates.
 - **DIP**: CLI depends on `hpx::Client` and `hpx_dl::DownloadEngine` abstractions, not concrete implementations.
 
-## BDD/TDD Strategy
-
-- **Primary Language:** Rust
-- **BDD Runner:** `cucumber` (existing workspace convention)
-- **BDD Command:** `cargo test -p hpx-cli --test cucumber`
-- **Unit Test Command:** `cargo nextest run -p hpx-cli`
-- **Property Test Tool:** `proptest` (for CLI argument parsing edge cases)
-- **Feature Files:** `specs/2026-06-05-01-hpx-cli-enhancement/features/*.feature`
-
 ## Code Simplification Constraints
 
 - **Behavioral Contract:** Preserve all existing CLI flags and behavior. New flags are additive.
@@ -225,17 +216,6 @@ Support `--form KEY=@filename` syntax (like curl):
 - Integration tests for WebSocket connections
 - Property tests for header/cookie/form parsing
 
-## BDD Scenario Inventory
-
-| Feature File | Scenario | Business Outcome |
-|-------------|----------|-----------------|
-| dl-progress.feature | Download with progress display | User sees real-time progress bar |
-| dl-options.feature | Download with all options | All new flags work correctly |
-| timing.feature | Timing waterfall phases | All phases displayed |
-| ws-reconnect.feature | WebSocket auto-reconnect | Connection re-established after drop |
-| json-output.feature | JSON output format | Programmatic consumers get valid JSON |
-| form-upload.feature | Form file upload | File content sent in multipart body |
-
 ## Existing Components to Reuse
 
 - `hpx_dl::DownloadEngine` — already supports all download options (speed_limit, checksum, mirrors, max_connections, headers, proxy)
@@ -249,5 +229,4 @@ Support `--form KEY=@filename` syntax (like curl):
 - `cargo nextest run -p hpx-cli --all-features` passes
 - `cargo +nightly clippy -p hpx-cli -- -D warnings` passes
 - `cargo build -p hpx-cli` succeeds
-- All BDD scenarios pass
 - Manual verification: `cargo run -p hpx-cli -- dl add https://example.com/large.bin --speed-limit 1MB/s --checksum sha256:abc123 --progress`

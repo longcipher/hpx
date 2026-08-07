@@ -815,16 +815,6 @@ impl Default for BrowserConfig {
 - Network interception callback abort/continue
 - Cookie get/set round-trip
 
-### 8.4 BDD Acceptance Testing
-
-| Scenario ID | Feature File | Command | Success Criteria |
-| :--- | :--- | :--- | :--- |
-| **BDD-01** | `features/cdp-client.feature` | `cargo test -p hpx-browser --features cdp-client` | CdpClient connects, sends command, receives response |
-| **BDD-02** | `features/chrome-management.feature` | `cargo test -p hpx-browser --features cdp-client` | Chrome launches, new_page works, process cleaned up |
-| **BDD-03** | `features/locator.feature` | `cargo test -p hpx-browser --features cdp-client` | Locator click/type/wait work against Chrome |
-| **BDD-04** | `features/har-capture.feature` | `cargo test -p hpx-browser --features cdp-client` | HAR archive contains correct entries |
-| **BDD-05** | `features/network-intercept.feature` | `cargo test -p hpx-browser --features cdp-client` | Interception callback can abort/continue requests |
-
 ### 8.5 Robustness & Performance Testing
 
 | Test Type | When It Is Required | Tool / Command | Planned Coverage or Reason Not Needed |
@@ -864,4 +854,4 @@ impl Default for BrowserConfig {
 - [ ] **Phase 3: Chrome Management** — Port find_chrome(), free_port(), launch_chrome(), Drop cleanup, stderr URL extraction
 - [ ] **Phase 4: CdpPage & Locator** — Port CdpPage with goto/evaluate/content/screenshot/pdf, Locator API, MutationObserver wait
 - [ ] **Phase 5: HAR & Interception** — Port HarCapture, network interception, cookie operations, manual ISO 8601
-- [ ] **Phase 6: Integration & Polish** — Wire into hpx-cli browser commands, BDD tests, benchmarks, documentation
+- [ ] **Phase 6: Integration & Polish** — Wire into hpx-cli browser commands, benchmarks, documentation

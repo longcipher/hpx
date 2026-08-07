@@ -303,22 +303,6 @@ Inherited from existing codebase:
 | Sharded SessionCache (clone from boring) | O(1) per-shard lookup, same as BoringSSL | None — identical algorithm | Direct reuse |
 | SslConnector::builder per-connection | Same allocation pattern as BoringSSL | Negligible — OpenSSL connection setup is dominated by handshake | No change needed |
 
-### 5.9 BDD/TDD Strategy
-
-- **BDD Runner:** `cucumber` (crate-level, if BDD is needed — this feature is infrastructure-level, not business-logic-driven)
-- **BDD Command:** N/A — TLS backend selection is not user-facing business behavior suitable for Gherkin scenarios
-- **Unit Test Command:** `cargo nextest run -p hpx --features openssl-tls --no-default-features --features http1,http2,stream,tracing`
-- **Property Test Tool:** `proptest` — for session cache shard routing stability (clone existing BoringSSL proptest cases)
-- **Fuzz Test Tool:** N/A — TLS handshake is handled by OpenSSL's C library; Rust-level parsing is minimal
-- **Benchmark Tool:** N/A — no explicit latency/throughput SLA for this feature
-- **Outer Loop:** Integration test: mTLS connection with OpenSSL backend against a local OpenSSL server
-- **Inner Loop:** Unit tests: session cache operations, TLS version bounds, identity parsing, connector builder configuration
-- **Step Definition Location:** N/A (no BDD)
-
-### 5.10 BDD Scenario Inventory
-
-N/A — TLS backend selection is infrastructure-level configuration, not user-facing business behavior. Gherkin scenarios are not appropriate here. Verification is through unit tests, integration tests, and compilation checks.
-
 ### 5.11 Simplification Opportunities in Touched Data
 
 | Area | Current Complexity or Smell | Planned Simplification | Why It Preserves or Clarifies Behavior |
@@ -467,10 +451,6 @@ The `openssl` crate's `ErrorStack` type is structurally identical to `boring`'s 
 
 - **mTLS test:** Clone `tls/boring.rs` integration test — spawn a local OpenSSL server (using `openssl::ssl::SslAcceptor`), connect with `Identity::from_pem`, verify response.
 - **HTTPS connectivity:** Connect to a real HTTPS server (e.g., `https://www.cloudflare.com`) and verify response.
-
-### 10.4 BDD Acceptance Testing
-
-N/A — infrastructure-level feature, not suitable for Gherkin scenarios.
 
 ### 10.5 Robustness & Performance Testing
 

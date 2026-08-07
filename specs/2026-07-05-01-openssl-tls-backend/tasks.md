@@ -10,7 +10,7 @@
 
 ## Summary & Phasing
 
-Implementation strategy: Clone the BoringSSL TLS backend module (`tls/boring.rs` + `tls/boring/`) into a parallel OpenSSL module (`tls/openssl.rs` + `tls/openssl/`), perform mechanical crate-name substitutions, gate BoringSSL-specific features as no-ops, and wire the new module into the existing cfg-based backend selection mux. No BDD harness is needed — this is infrastructure-level code verified through unit tests, integration tests, and compilation checks.
+Implementation strategy: Clone the BoringSSL TLS backend module (`tls/boring.rs` + `tls/boring/`) into a parallel OpenSSL module (`tls/openssl.rs` + `tls/openssl/`), perform mechanical crate-name substitutions, gate BoringSSL-specific features as no-ops, and wire the new module into the existing cfg-based backend selection mux. This is infrastructure-level code verified through unit tests, integration tests, and compilation checks.
 
 - **Planner Contract Rule:** Contract-complete spec in design.md and tasks.md. No sidecar schemas.
 - **State Contract Rule:** Status markers: `🔴 TODO` → `🟡 IN PROGRESS` → `🟢 DONE`, with `⏭️ SKIPPED` for explicit skips.
@@ -324,7 +324,6 @@ Implementation strategy: Clone the BoringSSL TLS backend module (`tls/boring.rs`
   ```
 
 - [x] **Step 5:** Run proptest for session cache shard routing
-- [x] **BDD Verification:** N/A (no BDD for this feature)
 - [x] **Verification:** `cargo nextest run -p hpx --no-default-features --features openssl-tls,http1,http2,stream,tracing` — all tests pass
 - [x] **Advanced Test Verification:** `cargo nextest run -p hpx --no-default-features --features openssl-tls,http1,http2,stream,tracing -- proptest` — property tests pass
 - [x] **Runtime Verification:** N/A

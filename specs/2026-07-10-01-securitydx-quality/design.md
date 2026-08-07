@@ -219,7 +219,6 @@ Six known mismatches:
 - **Impact:** HIGH — untested critical path (all cookie-enabled HTTP requests)
 - **Effort:** S
 
-See `features/testing.feature` for BDD scenarios.
 
 ---
 
@@ -267,14 +266,6 @@ See `features/testing.feature` for BDD scenarios.
 - **Decision:** Reject `..` components and absolute paths by default. Add optional `download_root` config.
 - **Consequences:** May break users who intentionally use absolute paths. Mitigated by config option.
 
-## BDD/TDD Strategy
-
-- **Primary Language:** Rust 2024
-- **BDD Runner:** cucumber-rs (`cargo test -p hpx-dl --test cucumber`)
-- **Unit Test Command:** `cargo nextest run --workspace`
-- **Feature Files:** `specs/2026-07-10-01-securitydx-quality/features/*.feature`
-- **Outside-in Loop:** Write Gherkin scenarios → write failing BDD steps → implement → green
-
 ## Code Simplification Constraints
 
 **Ponytail Ladder (mandatory at every decision point):**
@@ -292,20 +283,6 @@ See `features/testing.feature` for BDD scenarios.
 
 **Repo Standards:** `thiserror` for library errors, `scc`/`arc-swap` for concurrency, clippy pedantic+nursery enabled.
 
-## BDD Scenario Inventory
-
-- `features/security.feature` — SSRF blocks private IPs by default: Exploitable SSRF vector closed → Tasks 1.1-1.4
-- `features/security.feature` — SSLKEYLOGFILE ignored without keylog feature: TLS keys not leaked in prod → Tasks 2.1-2.2
-- `features/security.feature` — Download rejects parent directory traversal: Arbitrary file write blocked → Tasks 3.1-3.2
-- `features/performance.feature` — Checksum reuses pre-allocated buffer: Per-call allocation eliminated → Tasks 4.1-4.2
-- `features/dependencies.feature` — Cargo.lock committed for reproducible builds: Lockfile present → Tasks 5.1
-- `features/dependencies.feature` — AGENTS.md versions match Cargo.toml: Version drift corrected → Tasks 6.1-6.2
-- `features/debt.feature` — Deprecated config groups removed: 467 lines deleted → Tasks 7.1-7.3
-- `features/testing.feature` — Cookie jar unit tests: Critical path covered → Tasks 8.1-8.3
-- `features/testing.feature` — Retry policy unit tests: Logic verified → Tasks 9.1-9.2
-- `features/testing.feature` — Redirect unit tests: Header stripping verified → Tasks 10.1-10.2
-- `features/testing.feature` — Proxy unit tests: Pattern matching verified → Tasks 11.1-11.2
-
 ## Existing Components to Reuse
 
 - `crates/hpx-browser/src/net/ssrf.rs` — SSRF module with 14 passing tests (reuse as-is)
@@ -320,4 +297,3 @@ See `features/testing.feature` for BDD scenarios.
 | Build     | `cargo check --workspace`        | exit 0              |
 | Lint      | `just lint`                      | exit 0, no errors   |
 | Tests     | `cargo nextest run --workspace`  | all pass            |
-| BDD       | `cargo test -p hpx-dl --test cucumber` | all pass       |

@@ -14,7 +14,7 @@
 | Phase 3 | Queue & rate limiting (priority queue, token bucket) | Task 4.1-4.2 | ~2 days |
 | Phase 4 | Checksum, Metalink, proxy | Task 5.1-5.3 | ~3 days |
 | Phase 5 | Persistence & events (SQLite, crash recovery, broadcast) | Task 6.1-6.2 | ~2 days |
-| Phase 6 | CLI, BDD harness, polish | Task 7.1-7.2 | ~2 days |
+| Phase 6 | CLI, polish | Task 7.1-7.2 | ~2 days |
 
 ## Tasks
 
@@ -124,7 +124,7 @@
 > **Requirement Coverage:** R1
 > **Scenario Coverage:** seg-download-basic
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** N/A (new logic)
 - **Simplification Focus:** Named functions for segment calculation, no dense one-liners
 - **Advanced Test Coverage:** Property (proptest for segment boundary contiguity and coverage)
@@ -142,7 +142,7 @@
 > **Requirement Coverage:** R1
 > **Scenario Coverage:** seg-download-basic
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** N/A (new logic)
 - **Simplification Focus:** Clear loop: read chunk → check rate limit → seek → write → update progress
 - **Advanced Test Coverage:** Example-based only
@@ -159,7 +159,7 @@
 > **Requirement Coverage:** R1
 > **Scenario Coverage:** seg-download-basic
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** N/A (new logic)
 - **Simplification Focus:** Use `tokio::task::JoinSet` for segment tasks, aggregate progress with `AtomicU64`
 - **Advanced Test Coverage:** Example-based only
@@ -178,7 +178,7 @@
 > **Requirement Coverage:** R2
 > **Scenario Coverage:** seg-download-resume
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** N/A (new logic)
 - **Simplification Focus:** Clear match on content validation: unchanged → resume, changed → restart
 - **Advanced Test Coverage:** Example-based only
@@ -196,7 +196,7 @@
 > **Requirement Coverage:** R3, N6
 > **Scenario Coverage:** speed-limit-enforced
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** N/A (new logic)
 - **Simplification Focus:** Separate global and per-download limiters, compose with min()
 - **Advanced Test Coverage:** Example-based only
@@ -215,7 +215,7 @@
 > **Requirement Coverage:** R4
 > **Scenario Coverage:** queue-priority-ordering
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** N/A (new logic)
 - **Simplification Focus:** Standard binary heap with explicit priority comparison, no custom sorting
 - **Advanced Test Coverage:** Example-based only
@@ -234,7 +234,7 @@
 > **Requirement Coverage:** R5
 > **Scenario Coverage:** checksum-verification
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** N/A (new logic)
 - **Simplification Focus:** Separate compute function per algorithm, shared verify function
 - **Advanced Test Coverage:** Example-based only
@@ -254,7 +254,7 @@
 > **Requirement Coverage:** R6
 > **Scenario Coverage:** metalink-download
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** N/A (new parser)
 - **Simplification Focus:** Use `quick-xml` for structured XML parsing; no ad-hoc string manipulation
 - **Advanced Test Coverage:** Property (round-trip parse), Fuzz (conditional — see below)
@@ -274,7 +274,7 @@
 > **Requirement Coverage:** R7
 > **Scenario Coverage:** proxy-download
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** N/A (new integration)
 - **Simplification Focus:** Delegate to hpx, no custom proxy logic
 - **Advanced Test Coverage:** Example-based only
@@ -291,7 +291,7 @@
 > **Requirement Coverage:** R8
 > **Scenario Coverage:** crash-recovery
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** N/A (new persistence layer)
 - **Simplification Focus:** Runtime queries (`sqlx::query_as`), no compile-time macros
 - **Advanced Test Coverage:** Example-based only
@@ -310,7 +310,7 @@
 > **Requirement Coverage:** R9
 > **Scenario Coverage:** progress-reporting
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** N/A (new event integration)
 - **Simplification Focus:** Emit events at natural boundaries (state transitions, progress ticks)
 - **Advanced Test Coverage:** Example-based only
@@ -342,32 +342,12 @@
 - [x] Verification: `cargo build -p hpx-dl --features cli` succeeds
 - [x] Runtime Verification: `cargo run -p hpx-dl --features cli -- --help` prints usage
 
-### Task 7.2: Set up BDD harness and write feature files
-
-> **Context:** Set up `cucumber` BDD runner for hpx-dl. Write Gherkin feature files covering all user-visible scenarios.
-> **Verification:** BDD scenarios pass against the implemented engine.
-> **Requirement Coverage:** All R1-R11
-> **Scenario Coverage:** All scenarios
-
-- **Loop Type:** `BDD+TDD`
-- **Behavioral Contract:** N/A (test infrastructure)
-- **Simplification Focus:** Thin step definitions that delegate to engine API
-- **Advanced Test Coverage:** Example-based only
-- **Status:** 🟢 DONE
-- [x] Add `cucumber` dependency via `cargo add -p hpx-dl --workspace`
-- [x] Create `tests/cucumber/` directory with step definitions
-- [x] Implement step definitions for all feature scenarios
-- [x] Set up mock HTTP server for BDD tests (axum or hpx test support)
-- [x] Write step definitions: Given (engine setup, server state), When (add/pause/resume), Then (verify state/events/file)
-- [x] Verification: `cargo test --features cli -p hpx-dl --test cucumber` passes
-- [x] Final verification: `just format && just lint && just test` all pass
-
 ## Definition of Done
 
 - [ ] All tasks completed with status 🟢 DONE
 - [ ] `cargo nextest run --workspace --all-features` passes
 - [ ] `cargo +nightly clippy --all -- -D warnings` passes
-- [ ] All BDD scenarios pass
+- [ ] All scenarios pass
 - [ ] `just format` applied
 - [ ] `just lint` passes
 - [ ] `just test` passes

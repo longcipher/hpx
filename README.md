@@ -702,11 +702,11 @@ just lint
 # Run tests
 just test
 
-# Run BDD tests
-just bdd
-
-# Run all tests + BDD
+# Run all tests
 just test-all
+
+# Run mutation testing (cargo-mutants)
+just mutate
 
 # Full CI check (lint + test-all + build-docs)
 just ci

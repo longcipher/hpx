@@ -12,7 +12,7 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 > **Verification:** Run existing segment download tests. The downloaded file bytes must be identical.
 > **Scenario Coverage:** `features/performance.feature` — "Segment download avoids redundant seeks"
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Preserve existing behavior` — downloaded bytes must be identical
 - **Simplification Focus:** Remove the per-chunk `file.seek()` call; seek once before the loop
 - **Status:** 🟢 DONE
@@ -22,7 +22,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - [x] Step 4: Verify `offset` tracking still works for progress reporting (it should — `offset` is only used for the seek and progress, not for write positioning)
 - [x] Step 5: Run `cargo nextest run -p hpx-dl --all-features` — all existing tests pass
 - [x] Step 6: Run `cargo +nightly clippy -p hpx-dl --all-features -- -D warnings` — no warnings
-- [x] BDD Verification: `cargo test -p hpx-dl --test cucumber --all-features` — all pass
 - [x] Advanced Test Verification: `cargo nextest run --workspace --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly fmt --all` — no changes
 
@@ -38,7 +37,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - **Status:** 🟢 DONE
 - [x] Step 1: Add a test in `crates/hpx-dl/src/segment.rs` under `#[cfg(test)]` that calls the refactored seek logic with a mock file and verifies correct byte placement
 - [x] Step 2: Run the test: `cargo test -p hpx-dl --lib -- segment::tests --all-features`
-- [x] BDD Verification: N/A — unit test only
 - [x] Advanced Test Verification: `cargo nextest run -p hpx-dl --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly clippy -p hpx-dl --all-features -- -D warnings`
 
@@ -48,7 +46,7 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 > **Verification:** WSS connections work identically; the connector is constructed only once.
 > **Scenario Coverage:** `features/performance.feature` — "TLS connector is cached across WSS connections"
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Preserve existing behavior` — WSS connections must work identically
 - **Simplification Focus:** Replace per-call construction with `OnceLock`-cached static
 - **Status:** 🟢 DONE
@@ -58,7 +56,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - [x] Step 4: Update the call site at `mod.rs:795` if needed (should work with `|| tls_connector()` since the function now returns `&TlsConnector`)
 - [x] Step 5: Run `cargo nextest run -p hpx-yawc --all-features` — all pass
 - [x] Step 6: Run `cargo +nightly clippy -p hpx-yawc --all-features -- -D warnings`
-- [x] BDD Verification: N/A — no BDD for yawc
 - [x] Advanced Test Verification: `cargo nextest run --workspace --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly fmt --all`
 
@@ -74,7 +71,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - **Status:** 🟢 DONE
 - [x] Step 1: Add a test in `crates/yawc/src/native/mod.rs` under `#[cfg(test)]` that calls `tls_connector()` twice and asserts `Arc::ptr_eq` on the inner configs
 - [x] Step 2: Run the test: `cargo test -p hpx-yawc --lib -- native::tests --all-features`
-- [x] BDD Verification: N/A
 - [x] Advanced Test Verification: `cargo nextest run -p hpx-yawc --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly clippy -p hpx-yawc --all-features -- -D warnings`
 
@@ -84,7 +80,7 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 > **Verification:** Function returns identical results; existing tests pass.
 > **Scenario Coverage:** `features/performance.feature` — "Segment filtering uses constant-time lookup"
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Preserve existing behavior` — filtering results must be identical
 - **Simplification Focus:** Collect `completed_indices` into `HashSet<u32>` before filtering
 - **Status:** 🟢 DONE
@@ -94,7 +90,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - [x] Step 4: Change the filter to `!completed.contains(&(*i as u32))`
 - [x] Step 5: Run `cargo nextest run -p hpx-dl --all-features` — all pass
 - [x] Step 6: Run `cargo +nightly clippy -p hpx-dl --all-features -- -D warnings`
-- [x] BDD Verification: `cargo test -p hpx-dl --test cucumber --all-features` — all pass
 - [x] Advanced Test Verification: `cargo nextest run --workspace --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly fmt --all`
 
@@ -104,7 +99,7 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 > **Verification:** Function returns identical results; existing tests pass.
 > **Scenario Coverage:** `features/performance.feature` — "build_segment_states uses constant-time lookup"
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Preserve existing behavior`
 - **Simplification Focus:** Collect `completed_indices` into `HashSet<u32>` before the mapping
 - **Status:** 🟢 DONE
@@ -113,7 +108,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - [x] Step 3: Change `completed_indices.contains(&(index as u32))` to `completed.contains(&(index as u32))`
 - [x] Step 4: Run `cargo nextest run -p hpx-dl --all-features` — all pass
 - [x] Step 5: Run `cargo +nightly clippy -p hpx-dl --all-features -- -D warnings`
-- [x] BDD Verification: `cargo test -p hpx-dl --test cucumber --all-features` — all pass
 - [x] Advanced Test Verification: `cargo nextest run --workspace --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly fmt --all`
 
@@ -123,7 +117,7 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 > **Verification:** CSV streaming produces identical results; existing tests pass.
 > **Scenario Coverage:** `features/performance.feature` — "CSV stream reuses ReaderBuilder across rows"
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Preserve existing behavior` — deserialized CSV values must be identical
 - **Simplification Focus:** Create the builder once before `.map()` and clone it inside
 - **Status:** 🟢 DONE
@@ -132,7 +126,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - [x] Step 3: Inside `.map()`, use `builder.clone()` to create per-row readers (or find a way to avoid the clone — `csv::ReaderBuilder` should be `Clone`)
 - [x] Step 4: Run `cargo nextest run -p hpx-streams --all-features` — all pass
 - [x] Step 5: Run `cargo +nightly clippy -p hpx-streams --all-features` — no warnings
-- [x] BDD Verification: N/A — no BDD for hpx-streams
 - [x] Advanced Test Verification: `cargo nextest run --workspace --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly fmt --all`
 
@@ -148,7 +141,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - **Status:** 🟢 DONE
 - [x] Step 1: Add a test in `crates/hpx-streams/src/csv_stream.rs` under `#[cfg(test)]` that verifies CSV deserialization with the refactored builder
 - [x] Step 2: Run the test: `cargo test -p hpx-streams --lib -- csv_stream::tests --all-features`
-- [x] BDD Verification: N/A
 - [x] Advanced Test Verification: `cargo nextest run -p hpx-streams --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly clippy -p hpx-streams --all-features -- -D warnings`
 
@@ -158,7 +150,7 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 > **Verification:** Persistence operations work identically; all tests pass.
 > **Scenario Coverage:** `features/performance.feature` — "Persistence channel uses crossbeam-channel"
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Preserve existing behavior` — persistence commands must be processed identically
 - **Simplification Focus:** Drop-in replacement of `std::sync::mpsc` with `crossbeam_channel`
 - **Status:** 🟢 DONE
@@ -169,7 +161,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - [x] Step 5: Update `PersistenceCommand` enum — `Sender<Result<...>>` stays the same (crossbeam has compatible `Sender`)
 - [x] Step 6: Run `cargo nextest run -p hpx-dl --all-features` — all pass
 - [x] Step 7: Run `cargo +nightly clippy -p hpx-dl --all-features -- -D warnings`
-- [x] BDD Verification: `cargo test -p hpx-dl --test cucumber --all-features` — all pass
 - [x] Advanced Test Verification: `cargo nextest run --workspace --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly fmt --all`
 
@@ -185,7 +176,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - **Status:** 🟢 DONE
 - [x] Step 1: Add a test in `crates/hpx-dl/src/persistence.rs` under `#[cfg(test)]` that spawns multiple threads sending Upsert commands and verifies all are processed
 - [x] Step 2: Run the test: `cargo test -p hpx-dl --lib -- persistence::tests --all-features`
-- [x] BDD Verification: N/A
 - [x] Advanced Test Verification: `cargo nextest run -p hpx-dl --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly clippy -p hpx-dl --all-features -- -D warnings`
 
@@ -195,7 +185,7 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 > **Verification:** Segment completion works identically; existing tests pass.
 > **Scenario Coverage:** `features/performance.feature` — "Segment completion uses indexed lookup"
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Preserve existing behavior`
 - **Simplification Focus:** Change `segments` to a `Vec` indexed by segment index, or add a lookup map
 - **Status:** 🟢 DONE
@@ -205,7 +195,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - [x] Step 4: Verify `build_segment_states` produces segments with dense indices (it does — see line 1092)
 - [x] Step 5: Run `cargo nextest run -p hpx-dl --all-features` — all pass
 - [x] Step 6: Run `cargo +nightly clippy -p hpx-dl --all-features -- -D warnings`
-- [x] BDD Verification: `cargo test -p hpx-dl --test cucumber --all-features` — all pass
 - [x] Advanced Test Verification: `cargo nextest run --workspace --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly fmt --all`
 
@@ -221,7 +210,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - **Status:** 🟢 DONE
 - [x] Step 1: Add a test in `crates/hpx-dl/src/engine.rs` under `#[cfg(test)]` that creates a download entry with 5 segments, completes segment index 2, and verifies only segment 2 is marked completed
 - [x] Step 2: Run the test: `cargo test -p hpx-dl --lib -- engine::tests --all-features`
-- [x] BDD Verification: N/A
 - [x] Advanced Test Verification: `cargo nextest run -p hpx-dl --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly clippy -p hpx-dl --all-features -- -D warnings`
 
@@ -231,7 +219,7 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 > **Verification:** The header value is formatted correctly; existing tests pass.
 > **Scenario Coverage:** `features/performance.feature` — "Range header value avoids heap allocation"
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Preserve existing behavior` — header value must be identical
 - **Simplification Focus:** Use stack-allocated buffer or `ArrayString`
 - **Status:** 🟢 DONE
@@ -241,7 +229,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - [x] Step 4: Update callers to accept the new return type
 - [x] Step 5: Run `cargo nextest run -p hpx-dl --all-features` — all pass
 - [x] Step 6: Run `cargo +nightly clippy -p hpx-dl --all-features -- -D warnings`
-- [x] BDD Verification: `cargo test -p hpx-dl --test cucumber --all-features` — all pass
 - [x] Advanced Test Verification: `cargo nextest run --workspace --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly fmt --all`
 
@@ -253,7 +240,7 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 > **Verification:** State transitions work identically; persistence records are correct.
 > **Scenario Coverage:** `features/performance.feature` — "State transitions avoid unnecessary full-entry clones"
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Preserve existing behavior` — download state must be updated and persisted correctly
 - **Simplification Focus:** Return modified entry from `update_sync` closure, eliminating the snapshot clone
 - **Status:** 🟢 DONE
@@ -263,7 +250,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - [x] Step 4: Remove the `entry_snapshot(id)?` call in `update_entry`
 - [x] Step 5: Run `cargo nextest run -p hpx-dl --all-features` — all pass
 - [x] Step 6: Run `cargo +nightly clippy -p hpx-dl --all-features -- -D warnings`
-- [x] BDD Verification: `cargo test -p hpx-dl --test cucumber --all-features` — all pass
 - [x] Advanced Test Verification: `cargo nextest run --workspace --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly fmt --all`
 
@@ -273,7 +259,7 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 > **Verification:** The record produced is identical; existing tests pass.
 > **Scenario Coverage:** `features/performance.feature` — "State transitions avoid unnecessary full-entry clones" (part 2)
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Preserve existing behavior`
 - **Simplification Focus:** Use `Arc` for shared fields or swap fields instead of cloning
 - **Status:** 🟢 DONE
@@ -282,7 +268,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - [x] Step 3: If `DownloadRecord` is only used for persistence (written once then discarded), consider making `to_record` take `self` (consuming the entry) in paths where the entry is no longer needed
 - [x] Step 4: Run `cargo nextest run -p hpx-dl --all-features` — all pass
 - [x] Step 5: Run `cargo +nightly clippy -p hpx-dl --all-features` — -D warnings
-- [x] BDD Verification: `cargo test -p hpx-dl --test cucumber --all-features` — all pass
 - [x] Advanced Test Verification: `cargo nextest run --workspace --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly fmt --all`
 
@@ -298,7 +283,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - **Status:** 🟢 DONE
 - [x] Step 1: Add a test in `crates/hpx-dl/src/engine.rs` under `#[cfg(test)]` that creates a download, transitions through Pending→Downloading→Completed, and verifies each persisted record
 - [x] Step 2: Run the test: `cargo test -p hpx-dl --lib -- engine::tests --all-features`
-- [x] BDD Verification: N/A
 - [x] Advanced Test Verification: `cargo nextest run -p hpx-dl --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly clippy -p hpx-dl --all-features -- -D warnings`
 
@@ -310,7 +294,7 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 > **Verification:** Pending commands are processed before the worker exits.
 > **Scenario Coverage:** `features/correctness.feature` — "Persistence worker drains pending commands on shutdown"
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Change behavior` — shutdown now drains pending commands instead of dropping them
 - **Simplification Focus:** Use bounded channel + drain in Drop
 - **Status:** 🟢 DONE
@@ -320,7 +304,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - [x] Step 4: Verify the worker loop at `persistence.rs:62-78` exits correctly when the channel is disconnected
 - [x] Step 5: Run `cargo nextest run -p hpx-dl --all-features` — all pass
 - [x] Step 6: Run `cargo +nightly clippy -p hpx-dl --all-features` — -D warnings
-- [x] BDD Verification: `cargo test -p hpx-dl --test cucumber --all-features` — all pass
 - [x] Advanced Test Verification: `cargo nextest run --workspace --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly fmt --all`
 
@@ -336,7 +319,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - **Status:** 🟢 DONE
 - [x] Step 1: Add a test in `crates/hpx-dl/src/persistence.rs` under `#[cfg(test)]` that creates a PersistenceHandle, sends multiple Upsert commands, drops the handle, and verifies all records are persisted
 - [x] Step 2: Run the test: `cargo test -p hpx-dl --lib -- persistence::tests --all-features`
-- [x] BDD Verification: N/A
 - [x] Advanced Test Verification: `cargo nextest run -p hpx-dl --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly clippy -p hpx-dl --all-features -- -D warnings`
 
@@ -348,7 +330,7 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 > **Verification:** Valid hostnames pass; hosts with control characters are rejected.
 > **Scenario Coverage:** `features/security.feature` — "HTTP CONNECT tunnel rejects hosts with control characters"
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Change behavior` — invalid hosts now return an error instead of being accepted
 - **Simplification Focus:** Add a simple regex or character-check validation function
 - **Status:** 🟢 DONE
@@ -358,7 +340,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - [x] Step 4: Return `io::Error::new(io::ErrorKind::InvalidInput, "invalid hostname")` for invalid hosts
 - [x] Step 5: Run `cargo nextest run -p hpx-yawc --all-features` — all pass
 - [x] Step 6: Run `cargo +nightly clippy -p hpx-yawc --all-features -- -D warnings`
-- [x] BDD Verification: N/A — no BDD for yawc
 - [x] Advanced Test Verification: `cargo nextest run --workspace --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly fmt --all`
 
@@ -374,7 +355,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - **Status:** 🟢 DONE
 - [x] Step 1: Add tests in `crates/yawc/src/native/proxy.rs` under `#[cfg(test)]` for `validate_host`: valid cases (example.com, 192.168.1.1, [::1]), invalid cases (host\r\n, host\n, host with spaces)
 - [x] Step 2: Run the test: `cargo test -p hpx-yawc --lib -- native::proxy::tests --all-features`
-- [x] BDD Verification: N/A
 - [x] Advanced Test Verification: `cargo nextest run -p hpx-yawc --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly clippy -p hpx-yawc --all-features -- -D warnings`
 
@@ -384,7 +364,7 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 > **Verification:** Sensitive header values are redacted; other headers are logged normally.
 > **Scenario Coverage:** `features/security.feature` — "Sensitive headers are redacted in request logging"
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Change behavior` — sensitive headers now show "[REDACTED]" in logs
 - **Simplification Focus:** Add a static set of sensitive header names and check before logging
 - **Status:** 🟢 DONE
@@ -394,7 +374,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - [x] Step 4: Apply the same pattern to `on_response` at `hooks.rs:238-239`
 - [x] Step 5: Run `cargo nextest run -p hpx --all-features` — all pass
 - [x] Step 6: Run `cargo +nightly clippy -p hpx --all-features -- -D warnings`
-- [x] BDD Verification: N/A — no BDD for hpx core
 - [x] Advanced Test Verification: `cargo nextest run --workspace --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly fmt --all`
 
@@ -410,7 +389,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - **Status:** 🟢 DONE
 - [x] Step 1: Add a test in `crates/hpx/src/client/layer/hooks.rs` under `#[cfg(test)]` that creates a LoggingHook, constructs a request with `Authorization: Bearer secret-token`, calls `on_request`, and verifies the output contains "[REDACTED]" and not the token
 - [x] Step 2: Run the test: `cargo test -p hpx --lib -- client::layer::hooks::tests --all-features`
-- [x] BDD Verification: N/A
 - [x] Advanced Test Verification: `cargo nextest run -p hpx --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly clippy -p hpx --all-features -- -D warnings`
 
@@ -420,7 +398,7 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 > **Verification:** Proxy credentials are not visible in trace output.
 > **Scenario Coverage:** `features/security.feature` — "Proxy credentials are not logged in trace output"
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Change behavior` — proxy URIs now show masked credentials in logs
 - **Simplification Focus:** Add a `redact_proxy_uri` helper function
 - **Status:** 🟢 DONE
@@ -430,7 +408,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - [x] Step 4: Replace the `trace!` call with the redacted URI
 - [x] Step 5: Run `cargo nextest run -p hpx --all-features` — all pass
 - [x] Step 6: Run `cargo +nightly clippy -p hpx --all-features -- -D warnings`
-- [x] BDD Verification: N/A
 - [x] Advanced Test Verification: `cargo nextest run --workspace --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly fmt --all`
 
@@ -446,7 +423,6 @@ Planned at commit `fd64fd5`. Execute via `/pb-build 2026-06-14-01-perf-security-
 - **Status:** 🟢 DONE
 - [x] Step 1: Add a test in `crates/hpx/src/client/conn/connector.rs` under `#[cfg(test)]` that calls `redact_proxy_uri` with `http://user:pass@proxy:8080` and verifies the output is `http://***@proxy:8080`
 - [x] Step 2: Run the test: `cargo test -p hpx --lib -- client::conn::connector::tests --all-features`
-- [x] BDD Verification: N/A
 - [x] Advanced Test Verification: `cargo nextest run -p hpx --all-features` — all pass
 - [x] Runtime Verification: `cargo +nightly clippy -p hpx --all-features -- -D warnings`
 

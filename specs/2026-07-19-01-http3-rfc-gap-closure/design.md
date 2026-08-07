@@ -870,57 +870,36 @@ The `WsConfig` at `crates/hpx-transport/src/websocket/config.rs` gains an option
 ---
 
 ## Behavior Traceability Matrix
-
-| Domain Module | Core Component | Driven by Feature | BDD Tags | Scenario |
-| :--- | :--- | :--- | :--- | :--- |
-| HTTP/3 Transport | `QuicConnector` | `features/http3_transport.feature` | `@http3`, `@phase1` | "Successful HTTP/3 GET request" |
-| HTTP/3 Transport | `Http3Options` | `features/http3_transport.feature` | `@http3`, `@phase1` | "Http3Options configures h3 SETTINGS" |
-| HTTP/3 Transport | `Ver::Http3` pool shard | `features/http3_transport.feature` | `@http3`, `@phase1` | "HTTP/3 concurrent requests over single QUIC connection" |
-| HTTP/3 Transport | `H3Error` | `features/http3_transport.feature` | `@http3`, `@phase1` | "HTTP/3 connection failure surfaces typed error" |
-| HTTP/3 Transport | h3 STOP_SENDING handling | `features/http3_transport.feature` | `@http3`, `@phase1` | "HTTP/3 STOP_SENDING with H3_NO_ERROR is graceful" |
-| HTTP/2 (verification) | `h2_builder` path | `features/http3_transport.feature` | `@http2`, `@verification` | "HTTP/2 path is unaffected by http3 feature flag" |
-| Alt-Svc | `AltSvcCache` | `features/alt_svc_and_fallback.feature` | `@alt-svc`, `@phase2` | "Alt-Svc header parsed and cached" |
-| Alt-Svc | `AltSvcCache` (expiry) | `features/alt_svc_and_fallback.feature` | `@alt-svc`, `@phase2` | "Alt-Svc entry expires after ma period" |
-| Alt-Svc | `AltSvcCache` (clear) | `features/alt_svc_and_fallback.feature` | `@alt-svc`, `@phase2` | "Alt-Svc clear purges cache" |
-| Alt-Svc | `AltSvcCache` (malformed) | `features/alt_svc_and_fallback.feature` | `@alt-svc`, `@phase2` | "Malformed Alt-Svc header is ignored gracefully" |
-| Fallback | `FallbackPolicy` | `features/alt_svc_and_fallback.feature` | `@fallback`, `@phase2` | "Fallback to h2 when h3 unavailable" |
-| Fallback | `FallbackPolicy` (idempotency) | `features/alt_svc_and_fallback.feature` | `@fallback`, `@phase2` | "Non-idempotent request surfaces original h3 error" |
-| Fallback | `prefer_http3()` | `features/alt_svc_and_fallback.feature` | `@fallback`, `@phase2` | "prefer_http3 enables opportunistic h3" |
-| WS-over-h3 | `backend_fastwebsockets` RFC 9220 path | `features/websocket_over_h3.feature` | `@ws`, `@h3`, `@phase2` | "WS upgrade over h3 with extended CONNECT" |
-| WS-over-h3 | RFC 9220 rejection handling | `features/websocket_over_h3.feature` | `@ws`, `@h3`, `@phase2` | "WS over h3 rejected by server surfaces typed error" |
-| WS-over-h3 | Binary message round-trip | `features/websocket_over_h3.feature` | `@ws`, `@h3`, `@phase2` | "WS over h3 supports binary messages" |
-| WS-over-h3 | Close frame exchange | `features/websocket_over_h3.feature` | `@ws`, `@h3`, `@phase2` | "WS over h3 supports close frame exchange" |
-| Emulation (Chrome) | `chrome/http3.rs` | `features/http3_browser_emulation.feature` | `@emulation`, `@chrome`, `@phase3` | "Chrome 143 emulation produces h3 fingerprint" |
-| Emulation (Firefox) | `firefox/http3.rs` | `features/http3_browser_emulation.feature` | `@emulation`, `@firefox`, `@phase3` | "Firefox emulation produces h3 fingerprint" |
-| Emulation (Safari) | `safari/http3.rs` | `features/http3_browser_emulation.feature` | `@emulation`, `@safari`, `@phase3` | "Safari emulation produces h3 fingerprint" |
-| Emulation (Opera) | `opera/http3.rs` | `features/http3_browser_emulation.feature` | `@emulation`, `@opera`, `@phase3` | "Opera emulation produces h3 fingerprint" |
-| HTTP/1 RFC | `Http1Options::h1_trailers` | `features/http1_rfc_gaps.feature` | `@http1`, `@phase3` | "h1_trailers option enables trailer fields" |
-| HTTP/1 RFC | 1xx chaining | `features/http1_rfc_gaps.feature` | `@http1`, `@phase3` | "1xx informational responses chain to final response" |
-| HTTP/1 RFC | Chunked TE error | `features/http1_rfc_gaps.feature` | `@http1`, `@phase3` | "Malformed chunked transfer-encoding surfaces typed error" |
-| HTTP/1 RFC | Smuggling rejection | `features/http1_rfc_gaps.feature` | `@http1`, `@phase3` | "Ambiguous Content-Length is rejected" |
-| WS deflate | `fastwebsockets::deflate` | `features/websocket_deflate.feature` | `@ws`, `@deflate`, `@phase3` | "fastwebsockets negotiates permessage-deflate" |
-| WS deflate | `server_no_context_takeover` | `features/websocket_deflate.feature` | `@ws`, `@deflate`, `@phase3` | "permessage-deflate with server_no_context_takeover" |
-| WS deflate | Fallback | `features/websocket_deflate.feature` | `@ws`, `@deflate`, `@phase3` | "permessage-deflate fallback when no overlap" |
-
----
-
-## BDD/TDD Strategy
-
-- **Primary Language:** Rust (edition 2024, MSRV per `quinn` 0.11 requirements — likely 1.85+).
-- **BDD Runner:** None currently configured in the repo. The repo's convention is `#[tokio::test]` with descriptive function names (see `crates/hpx/tests/client.rs`, `tests/upgrade.rs`, etc.). The `.feature` files in this spec serve as **specification and traceability artifacts**; the actual tests are Rust integration tests whose function names match the scenario names (snake_cased). If the project later adopts `cucumber`, the `.feature` files are already in place for direct use.
-- **Test Runner:** `cargo nextest run` (configured at `.config/nextest.toml`) and `cargo test`.
-- **BDD Command:** `cargo nextest run -p hpx --features http3` (Phase 1+); `cargo nextest run -p hpx --features http3,alt-svc` (Phase 2).
-- **Unit Test Command:** `cargo test -p hpx --features http3 --lib`.
-- **Property Test Tool:** `proptest` (already a dev-dep candidate; verify in Phase 1 Task 1.1). Used for: Alt-Svc header parser property tests, h3 frame round-trip property tests.
-- **Fuzz Test Tool:** `cargo-fuzz` (already used by `crates/fastwebsockets/fuzz/`). Used for: Alt-Svc parser fuzzing (Phase 2), fastwebsockets deflate decompressor fuzzing (Phase 3).
-- **Benchmark Tool:** `criterion` (already used by `crates/hpx/benches/`). Used for: HTTP/3 throughput benchmark (Phase 1, gated on `http3` feature), Alt-Svc cache lookup overhead (Phase 2).
-- **Feature Files:** `specs/2026-07-19-01-http3-rfc-gap-closure/features/*.feature` (6 files).
-- **Step Definitions:** N/A — Rust integration tests in `crates/hpx/tests/{http3,alt_svc,fallback,ws_over_h3,http1_rfc_gaps,websocket_deflate}.rs` (one file per feature).
-- **Outside-in Loop Execution Order:**
-  1. Write the `.feature` scenario as a `#[tokio::test]` function in the corresponding `tests/*.rs` file → confirm RED (test fails to compile or fails assertion).
-  2. Implement the minimum production code (QuicConnector, H3Options, etc.) to satisfy the scenario.
-  3. Run the specific test → confirm GREEN.
-  4. Refactor, re-run to confirm no regression.
+| Domain Module | Core Component | Driven by Feature | Scenario |
+| :--- | :--- | :--- | :--- |
+| HTTP/3 Transport | `QuicConnector` | `features/http3_transport.feature` | "Successful HTTP/3 GET request" |
+| HTTP/3 Transport | `Http3Options` | `features/http3_transport.feature` | "Http3Options configures h3 SETTINGS" |
+| HTTP/3 Transport | `Ver::Http3` pool shard | `features/http3_transport.feature` | "HTTP/3 concurrent requests over single QUIC connection" |
+| HTTP/3 Transport | `H3Error` | `features/http3_transport.feature` | "HTTP/3 connection failure surfaces typed error" |
+| HTTP/3 Transport | h3 STOP_SENDING handling | `features/http3_transport.feature` | "HTTP/3 STOP_SENDING with H3_NO_ERROR is graceful" |
+| HTTP/2 (verification) | `h2_builder` path | `features/http3_transport.feature` | "HTTP/2 path is unaffected by http3 feature flag" |
+| Alt-Svc | `AltSvcCache` | `features/alt_svc_and_fallback.feature` | "Alt-Svc header parsed and cached" |
+| Alt-Svc | `AltSvcCache` (expiry) | `features/alt_svc_and_fallback.feature` | "Alt-Svc entry expires after ma period" |
+| Alt-Svc | `AltSvcCache` (clear) | `features/alt_svc_and_fallback.feature` | "Alt-Svc clear purges cache" |
+| Alt-Svc | `AltSvcCache` (malformed) | `features/alt_svc_and_fallback.feature` | "Malformed Alt-Svc header is ignored gracefully" |
+| Fallback | `FallbackPolicy` | `features/alt_svc_and_fallback.feature` | "Fallback to h2 when h3 unavailable" |
+| Fallback | `FallbackPolicy` (idempotency) | `features/alt_svc_and_fallback.feature` | "Non-idempotent request surfaces original h3 error" |
+| Fallback | `prefer_http3()` | `features/alt_svc_and_fallback.feature` | "prefer_http3 enables opportunistic h3" |
+| WS-over-h3 | `backend_fastwebsockets` RFC 9220 path | `features/websocket_over_h3.feature` | "WS upgrade over h3 with extended CONNECT" |
+| WS-over-h3 | RFC 9220 rejection handling | `features/websocket_over_h3.feature` | "WS over h3 rejected by server surfaces typed error" |
+| WS-over-h3 | Binary message round-trip | `features/websocket_over_h3.feature` | "WS over h3 supports binary messages" |
+| WS-over-h3 | Close frame exchange | `features/websocket_over_h3.feature` | "WS over h3 supports close frame exchange" |
+| Emulation (Chrome) | `chrome/http3.rs` | `features/http3_browser_emulation.feature` | "Chrome 143 emulation produces h3 fingerprint" |
+| Emulation (Firefox) | `firefox/http3.rs` | `features/http3_browser_emulation.feature` | "Firefox emulation produces h3 fingerprint" |
+| Emulation (Safari) | `safari/http3.rs` | `features/http3_browser_emulation.feature` | "Safari emulation produces h3 fingerprint" |
+| Emulation (Opera) | `opera/http3.rs` | `features/http3_browser_emulation.feature` | "Opera emulation produces h3 fingerprint" |
+| HTTP/1 RFC | `Http1Options::h1_trailers` | `features/http1_rfc_gaps.feature` | "h1_trailers option enables trailer fields" |
+| HTTP/1 RFC | 1xx chaining | `features/http1_rfc_gaps.feature` | "1xx informational responses chain to final response" |
+| HTTP/1 RFC | Chunked TE error | `features/http1_rfc_gaps.feature` | "Malformed chunked transfer-encoding surfaces typed error" |
+| HTTP/1 RFC | Smuggling rejection | `features/http1_rfc_gaps.feature` | "Ambiguous Content-Length is rejected" |
+| WS deflate | `fastwebsockets::deflate` | `features/websocket_deflate.feature` | "fastwebsockets negotiates permessage-deflate" |
+| WS deflate | `server_no_context_takeover` | `features/websocket_deflate.feature` | "permessage-deflate with server_no_context_takeover" |
+| WS deflate | Fallback | `features/websocket_deflate.feature` | "permessage-deflate fallback when no overlap" |
 
 ---
 
@@ -1017,57 +996,6 @@ flowchart TD
 - **Repo Standards:** Rust edition 2024, resolver 3, strict lints (C-03). No `unwrap`/`expect`/`panic`/`todo`/`unimplemented`/`dbg_macro`/`print_stdout`/`print_stderr`. Comments use `//` and `///`; no `/* */` block comments per existing style.
 - **Readability Priorities:** Prefer explicit control flow (match arms, early returns) over combinator chains. Mirror the existing `proto/h2/` code style.
 - **Refactor Scope:** Limited to new modules (`tls/quic.rs`, `client/conn/quic.rs`, `client/core/http3.rs`, `client/core/proto/h3/`, `client/http/alt_svc.rs`, `client/http/fallback.rs`, `crates/hpx-util/src/emulation/device/*/http3.rs`, `crates/fastwebsockets/src/deflate.rs`) and minimal additive changes to existing modules (`tls.rs`, `client/http.rs`, `client/http/client.rs`, `client/http/client/pool.rs`, `error.rs`, `client/core/http1.rs`, `client/ws/backend_fastwebsockets.rs`, `Cargo.toml`). No broad refactor.
-
----
-
-## BDD Scenario Inventory
-
-| Feature File | Scenario Name | Business Outcome | Task Coverage |
-| :--- | :--- | :--- | :--- |
-| `features/http3_transport.feature` | Successful HTTP/3 GET request | User can fetch a resource over h3 | Task 1.10 |
-| `features/http3_transport.feature` | HTTP/3 POST with body and content-length | Request body framing works | Task 1.10 |
-| `features/http3_transport.feature` | HTTP/3 streaming request body | Streaming bodies work over h3 | Task 1.11 |
-| `features/http3_transport.feature` | HTTP/3 concurrent requests over single QUIC connection | Stream multiplexing works | Task 1.12 |
-| `features/http3_transport.feature` | HTTP/3 connection failure surfaces typed error | H3Error::Handshake surfaces correctly | Task 1.13 |
-| `features/http3_transport.feature` | HTTP/3 reconnection after server closes | Pool invalidation + reconnect | Task 1.14 |
-| `features/http3_transport.feature` | HTTP/3 STOP_SENDING with H3_NO_ERROR is graceful | Graceful EOF handling | Task 1.15 |
-| `features/http3_transport.feature` | HTTP/3 STOP_SENDING with H3_INTERNAL_ERROR surfaces error | Error-path STOP_SENDING | Task 1.15 |
-| `features/http3_transport.feature` | HTTP/3 request body mid-stream error surfaces is_body error | Body error categorization | Task 1.16 |
-| `features/http3_transport.feature` | Ver::Http3 routes to h3 pool shard | Pool routing | Task 1.7 |
-| `features/http3_transport.feature` | Http3Options configures h3 SETTINGS | Builder option wiring | Task 1.6 |
-| `features/http3_transport.feature` | HTTP/3 ALPN h3 negotiated over QUIC | ALPN correctness | Task 1.5 |
-| `features/http3_transport.feature` | HTTP/2 path is unaffected by http3 feature flag | Regression guard | Task 1.17 |
-| `features/alt_svc_and_fallback.feature` | Alt-Svc header parsed and cached | RFC 7838 parsing | Task 2.1 |
-| `features/alt_svc_and_fallback.feature` | Subsequent requests prefer h3 after Alt-Svc | Cache lookup | Task 2.2 |
-| `features/alt_svc_and_fallback.feature` | Alt-Svc entry expires after ma period | Cache expiry | Task 2.3 |
-| `features/alt_svc_and_fallback.feature` | Alt-Svc clear purges cache | RFC 7838 clear | Task 2.3 |
-| `features/alt_svc_and_fallback.feature` | Malformed Alt-Svc header is ignored gracefully | Parser robustness (D2) | Task 2.4 |
-| `features/alt_svc_and_fallback.feature` | Cached Alt-Svc unreachable deprioritizes entry | D13 handling | Task 2.5 |
-| `features/alt_svc_and_fallback.feature` | Multiple Alt-Svc entries follow RFC 7838 precedence | D14 handling | Task 2.6 |
-| `features/alt_svc_and_fallback.feature` | Fallback to h2 when h3 unavailable | REQ-16 fallback | Task 2.7 |
-| `features/alt_svc_and_fallback.feature` | Non-idempotent request surfaces original h3 error | C-13 idempotency | Task 2.8 |
-| `features/alt_svc_and_fallback.feature` | prefer_http3 enables opportunistic h3 | REQ-09 builder | Task 2.9 |
-| `features/alt_svc_and_fallback.feature` | Alt-Svc from HTTP response is not cached | C-09 HTTPS-only | Task 2.10 |
-| `features/websocket_over_h3.feature` | WS upgrade over h3 with extended CONNECT | RFC 9220 base | Task 2.11 |
-| `features/websocket_over_h3.feature` | WS over h3 supports binary messages | RFC 9220 binary | Task 2.12 |
-| `features/websocket_over_h3.feature` | WS over h3 supports close frame exchange | RFC 9220 close | Task 2.13 |
-| `features/websocket_over_h3.feature` | WS over h3 rejected by server surfaces typed error | D24 handling | Task 2.14 |
-| `features/websocket_over_h3.feature` | WS over h3 with permessage-deflate (when Phase 3 lands) | RFC 9220 + 7692 | Task 3.10 |
-| `features/http3_browser_emulation.feature` | Chrome 143 emulation produces h3 fingerprint | REQ-08 Chrome | Task 3.1 |
-| `features/http3_browser_emulation.feature` | Chrome 96 emulation produces h3 fingerprint | REQ-08 Chrome first-stable | Task 3.2 |
-| `features/http3_browser_emulation.feature` | Firefox emulation produces h3 fingerprint | REQ-08 Firefox | Task 3.3 |
-| `features/http3_browser_emulation.feature` | Safari emulation produces h3 fingerprint | REQ-08 Safari | Task 3.4 |
-| `features/http3_browser_emulation.feature` | Opera emulation produces h3 fingerprint | REQ-08 Opera | Task 3.5 |
-| `features/http3_browser_emulation.feature` | http3_options macro configures QPACK max table capacity | Macro wiring | Task 3.6 |
-| `features/http1_rfc_gaps.feature` | h1_trailers option enables trailer fields | REQ-15 trailers | Task 3.11 |
-| `features/http1_rfc_gaps.feature` | 1xx informational responses chain to final response | D27 chaining | Task 3.12 |
-| `features/http1_rfc_gaps.feature` | Malformed chunked transfer-encoding surfaces typed error | D29 chunked | Task 3.13 |
-| `features/http1_rfc_gaps.feature` | Ambiguous Content-Length is rejected | D31 smuggling | Task 3.14 |
-| `features/http1_rfc_gaps.feature` | Expect: 100-continue timeout surfaces error | D28 Expect | Task 3.15 |
-| `features/websocket_deflate.feature` | fastwebsockets negotiates permessage-deflate | REQ-12 base | Task 3.16 |
-| `features/websocket_deflate.feature` | permessage-deflate with server_no_context_takeover | D19 config | Task 3.17 |
-| `features/websocket_deflate.feature` | permessage-deflate fallback when no overlap | D19 fallback | Task 3.18 |
-| `features/websocket_deflate.feature` | permessage-deflate decompression failure closes 1002 | C-17 | Task 3.19 |
 
 ---
 

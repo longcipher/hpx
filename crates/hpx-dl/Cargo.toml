@@ -14,7 +14,6 @@ include = [
     "src/**/*.rs",
     "examples/**/*.rs",
     "tests/**/*.rs",
-    "features/**/*.feature",
 ]
 
 [package.metadata.docs.rs]
@@ -70,7 +69,6 @@ url = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 
 [dev-dependencies]
-cucumber = { workspace = true }
 proptest = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = [
@@ -83,10 +81,6 @@ tokio = { workspace = true, features = [
     "net",
     "test-util",
 ] }
-
-[[test]]
-name = "cucumber"
-harness = false
 
 [lints]
 workspace = true

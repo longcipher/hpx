@@ -318,30 +318,6 @@ From `AGENTS.md`:
 - **SRP:** Each improvement area (emulation profiles, error handling, pool keys, cert compression) stays in its own module. No cross-concern pollution.
 - **DIP:** `CertificateCompressor` implementations depend on the `boring` crate's trait, not on concrete types. `Platform` maps to `EmulationOS` through a clean conversion.
 
-### 5.9 BDD/TDD Strategy
-
-- **BDD Runner:** `cucumber` (Rust crate)
-- **BDD Command:** `cargo test --test features` (cucumber integration tests)
-- **Unit Test Command:** `cargo test -p hpx -p hpx-emulation`
-- **Property Test Tool:** `proptest` for weighted random distribution validation
-- **Fuzz Test Tool:** N/A — no parser/protocol/unsafe work
-- **Benchmark Tool:** N/A — no latency SLA for emulation profile lookup
-- **Outer Loop:** Feature scenarios in `features/` verify end-to-end emulation behavior
-- **Inner Loop:** Unit tests in `#[cfg(test)]` modules verify each component
-
-### 5.10 BDD Scenario Inventory
-
-| Feature File | Scenario | Business Outcome | Primary Verification | Supporting TDD Focus |
-| :--- | :--- | :--- | :--- | :--- |
-| `features/emulation-profiles.feature` | All major browser versions available | Users can emulate any major browser | `cargo test -p hpx-emulation` | Enum variant count test |
-| `features/emulation-profiles.feature` | Platform-specific emulation | OS-accurate fingerprints | `cargo test -p hpx-emulation` | Platform→EmulationOS mapping |
-| `features/emulation-profiles.feature` | Weighted random distribution | Realistic traffic profile | `cargo test -p hpx-emulation` | Distribution chi-squared test |
-| `features/error-diagnostics.feature` | Timeout detected through tower layers | Accurate error classification | `cargo test -p hpx` | Source chain walking unit test |
-| `features/error-diagnostics.feature` | Connect error detected through layers | Accurate error classification | `cargo test -p hpx` | Source chain walking unit test |
-| `features/cert-compression.feature` | Browser-appropriate compression applied | Accurate TLS fingerprint | `cargo test -p hpx-emulation` | Compressor trait impl tests |
-| `features/connection-pool.feature` | Different emulations get separate pool entries | Fingerprint isolation | `cargo test -p hpx` | Pool key hash test |
-| `features/connection-pool.feature` | Response::forbid_recycle prevents reuse | Connection poisoning | `cargo test -p hpx` | PoisonPill test |
-
 ### 5.11 Simplification Opportunities in Touched Code
 
 | Area | Current Complexity | Planned Simplification | Why It Preserves Behavior |
@@ -526,15 +502,6 @@ New feature flags in `hpx-emulation/Cargo.toml`:
 - Emulation profile → TLS handshake → verify JA3 fingerprint matches expected browser.
 - Different emulation profiles to same host → verify separate pool entries.
 - `forbid_recycle()` → verify connection not reused on next request.
-
-### 10.4 BDD Acceptance Testing
-
-| Scenario ID | Feature File | Command | Success Criteria |
-| :--- | :--- | :--- | :--- |
-| BDD-01 | `features/emulation-profiles.feature` | `cargo test -p hpx-emulation` | All scenarios pass |
-| BDD-02 | `features/error-diagnostics.feature` | `cargo test -p hpx` | All scenarios pass |
-| BDD-03 | `features/cert-compression.feature` | `cargo test -p hpx-emulation` | All scenarios pass |
-| BDD-04 | `features/connection-pool.feature` | `cargo test -p hpx` | All scenarios pass |
 
 ### 10.5 Robustness & Performance Testing
 

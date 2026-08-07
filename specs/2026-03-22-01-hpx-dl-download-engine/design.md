@@ -98,15 +98,14 @@ The planner consumed:
 This spec is build-eligible for `/pb-build`. The contract surface consists of:
 
 - `design.md` — this file, containing the full architecture, decisions, and detailed design.
-- `tasks.md` — phased task breakdown with `Task X.Y` IDs, verification criteria, and BDD/TDD loop types.
-- `features/*.feature` — Gherkin scenarios covering user-visible behavior.
+- `tasks.md` — phased task breakdown with `Task X.Y` IDs, verification criteria, and loop types.
 
 ### TaskContract
 
 Each task in `tasks.md` includes:
 
 - Unique `Task X.Y` ID for state tracking.
-- `Loop Type: BDD+TDD` for user-visible behavior, `TDD-only` for infrastructure.
+- `Loop Type: TDD` for user-visible behavior, `TDD-only` for infrastructure.
 - `Behavioral Contract` stating whether existing behavior is preserved or intentionally changed.
 - `Simplification Focus` to keep implementations readable.
 - `Advanced Test Coverage` indicating property/fuzz/benchmark requirements.
@@ -210,18 +209,6 @@ From `AGENTS.md` and existing hpx workspace conventions:
 - The `Storage` trait uses only 5 methods (save, load, list, delete, update_progress), keeping the interface minimal.
 - Token-bucket via `governor` avoids reinventing rate limiting with complex async semaphore patterns.
 
-## BDD/TDD Strategy
-
-- **Primary Language:** Rust
-- **BDD Runner:** `cucumber`
-- **BDD Command:** `cargo test --features cli -p hpx-dl --test cucumber`
-- **Unit Test Command:** `cargo nextest run -p hpx-dl --all-features`
-- **Property Test Tool:** `proptest` (for segment calculation, Metalink parsing, checksum verification)
-- **Fuzz Test Tool:** `cargo-fuzz` (conditional — for Metalink binary/XML parsing with untrusted input)
-- **Benchmark Tool:** `criterion` (N/A for v1 — no explicit latency SLA; can be added if throughput targets emerge)
-- **Feature Files:** `specs/2026-03-22-01-hpx-dl-download-engine/features/*.feature`
-- **Outside-in Loop:** Start with `seg-download-basic.feature` scenario (add download, start, complete) → drive `DownloadEngine::add()` and `SegmentDownloader` implementation → then `seg-download-resume.feature` → drive resume logic → then queue/speed/checksum/metalink scenarios.
-
 ## Code Simplification Constraints
 
 - **Behavioral Contract:** No existing behavior to preserve — this is a new crate. All behavior is net-new.
@@ -229,20 +216,6 @@ From `AGENTS.md` and existing hpx workspace conventions:
 - **Readability Priorities:** Prefer explicit control flow, named constants over magic numbers, clear error types over boxed errors. Avoid nested closures — extract named functions for segment download, checksum computation, etc.
 - **Refactor Scope:** N/A (new crate).
 - **Clarity Guardrails:** No dense iterator chains that obscure download state transitions. Use match arms for `DownloadState` transitions with explicit logging at each state change.
-
-## BDD Scenario Inventory
-
-| Feature File | Scenario | Business Outcome |
-|-------------|----------|-----------------|
-| `seg-download.feature` | Basic segmented download | User adds a URL, download completes with multiple connections |
-| `seg-download.feature` | Resume interrupted download | User restarts after crash, download resumes from last checkpoint |
-| `speed-limit.feature` | Speed limit enforced | Download speed stays within configured limit |
-| `queue.feature` | Priority ordering | Critical downloads execute before Low priority ones |
-| `checksum.feature` | Checksum verification | Download with checksum succeeds when hash matches, fails when mismatched |
-| `metalink.feature` | Metalink download | User provides Metalink file, engine downloads from best source with checksum |
-| `proxy.feature` | Proxy download | Download succeeds through configured HTTP proxy |
-| `crash-recovery.feature` | Crash recovery | Engine recovers in-progress downloads after unclean shutdown |
-| `progress.feature` | Progress reporting | Consumer receives progress events during download |
 
 ## Detailed Design
 
@@ -519,10 +492,6 @@ Each module has colocated `#[cfg(test)]` tests:
   - Speed limiting: verify download speed stays within configured bounds.
   - Checksum verification: success and failure cases.
 
-### BDD Scenarios
-
-Gherkin scenarios in `features/` directory cover all user-visible behaviors listed in the BDD Scenario Inventory.
-
 ### Runtime Verification
 
 For tasks that change runtime behavior:
@@ -555,4 +524,4 @@ Implement SQLite storage, crash recovery, and broadcast event system.
 
 ### Phase 6: CLI & Polish (Tasks 7.1-7.2)
 
-Add optional CLI binary with clap, BDD harness with cucumber, final lint/format pass.
+Add optional CLI binary with clap, final lint/format pass.

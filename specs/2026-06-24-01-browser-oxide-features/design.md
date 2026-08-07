@@ -255,32 +255,6 @@ hpx has solid HTTP client foundations and basic browser emulation, but cannot re
 
 No template identity mismatches detected. The hpx workspace uses project-matching crate names.
 
-### 5.6 BDD/TDD Strategy
-
-- **BDD Runner:** `cucumber` (Rust)
-- **BDD Command:** `cargo test --test challenge_features` (cucumber-rs colocated tests)
-- **Unit Test Command:** `cargo test -p hpx --features challenge,stealth-profile,humanize,csp`
-- **Property Test Tool:** `proptest` for CSP parser (large input domain: directive/source combinations)
-- **Fuzz Test Tool:** `cargo-fuzz` for CSP parser (untrusted HTTP headers, crash-safety)
-- **Benchmark Tool:** `criterion` for challenge detection (hot path on every response)
-- **Outer Loop:** Challenge detection and CSP parsing scenarios prove end-to-end behavior
-- **Inner Loop:** Unit tests for marker constants, profile validation, humanization determinism
-- **Step Definition Location:** `crates/hpx/tests/` (colocated with existing integration tests)
-
-### 5.7 BDD Scenario Inventory
-
-| Feature File | Scenario | Business Outcome | Primary Verification | Supporting TDD Focus |
-| :--- | :--- | :--- | :--- | :--- |
-| `features/challenge-detection.feature` | Detect Cloudflare challenge | Client identifies CF managed challenge from response body | classify::engine_classify returns correct tag | Marker constant matching |
-| `features/challenge-detection.feature` | Detect DataDome challenge | Client identifies DataDome captcha from response body | classify::engine_classify returns correct tag | Edge cases: multilingual |
-| `features/challenge-detection.feature` | Pass clean response | Clean page returns Pass verdict | classify::engine_classify returns Pass | False positive regression |
-| `features/stealth-profile.feature` | Validate Chrome 148 profile | Profile passes all consistency checks | profile.validate() returns Ok | Cross-field validation |
-| `features/stealth-profile.feature` | Random desktop profile selection | random_desktop() returns valid profile | Different profiles on repeated calls | Seed determinism |
-| `features/humanization.feature` | Generate mouse trajectory | Trajectory has smooth velocity curve | Points are monotonically approaching target | Endpoint accuracy |
-| `features/humanization.feature` | Generate keystroke timings | Timings vary per keystroke | Dwell/flight times are positive, vary | Bigram modulation |
-| `features/csp-parsing.feature` | Parse strict-dynamic policy | strict-dynamic ignores host sources | Policy.allows() correct for nonce/hash | Parser property tests |
-| `features/cookie-jar.feature` | Domain-scoped cookie storage | Cookies scoped by domain attribute | cookies_for() returns correct set | RFC 6265 compliance |
-
 ### 5.8 Simplification Opportunities in Touched Code
 
 | Area | Current Complexity or Smell | Planned Simplification | Why It Preserves or Clarifies Behavior |
@@ -866,17 +840,6 @@ Extended `stealth` preset: `stealth = ["challenge", "stealth-profile", "humanize
 - Cookie jar persistence round-trip: set cookies → save → load → verify
 - CSP enforcement: build request to URL with CSP policy → verify blocked/allowed
 
-### 7.4 BDD Acceptance Testing
-
-| Scenario ID | Feature File | Command | Success Criteria |
-| :--- | :--- | :--- | :--- |
-| **BDD-01** | `features/challenge-detection.feature` | `cargo test -p hpx-browser --features challenge` | All scenarios pass |
-| **BDD-02** | `features/stealth-profile.feature` | `cargo test -p hpx-browser --features stealth-profile` | All scenarios pass |
-| **BDD-03** | `features/csp-parsing.feature` | `cargo test -p hpx-browser --features csp` | All scenarios pass |
-| **BDD-04** | `features/page-navigation.feature` | `cargo test -p hpx-browser` | Navigate, evaluate, title, content all work |
-| **BDD-05** | `features/dom-rendering.feature` | `cargo test -p hpx-browser` | HTML parsed, DOM queries return correct results |
-| **BDD-06** | `features/js-execution.feature` | `cargo test -p hpx-browser --features v8` | JS executed, DOM manipulations reflected |
-
 ### 7.5 Robustness & Performance Testing
 
 | Test Type | When It Is Required | Tool / Command | Planned Coverage or Reason Not Needed |
@@ -911,7 +874,7 @@ Extended `stealth` preset: `stealth = ["challenge", "stealth-profile", "humanize
 - [ ] **Phase 5: JS Runtime** — Port deno_core integration, 16 JS extension modules, BrowserEventLoop (timers, rAF, idle)
 - [ ] **Phase 6: Canvas + Rendering** — Port skia-safe Canvas 2D, WebGL stubs, AudioContext fingerprint, font shaping
 - [ ] **Phase 7: Advanced Features** — Port Web Workers, iframes, CDP server, PagePool, ParallelPager, EngineHandle
-- [ ] **Phase 8: Integration & Polish** — navigate() loop, BDD tests, property tests, benchmarks, fuzz targets, docs
+- [ ] **Phase 8: Integration & Polish** — navigate() loop, property tests, benchmarks, fuzz targets, docs
 
 ## Revision History
 

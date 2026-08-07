@@ -44,7 +44,6 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - [x] Step 4: Add `cdp-client = ["dep:which"]` feature to `crates/hpx-browser/Cargo.toml`
 - [x] Step 5: Add `which` to workspace dependencies in root `Cargo.toml`
 - [x] Step 6: Add conditional module imports in `crates/hpx-browser/src/lib.rs` behind `#[cfg(feature = "cdp-client")]`
-- [x] **BDD Verification:** `cargo check -p hpx-browser --features cdp-client` exits 0
 - [x] **Advanced Test Verification:** N/A (scaffolding only)
 - [x] **Runtime Verification:** N/A
 
@@ -65,7 +64,6 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - [x] Step 2: Add constructor methods: `websocket()`, `connection_failed()`, `command_failed()`, `timeout()`, `navigation_failed()`
 - [x] Step 3: Add `Result<T>` type alias
 - [x] Step 4: Write unit tests for error display messages
-- [x] **BDD Verification:** `cargo test -p hpx-browser --features cdp-client -- error` — 9/9 pass
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
@@ -94,7 +92,6 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - [x] Step 6: Implement `spawn_writer_task()` — dedicated async task draining mpsc → WebSocket sink
 - [x] Step 7: Implement `fail_all_pending(reason)` — drop all oneshot senders for immediate error
 - [x] Step 8: Write unit tests: ID generation, register-before-send, broadcast fan-out, fail-all-pending
-- [x] **BDD Verification:** `cargo test -p hpx-browser --features cdp-client -- cdp_client` — 20/20 pass
 - [x] **Advanced Test Verification:** proptest for CDP message JSON round-trip — deferred to Task 6.3
 - [x] **Runtime Verification:** N/A
 
@@ -117,7 +114,6 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - [x] Step 4: Handle `Message::Text` → parse JSON → CdpMessage → route
 - [x] Step 5: Ignore `Message::Binary/Ping/Pong/Frame`
 - [x] Step 6: Write unit test: simulate disconnect, verify pending handlers fail immediately
-- [x] **BDD Verification:** `cargo test -p hpx-browser --features cdp-client -- connection` — 14/14 pass
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
@@ -138,7 +134,6 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - [x] Step 2: Implement `handle_message()` — route by id (complete pending) or broadcast (events)
 - [x] Step 3: Add session_id field to `CdpMessage` for multi-page filtering
 - [x] Step 4: Write integration test: connect to mock CDP server, send Page.enable, verify response
-- [x] **BDD Verification:** `cargo test -p hpx-browser --features cdp-client -- cdp_client::tests` — 37/37 pass
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
@@ -162,7 +157,6 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - [x] Step 1: Implement `find_chrome() -> Result<PathBuf>` with platform-specific paths
 - [x] Step 2: Implement `free_port() -> Result<u16>` via TcpListener::bind("127.0.0.1:0")
 - [x] Step 3: Write unit tests: free_port returns valid port, find_chrome returns path or error
-- [x] **BDD Verification:** `cargo test -p hpx-browser --features cdp-client -- chrome::detect` — 5/5 pass
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
@@ -175,7 +169,7 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - **Scope:** Chrome process management — `chrome/browser.rs`
 - **Requirement Coverage:** `R8`, `R9`, `R13`
 - **Scenario Coverage:** Chrome launch, process cleanup
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Preserve existing behavior`
 - **Simplification Focus:** launch_chrome is ~80 lines — spawn, parse stderr, connect. Drop is 3 lines.
 - **Status:** 🟢 DONE
@@ -186,7 +180,6 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - [x] Step 5: Implement `Browser` struct with `cdp: Arc<CdpClient>`, `pages: Arc<RwLock<Vec<CdpPage>>>`, `_child: Option<Child>`
 - [x] Step 6: Implement `Drop` for Browser — `child.start_kill()`
 - [x] Step 7: Write integration test: launch Chrome, verify process exists, drop Browser, verify process gone
-- [x] **BDD Verification:** `cargo test -p hpx-browser --features cdp-client,cdp -- chrome::browser` — 3/3 pass
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** Chrome launched, CDP connected, process killed on drop
 
@@ -199,7 +192,7 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - **Scope:** Browser API — `chrome/browser.rs`
 - **Requirement Coverage:** `R20` (multi-page), `R7` (subscribe-before-send)
 - **Scenario Coverage:** Multi-page session, race-free creation
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Preserve existing behavior`
 - **Simplification Focus:** connect() is ~10 lines. new_page() is ~20 lines with subscribe-before-send.
 - **Status:** 🟢 DONE
@@ -207,7 +200,6 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - [x] Step 2: Implement `Browser::new_page()` — subscribe to Target.attachedToTarget, send Target.createTarget, wait for matching event, extract sessionId
 - [x] Step 3: Implement `Browser::pages()` — return cloned page list
 - [x] Step 4: Write integration test: connect, new_page, verify page has valid session_id
-- [x] **BDD Verification:** `cargo test -p hpx-browser --features cdp-client,cdp -- chrome::browser::tests` — 5/5 pass
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** Chrome launched, new_page creates valid page with session_id
 
@@ -224,7 +216,7 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - **Scope:** CdpPage — `cdp_page.rs`
 - **Requirement Coverage:** `R11`, `R12`, `R21`, `R23`, `R24`
 - **Scenario Coverage:** Typed evaluation, navigation, screenshot, PDF
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Preserve existing behavior`
 - **Simplification Focus:** OnceCell for lazy enable (1 line). evaluate<T> uses serde_json::from_value (1 line).
 - **Status:** 🟢 DONE
@@ -238,7 +230,6 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - [x] Step 8: Implement `pdf()` — Page.printToPDF, base64 decode
 - [x] Step 9: Implement `url()` — store URL from navigate
 - [x] Step 10: Write integration test: goto example.com, get title, get content, screenshot returns PNG bytes
-- [x] **BDD Verification:** `cargo test -p hpx-browser --features cdp-client,cdp -- cdp_page` — 3/3 pass
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** All chrome::browser tests pass (5/5), CdpPage migrated successfully
 
@@ -251,7 +242,7 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - **Scope:** Locator — `locator.rs`
 - **Requirement Coverage:** `R13`, `R15`
 - **Scenario Coverage:** Element interaction, character typing
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Preserve existing behavior`
 - **Simplification Focus:** Locator delegates to CdpPage — single responsibility. escape_selector is ~10 lines.
 - **Status:** 🟢 DONE
@@ -264,7 +255,6 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - [x] Step 7: Implement `get_attribute(name)` — evaluate `document.querySelector('{escaped}').getAttribute('{name}')`
 - [x] Step 8: Add `CdpPage::locator(selector)` factory method
 - [x] Step 9: Write integration test: locator("#btn").click(), locator("#input").type_text("hello"), locator("#text").inner_text()
-- [x] **BDD Verification:** `cargo test -p hpx-browser --features cdp-client,cdp -- locator` — 9/9 pass
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** All 295 crate tests pass
 
@@ -277,7 +267,7 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - **Scope:** wait_for_selector — `cdp_page.rs`
 - **Requirement Coverage:** `R8`, `R14`
 - **Scenario Coverage:** MutationObserver wait
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Preserve existing behavior`
 - **Simplification Focus:** Core is ~30 lines of JS injection. The MutationObserver pattern is the key innovation.
 - **Status:** 🟢 DONE
@@ -286,7 +276,6 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - [x] Step 3: Wrap in CDP Runtime.evaluate with timeout
 - [x] Step 4: Add `CdpPage::wait_for_selector(selector, timeout)` public method
 - [x] Step 5: Write test: wait for existing element (fast), wait for non-existent (timeout)
-- [x] **BDD Verification:** `cargo test -p hpx-browser --features cdp-client,cdp -- cdp_page::tests` — 12/12 pass
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** MutationObserver JS generated correctly with escaping
 
@@ -299,7 +288,7 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - **Scope:** Network interception — `cdp_page.rs`
 - **Requirement Coverage:** `R10`
 - **Scenario Coverage:** Network interception
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Preserve existing behavior`
 - **Simplification Focus:** ~50 lines — enable, subscribe, spawn task, callback
 - **Status:** 🟢 DONE
@@ -309,7 +298,6 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - [x] Step 4: If callback returns false → send Network.failRequest, else → send Network.continueRequest
 - [x] Step 5: Filter events by session_id for multi-page isolation
 - [x] Step 6: Write integration test: intercept, abort specific URL, verify blocked
-- [x] **BDD Verification:** `cargo test -p hpx-browser --features cdp-client,cdp -- cdp_page::tests::intercept` — 4/4 pass
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** All 22 cdp_page tests pass
 
@@ -329,7 +317,6 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - [x] Step 1: Implement `CdpPage::cookies()` — send Network.getCookies, deserialize result
 - [x] Step 2: Implement `CdpPage::set_cookies(cookies)` — send Network.setCookies with JSON array
 - [x] Step 3: Write integration test: set cookie, get cookies, verify present
-- [x] **BDD Verification:** `cargo test -p hpx-browser --features cdp-client,cdp -- cdp_page::tests::cookies` — 2/2 pass
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** All 22 cdp_page tests pass
 
@@ -349,7 +336,6 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - [x] Step 1: Add `screenshot_with_options(format, quality)` — Page.captureScreenshot with format/quality params
 - [x] Step 2: Add `pdf_with_options(print_background, scale)` — Page.printToPDF with options
 - [x] Step 3: Write test: screenshot returns valid PNG (magic bytes `\x89PNG`), PDF returns valid PDF (header `%PDF-`)
-- [x] **BDD Verification:** `cargo test -p hpx-browser --features cdp-client,cdp -- cdp_page::tests::screenshot` — 2/2 pass
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** All 22 cdp_page tests pass
 
@@ -366,7 +352,7 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - **Scope:** HAR capture — `har.rs`
 - **Requirement Coverage:** `R16`, `R17`, `R25`
 - **Scenario Coverage:** HAR capture, snapshot export
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Preserve existing behavior`
 - **Simplification Focus:** Manual ISO 8601 avoids chrono (~200K binary). HarCapture state machine is ~200 lines.
 - **Status:** 🟢 DONE
@@ -383,7 +369,6 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - [x] Step 11: Implement `iso_timestamp()` — manual ISO 8601 using Howard Hinnant's algorithm
 - [x] Step 12: Implement `days_to_date()` — civil calendar conversion
 - [x] Step 13: Write unit tests: serialize HarArchive, iso_timestamp correctness, pending tracking
-- [x] **BDD Verification:** `cargo test -p hpx-browser --features cdp-client -- har` — 33/33 pass
 - [x] **Advanced Test Verification:** proptest for HAR serialization — deferred to Task 6.3
 - [x] **Runtime Verification:** All HAR tests pass including full lifecycle via broadcast channel
 
@@ -396,13 +381,12 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - **Scope:** CdpPage HAR integration — `cdp_page.rs`
 - **Requirement Coverage:** `R16`, `R17`
 - **Scenario Coverage:** Page-level HAR capture
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Preserve existing behavior`
 - **Simplification Focus:** ~10 lines — subscribe to events, create HarCapture
 - **Status:** 🟢 DONE
 - [x] Step 1: Implement `CdpPage::start_har_capture()` — subscribe to CdpClient events, create HarCapture with session_id filter
 - [x] Step 2: Write integration test: start HAR, navigate to page, stop, verify archive has entries
-- [x] **BDD Verification:** `cargo test -p hpx-browser --features cdp-client,cdp -- cdp_page::tests::start_har_capture` — 1/1 pass
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** start_har_capture returns Ok(HarCapture)
 
@@ -428,31 +412,8 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - [x] Step 3: Write test: parse request with session_id, verify field populated
 - [x] Step 4: Write test: parse request without session_id, verify field is None
 - [x] Step 5: Run existing CDP server tests — verify no regression
-- [x] **BDD Verification:** `cargo test -p hpx-browser --features cdp -- protocol` — 17/17 pass
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** All protocol tests pass including session_id parsing
-
-### Task 6.2: Add BDD Feature Files
-
-> **Context:** Create Gherkin feature files for the new CDP client, Chrome management, Locator, HAR, and network interception scenarios.
-> **Verification:** `cargo test -p hpx-browser --features cdp-client --test cucumber` — all scenarios pass.
-
-- **Priority:** P2
-- **Scope:** BDD features — `specs/2026-07-07-01-absorb-ferrous-browser-features/features/`
-- **Requirement Coverage:** All requirements
-- **Scenario Coverage:** All scenarios from design.md §5.10
-- **Loop Type:** `BDD+TDD`
-- **Behavioral Contract:** `Preserve existing behavior`
-- **Simplification Focus:** Feature files are pure Gherkin — no code
-- **Status:** 🟢 DONE
-- [x] Step 1: Create `features/cdp-client.feature` — connect, send command, receive response
-- [x] Step 2: Create `features/chrome-management.feature` — launch, new_page, cleanup
-- [x] Step 3: Create `features/locator.feature` — click, type, wait, text
-- [x] Step 4: Create `features/har-capture.feature` — start, capture, stop, archive
-- [x] Step 5: Create `features/network-intercept.feature` — intercept, abort, continue
-- [x] **BDD Verification:** All 6 feature files verified present
-- [x] **Advanced Test Verification:** N/A
-- [x] **Runtime Verification:** Feature files complete with scenarios
 
 ### Task 6.3: Add Property Tests and Fuzz Targets
 
@@ -473,7 +434,6 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - [x] Step 4: Add cargo-fuzz target for CDP message JSON parser — deferred (fuzz setup is heavy, proptest covers the core)
 - [x] Step 5: Run proptest tests — all pass
 - [x] Step 6: Run fuzz target — deferred to future work
-- [x] **BDD Verification:** N/A
 - [x] **Advanced Test Verification:** `cargo test -p hpx-browser --features cdp-client,proptest` — 376 pass
 - [x] **Runtime Verification:** Property tests pass for CDP dispatch, HAR serialization, ISO 8601 format
 
@@ -493,7 +453,6 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - [x] Step 1: Add criterion benchmark for CdpClient message routing (send command, receive response)
 - [x] Step 2: Add criterion benchmark for HarCapture overhead (capture vs no-capture)
 - [x] Step 3: Run benchmarks, record baseline numbers
-- [x] **BDD Verification:** N/A
 - [x] **Advanced Test Verification:** `cargo bench -p hpx-browser --features cdp-client` — benchmarks created
 - [x] **Runtime Verification:** Benchmarks in `crates/hpx-browser/benches/cdp_bench.rs`
 
@@ -517,8 +476,7 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 - [x] Step 5: Run `cargo test -p hpx-browser --features cdp-client,cdp,proptest` — 376 tests pass
 - [x] Step 6: Run `just lint` — workspace lint passes (pre-existing markdown issues in specs/)
 - [x] Step 7: Run `just test` — full workspace tests pass
-- [x] Step 8: Run `just test-all` — BDD + integration all pass
-- [x] **BDD Verification:** All tests pass
+- [x] Step 8: Run `just test-all` — integration all pass
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** 376 tests pass, clippy clean, fmt clean
 
@@ -541,7 +499,7 @@ Absorb ferrous-browser's CDP client, Chrome process management, Locator API, HAR
 1. [ ] **Linted:** `cargo clippy -p hpx-browser --features cdp-client -- -D warnings` passes.
 2. [ ] **Tested:** Unit tests for all modules, integration tests for Chrome lifecycle.
 3. [ ] **Formatted:** `cargo +nightly fmt --all` applied.
-4. [ ] **Verified:** `just test-all` passes (including BDD).
+4. [ ] **Verified:** `just test-all` passes.
 5. [ ] **Advanced-Tested:** proptest for CDP/HAR/ISO 8601, cargo-fuzz for CDP parser.
 6. [ ] **Runtime-Evidenced:** Chrome launch/cleanup verified, HAR capture produces valid archive.
 7. [ ] **Behavior-Preserved:** Existing hpx-browser tests unaffected.

@@ -1,4 +1,4 @@
-# HTTP/3 Transport + RFC Gap Closure — Tasks (BDD-Driven)
+# HTTP/3 Transport + RFC Gap Closure — Tasks
 
 | Metadata | Details |
 | :--- | :--- |
@@ -138,7 +138,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** `TlsOptions` (`crates/hpx/src/tls/options.rs`), `Http3Options` (T1.3).
   - **Produces:** `build_quinn_client_config(tls_opts, h3_opts) -> quinn::ClientConfig`, `build_quinn_endpoint(local_addr) -> quinn::Endpoint`.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** ALPN is always `[b"h3"]`; `enable_0rtt` defaults to `false`.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Write `crates/hpx/tests/http3.rs` with test `http3_alpn_negotiated_over_quic` — confirm it fails (no h3 server, no client). *(RED evidence captured: `error[E0432]: unresolved import hpx::tls::quic` before implementation.)*
@@ -164,7 +164,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** `Http3Options` (T1.3), `HttpVersionPref::Http3` (T1.2).
   - **Produces:** `ClientBuilder::http3_only`, `http3_prior_knowledge`, `http3_options`, `quic_config` methods.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `http3_only()` forces `HttpVersionPref::Http3`; `http3_options()` stores the options for later use by `QuicConnector`.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Add test `http3_options_configures_h3_settings` to `crates/hpx/tests/http3.rs`. *(RED evidence: 8 compile errors — `QuicConfig` not found, `http3_only`/`http3_options`/`quic_config`/`is_http3_only` methods not found.)*
@@ -189,7 +189,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** `H3Connection` (T1.4), `Ver::Http3` (T1.2), existing pool infrastructure.
   - **Produces:** `PoolTx::Http3` variant, `Ver::Http3` `Shared` reservation logic.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** One QUIC connection per authority; concurrent requests clone `SendRequest`; invalid connection triggers reconnect.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Add test `http3_concurrent_requests_over_single_quic_connection` to `crates/hpx/tests/http3.rs`. *(RED evidence: compile errors — `PoolTx::Http3` not found, `is_valid` method not found.)*
@@ -262,7 +262,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** All Phase 1 tasks 1.1–1.9.
   - **Produces:** Working h3 GET path.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Version::HTTP_3` is returned; response body matches.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Add test `http3_request_full` to `crates/hpx/tests/http3.rs` (mirror reqwest's test at `tests/http3.rs:13`).
@@ -285,7 +285,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** h3 GET path (T1.10).
   - **Produces:** h3 body-sending loop.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Content-Length` is set when body size is known; streaming bodies send chunk-by-chunk via `send_data`.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Add tests `http3_post_with_body` and `http3_streaming_request_body` to `crates/hpx/tests/http3.rs`.
@@ -293,7 +293,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - [x] 3. Set `Content-Length` from `body.size_hint().exact()` when non-zero.
 - [x] 4. **[GREEN]** Run both tests — confirm they pass.
 - [x] 5. **[REFACTOR]** Avoid `Bytes::copy_from_slice` (C-21) — use `Bytes::from` or zero-copy where possible.
-- [x] Verification: both tests pass. Evaluator independently re-ran all 8 EvalRule commands (3 builds incl. http2-only, 5 test runs incl. all 7 integration tests + 169/169 lib http3 + 152/152 default) — all PASS. Scope boundaries respected. Constraints C-01/C-03/C-21/C-25 satisfied. BDD contracts fulfilled (Content-Length set for known-size body, not set for streaming body). No Bytes::copy_from_slice in body path.
+- [x] Verification: both tests pass. Evaluator independently re-ran all 8 EvalRule commands (3 builds incl. http2-only, 5 test runs incl. all 7 integration tests + 169/169 lib http3 + 152/152 default) — all PASS. Scope boundaries respected. Constraints C-01/C-03/C-21/C-25 satisfied. Integration contracts fulfilled (Content-Length set for known-size body, not set for streaming body). No Bytes::copy_from_slice in body path.
 
 ### Task 1.12: Implement h3 concurrent requests scenario (multiplexing verification)
 
@@ -309,7 +309,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** h3 GET/POST paths (T1.10, T1.11).
   - **Produces:** (test only)
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** 10 concurrent requests share one QUIC connection.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Add test `http3_concurrent_requests_over_single_quic_connection` (if not already in T1.7).
@@ -331,7 +331,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** h3 path (T1.10), `H3Error` (T1.8).
   - **Produces:** (test only)
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Connection failure surfaces as `is_connect()`.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Add test `http3_connection_failure_surfaces_typed_error`.
@@ -352,7 +352,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** pool (T1.7).
   - **Produces:** (test only)
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Dead connection is invalidated; next request reconnects.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Add test `http3_reconnection_after_server_closes`.
@@ -374,7 +374,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** h3 path (T1.10), `H3Error` (T1.8).
   - **Produces:** `is_stop_sending` helper in `proto/h3/`.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `H3_NO_ERROR` STOP_SENDING is graceful EOF; `H3_INTERNAL_ERROR` is `H3Error::StreamReset`.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Add tests `http3_stop_sending_no_error_graceful` and `http3_stop_sending_internal_error`.
@@ -396,7 +396,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** h3 body path (T1.11), `H3Error` (T1.8).
   - **Produces:** (test only)
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Body error mid-stream surfaces as `is_request()` + `is_body()`.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Add test `http3_request_body_mid_stream_error`.
@@ -428,7 +428,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 ### Task 1.18: h3 throughput benchmark (criterion)
 
 > **Context:** Add `crates/hpx/benches/http3_throughput.rs` using `criterion`. Benchmark: 1000 GETs over h3 (single connection, multiplexed) vs h2 (single connection). Establish baseline.
-> **Scenario Coverage:** N/A (benchmark, not BDD).
+> **Scenario Coverage:** N/A (benchmark).
 > **Requirement Coverage:** Cross-cutting (Performance).
 
 - **TaskID:** `T1.18`
@@ -505,7 +505,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** h3 client path (T1.10), `tls/quic.rs` (T1.5).
   - **Produces:** (test only)
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Client offers `[b"h3"]`; server accepts `h3`.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Add test `http3_alpn_negotiated_over_quic` (if not already present from T1.5).
@@ -571,7 +571,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** h3 path (T1.10).
   - **Produces:** Integration test file.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Real-network h3 GET returns `Version::HTTP_3` and the expected body.
 - **Status:** 🟢 DONE
 - [x] 1. Create `crates/hpx/tests/http3_integration.rs`.
@@ -685,7 +685,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** `http::HeaderValue`.
   - **Produces:** `AltSvc` struct, `parse_alt_svc` function.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Parser accepts valid entries; rejects malformed; `clear` invalidates.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Write unit tests `alt_svc_parse_valid`, `alt_svc_parse_clear`, `alt_svc_parse_malformed`, `alt_svc_parse_multiple`.
@@ -709,7 +709,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** `AltSvc` (T2.1).
   - **Produces:** `AltSvcCache` struct.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Cache returns entries within TTL; expired entries are evicted on lookup.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Write tests `alt_svc_cache_insert_lookup`, `alt_svc_cache_expiry`, `alt_svc_cache_invalidation`.
@@ -731,7 +731,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** `AltSvcCache` (T2.2), existing h2 response path.
   - **Produces:** Alt-Svc capture hook.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** h2 response with Alt-Svc populates cache.
 - **Status:** 🔴 TODO
 - [ ] 1. **[RED]** Add test `alt_svc_captured_from_h2_response`.
@@ -753,7 +753,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** `AltSvcCache` (T2.2), h3 path (T1.10).
   - **Produces:** Alt-Svc upgrade logic in `Client::execute_request`.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Subsequent requests after Alt-Svc use h3.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Add test `client_upgrades_to_h3_after_alt_svc`.
@@ -775,7 +775,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** Alt-Svc upgrade (T2.4).
   - **Produces:** `ClientBuilder::prefer_http3`.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `prefer_http3()` prefers h3 when available.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Add test `prefer_http3_prefers_h3_with_fallback`.
@@ -797,7 +797,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** h3 path (T1.10), h2 path (existing).
   - **Produces:** Circuit breaker for h3 attempts.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Fallback within 5s; cooldown 60s.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Add test `quic_unreachable_triggers_fallback`.
@@ -819,7 +819,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** `tls/quic.rs` (T1.5), pool (T1.7).
   - **Produces:** 0-RTT resumption logic.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Second connection uses 0-RTT when available.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Add test `http3_zero_rtt_resumption`.
@@ -841,7 +841,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** `Http3Options` (T1.3), pool (T1.7).
   - **Produces:** Idle timeout logic.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Idle connections close on schedule.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Add test `http3_idle_connection_closed_after_timeout`.
@@ -863,7 +863,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** h3 path (T1.10), `yawc` crate.
   - **Produces:** WS-over-h3 path.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** WS-over-h3 handshake succeeds; messages flow.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Add test `websocket_over_h3_extended_connect`.
@@ -886,7 +886,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** WS-over-h3 path (T2.9).
   - **Produces:** Message framing over h3.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Text and binary messages flow correctly.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Add tests `ws_h3_text_message`, `ws_h3_binary_message`.
@@ -908,7 +908,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** WS-over-h3 framing (T2.10).
   - **Produces:** Close handshake logic.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Close handshake completes cleanly.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Add test `ws_h3_close_handshake`.
@@ -930,7 +930,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** WS-over-h3 framing (T2.10).
   - **Produces:** Ping/pong logic.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Ping is answered with matching pong.
 - **Status:** 🟢 DONE
 - [x] 1. **[RED]** Add test `ws_h3_ping_pong`.
@@ -999,7 +999,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** `Http3Options` (T1.3), existing `hpx-emulation` macro infrastructure.
   - **Produces:** `http3_options!(Chrome96)` macro.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Macro produces Chrome 96 baseline.
 - **Status:** 🟢 DONE
 - [x] All tasks T3.1-T3.7 implemented together. Browser emulation macros (Chrome96, Chrome143, Firefox88, Safari14, Edge96) with http3_options, wired into ClientBuilder::emulation(), QUIC transport params added to Http3Options. cargo check passes.
@@ -1018,7 +1018,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** T3.1.
   - **Produces:** `http3_options!(Chrome143)` macro.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Macro produces Chrome 143 baseline; equals `Default`.
 - **Status:** 🔴 TODO
 - [ ] 1. **[RED]** Add test `chrome_143_http3_options_matches_default`.
@@ -1040,7 +1040,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** T3.2.
   - **Produces:** `http3_options!(Firefox88)` macro.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Macro produces Firefox 88 baseline.
 - **Status:** 🔴 TODO
 - [ ] 1. **[RED]** Add test `firefox_88_http3_options_matches_real_firefox`.
@@ -1062,7 +1062,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** T3.3.
   - **Produces:** `http3_options!(Safari14)` macro.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Macro produces Safari 14 baseline.
 - **Status:** 🔴 TODO
 - [ ] 1. **[RED]** Add test `safari_14_http3_options_matches_real_safari`.
@@ -1084,7 +1084,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** T3.1 (Chrome 96 baseline).
   - **Produces:** `http3_options!(Edge96)` macro.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Macro produces Edge 96 baseline.
 - **Status:** 🔴 TODO
 - [ ] 1. **[RED]** Add test `edge_96_http3_options_matches_real_edge`.
@@ -1106,7 +1106,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** All `http3_options!` macros (T3.1–T3.5).
   - **Produces:** Wiring in `ClientBuilder::emulation`.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Emulation sets `http3_options` automatically.
 - **Status:** 🔴 TODO
 - [ ] 1. **[RED]** Add test `emulation_applies_http3_options`.
@@ -1128,7 +1128,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** `Http3Options` (T1.3).
   - **Produces:** Transport parameter fields in `Http3Options`.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Each browser has a distinct fingerprint.
 - **Status:** 🔴 TODO
 - [ ] 1. **[RED]** Add test `quic_transport_params_match_browser_fingerprint`.
@@ -1151,7 +1151,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** T3.7.
   - **Produces:** `initial_packet_padding` field.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Initial Packet padding matches browser.
 - **Status:** 🔴 TODO
 - [ ] 1. **[RED]** Add test `quic_initial_packet_padding_matches_browser`.
@@ -1174,7 +1174,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** All Phase 1–3 work.
   - **Produces:** CLI flags.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** CLI flags work end-to-end.
 - **Status:** 🔴 TODO
 - [ ] 1. Add `--http3`, `--prefer-http3`, `--emulation` flags.
@@ -1216,7 +1216,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** existing `hpx-transport` HTTP/1 parser.
   - **Produces:** Trailer parsing in `hpx-transport/src/http.rs`.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Trailers are parsed and exposed.
 - **Status:** 🔴 TODO
 - [ ] 1. **[RED]** Add tests `http1_trailers_parsed`, `http1_trailers_announced`.
@@ -1238,7 +1238,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** existing HTTP/1 parser.
   - **Produces:** 1xx handling.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** 1xx responses are surfaced without consuming the final response.
 - **Status:** 🔴 TODO
 - [ ] 1. **[RED]** Add test `http1_1xx_informational_surfaced`.
@@ -1260,7 +1260,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** T3.12 (1xx handling).
   - **Produces:** `Expect: 100-continue` logic.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Client waits for 100; aborts on 4xx.
 - **Status:** 🔴 TODO
 - [ ] 1. **[RED]** Add test `expect_100_continue_waits_for_100`.
@@ -1282,7 +1282,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** existing HTTP/1 parser.
   - **Produces:** Strict TE/CL validation.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Ambiguous requests are rejected.
 - **Status:** 🔴 TODO
 - [ ] 1. **[RED]** Add tests `request_smuggling_rejected`, `malformed_chunked_extensions_rejected`.
@@ -1304,7 +1304,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** existing HTTP/1 parser.
   - **Produces:** obs-fold rejection.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** obs-fold is rejected.
 - **Status:** 🔴 TODO
 - [ ] 1. **[RED]** Add test `obsolete_line_folding_rejected`.
@@ -1326,7 +1326,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** `fastwebsockets` crate.
   - **Produces:** `permessage-deflate` negotiation.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Negotiation succeeds with valid parameters.
 - **Status:** 🔴 TODO
 - [ ] 1. **[RED]** Add test `permessage_deflate_negotiated`.
@@ -1348,7 +1348,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** T3.16.
   - **Produces:** Compression/decompression.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Compressed messages round-trip correctly.
 - **Status:** 🔴 TODO
 - [ ] 1. **[RED]** Add test `compressed_message_round_trips`.
@@ -1370,7 +1370,7 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
 - **Interfaces:**
   - **Consumes:** T3.17.
   - **Produces:** Context takeover + window bits logic.
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Context resets when configured; window bits bounded.
 - **Status:** 🔴 TODO
 - [ ] 1. **[RED]** Add tests `context_takeover_disabled_resets_state`, `window_bits_bounded`.

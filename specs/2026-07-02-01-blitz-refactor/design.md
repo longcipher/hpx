@@ -190,28 +190,6 @@ Ponytail ladder applied at every decision:
 - **DIP:** Stylo integration goes behind a `CssEngine` trait so both custom and Stylo implementations can coexist during transition.
 - **Dependency Injection:** SharedSession is injected via `Arc<SharedSession>` — no service locator, no global state.
 
-## BDD/TDD Strategy
-
-- **BDD Runner:** cucumber (Rust)
-- **BDD Command:** `cargo test -p hpx-browser --test cucumber`
-- **Unit Test Command:** `cargo test -p hpx-browser`
-- **Property Test Tool:** proptest (already in workspace, available via `proptest` feature)
-- **Fuzz Test Tool:** N/A (no new parsers in this refactor; Stylo is external)
-- **Benchmark Tool:** criterion (already configured in hpx-browser benches)
-
-## BDD Scenario Inventory
-
-| Feature File | Scenario | Business Outcome | Task |
-| :--- | :--- | :--- | :--- |
-| net-api-unification | Unified request method handles GET | Single code path for all HTTP verbs | T2.1 |
-| net-api-unification | Redirect following is policy-based | Redirect behavior is configurable | T2.2 |
-| net-api-unification | All existing public methods still work | Backward compatibility preserved | T2.3 |
-| session-explicit-injection | Page creates its own SharedSession | No global state leakage | T3.1 |
-| session-explicit-injection | Two Pages share session when explicit | Multi-tab scenarios work | T3.2 |
-| dom-element-safety | node() uses expect with message | Panic message is informative | T4.1 |
-| stylo-css-replacement | Stylo parses real-world stylesheets | Spec compliance | T5.1 |
-| parley-text-layout | Parley produces same glyph positions | Canvas output equivalent | T6.1 |
-
 ## 12. Cross-Functional Concerns
 
 ### Backward Compatibility

@@ -18,7 +18,6 @@
 - [x] Step 2: In `execute_single_request`, after URL parsing, call `crate::net::ssrf::is_forbidden_host(url.host_str().unwrap_or(""))`. Return an error if forbidden and `allow_private_network` is false.
 - [x] Step 3: Write a unit test in `crates/hpx-browser/src/net/mod.rs` `#[cfg(test)]` that verifies HttpClient rejects 127.0.0.1 by default and allows it with `allow_private_network: true`.
 - [x] Step 4: Run `cargo test -p hpx-browser` — all tests pass.
-- [x] BDD Verification: N/A — SSRF is an internal safety check; verified by unit test.
 - [x] Advanced Test Verification: `cargo test -p hpx-browser -- --nocapture` — confirm SSRF rejection error message is user-friendly.
 - [x] Runtime Verification: `cargo check --workspace` — no regressions.
 
@@ -36,7 +35,6 @@
 - [x] Step 3: Do the same for the `serve` subcommand (CDP server) at line ~402.
 - [x] Step 4: Add `--allow-private-network` to the CLI help text: "Allow requests to private/internal IP addresses (disabled by default for security)."
 - [x] Step 5: Run `cargo check -p hpx-cli` — compiles.
-- [x] BDD Verification: `just bdd` — passes.
 - [x] Advanced Test Verification: `cargo test -p hpx-cli` — pass.
 - [x] Runtime Verification: Manual test: `cargo run -- fetch http://127.0.0.1 2>&1 | grep -i "forbidden"` exits non-zero; `cargo run -- fetch http://93.184.216.34` succeeds.
 
@@ -52,7 +50,6 @@
 - [x] Step 1: Add `ssrf_integration.rs` in `crates/hpx-browser/tests/` that tests HttpClient with a local HTTP server bound to 127.0.0.1 — verify SSRF blocks it by default.
 - [x] Step 2: Same test with `allow_private_network: true` — verify it connects.
 - [x] Step 3: Run `cargo test -p hpx-browser` — all tests pass.
-- [x] BDD Verification: N/A — integration test covers the behavior.
 - [x] Advanced Test Verification: `cargo test -p hpx-browser --test ssrf_integration` — pass.
 - [x] Runtime Verification: N/A.
 
@@ -73,7 +70,6 @@
 - [x] Step 4: In TLS backend files (`openssl.rs`, `rustls.rs`), gate `KeyLog::handle()` calls behind `#[cfg(feature = "keylog")]`.
 - [x] Step 5: Run `cargo check -p hpx --no-default-features` — compiles without keylog.
 - [x] Step 6: Run `cargo check -p hpx --features keylog` — compiles with keylog.
-- [x] BDD Verification: N/A — configuration-only change.
 - [x] Advanced Test Verification: `cargo test -p hpx --features keylog` — existing tests pass.
 - [x] Runtime Verification: `SSLKEYLOGFILE=/tmp/keys.log cargo test -p hpx --features keylog` — key file is created.
 
@@ -88,7 +84,6 @@
 - **Status:** 🟢 DONE
 - [x] Step 1: In README.md, add `keylog` row to the hpx features table under "TLS" section: "TLS key logging to file (for debugging) — NOT for production".
 - [x] Step 2: In `crates/hpx/src/tls/keylog.rs`, add `#[cfg(feature = "keylog")]` module doc noting the feature gate requirement.
-- [x] BDD Verification: N/A — documentation only.
 - [x] Advanced Test Verification: N/A — documentation only.
 - [x] Runtime Verification: `cargo doc -p hpx --no-deps` — docs build without errors.
 
@@ -99,7 +94,7 @@
 > **Context:** The download engine accepts user-supplied destination paths without sanitization, enabling path traversal attacks.
 > **Verification:** Unit test confirms `../../etc/passwd` is rejected, `./downloads/file.bin` is accepted.
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Reject paths with .. components or absolute paths by default.`
 - **Simplification Focus:** `Simple path component check using std::path::Component.`
 - **Status:** 🟢 DONE
@@ -109,7 +104,6 @@
 - [x] GREEN: Implement `fn validate_download_path(path: &Path) -> Result<(), DownloadError>` that iterates components and rejects `ParentDir` and `RootDir`.
 - [x] GREEN: Run `cargo test -p hpx-dl` — all tests pass including new ones.
 - [x] REFACTOR: Clean up; verify `cargo test -p hpx-dl` still passes.
-- [x] BDD Verification: `just bdd` — passes.
 - [x] Advanced Test Verification: `cargo test -p hpx-dl -- --nocapture` — verify error messages are clear.
 - [x] Runtime Verification: `cargo run -- dl add https://example.com/file.bin -o ../../etc/passwd 2>&1 | grep -i "traversal"` — exits non-zero.
 
@@ -124,8 +118,6 @@
 - **Status:** 🟢 DONE
 - [x] Step 1: In `crates/hpx-dl/src/engine.rs`, find the call site of `ensure_destination_parent` and insert `validate_download_path(&destination)?;` before it.
 - [x] Step 2: Run `cargo test -p hpx-dl` — all tests pass.
-- [x] BDD Verification: `just bdd` — passes.
-- [x] Advanced Test Verification: `cargo test -p hpx-dl --test cucumber` — passes.
 - [x] Runtime Verification: N/A — covered by unit test in Task 3.1.
 
 ## Phase 4: Checksum Buffer Allocation (Finding 4: PERF-17)
@@ -135,7 +127,7 @@
 > **Context:** `compute_checksum` allocates a 64KB Vec on every call. Thread-local avoids allocation.
 > **Verification:** The function produces identical hashes before and after, and `cargo test -p hpx-dl` passes.
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Hash output must be byte-identical to current implementation.`
 - **Simplification Focus:** `Replace vec![] with thread_local! static; no API change.`
 - **Status:** 🟢 DONE
@@ -143,7 +135,6 @@
 - [x] GREEN: Replace `let mut buf = vec![0u8; 65536];` with `thread_local! { static BUF: std::cell::RefCell<Box<[u8; 65536]>> = const { std::cell::RefCell::new(Box::new([0u8; 65536])) }; }` and borrow the buffer.
 - [x] GREEN: Run `cargo test -p hpx-dl` — all existing checksum tests pass.
 - [x] REFACTOR: Verify `cargo test -p hpx-dl` still passes.
-- [x] BDD Verification: `just bdd` — passes.
 - [x] Advanced Test Verification: `cargo bench -p hpx-dl --bench checksum` if benchmark exists, else `cargo test -p hpx-dl --release -- --nocapture` — no regression.
 - [x] Runtime Verification: N/A.
 
@@ -157,7 +148,6 @@
 - **Simplification Focus:** `One comment line in checksum.rs.`
 - **Status:** 🟢 DONE
 - [x] Step 1: Add comment above the thread_local! block: "Thread-local buffer avoids per-call 64 KiB heap allocation in compute_checksum hot path."
-- [x] BDD Verification: N/A.
 - [x] Advanced Test Verification: N/A.
 - [x] Runtime Verification: N/A.
 
@@ -176,7 +166,6 @@
 - [x] Step 2: Run `cargo check --workspace` — must pass.
 - [x] Step 3: Run `cargo nextest run --workspace` — must pass.
 - [x] Step 4: `git add Cargo.lock && git commit -m "chore: add Cargo.lock for reproducible builds"`.
-- [x] BDD Verification: N/A — configuration only.
 - [x] Advanced Test Verification: `cargo build --workspace --locked` — succeeds.
 - [x] Runtime Verification: N/A.
 
@@ -198,7 +187,6 @@
 - [x] Step 5: Update line 49: `scc = "3.8.4"`.
 - [x] Step 6: Update line 50: `winnow = "1.0.3"`.
 - [x] Step 7: Review lines 40-43, 45-46, 48, 51-52 for any other mismatches and fix them.
-- [x] BDD Verification: N/A — documentation only.
 - [x] Advanced Test Verification: N/A — documentation only.
 - [x] Runtime Verification: N/A.
 
@@ -214,7 +202,6 @@
 - [x] Step 1: Add `check-agents-md` recipe to `Justfile` that extracts versions from AGENTS.md and Cargo.toml, compares them, and exits non-zero on mismatch.
 - [x] Step 2: Add `check-agents-md` to the `lint` or `ci` recipe chain.
 - [x] Step 3: Run `just lint` — must pass.
-- [x] BDD Verification: N/A — CI infrastructure only.
 - [x] Advanced Test Verification: `just check-agents-md` — passes.
 - [x] Runtime Verification: N/A.
 
@@ -235,7 +222,6 @@
 - [x] Step 4: In `crates/hpx/tests/http.rs`, update any tests that instantiate `TransportConfigOptions`, `PoolConfigOptions`, etc. to use `ClientBuilder` methods instead.
 - [x] Step 5: Run `cargo check --workspace` — compiles.
 - [x] Step 6: Run `cargo nextest run --workspace` — all tests pass.
-- [x] BDD Verification: N/A — code removal only.
 - [x] Advanced Test Verification: `cargo test -p hpx` — all tests pass.
 - [x] Runtime Verification: N/A.
 
@@ -251,7 +237,6 @@
 - [x] Step 1: Determine if this should be a major bump (3.0.0) or if a migration window is needed.
 - [x] Step 2: Bump `workspace.package.version` in root `Cargo.toml` and all crate `Cargo.toml` files.
 - [x] Step 3: Add CHANGELOG entry documenting the removal.
-- [x] BDD Verification: N/A.
 - [x] Advanced Test Verification: `cargo check --workspace` — compiles.
 - [x] Runtime Verification: N/A.
 
@@ -262,7 +247,7 @@
 > **Context:** The cookie store (`crates/hpx/src/cookie.rs`, 20.54 KB) has zero unit tests despite being on every HTTP response path.
 > **Verification:** `cargo test -p hpx -- cookie` runs and passes new tests.
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Additive — no behavior change.`
 - **Simplification Focus:** `N/A — testing-only task.`
 - **Status:** 🟢 DONE
@@ -273,7 +258,6 @@
 - [x] RED: Add scenario: concurrent insert/read from multiple tokio tasks does not panic.
 - [x] GREEN: Run `cargo test -p hpx -- cookie` — all tests pass.
 - [x] REFACTOR: Clean up; verify `cargo test -p hpx -- cookie` still passes.
-- [x] BDD Verification: N/A — unit tests cover the scenarios.
 - [x] Advanced Test Verification: `cargo test -p hpx -- cookie -- --nocapture` — review test output.
 - [x] Runtime Verification: N/A.
 
@@ -282,7 +266,7 @@
 > **Context:** Cookie header parsing handles malformed input; edge cases must be verified.
 > **Verification:** Tests cover empty cookie, malformed attributes, multiple cookies.
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Additive — no behavior change.`
 - **Simplification Focus:** `Add test cases using existing parse_set_cookies function.`
 - **Status:** 🟢 DONE
@@ -291,7 +275,6 @@
 - [x] RED: Add test: cookie with Secure, HttpOnly, SameSite=Strict all parsed correctly.
 - [x] GREEN: Run `cargo test -p hpx -- cookie` — all tests pass.
 - [x] REFACTOR: Clean up.
-- [x] BDD Verification: N/A.
 - [x] Advanced Test Verification: `cargo test -p hpx -- cookie` — pass.
 - [x] Runtime Verification: N/A.
 
@@ -302,7 +285,7 @@
 > **Context:** `crates/hpx/src/retry.rs` (6.38 KB) has zero unit tests.
 > **Verification:** Tests cover scope exclusion, budget arithmetic, classifier chaining.
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Additive — no behavior change.`
 - **Simplification Focus:** `N/A — testing-only task.`
 - **Status:** 🟢 DONE
@@ -312,7 +295,6 @@
 - [x] RED: Test: classifier chaining — two classifiers combined produce expected result.
 - [x] GREEN: Run `cargo test -p hpx -- retry` — all tests pass.
 - [x] REFACTOR: Clean up.
-- [x] BDD Verification: N/A.
 - [x] Advanced Test Verification: `cargo test -p hpx -- retry` — pass.
 - [x] Runtime Verification: N/A.
 
@@ -321,14 +303,13 @@
 > **Context:** Retry budget must never go negative; behavior must be monotonic.
 > **Verification:** proptest verifies invariants across random inputs.
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Additive — no behavior change.`
 - **Simplification Focus:** `Use existing proptest patterns from other hpx modules.`
 - **Status:** 🟢 DONE
 - [x] RED: Add proptest: for any sequence of retry/not-retry decisions with budget N, remaining budget never exceeds N and never goes below 0.
 - [x] GREEN: Run `cargo test -p hpx -- retry` — proptest passes.
 - [x] REFACTOR: Clean up.
-- [x] BDD Verification: N/A.
 - [x] Advanced Test Verification: `cargo test -p hpx -- retry -- --nocapture` — proptest report confirms 1000+ cases.
 - [x] Runtime Verification: N/A.
 
@@ -339,7 +320,7 @@
 > **Context:** `crates/hpx/src/redirect.rs` (18.6 KB) has zero unit tests. Cross-origin redirect header stripping is security-critical.
 > **Verification:** Tests verify Authorization is stripped on cross-origin but preserved on same-origin.
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Additive — no behavior change.`
 - **Simplification Focus:** `N/A — testing-only task.`
 - **Status:** 🟢 DONE
@@ -349,7 +330,6 @@
 - [x] RED: Test: redirect loop detection stops at max_redirects.
 - [x] GREEN: Run `cargo test -p hpx -- redirect` — all tests pass.
 - [x] REFACTOR: Clean up.
-- [x] BDD Verification: N/A.
 - [x] Advanced Test Verification: `cargo test -p hpx -- redirect` — pass.
 - [x] Runtime Verification: N/A.
 
@@ -358,14 +338,13 @@
 > **Context:** Redirect attempt counter must never exceed configured maximum.
 > **Verification:** proptest verifies invariants.
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Additive — no behavior change.`
 - **Simplification Focus:** `Use existing proptest patterns.`
 - **Status:** 🟢 DONE
 - [x] RED: Add proptest: for any redirect sequence, `attempt.used()` never exceeds `attempt.remaining()` + used count.
 - [x] GREEN: Run `cargo test -p hpx -- redirect` — proptest passes.
 - [x] REFACTOR: Clean up.
-- [x] BDD Verification: N/A.
 - [x] Advanced Test Verification: `cargo test -p hpx -- redirect -- --nocapture` — pass.
 - [x] Runtime Verification: N/A.
 
@@ -376,7 +355,7 @@
 > **Context:** `crates/hpx/src/proxy.rs` (16.94 KB) has zero unit tests.
 > **Verification:** Tests verify URL pattern matching, auth header construction, no_proxy exclusions.
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** `Additive — no behavior change.`
 - **Simplification Focus:** `N/A — testing-only task.`
 - **Status:** 🟢 DONE
@@ -386,7 +365,6 @@
 - [x] RED: Test: proxy URL construction handles username/password.
 - [x] GREEN: Run `cargo test -p hpx -- proxy` — all tests pass.
 - [x] REFACTOR: Clean up.
-- [x] BDD Verification: N/A.
 - [x] Advanced Test Verification: `cargo test -p hpx -- proxy` — pass.
 - [x] Runtime Verification: N/A.
 
@@ -401,6 +379,5 @@
 - **Status:** 🟢 DONE
 - [x] Step 1: Add a test in `crates/hpx/tests/proxy.rs` (or extend existing) that configures a proxy and verifies the request targets the proxy.
 - [x] Step 2: Run `cargo test -p hpx --test proxy` — pass.
-- [x] BDD Verification: N/A.
 - [x] Advanced Test Verification: `cargo test -p hpx --test proxy` — pass.
 - [x] Runtime Verification: N/A.

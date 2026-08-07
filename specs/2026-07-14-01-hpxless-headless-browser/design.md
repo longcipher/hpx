@@ -36,7 +36,7 @@ Three parallel subagents analyzed the live codebase:
 
 1. **hpx-browser analyst** — mapped the complete module structure, feature flags, and all 8,500+ lines
 2. **Workspace analyst** — cataloged all 7 workspace crates, the hpx HTTP client, CLI structure, and infrastructure
-3. **Spec/BDD analyst** — inventoried 14 existing specs, found 4 browser-related specs already in progress
+3. **Spec analyst** — inventoried 14 existing specs, found 4 browser-related specs already in progress
 
 Key normalization findings:
 
@@ -221,32 +221,6 @@ This means Puppeteer/Playwright connecting to `hpx serve` gets a page where CSS 
 ### 5.5 Project Identity Alignment
 
 No template identity mismatches detected. All crate names (`hpx`, `hpx-browser`, `hpx-cli`, etc.) are project-specific.
-
-### 5.6 BDD/TDD Strategy
-
-- **BDD Runner:** `cucumber` (cucumber-rs, already used in `hpx-dl`)
-- **BDD Command:** `cargo test -p hpxless --test cucumber`
-- **Unit Test Command:** `cargo test -p hpx-browser`
-- **Property Test Tool:** `proptest` (already used in `hpx-browser`)
-- **Fuzz Test Tool:** `cargo-fuzz` (conditional — for HTML/CSS parsing robustness)
-- **Benchmark Tool:** `criterion` (conditional — for navigation latency)
-- **Outer Loop:** CDP-based scenarios: start hpxless → connect via WebSocket → navigate → verify DOM state
-- **Inner Loop:** Unit tests for resource discovery, script ordering, CSS injection
-- **Step Definition Location:** `crates/hpxless/features/` (BDD) and `crates/hpx-browser/src/` (unit)
-
-### 5.7 BDD Scenario Inventory
-
-| Feature File | Scenario | Business Outcome | Primary Verification | Supporting TDD Focus |
-| :--- | :--- | :--- | :--- | :--- |
-| `features/hpxless-startup.feature` | hpxless starts and serves CDP | Binary starts, CDP endpoint accessible | WebSocket connect + `Browser.getVersion` | CLI argument parsing, port binding |
-| `features/navigation.feature` | Navigate to a page with sub-resources | Page loads CSS/JS/images, DOM reflects styled content | CDP `Page.navigate` + `Runtime.evaluate` returns styled element | Resource discovery, parallel fetch |
-| `features/navigation.feature` | Execute inline scripts during load | `<script>` tags run in document order | CDP `Runtime.evaluate` checks script side effects | Script parser, execution order |
-| `features/navigation.feature` | Apply external CSS | `<link rel="stylesheet">` styles are applied | CDP `Runtime.evaluate` checks computed style | CSS fetch and injection |
-| `features/lazy-layout.feature` | Layout computed only on demand | `getBoundingClientRect` triggers layout | CDP `Runtime.evaluate` returns correct rect | Dirty tracking, layout trigger |
-| `features/resource-blocking.feature` | Block images during navigation | Images not fetched, page loads faster | Network request log shows no image requests | Resource type filter |
-| `features/proxy.feature` | Navigate through proxy | Page loads via SOCKS5 proxy | CDP `Page.navigate` succeeds with proxy flag | Proxy config wiring |
-| `features/stealth.feature` | Stealth profile active | `navigator.webdriver` is false | CDP `Runtime.evaluate` checks property | Stealth bootstrap integration |
-| `features/multi-page.feature` | Multiple concurrent pages | 10 pages navigate simultaneously | All pages return correct results | Per-page isolation |
 
 ### 5.8 Simplification Opportunities in Touched Code
 
@@ -460,14 +434,6 @@ JS calls getBoundingClientRect() / offsetWidth / etc.
 - Use `tokio-tungstenite` client to connect and send raw CDP JSON-RPC
 - Verify: navigate to a test HTML page with inline CSS, external JS, and images → check that CSS is applied and JS has executed
 
-### 7.4 BDD Acceptance Testing
-
-| Scenario ID | Feature File | Command | Success Criteria |
-| :--- | :--- | :--- | :--- |
-| **BDD-01** | `features/hpxless-startup.feature` | `cargo test -p hpxless --test cucumber` | Server starts, CDP endpoint responds |
-| **BDD-02** | `features/navigation.feature` | `cargo test -p hpxless --test cucumber` | Page loads with CSS applied and scripts executed |
-| **BDD-03** | `features/resource-blocking.feature` | `cargo test -p hpxless --test cucumber` | Blocked resource types not fetched |
-
 ### 7.5 Robustness & Performance Testing
 
 | Test Type | When It Is Required | Tool / Command | Planned Coverage or Reason Not Needed |
@@ -497,4 +463,4 @@ JS calls getBoundingClientRect() / offsetWidth / etc.
 - [ ] **Phase 1: Binary scaffolding** — Create `bin/hpxless`, CLI, CDP server startup, signal handling
 - [ ] **Phase 2: Resource loading pipeline** — Sub-resource discovery, concurrent fetch, CSS injection, script execution
 - [ ] **Phase 3: CDP integration** — Wire resource loading into CDP `Page.navigate`, lifecycle events, resource blocking
-- [ ] **Phase 4: Polish** — BDD tests, property tests, benchmarks, documentation, memory profiling
+- [ ] **Phase 4: Polish** — property tests, benchmarks, documentation, memory profiling

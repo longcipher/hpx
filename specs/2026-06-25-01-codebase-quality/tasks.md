@@ -16,14 +16,13 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - **Status:** 🟢 DONE
 - [x] Step 1: In `Justfile`, replace the `test` target body with `cargo nextest run --workspace --all-features`
 - [x] Step 2: Run `just test` and verify all tests pass
-- [x] BDD Verification: N/A — this is infrastructure, not behavior
 - [x] Advanced Test Verification: `just test` exits 0
 - [x] Runtime Verification: N/A
 
 ### Task 1.2: Fix just ci to run all test suites
 
-> **Context:** `just ci` runs `lint test` which misses integration tests and BDD. CI green is false.
-> **Verification:** `just ci` runs lint, all tests, and BDD.
+> **Context:** `just ci` runs `lint test` which misses integration tests. CI green is false.
+> **Verification:** `just ci` runs lint and all tests.
 > **Scenario Coverage:** `features/test-coverage.feature` — CI runs all test suites
 
 - **Loop Type:** `TDD-only`
@@ -32,7 +31,6 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - **Status:** 🟢 DONE
 - [x] Step 1: In `Justfile`, change `ci: lint test` to `ci: lint test-all`
 - [x] Step 2: Run `just ci` and verify all steps pass
-- [x] BDD Verification: N/A — infrastructure
 - [x] Advanced Test Verification: `just ci` exits 0
 - [x] Runtime Verification: N/A
 
@@ -49,7 +47,6 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - [x] Step 1: Remove `just build-docs` from the `lint` target in `Justfile`
 - [x] Step 2: Change `ci` to `lint test-all build-docs`
 - [x] Step 3: Run `just lint` and verify it no longer runs doc build
-- [x] BDD Verification: N/A — infrastructure
 - [x] Advanced Test Verification: `just lint` exits 0 without building docs
 - [x] Runtime Verification: N/A
 
@@ -70,7 +67,6 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - [x] Step 3: If `clone_http_request()` returns `None`, deposit the token back
 - [x] Step 4: Add `#[cfg(test)]` module with test: budget token count unchanged when clone returns None
 - [x] Step 5: Run `cargo test -p hpx --lib --all-features` — all pass
-- [x] BDD Verification: N/A — unit test covers the scenario
 - [x] Advanced Test Verification: `cargo nextest run -p hpx --all-features` — all pass
 - [x] Runtime Verification: N/A
 
@@ -87,7 +83,6 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - [x] Step 1: In `crates/hpx/src/redirect.rs:391-394`, replace `.expect("[BUG]...")` with `.ok_or_else(|| Error::redirect("redirect policy not configured"))?`
 - [x] Step 2: Add `#[cfg(test)]` test that verifies no panic when policy is absent
 - [x] Step 3: Run `cargo test -p hpx --lib --all-features` — all pass
-- [x] BDD Verification: N/A — unit test covers the scenario
 - [x] Advanced Test Verification: `cargo nextest run -p hpx --all-features` — all pass
 - [x] Runtime Verification: N/A
 
@@ -105,7 +100,6 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - [x] Step 2: Remove the `unsafe` block and the cast; use `&mut output.spare_capacity_mut()[..].iter_mut().map(|x| unsafe { x.assume_init_mut() }).collect::<&mut [u8]>()` — OR keep the cast but now it's safe since memory is zero-initialized
 - [x] Step 3: Actually, simplest: keep the existing code but add `fill(MaybeUninit::new(0))` before the unsafe cast. The cast is still technically `unsafe` but no longer UB since all bytes are initialized (to 0).
 - [x] Step 4: Run `cargo test -p hpx-yawc --all-features` — all pass
-- [x] BDD Verification: N/A — unit test covers the scenario
 - [x] Advanced Test Verification: `cargo nextest run -p hpx-yawc --all-features` — all pass
 - [x] Runtime Verification: N/A
 
@@ -123,7 +117,6 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - [x] Step 2: After the main loop exits (no more work), CAS `true→false`. If CAS fails (someone set it to true), re-enter the loop.
 - [x] Step 3: If queue is non-empty after CAS to false, CAS `false→true` and re-enter the loop.
 - [x] Step 4: Run `cargo nextest run -p hpx-dl --all-features` — all pass
-- [x] BDD Verification: `cargo test -p hpx-dl --test cucumber --all-features` — all pass
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: N/A
 
@@ -142,7 +135,6 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - [x] Step 3: Change `pop()` to loop: pop from heap, skip if in tombstones, remove from tombstones if found
 - [x] Step 4: Add test: remove + pop preserves ordering
 - [x] Step 5: Run `cargo nextest run -p hpx-dl --all-features` — all pass
-- [x] BDD Verification: `cargo test -p hpx-dl --test cucumber --all-features` — all pass
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: N/A
 
@@ -161,7 +153,6 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - [x] Step 1: In `bin/hpx-cli/src/http.rs:185-188`, replace `.get("set-cookie")` with `.get_all("set-cookie")` and collect all values
 - [x] Step 2: Change `std::fs::write(jar_path, ...)` to `std::fs::OpenOptions::new().create(true).append(true).open(jar_path)` and write each cookie on its own line
 - [x] Step 3: Verify manually that `hpx get --cookie-jar /tmp/c.txt https://httpbin.org/cookies/set/a/1/b/2` saves both cookies
-- [x] BDD Verification: N/A — CLI integration
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: N/A
 
@@ -178,7 +169,6 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - [x] Step 1: In `bin/hpx-cli/src/browser.rs:212-219`, replace `format!(...)` with `serde_json::json!({"url": url, "type": asset_type}).to_string() + "\n"`
 - [x] Step 2: Add test: URL with double quotes produces valid JSON
 - [x] Step 3: Run `cargo test -p hpx-cli` — all pass
-- [x] BDD Verification: N/A — unit test
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: N/A
 
@@ -195,7 +185,6 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - [x] Step 1: In `bin/hpx-cli/src/browser.rs:390`, rename `_host` to `host` and wire it to the CDP server bind address
 - [x] Step 2: After binding, if host is not loopback (`!host.parse::<IpAddr>()?.is_loopback()`), print `tracing::warn!("CDP WebSocket bound to {host}:{port} — accessible to external networks. Full browser control is exposed.")`
 - [x] Step 3: Run `cargo check -p hpx-cli` — compiles clean
-- [x] BDD Verification: N/A — CLI behavior
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: N/A
 
@@ -212,7 +201,6 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - [x] Step 1: In `crates/hpx-dl/src/persistence.rs`, before serializing `DownloadRecord`, parse the proxy URL with `url::Url` and call `url.set_username(None)` and `url.set_password(None)`
 - [x] Step 2: Add test: record with proxy `http://user:pass@proxy:8080` is stored as `http://proxy:8080`
 - [x] Step 3: Run `cargo nextest run -p hpx-dl --all-features` — all pass
-- [x] BDD Verification: N/A — unit test
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: N/A
 
@@ -233,7 +221,6 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - [x] Step 3: Add `#[cfg(test)]` to `crates/hpx-streams/src/protobuf_stream.rs` with 3 tests
 - [x] Step 4: Add `#[cfg(test)]` to `crates/hpx-streams/src/arrow_ipc_stream.rs` with 3 tests
 - [x] Step 5: Run `cargo nextest run -p hpx-streams --all-features` — all pass
-- [x] BDD Verification: N/A — unit tests
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: N/A
 
@@ -254,7 +241,6 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - [x] Step 5: Add roundtrip test for ping/pong frames
 - [x] Step 6: Add test for 16-bit and 64-bit payload length variants
 - [x] Step 7: Run `cargo nextest run -p hpx-yawc --all-features` — all pass
-- [x] BDD Verification: N/A — unit tests
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: N/A
 
@@ -274,7 +260,6 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - [x] Step 2: Run `cargo clippy -p hpx --all-features -- -D warnings` — capture all dead_code warnings
 - [x] Step 3: For genuinely dead code: delete it. For intentional unused items: add targeted `#[allow(dead_code)]` with justification comment.
 - [x] Step 4: Run `cargo clippy -p hpx --all-features -- -D warnings` — clean
-- [x] BDD Verification: N/A — lint enforcement
 - [x] Advanced Test Verification: `cargo nextest run -p hpx --all-features` — all pass
 - [x] Runtime Verification: N/A
 
@@ -293,7 +278,6 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - [x] Step 3: Fix correctness-level warnings (real bugs)
 - [x] Step 4: For style/pedantic warnings that are too noisy, keep `#![allow(clippy::pedantic)]` for now
 - [x] Step 5: Run `cargo clippy -p hpx-browser -- -D warnings` — clean for clippy::all
-- [x] BDD Verification: N/A — lint enforcement
 - [x] Advanced Test Verification: `cargo nextest run -p hpx-browser` — all pass (1 pre-existing failure in parallel module)
 - [x] Runtime Verification: N/A
 
@@ -309,7 +293,6 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - **Status:** 🟢 DONE
 - [x] Step 1: Remove `progress = []` and `storage = ["sqlite"]` from `crates/hpx-dl/Cargo.toml` features section
 - [x] Step 2: Run `cargo check -p hpx-dl --all-features` — compiles clean
-- [x] BDD Verification: N/A
 - [x] Advanced Test Verification: `cargo nextest run -p hpx-dl --all-features` — all pass
 - [x] Runtime Verification: N/A
 
@@ -326,7 +309,6 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - [x] Step 1: Replace `crate::util::fast_random()` with `rand::random::<u64>()` at: `crates/hpx/src/conn/verbose.rs:21`, `crates/hpx/src/tls/boring.rs:233`, `crates/hpx/src/client/multipart.rs:554`
 - [x] Step 2: Delete `fast_random` function from `crates/hpx/src/util.rs`
 - [x] Step 3: Run `cargo clippy -p hpx --all-features -- -D warnings` — clean
-- [x] BDD Verification: N/A
 - [x] Advanced Test Verification: `cargo nextest run -p hpx --all-features` — all pass
 - [x] Runtime Verification: N/A
 
@@ -347,7 +329,6 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - [x] Step 3: Read `crates/hpx/src/client/http/client/error.rs` and list all `ErrorKind` variants
 - [x] Step 4: Create a mapping table: old variant → unified variant, noting overlaps and unique ones
 - [x] Step 5: Document the unified `hpx::Error` enum design
-- [x] BDD Verification: N/A — analysis only
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: N/A
 
@@ -367,7 +348,6 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - [x] Step 4: Deprecate `core::Error` and `client::Error` types — DEFERRED: 210+ internal usages require migration first
 - [x] Step 5: Run `cargo clippy --all -- -D warnings` — clean
 - [x] Step 6: Run `cargo nextest run --workspace --all-features` — all pass
-- [x] BDD Verification: `cargo test -p hpx-dl --test cucumber --all-features` — all pass
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: N/A
 
@@ -385,6 +365,5 @@ Generated from `specs/2026-06-25-01-codebase-quality/design.md` at commit `0156c
 - [x] Step 2: Run `cargo clippy -p hpx --all-features` — verify deprecation warnings appear
 - [x] Step 3: Update doc comments to point to ClientBuilder as primary API
 - [x] Step 4: Run `cargo nextest run -p hpx --all-features` — all pass (deprecation warnings don't break tests)
-- [x] BDD Verification: N/A
 - [x] Advanced Test Verification: N/A
 - [x] Runtime Verification: N/A

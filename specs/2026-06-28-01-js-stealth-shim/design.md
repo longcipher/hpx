@@ -184,33 +184,6 @@ CLI (--stealth)
 
 No template identity mismatches detected. All crate names match the hpx project.
 
-### 5.6 BDD/TDD Strategy
-
-- **BDD Runner:** `cucumber` (Rust, already used in hpx-dl)
-- **BDD Command:** `cargo test -p hpx-browser --test cucumber --all-features`
-- **Unit Test Command:** `cargo test -p hpx-browser --all-features`
-- **Property Test Tool:** `proptest` (already in workspace) — for GREASE token determinism, canvas noise distribution
-- **Fuzz Test Tool:** `cargo-fuzz` — N/A (JS shim is not parser/protocol code)
-- **Benchmark Tool:** `criterion` — N/A (no explicit latency SLA for JS init)
-- **Outer Loop:** `stealth-js-shim.feature` scenarios prove JS stealth works end-to-end
-- **Inner Loop:** Unit tests for globals injection, GREASE derivation, profile-to-globals mapping
-- **Step Definition Location:** `crates/hpx-browser/tests/` (existing pattern)
-
-### 5.7 BDD Scenario Inventory
-
-| Feature File | Scenario | Business Outcome | Primary Verification | Supporting TDD Focus |
-| :--- | :--- | :--- | :--- | :--- |
-| `stealth-js-shim.feature` | Navigator identity consistency | navigator.userAgent matches StealthProfile UA | `cargo test -p hpx-browser` | Globals injection from StealthProfile |
-| `stealth-js-shim.feature` | WebDriver hidden | navigator.webdriver returns false, getOwnPropertyDescriptor returns undefined | `cargo test -p hpx-browser` | Prototype chain manipulation |
-| `stealth-js-shim.feature` | Chrome object exists | window.chrome has app, runtime, csi(), loadTimes() | `cargo test -p hpx-browser` | Chrome object structure |
-| `stealth-js-shim.feature` | Screen dimensions from profile | screen.width/height match StealthProfile | `cargo test -p hpx-browser` | Profile-to-screen mapping |
-| `stealth-js-shim.feature` | WebGL renderer spoofed | canvas.getContext('webgl') returns platform GPU renderer | `cargo test -p hpx-browser` | GPU pool selection |
-| `stealth-js-shim.feature` | sec-ch-ua GREASE tokens | navigator.userAgentData.brands has 3 entries with correct format | `cargo test -p hpx-browser` | GREASE derivation from Chrome version |
-| `stealth-js-shim.feature` | userAgentData high entropy | getHighEntropyValues returns profile-consistent data | `cargo test -p hpx-browser` | High entropy values mapping |
-| `stealth-js-shim.feature` | Canvas noise applied | toDataURL() returns different hashes per session | `cargo test -p hpx-browser` | Per-session seed noise |
-| `stealth-js-shim.feature` | Audio context spoofed | AudioContext sample rate matches profile | `cargo test -p hpx-browser` | Audio parameter randomization |
-| `stealth-wiring.feature` | --stealth flag wired | CDP server receives stealth flag, JS runtime gets stealth globals | `cargo test -p hpx-cli` | End-to-end wiring |
-
 ### 5.8 Simplification Opportunities in Touched Code
 
 | Area | Current Complexity or Smell | Planned Simplification | Why It Preserves or Clarifies Behavior |
@@ -366,13 +339,6 @@ Each section is preceded by a `// === Section Name ===` comment header.
 - End-to-end: `--stealth` flag → CDP server → JS runtime → evaluate `navigator.webdriver === false`
 - Profile round-trip: StealthProfile → set_user_agent/set_platform → evaluate navigator.userAgent matches
 
-### 7.4 BDD Acceptance Testing
-
-| Scenario ID | Feature File | Command | Success Criteria |
-| :--- | :--- | :--- | :--- |
-| **BDD-01** | `stealth-js-shim.feature` | `cargo test -p hpx-browser --test cucumber --all-features` | All scenarios pass |
-| **BDD-02** | `stealth-wiring.feature` | `cargo test -p hpx-browser --test cucumber --all-features` | --stealth wiring scenario passes |
-
 ### 7.5 Robustness & Performance Testing
 
 | Test Type | When It Is Required | Tool / Command | Planned Coverage or Reason Not Needed |
@@ -386,7 +352,6 @@ Each section is preceded by a `// === Section Name ===` comment header.
 | :--- | :--- | :--- |
 | **VP-01** | `cargo test -p hpx-browser --all-features` | All tests pass |
 | **VP-02** | `cargo +nightly clippy -p hpx-browser --all -- -D warnings` | No lint errors |
-| **VP-03** | `cargo test -p hpx-browser --test cucumber --all-features` | All BDD scenarios pass |
 | **VP-04** | Manual: start CDP server with `--stealth`, evaluate `navigator.webdriver` | Returns `false` |
 
 ### 5.7 Validation Rules
@@ -407,7 +372,7 @@ Each section is preceded by a `// === Section Name ===` comment header.
 
 - [ ] **Phase 1: Foundation** — Create stealth_bootstrap.js, add runtime methods, extend stealth_ext
 - [ ] **Phase 2: Core Logic** — Implement all JS shim sections (navigator, webdriver, chrome, screen, WebGL, canvas, audio, GREASE, userAgentData)
-- [ ] **Phase 3: Integration** — Wire --stealth through CDP server, add BDD scenarios, connect StealthProfile to globals
+- [ ] **Phase 3: Integration** — Wire --stealth through CDP server, connect StealthProfile to globals
 - [ ] **Phase 4: Polish** — Unit tests, property tests, lint clean, documentation
 
 ---

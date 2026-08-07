@@ -17,7 +17,7 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 
 ---
 
-## Phase 1: BDD Harness & Binary Scaffolding
+## Phase 1: Binary Scaffolding & Harness
 
 ### Task 1.1: Create `bin/hpxless` crate with CLI
 
@@ -38,7 +38,6 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - [x] **Step 3:** Create `bin/hpxless/src/main.rs` — parse CLI, init tracing, print startup banner
 - [x] **Step 4:** Add `hpxless` to workspace `Cargo.toml` members
 - [x] **Step 5:** Add `hpxless` to Justfile targets (build, test, lint)
-- [x] **BDD Verification:** N/A — infrastructure task
 - [x] **Verification:** `cargo build -p hpxless` succeeds; `./target/debug/hpxless --help` shows all flags
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** `./target/debug/hpxless --port 0 2>&1 | head -5` shows startup log
@@ -52,7 +51,7 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - **Scope:** CDP server integration, page creation
 - **Requirement Coverage:** `R1`, `R5`
 - **Scenario Coverage:** `hpxless-startup.feature`
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** New binary — no existing behavior to preserve
 - **Simplification Focus:** N/A — new code
 - **Advanced Test Coverage:** Example-based only
@@ -61,35 +60,9 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - [x] **Step 2:** Start `CdpServer` with the page, port, and stealth flag
 - [x] **Step 3:** Add graceful shutdown via `ecdysis` — SIGTERM/SIGINT stops the server
 - [x] **Step 4:** Write unit test: start hpxless with `--port 0`, verify port is printed
-- [x] **BDD Verification:** Write `features/hpxless-startup.feature` with scenario: "hpxless starts and serves CDP"
 - [x] **Verification:** `cargo test -p hpxless` passes; manual WebSocket connect to `ws://127.0.0.1:9222` works
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** Start hpxless, connect with `websocat ws://127.0.0.1:9222`, send `{"id":1,"method":"Browser.getVersion"}`, verify JSON response
-
-### Task 1.3: BDD harness setup for hpxless
-
-> **Context:** Set up cucumber-rs test harness for `bin/hpxless`. The `hpx-dl` crate already has a working cucumber setup — follow the same pattern.
-> **Verification:** `cargo test -p hpxless --test cucumber` runs (even if scenarios are pending).
-
-- **Priority:** P1
-- **Scope:** BDD test infrastructure
-- **Requirement Coverage:** N/A — infrastructure
-- **Scenario Coverage:** All BDD scenarios
-- **Loop Type:** `TDD-only`
-- **Behavioral Contract:** N/A — test infrastructure
-- **Simplification Focus:** N/A
-- **Advanced Test Coverage:** N/A
-- **Status:** 🟢 DONE
-- [x] **Step 1:** Create `bin/hpxless/tests/cucumber.rs` following `crates/hpx-dl/tests/cucumber.rs` pattern
-- [x] **Step 2:** Create `bin/hpxless/features/` directory
-- [x] **Step 3:** Move feature files from `specs/2026-07-14-01-hpxless-headless-browser/features/` to `bin/hpxless/features/`
-- [x] **Step 4:** Implement step definitions for `hpxless-startup.feature`
-- [x] **BDD Verification:** `cargo test -p hpxless --test cucumber` runs, startup scenario passes
-- [x] **Verification:** `cargo test -p hpxless --test cucumber` completes without panic
-- [x] **Advanced Test Verification:** N/A
-- [x] **Runtime Verification:** N/A
-
----
 
 ## Phase 2: Resource Loading Pipeline
 
@@ -112,7 +85,6 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - [x] **Step 3:** Implement block filtering: `filter_by_block_types(resources, block_types)`
 - [x] **Step 4:** Write unit tests: HTML with `<link>`, `<script src>`, `<img>`, `<style>` → correct extraction
 - [x] **Step 5:** Write proptest: random HTML with resource tags → extracted URLs are valid, block filtering is idempotent
-- [x] **BDD Verification:** N/A — unit-level
 - [x] **Verification:** `cargo test -p hpx-browser resource_loader` passes
 - [x] **Advanced Test Verification:** `cargo test -p hpx-browser --features proptest resource_loader` passes
 - [x] **Runtime Verification:** N/A
@@ -135,7 +107,6 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - [x] **Step 2:** Respect `block_types` — skip fetching blocked resource types
 - [x] **Step 3:** Set reasonable timeouts (5s per resource, 15s total)
 - [x] **Step 4:** Write unit test: start local HTTP server, serve test resources, verify concurrent fetch
-- [x] **BDD Verification:** N/A — unit-level
 - [x] **Verification:** `cargo test -p hpx-browser resource_loader::fetch` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -156,7 +127,6 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - **Status:** 🟢 DONE
 - [x] **Step 1:** Implement `Page::apply_stylesheets(&mut self, styles: &[LoadedResource])` — for each stylesheet, create a `<style>` text node in DOM `<head>`
 - [x] **Step 2:** Write unit test: HTML with `<link rel="stylesheet">` → after `apply_stylesheets`, DOM contains `<style>` with CSS content
-- [x] **BDD Verification:** Scenario: "Page applies external CSS" — navigate to page with linked stylesheet, check computed color
 - [x] **Verification:** `cargo test -p hpx-browser page::apply_stylesheets` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -170,7 +140,7 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - **Scope:** Script execution, V8 integration
 - **Requirement Coverage:** `R3`
 - **Scenario Coverage:** `navigation.feature` (inline script execution)
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** New functionality — no existing behavior to preserve
 - **Simplification Focus:** N/A — new code
 - **Advanced Test Coverage:** Example-based only
@@ -178,7 +148,6 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - [x] **Step 1:** Implement `Page::execute_inline_scripts(&mut self) -> Result<(), PageError>` — walk DOM for `<script>` without `src`, execute each in order via `BrowserJsRuntime::execute_script`
 - [x] **Step 2:** Handle script errors gracefully — log warning, continue with next script
 - [x] **Step 3:** Write unit test: HTML with inline scripts → scripts executed in order, side effects visible in DOM
-- [x] **BDD Verification:** Scenario: "Page executes inline scripts during load"
 - [x] **Verification:** `cargo test -p hpx-browser --features v8 page::execute_inline_scripts` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -192,7 +161,7 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - **Scope:** Script execution, fetch integration
 - **Requirement Coverage:** `R3`
 - **Scenario Coverage:** `navigation.feature` (external script execution)
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** New functionality — no existing behavior to preserve
 - **Simplification Focus:** N/A — new code
 - **Advanced Test Coverage:** Example-based only
@@ -200,7 +169,6 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - [x] **Step 1:** Extend `Page::execute_scripts` to also execute fetched external scripts after inline scripts
 - [x] **Step 2:** Respect `async` and `defer` attributes: `async` scripts execute as soon as fetched, `defer` scripts execute after parsing, normal scripts block
 - [x] **Step 3:** Write unit test: HTML with mixed inline/external scripts → all execute in correct order
-- [x] **BDD Verification:** Scenario: "Page executes external scripts"
 - [x] **Verification:** `cargo test -p hpx-browser --features v8 page::execute_scripts` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -214,7 +182,7 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - **Scope:** Pipeline integration
 - **Requirement Coverage:** `R2`, `R3`, `R4`
 - **Scenario Coverage:** `navigation.feature` (full lifecycle)
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Changes `Page::navigate` behavior — now loads sub-resources (was previously HTML-only)
 - **Simplification Focus:** N/A — additive change
 - **Advanced Test Coverage:** Example-based only
@@ -223,7 +191,6 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - [x] **Step 2:** Call `load_subresources` at the end of `navigate_inner` (after `reload_html` and challenge classification)
 - [x] **Step 3:** Add `subresource_block_types: HashSet<ResourceType>` field to `Page` (configurable via builder or constructor)
 - [x] **Step 4:** Write integration test: navigate to local test HTML with CSS + JS → verify applied
-- [x] **BDD Verification:** Scenario: "Navigate to a page with sub-resources"
 - [x] **Verification:** `cargo test -p hpx-browser --features v8 page::navigate` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -241,7 +208,7 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - **Scope:** CDP protocol, lifecycle events
 - **Requirement Coverage:** `R5`
 - **Scenario Coverage:** `navigation.feature` (CDP navigation)
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Changes CDP `Page.navigate` from stub to real navigation
 - **Simplification Focus:** Remove stub code, replace with real implementation
 - **Advanced Test Coverage:** Example-based only
@@ -251,7 +218,6 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - [x] **Step 3:** Emit `Page.domContentEventFired` and `Page.loadEventFired` events after resource loading completes
 - [x] **Step 4:** Emit `Network.requestWillBeSent` and `Network.responseReceived` for main document and sub-resources (if Network domain is enabled)
 - [x] **Step 5:** Write integration test: send CDP `Page.navigate` → receive lifecycle events
-- [x] **BDD Verification:** Scenario: "Puppeteer navigates to page"
 - [x] **Verification:** `cargo test -p hpx-browser --features cdp cdp_navigate` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** Start hpxless, connect with Puppeteer, run `page.goto()`, verify success
@@ -265,7 +231,7 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - **Scope:** CDP protocol, JS evaluation
 - **Requirement Coverage:** `R3`, `R5`
 - **Scenario Coverage:** `navigation.feature` (evaluate after load)
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Preserves existing `Runtime.evaluate` behavior, but now the page context is richer
 - **Simplification Focus:** N/A
 - **Advanced Test Coverage:** Example-based only
@@ -273,7 +239,6 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - [x] **Step 1:** Verify `Runtime.evaluate` works after resource loading (may require re-initializing JS context after scripts execute)
 - [x] **Step 2:** Write test: navigate to page with JS that sets global → `Runtime.evaluate` reads it
 - [x] **Step 3:** Write test: navigate to page with CSS → `Runtime.evaluate("getComputedStyle(...)")` returns styled value
-- [x] **BDD Verification:** Scenario: "Evaluate JS after page load"
 - [x] **Verification:** `cargo test -p hpx-browser --features cdp,v8 cdp_evaluate` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -295,7 +260,6 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - [x] **Step 1:** Parse `--proxy` flag into `hpx::Proxy` in CLI
 - [x] **Step 2:** Pass proxy to `HttpClient::builder().proxy(proxy).build()`
 - [x] **Step 3:** Write test: CLI parsing with `--proxy socks5://...` → correct `Proxy` struct
-- [x] **BDD Verification:** Scenario: "Navigate through proxy"
 - [x] **Verification:** `cargo test -p hpxless cli::proxy` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A — requires proxy server
@@ -309,7 +273,7 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - **Scope:** Stealth configuration
 - **Requirement Coverage:** `R10`
 - **Scenario Coverage:** `stealth.feature`
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** New functionality — additive
 - **Simplification Focus:** N/A
 - **Advanced Test Coverage:** Example-based only
@@ -317,7 +281,6 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - [x] **Step 1:** Map `--profile` CLI arg to `StealthProfile` preset
 - [x] **Step 2:** Pass stealth profile to `Page` creation
 - [x] **Step 3:** Ensure stealth bootstrap JS runs when `--stealth` is set
-- [x] **BDD Verification:** Scenario: "Stealth profile active"
 - [x] **Verification:** `cargo test -p hpxless cli::stealth` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** Start hpxless with `--stealth`, connect CDP, evaluate `navigator.webdriver` → `false`
@@ -331,7 +294,7 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - **Scope:** Resource filtering
 - **Requirement Coverage:** `R13`
 - **Scenario Coverage:** `resource-blocking.feature`
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** New functionality — additive
 - **Simplification Focus:** N/A
 - **Advanced Test Coverage:** Example-based only
@@ -339,7 +302,6 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - [x] **Step 1:** Parse `--block` flag into `HashSet<ResourceType>` in CLI
 - [x] **Step 2:** Pass block types to `Page` and `ResourceLoader`
 - [x] **Step 3:** Write test: HTML with `<img>` + block images → no image fetch
-- [x] **BDD Verification:** Scenario: "Block images during navigation"
 - [x] **Verification:** `cargo test -p hpx-browser resource_loader::block` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -361,7 +323,6 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - [x] **Step 1:** Verify existing `CdpServer` supports multiple concurrent connections (it uses `Arc<Mutex<Page>>`)
 - [x] **Step 2:** If needed, change to per-connection `Page` creation (each WS connection gets a fresh `Page`)
 - [x] **Step 3:** Write test: 10 concurrent navigations → all complete successfully
-- [x] **BDD Verification:** Scenario: "Multiple concurrent pages"
 - [x] **Verification:** `cargo test -p hpx-browser --features cdp multi_page` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -387,7 +348,6 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - [x] **Step 1:** Add `ecdysis` dependency to `hpxless`
 - [x] **Step 2:** Register signal handlers for SIGTERM/SIGINT
 - [x] **Step 3:** On signal, set shutdown flag, wait for in-flight navigations (with timeout), close server
-- [x] **BDD Verification:** N/A — infrastructure
 - [x] **Verification:** `cargo build -p hpxless` succeeds; manual SIGTERM test
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** Start hpxless, send `kill -TERM <pid>`, verify clean exit in logs
@@ -409,7 +369,6 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - [x] **Step 1:** Write benchmark: navigate to test page 100 times, measure RSS
 - [x] **Step 2:** Profile with `dhat` or `jemalloc` to identify allocation hotspots
 - [x] **Step 3:** Optimize: ensure DOM arena is dropped between navigations, V8 context is reused
-- [x] **BDD Verification:** N/A
 - [x] **Verification:** `cargo bench -p hpx-browser --bench memory` shows < 64MB per page
 - [x] **Advanced Test Verification:** `cargo bench -p hpx-browser --bench memory`
 - [x] **Runtime Verification:** N/A
@@ -431,33 +390,8 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - [x] **Step 1:** Create `crates/hpx-browser/benches/navigation.rs` with criterion benchmark
 - [x] **Step 2:** Benchmark: navigate to local test HTML with CSS + JS → measure time
 - [x] **Step 3:** Benchmark: navigate to remote page (example.com) → measure time
-- [x] **BDD Verification:** N/A
 - [x] **Verification:** `cargo bench -p hpx-browser --bench navigation` runs successfully
 - [x] **Advanced Test Verification:** `cargo bench -p hpx-browser --bench navigation`
-- [x] **Runtime Verification:** N/A
-
-### Task 4.4: BDD scenarios for navigation pipeline
-
-> **Context:** Write comprehensive BDD scenarios covering the full navigation pipeline: sub-resource loading, CSS application, script execution, lazy layout.
-> **Verification:** All BDD scenarios pass.
-
-- **Priority:** P1
-- **Scope:** Acceptance tests
-- **Requirement Coverage:** `R2`, `R3`, `R4`, `R6`
-- **Scenario Coverage:** All navigation scenarios
-- **Loop Type:** `BDD+TDD`
-- **Behavioral Contract:** N/A — test coverage
-- **Simplification Focus:** N/A
-- **Advanced Test Coverage:** N/A
-- **Status:** 🟢 DONE
-- [x] **Step 1:** Write `features/navigation.feature` with all navigation scenarios
-- [x] **Step 2:** Write `features/lazy-layout.feature` for layout-on-demand
-- [x] **Step 3:** Write `features/resource-blocking.feature` for block types
-- [x] **Step 4:** Write `features/proxy.feature` and `features/stealth.feature`
-- [x] **Step 5:** Implement all step definitions
-- [x] **BDD Verification:** `cargo test -p hpxless --test cucumber` — all scenarios pass
-- [x] **Verification:** `cargo test -p hpxless --test cucumber` passes with 0 failures
-- [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
 
 ### Task 4.5: Documentation and examples
@@ -476,7 +410,6 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - **Status:** 🟢 DONE
 - [x] **Step 1:** Write `bin/hpxless/README.md` with usage, CLI flags, Puppeteer example, Playwright example
 - [x] **Step 2:** Add `hpxless` to workspace-level documentation
-- [x] **BDD Verification:** N/A
 - [x] **Verification:** `rumdl check bin/hpxless/README.md` passes
 - [x] **Advanced Test Verification:** N/A
 - [x] **Runtime Verification:** N/A
@@ -487,7 +420,7 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 
 | Phase | Tasks | Target Date |
 | :--- | :---: | :--- |
-| **1. BDD Harness & Binary Scaffolding** | 3 | 07-16 |
+| **1. Binary Scaffolding & Harness** | 3 | 07-16 |
 | **2. Resource Loading Pipeline** | 6 | 07-21 |
 | **3. CDP Integration & Features** | 6 | 07-25 |
 | **4. Polish, QA & Docs** | 5 | 07-28 |
@@ -499,7 +432,6 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 2. [ ] **Tested:** `cargo test -p hpxless` and `cargo test -p hpx-browser` pass
 3. [ ] **Formatted:** `just format` applied
 4. [ ] **Verified:** All task-specific Verification criteria met
-5. [ ] **BDD Passing:** `cargo test -p hpxless --test cucumber` — all scenarios green
 6. [ ] **Runtime Working:** `hpxless --port 9222` starts, Puppeteer `page.goto("https://example.com")` succeeds
 7. [ ] **Memory Target:** < 64MB RSS per page (text-heavy)
 8. [ ] **Performance Target:** Navigation to DOMContentLoaded < 2s for typical pages

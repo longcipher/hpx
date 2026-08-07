@@ -24,7 +24,7 @@
 > **Requirement Coverage:** R1
 > **Scenario Coverage:** dl-progress-display
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** New behavior — previously dl add was fire-and-forget
 - **Simplification Focus:** Extract progress rendering into `output.rs` helper
 - **Advanced Test Coverage:** Example-based only
@@ -45,7 +45,7 @@
 > **Requirement Coverage:** R2
 > **Scenario Coverage:** dl-speed-limit
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Additive — new flag, no existing behavior changed
 - **Simplification Focus:** Parse speed string in a dedicated helper function
 - **Advanced Test Coverage:** Example-based only
@@ -65,7 +65,7 @@
 > **Requirement Coverage:** R3
 > **Scenario Coverage:** dl-checksum
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Additive
 - **Simplification Focus:** Parse "algorithm:hex_value" format in dedicated helper
 - **Advanced Test Coverage:** Example-based only
@@ -84,7 +84,7 @@
 > **Requirement Coverage:** R4
 > **Scenario Coverage:** dl-mirror
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Additive
 - **Simplification Focus:** Simple Vec<String> passthrough
 - **Advanced Test Coverage:** Example-based only
@@ -101,7 +101,7 @@
 > **Requirement Coverage:** R5
 > **Scenario Coverage:** dl-max-connections
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Additive
 - **Simplification Focus:** Direct passthrough
 - **Advanced Test Coverage:** Example-based only
@@ -118,7 +118,7 @@
 > **Requirement Coverage:** R6
 > **Scenario Coverage:** dl-headers
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Additive
 - **Simplification Focus:** Reuse `parsed_headers()` pattern from main Cli
 - **Advanced Test Coverage:** Example-based only
@@ -136,7 +136,7 @@
 > **Requirement Coverage:** R7
 > **Scenario Coverage:** dl-proxy
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Additive
 - **Simplification Focus:** Reuse `ProxyConfig` from hpx-dl types
 - **Advanced Test Coverage:** Example-based only
@@ -154,7 +154,7 @@
 > **Requirement Coverage:** R8
 > **Scenario Coverage:** dl-retry
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Additive
 - **Simplification Focus:** Store retry value, pass to engine builder
 - **Advanced Test Coverage:** Example-based only
@@ -171,7 +171,7 @@
 > **Requirement Coverage:** R9
 > **Scenario Coverage:** dl-engine-config
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Additive
 - **Simplification Focus:** Global flags on Cli struct, applied to engine builder
 - **Advanced Test Coverage:** Example-based only
@@ -190,7 +190,7 @@
 > **Requirement Coverage:** R10
 > **Scenario Coverage:** timing-waterfall
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Enhanced — more timing data displayed
 - **Simplification Focus:** Extract timing data from hpx response extensions
 - **Advanced Test Coverage:** Example-based only
@@ -210,7 +210,7 @@
 > **Requirement Coverage:** R12
 > **Scenario Coverage:** ws-reconnect
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Additive
 - **Simplification Focus:** Wrap existing ws::execute in retry loop
 - **Advanced Test Coverage:** Example-based only
@@ -228,7 +228,7 @@
 > **Requirement Coverage:** R13
 > **Scenario Coverage:** env-config
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Additive — env vars are fallback, flags take precedence
 - **Simplification Focus:** Merge env vars after `Cli::parse()` using clap's `env` attribute
 - **Advanced Test Coverage:** Example-based only
@@ -246,7 +246,7 @@
 > **Requirement Coverage:** R14
 > **Scenario Coverage:** json-output
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Additive — existing text output preserved when format is not json
 - **Simplification Focus:** Use serde_json for serialization
 - **Advanced Test Coverage:** Example-based only
@@ -264,7 +264,7 @@
 > **Requirement Coverage:** R15
 > **Scenario Coverage:** form-file-upload
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** Enhanced — `@` prefix now triggers file read
 - **Simplification Focus:** Reuse existing multipart infrastructure in `http.rs`
 - **Advanced Test Coverage:** Example-based only
@@ -304,7 +304,7 @@
 > **Requirement Coverage:** R11
 > **Scenario Coverage:** all
 
-- **Loop Type:** `BDD+TDD`
+- **Loop Type:** `TDD`
 - **Behavioral Contract:** N/A (tests only)
 - **Simplification Focus:** Use `axum` test server (already in workspace)
 - **Advanced Test Coverage:** Example-based only
@@ -322,7 +322,7 @@
 - [ ] All tasks completed with status 🟢 DONE
 - [ ] `cargo nextest run -p hpx-cli --all-features` passes
 - [ ] `cargo +nightly clippy -p hpx-cli -- -D warnings` passes
-- [ ] All BDD scenarios pass
+- [ ] All scenarios pass
 - [ ] `just format` applied
 - [ ] `just lint` passes
 - [ ] `just test` passes
