@@ -145,6 +145,42 @@ mod tests {
     }
 
     #[test]
+    fn decode_eof_returns_pending_batch() {
+        let batch = make_batch();
+        let data = encode_ipc(&batch);
+
+        let mut codec = ArrowIpcCodec::new_with_max_length(1024 * 1024);
+        let mut buf = BytesMut::from(&data[..]);
+        let result = codec.decode_eof(&mut buf).unwrap();
+        assert!(result.is_some(), "decode_eof must flush a pending batch");
+    }
+
+    #[test]
+    fn garbage_exceeding_max_length_errors() {
+        // Arrow StreamDecoder returns None for garbage; the accumulated
+        // consumed length then trips the max-length guard.
+        let data = b"not arrow data";
+        let mut codec = ArrowIpcCodec::new_with_max_length(4);
+        let mut buf = BytesMut::from(&data[..]);
+        assert!(
+            codec.decode(&mut buf).is_err(),
+            "garbage over max_length must error"
+        );
+    }
+
+    #[test]
+    fn garbage_equal_to_max_length_is_accepted() {
+        // Exactly at the limit must still be accepted (guard is `>` not `>=`).
+        let data = b"not arrow data!";
+        let mut codec = ArrowIpcCodec::new_with_max_length(data.len());
+        let mut buf = BytesMut::from(&data[..]);
+        assert!(
+            !codec.decode(&mut buf).is_err(),
+            "exactly-at-limit input must not error"
+        );
+    }
+
+    #[test]
     fn single_column_batch() {
         let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Int32, false)]));
         let values = Arc::new(Int32Array::from(vec![10, 20, 30]));

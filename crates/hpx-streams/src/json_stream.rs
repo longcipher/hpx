@@ -310,4 +310,10 @@ mod tests {
         let err = result.unwrap_err();
         assert!(matches!(err.kind(), StreamBodyKind::CodecError));
     }
+
+    #[test]
+    fn initial_capacity_is_8kib() {
+        // Pin the streaming buffer size: 8 KiB (8 * 1024 bytes).
+        assert_eq!(INITIAL_CAPACITY, 8 * 1024);
+    }
 }

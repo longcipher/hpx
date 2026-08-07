@@ -471,4 +471,85 @@ mod tests {
         );
         Ok(())
     }
+
+    #[test]
+    fn emulation_factory_builds_variant_headers() -> Result<(), Box<dyn std::error::Error>> {
+        // The `EmulationFactory::emulation` trait impl must dispatch to the
+        // real per-variant constructor; a naive `Default::default()` would
+        // produce an emulation without any headers.
+        let mut emu = Emulation::Chrome147.emulation();
+        let ua = emu
+            .headers_mut()
+            .get(http::header::USER_AGENT)
+            .ok_or("USER_AGENT header not set for Chrome147")?
+            .to_str()?
+            .to_string();
+        assert!(
+            ua.contains("Chrome"),
+            "expected Chrome User-Agent, got: {ua}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn emulation_factory_builds_headers_and_tls_for_each_browser()
+    -> Result<(), Box<dyn std::error::Error>> {
+        // Exercises the per-browser `header_initializer*` functions (via the
+        // emitted headers) and the `From<XxxTlsConfig> for TlsOptions`
+        // conversions (via the configured TLS versions). A degenerate
+        // `Default::default()` anywhere in that chain leaves the headers
+        // empty and the TLS version bounds unset.
+        let cases: [(&str, hpx::Emulation, Option<hpx::tls::TlsVersion>); 5] = [
+            (
+                "Chrome147",
+                Emulation::Chrome147.emulation(),
+                Some(hpx::tls::TlsVersion::TLS_1_2),
+            ),
+            (
+                "Firefox151",
+                Emulation::Firefox151.emulation(),
+                Some(hpx::tls::TlsVersion::TLS_1_2),
+            ),
+            (
+                "Safari18",
+                Emulation::Safari18.emulation(),
+                Some(hpx::tls::TlsVersion::TLS_1_0),
+            ),
+            (
+                "Opera131",
+                Emulation::Opera131.emulation(),
+                Some(hpx::tls::TlsVersion::TLS_1_2),
+            ),
+            (
+                "OkHttp5",
+                Emulation::OkHttp5.emulation(),
+                Some(hpx::tls::TlsVersion::TLS_1_2),
+            ),
+        ];
+
+        for (name, mut emu, min_tls) in cases {
+            assert!(
+                emu.headers_mut().contains_key(http::header::USER_AGENT),
+                "{name}: User-Agent header missing"
+            );
+            assert!(
+                emu.headers_mut().contains_key(http::header::ACCEPT),
+                "{name}: Accept header missing"
+            );
+            let tls = emu
+                .tls_options_mut()
+                .as_ref()
+                .ok_or_else(|| format!("{name}: TLS options not configured"))?;
+            assert_eq!(
+                tls.min_tls_version, min_tls,
+                "{name}: unexpected min TLS version"
+            );
+            assert_eq!(
+                tls.max_tls_version,
+                Some(hpx::tls::TlsVersion::TLS_1_3),
+                "{name}: unexpected max TLS version"
+            );
+        }
+        Ok(())
+    }
 }

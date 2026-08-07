@@ -220,6 +220,12 @@ Before serializing, parse the proxy URL and strip `userinfo` (username:password@
 
 ---
 
+### Finding 10: CI runs only a subset of tests (TEST-02)
+
+- **Category:** testing
+- **Impact:** HIGH
+- **Effort:** S
+
 #### Requirements (EARS Notation)
 
 - **[REQ-19]:** THE `just ci` target SHALL run lint, all unit tests, and all integration tests.

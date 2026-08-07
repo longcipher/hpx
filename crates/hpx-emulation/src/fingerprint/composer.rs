@@ -175,4 +175,16 @@ mod tests {
         assert_eq!(headers.get("x-valid").ok_or("x-valid missing")?, "value");
         Ok(())
     }
+
+    #[test]
+    fn test_compose_error_display_messages() {
+        assert_eq!(
+            ComposeError::InvalidHeaderName("bad name".to_string()).to_string(),
+            "Invalid header name: bad name"
+        );
+        assert_eq!(
+            ComposeError::InvalidHeaderValue("bad value".to_string()).to_string(),
+            "Invalid header value: bad value"
+        );
+    }
 }

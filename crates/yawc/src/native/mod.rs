@@ -2371,4 +2371,97 @@ mod tests {
             "tls_connector() should return the same &'static reference on repeated calls"
         );
     }
+
+    #[test]
+    fn buffer_limit_constants_are_exact() {
+        // Pin the memory-limit constants: 1 MiB payload, 2 MiB read buffer.
+        assert_eq!(MAX_PAYLOAD_READ, 1024 * 1024);
+        assert_eq!(MAX_READ_BUFFER, 2 * 1024 * 1024);
+    }
+
+    #[test]
+    fn role_display_matches_expected_strings() {
+        assert_eq!(format!("{}", Role::Server), "server");
+        assert_eq!(format!("{}", Role::Client), "client");
+    }
+
+    #[test]
+    fn negotiation_without_extensions_has_no_codecs() {
+        let neg = Negotiation::default();
+        assert!(neg.decompressor(Role::Server).is_none());
+        assert!(neg.compressor(Role::Server).is_none());
+    }
+
+    #[test]
+    fn negotiation_with_extensions_builds_codecs() {
+        let neg = Negotiation {
+            extensions: Some(WebSocketExtensions::default()),
+            compression_level: Some(CompressionLevel::default()),
+            ..Default::default()
+        };
+        for role in [Role::Client, Role::Server] {
+            assert!(neg.decompressor(role).is_some(), "decompressor for {role}");
+            assert!(neg.compressor(role).is_some(), "compressor for {role}");
+        }
+    }
+
+    #[tokio::test]
+    async fn compression_roundtrip_with_asymmetric_no_context_takeover() {
+        // `server_no_context_takeover = true` makes the server compressor emit
+        // self-contained streams. A role-inverting `==`/`!=` mutation in the
+        // compressor makes it keep a persistent dictionary instead; the client
+        // decompressor (no_context) then fails to decode the second message,
+        // whose compressed bytes reference the first message's dictionary.
+        let extensions = WebSocketExtensions {
+            server_no_context_takeover: true,
+            client_no_context_takeover: false,
+            ..Default::default()
+        };
+        let neg = Negotiation {
+            extensions: Some(extensions),
+            compression_level: Some(CompressionLevel::default()),
+            ..Default::default()
+        };
+        let mut server_comp = neg.compressor(Role::Server).unwrap();
+        let mut client_decomp = neg.decompressor(Role::Client).unwrap();
+
+        for payload in [b"first message".as_slice(), b"second message".as_slice()] {
+            let compressed = server_comp.compress(payload, false).unwrap();
+            let decompressed = client_decomp.decompress(&compressed, false).unwrap();
+            assert_eq!(&decompressed[..], payload);
+        }
+    }
+
+    #[tokio::test]
+    async fn decompressor_persistent_dictionary_survives_shared_prefix() {
+        // Mirror configuration: the server keeps a persistent deflate
+        // dictionary (`server_no_context_takeover = false`), so consecutive
+        // compressed messages reference earlier context. The client
+        // decompressor must also use a persistent window; a role-inverting
+        // `==`/`!=` mutation in the decompressor makes it reset per-message
+        // (`no_context_takeover`) and fail to decode the second message.
+        let extensions = WebSocketExtensions {
+            server_no_context_takeover: false,
+            client_no_context_takeover: true,
+            ..Default::default()
+        };
+        let neg = Negotiation {
+            extensions: Some(extensions),
+            compression_level: Some(CompressionLevel::default()),
+            ..Default::default()
+        };
+        let mut server_comp = neg.compressor(Role::Server).unwrap();
+        let mut client_decomp = neg.decompressor(Role::Client).unwrap();
+
+        // A shared prefix forces the second compressed stream to reference the
+        // first message's dictionary (persistent window).
+        let prefix = b"common-prefix-that-appears-in-both-messages-";
+        for i in 0..2u8 {
+            let mut payload = prefix.to_vec();
+            payload.push(b'0' + i);
+            let compressed = server_comp.compress(&payload, false).unwrap();
+            let decompressed = client_decomp.decompress(&compressed, false).unwrap();
+            assert_eq!(&decompressed[..], payload.as_slice());
+        }
+    }
 }

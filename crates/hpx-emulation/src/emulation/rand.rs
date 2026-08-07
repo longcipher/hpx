@@ -325,4 +325,35 @@ mod tests {
             "Chrome frequency {freq:.3} outside [0.66, 0.77]"
         );
     }
+
+    #[test]
+    fn test_random_produces_varied_emulations() {
+        // A degenerate `random()` (e.g. one that always returns
+        // `EmulationOption::default()`) would collapse to a single variant.
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..2_000 {
+            seen.insert(Emulation::random().emulation);
+        }
+        assert!(
+            seen.len() > 1,
+            "random() should produce more than one distinct emulation"
+        );
+    }
+
+    #[test]
+    fn test_random_returns_valid_emulation_and_os() {
+        for _ in 0..1_000 {
+            let opt = Emulation::random();
+            assert!(
+                Emulation::VARIANTS.contains(&opt.emulation),
+                "random() returned an invalid emulation: {:?}",
+                opt.emulation
+            );
+            assert!(
+                EmulationOS::VARIANTS.contains(&opt.emulation_os),
+                "random() returned an invalid OS: {:?}",
+                opt.emulation_os
+            );
+        }
+    }
 }

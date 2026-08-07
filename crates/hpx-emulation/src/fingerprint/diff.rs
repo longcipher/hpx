@@ -283,4 +283,34 @@ mod tests {
                 .any(|d| matches!(d, FingerprintDiff::EchModeChanged { .. }))
         );
     }
+
+    #[test]
+    fn test_fingerprint_diff_display_contains_values() {
+        let diff = FingerprintDiff::NameChanged {
+            old: "chrome",
+            new: "firefox",
+        };
+        let s = diff.to_string();
+        assert!(
+            s.contains("chrome") && s.contains("firefox"),
+            "expected both names in display, got: {s}"
+        );
+    }
+
+    #[test]
+    fn test_curves_diff_display_uses_openssl_names() {
+        // Exercises both `Display for FingerprintDiff` and the private
+        // `format_curves` helper (via the CurvesChanged arm).
+        let diff = FingerprintDiff::CurvesChanged {
+            old: vec![Curve::X25519, Curve::Secp256r1],
+            new: vec![Curve::X25519MLKEM768],
+        };
+        let s = diff.to_string();
+        assert!(s.contains("X25519"), "expected X25519 in display, got: {s}");
+        assert!(s.contains("P-256"), "expected P-256 in display, got: {s}");
+        assert!(
+            s.contains("X25519MLKEM768"),
+            "expected X25519MLKEM768 in display, got: {s}"
+        );
+    }
 }

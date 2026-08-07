@@ -60,3 +60,34 @@ pub fn header_initializer_with_zstd_priority(
     );
     headers
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SEC_CH_UA: &str = "\"Chromium\";v=\"147\", \"Not.A/Brand\";v=\"99\"";
+    const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36";
+
+    fn assert_full_headers(headers: HeaderMap) {
+        assert!(
+            headers.contains_key(http::header::USER_AGENT),
+            "missing User-Agent"
+        );
+        assert!(headers.contains_key(http::header::ACCEPT), "missing Accept");
+    }
+
+    #[test]
+    fn all_chrome_header_initializers_populate_headers() {
+        assert_full_headers(header_initializer(SEC_CH_UA, UA, EmulationOS::Windows));
+        assert_full_headers(header_initializer_with_zstd(
+            SEC_CH_UA,
+            UA,
+            EmulationOS::Windows,
+        ));
+        assert_full_headers(header_initializer_with_zstd_priority(
+            SEC_CH_UA,
+            UA,
+            EmulationOS::Windows,
+        ));
+    }
+}

@@ -1,4 +1,7 @@
 target/
+# cargo-mutants output
+mutants.out/
+mutants.out.old/
 .rumdl_cache/
 *.db
 *.db-wal

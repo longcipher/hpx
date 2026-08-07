@@ -870,6 +870,7 @@ The `WsConfig` at `crates/hpx-transport/src/websocket/config.rs` gains an option
 ---
 
 ## Behavior Traceability Matrix
+
 | Domain Module | Core Component | Driven by Feature | Scenario |
 | :--- | :--- | :--- | :--- |
 | HTTP/3 Transport | `QuicConnector` | `features/http3_transport.feature` | "Successful HTTP/3 GET request" |

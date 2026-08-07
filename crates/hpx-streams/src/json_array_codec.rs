@@ -309,7 +309,15 @@ mod tests {
         let mut codec = JsonArrayCodec::<T>::new_with_max_length(1024);
         let mut buf = BytesMut::from(data);
         let mut results = Vec::new();
+        // Bound the loop so a mutant that makes decode never terminate (e.g. a
+        // broken buffer-advance) fails fast as a test failure instead of hanging.
+        let mut iterations = 0;
         loop {
+            iterations += 1;
+            assert!(
+                iterations < 10_000,
+                "decode_all did not terminate (possible buffer-advance regression)"
+            );
             match codec.decode(&mut buf) {
                 Ok(Some(item)) => results.push(item),
                 Ok(None) => break,
@@ -423,6 +431,59 @@ mod tests {
         let items: Vec<Item> = decode_all(data);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].name, "ws");
+    }
+
+    #[test]
+    fn nested_arrays() {
+        let data = br#"[[1,2],[3,4]]"#;
+        let items: Vec<Vec<i64>> = decode_all(data);
+        assert_eq!(items, vec![vec![1, 2], vec![3, 4]]);
+    }
+
+    #[test]
+    fn objects_with_nested_array_field() {
+        #[derive(Debug, serde::Deserialize, PartialEq)]
+        struct WithArray {
+            name: String,
+            values: Vec<i32>,
+        }
+        let data = br#"[{"name":"a","values":[1,2]},{"name":"b","values":[3,4]}]"#;
+        let items: Vec<WithArray> = decode_all(data);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].name, "a");
+        assert_eq!(items[0].values, vec![1, 2]);
+        assert_eq!(items[1].values, vec![3, 4]);
+    }
+
+    #[test]
+    fn strings_containing_brackets() {
+        // `[`/`]` inside a quoted string must not be interpreted as array
+        // delimiters by the bracket-tracking state machine.
+        let data = br#"["a[b]c", "d]e[f", "plain"]"#;
+        let items: Vec<String> = decode_all(data);
+        assert_eq!(items, vec!["a[b]c", "d]e[f", "plain"]);
+    }
+
+    #[test]
+    fn escaped_quotes_and_brackets_in_strings() {
+        let data = br#"["he said \"[x]\"", "ok"]"#;
+        let items: Vec<String> = decode_all(data);
+        assert_eq!(items, vec!["he said \"[x]\"", "ok"]);
+    }
+
+    #[test]
+    fn bracket_inside_nested_string_does_not_emit_early() {
+        // A `]` inside a value string of a nested object must not close the
+        // object early; the item is emitted only at the real `}`.
+        #[derive(Debug, serde::Deserialize, PartialEq)]
+        struct WithNote {
+            note: String,
+        }
+        let data = br#"[{"note":"a]b"},{"note":"c"}]"#;
+        let items: Vec<WithNote> = decode_all(data);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].note, "a]b");
+        assert_eq!(items[1].note, "c");
     }
 
     #[test]

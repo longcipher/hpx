@@ -288,7 +288,15 @@ async fn with_concurrency_limit_layer_timeout() {
     let client = Client::builder()
         .layer(DelayLayer::new(Duration::from_millis(100)))
         .layer(SharedConcurrencyLimitLayer::new(2))
-        .timeout(Duration::from_millis(200))
+        // 3 requests with a concurrency limit of 2 mean the third request
+        // waits 100ms for a slot plus 100ms of DelayLayer processing, i.e.
+        // exactly 200ms in the worst case. The timeout must be strictly
+        // below that so the third request deterministically times out
+        // instead of racing the deadline.
+        .timeout(Duration::from_millis(150))
+        // The default retry policy retries idempotent (GET) requests on
+        // timeout, which would mask the timeout this test wants to observe.
+        .retry(hpx::retry::Policy::never())
         .pool_max_idle_per_host(0) // disable connection reuse to force resource contention on the concurrency limit semaphore
         .no_proxy()
         .build()

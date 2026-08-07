@@ -1,0 +1,46 @@
+# cargo-mutants configuration for the hpx workspace.
+#
+# Run mutation testing with:
+#   just mutate
+# or scoped to a single crate:
+#   cargo mutants -p hpx-dl
+#
+# Keys are snake_case and must match the cargo-mutants v27 config schema
+# (the file is parsed with deny_unknown_fields). See https://mutants.rs/.
+
+# Floor for the per-mutant test timeout (seconds). The effective timeout is
+# auto-set from the baseline test time, never below this value.
+#
+# This workspace's tests complete in well under a second each, so 15s is a
+# generous bound. Keeping it small is important: a mutant that makes a test
+# loop forever would otherwise burn 60s+ per mutant, which dominates the
+# wall-clock time of a full run.
+minimum_test_timeout = 15
+
+# Use cargo-nextest for faster, more reliable test runs.
+test_tool = "nextest"
+
+# Cap rustc lints so that deny-level lints do not make otherwise-viable
+# mutants fail to compile.
+cap_lints = true
+
+# Never mutate vendored or generated code.
+exclude_globs = [
+    "**/build.rs",
+    "crates/hpx-h3/**",
+]
+
+# Skip tests that are extremely slow (many seconds to minutes each) when
+# running mutation tests. A mutation run executes the test suite hundreds of
+# times, so skipping these keeps each mutant's test phase fast. The filters
+# are `cargo nextest` substring filters; tests that do not match are still run.
+additional_cargo_test_args = [
+    # hpx-browser memory/concurrency benchmarks take 50-110s each.
+    "--skip", "memory_benchmark",
+    "--skip", "reload_html_100_times_no_leak",
+    "--skip", "create_and_drop_100_pages_no_leak",
+]
+
+# Note: by default each mutant is validated by the tests of its own package
+# (precise and fast). For a deeper, cross-crate analysis that runs the whole
+# workspace test suite per mutant, set `test_workspace = true` (much slower).

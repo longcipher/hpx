@@ -290,3 +290,106 @@ impl WebSocketError {
         }
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_classification_methods() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe");
+        let cases: &[(WebSocketError, bool, bool, bool, bool, bool)] = &[
+            // (error, is_protocol, is_handshake, is_closed, is_data, is_io)
+            (
+                WebSocketError::InvalidOpCode(5),
+                true,
+                false,
+                false,
+                false,
+                false,
+            ),
+            (
+                WebSocketError::ReservedBitsNotZero,
+                true,
+                false,
+                false,
+                false,
+                false,
+            ),
+            (
+                WebSocketError::InvalidStatusCode(403),
+                false,
+                true,
+                false,
+                false,
+                false,
+            ),
+            (
+                WebSocketError::InvalidHttpScheme,
+                false,
+                true,
+                false,
+                false,
+                false,
+            ),
+            (
+                WebSocketError::ConnectionClosed,
+                false,
+                false,
+                true,
+                false,
+                false,
+            ),
+            (
+                WebSocketError::InvalidUTF8,
+                false,
+                false,
+                false,
+                true,
+                false,
+            ),
+            (
+                WebSocketError::FrameTooLarge,
+                false,
+                false,
+                false,
+                true,
+                false,
+            ),
+            (
+                WebSocketError::IoError(io_err),
+                false,
+                false,
+                false,
+                false,
+                true,
+            ),
+        ];
+
+        for (err, protocol, handshake, closed, data, io) in cases {
+            assert_eq!(
+                err.is_protocol_error(),
+                *protocol,
+                "is_protocol_error({err})"
+            );
+            assert_eq!(
+                err.is_handshake_error(),
+                *handshake,
+                "is_handshake_error({err})"
+            );
+            assert_eq!(err.is_closed(), *closed, "is_closed({err})");
+            assert_eq!(err.is_data_error(), *data, "is_data_error({err})");
+            assert_eq!(err.is_io_error(), *io, "is_io_error({err})");
+        }
+    }
+
+    #[test]
+    fn as_io_error_returns_source_only_for_io_errors() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out");
+        let err = WebSocketError::IoError(io_err);
+        assert!(err.as_io_error().is_some());
+
+        let err = WebSocketError::InvalidHttpScheme;
+        assert!(err.as_io_error().is_none());
+    }
+}

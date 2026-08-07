@@ -156,6 +156,22 @@ mod tests {
     }
 
     #[test]
+    fn source_ref_returns_source() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe broke");
+        let err = StreamBodyError::new(StreamBodyKind::CodecError, Some(Box::new(io_err)), None);
+        assert!(
+            err.source_ref().is_some(),
+            "source_ref must return the wrapped source"
+        );
+    }
+
+    #[test]
+    fn source_ref_is_none_without_source() {
+        let err = StreamBodyError::new(StreamBodyKind::CodecError, None, None);
+        assert!(err.source_ref().is_none());
+    }
+
+    #[test]
     fn kind_is_copy() {
         let k = StreamBodyKind::CodecError;
         let k2 = k;

@@ -381,17 +381,20 @@ mod tests {
 
         let mut decoded = Vec::new();
         // The codec may need multiple decode calls per message (varint then body).
-        // Use a limit to avoid infinite loop if codec returns None forever.
-        let mut attempts = 0;
-        while attempts < 100 {
+        // Use an absolute iteration bound so a mutant that always yields Some
+        // (e.g. decode returning a default message) fails fast instead of hanging.
+        let mut iterations = 0;
+        let mut idle = 0;
+        while iterations < 1_000 {
+            iterations += 1;
             match codec.decode(&mut buf) {
                 Ok(Some(msg)) => {
                     decoded.push(msg);
-                    attempts = 0; // reset on progress
+                    idle = 0;
                 }
                 Ok(None) => {
-                    attempts += 1;
-                    if buf.is_empty() && attempts > 2 {
+                    idle += 1;
+                    if buf.is_empty() && idle > 2 {
                         break;
                     }
                 }
@@ -422,5 +425,114 @@ mod tests {
         assert!(matches!(codec.decode(&mut buf), Ok(None)));
         let result = codec.decode(&mut buf).unwrap().unwrap();
         assert_eq!(result.name, "x");
+    }
+
+    #[test]
+    fn decode_varint_slice_multibyte_and_malformed() {
+        // Multi-byte varint: 0x80 0x01 encodes 128 over two bytes.
+        let (val, advance) = decode_varint_slice(&[0x80, 0x01]).unwrap();
+        assert_eq!((val, advance), (128, 2));
+
+        // Malformed: the last byte still has the continuation bit set.
+        assert!(decode_varint_slice(&[0x80, 0x80]).is_err());
+        // Empty input.
+        assert!(decode_varint_slice(&[]).is_err());
+    }
+
+    #[test]
+    fn decode_varint_slice_across_all_byte_lengths() {
+        // 1-byte varint.
+        assert_eq!(decode_varint_slice(&[0x05]).unwrap(), (5, 1));
+        // 2-byte: 128.
+        assert_eq!(decode_varint_slice(&[0x80, 0x01]).unwrap(), (128, 2));
+        // 3-byte: 16384 = 1 << 14.
+        assert_eq!(
+            decode_varint_slice(&[0x80, 0x80, 0x01]).unwrap(),
+            (16_384, 3)
+        );
+        // 4-byte: 2097152 = 1 << 21.
+        assert_eq!(
+            decode_varint_slice(&[0x80, 0x80, 0x80, 0x01]).unwrap(),
+            (2_097_152, 4)
+        );
+        // 5-byte: 268435456 = 1 << 28.
+        assert_eq!(
+            decode_varint_slice(&[0x80, 0x80, 0x80, 0x80, 0x01]).unwrap(),
+            (268_435_456, 5)
+        );
+        // 6-byte: 1 << 35.
+        assert_eq!(
+            decode_varint_slice(&[0x80, 0x80, 0x80, 0x80, 0x80, 0x01]).unwrap(),
+            (34_359_738_368, 6)
+        );
+        // 7-byte: 1 << 42.
+        assert_eq!(
+            decode_varint_slice(&[0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01]).unwrap(),
+            (4_398_046_511_104, 7)
+        );
+        // 8-byte: 1 << 49.
+        assert_eq!(
+            decode_varint_slice(&[0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01]).unwrap(),
+            (562_949_953_421_312, 8)
+        );
+        // 9-byte: 1 << 56.
+        assert_eq!(
+            decode_varint_slice(&[0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01]).unwrap(),
+            (72_057_594_037_927_936, 9)
+        );
+        // 10-byte: 1 << 63 (final byte must be < 0x02).
+        assert_eq!(
+            decode_varint_slice(&[0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01])
+                .unwrap(),
+            (9_223_372_036_854_775_808, 10)
+        );
+        // 10-byte overflow: final byte >= 0x02 is invalid.
+        assert!(
+            decode_varint_slice(&[0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x02])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn decode_eof_emits_pending_body() {
+        let msg = TestMsg {
+            name: "flush".into(),
+            value: 9,
+        };
+        let data = encode_len_prefixed(&msg);
+        let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(1024);
+        let mut buf = BytesMut::from(&data[..]);
+        // First decode reads the length prefix.
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+        // decode_eof must flush the pending message body.
+        let result = codec.decode_eof(&mut buf).unwrap();
+        assert_eq!(result, Some(msg));
+    }
+
+    #[test]
+    fn decode_eof_errors_on_incomplete_varint() {
+        let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(1024);
+        // 0x80 alone: continuation bit set but no terminator byte available.
+        let mut buf = BytesMut::from(&[0x80u8][..]);
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+        assert!(codec.decode_eof(&mut buf).is_err());
+    }
+
+    #[test]
+    fn exact_max_length_body_is_accepted() {
+        // body = field(0x0A,0x08) + 8 name bytes + field(0x10,0x01) = 12 bytes
+        let msg = TestMsg {
+            name: "x".repeat(8),
+            value: 1,
+        };
+        let data = encode_len_prefixed(&msg);
+        let body_len = data.len() - 1; // single-byte varint prefix
+        assert_eq!(body_len, 12, "expected an exact 12-byte body");
+
+        let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(body_len);
+        let mut buf = BytesMut::from(&data[..]);
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+        let result = codec.decode(&mut buf).unwrap();
+        assert_eq!(result, Some(msg));
     }
 }

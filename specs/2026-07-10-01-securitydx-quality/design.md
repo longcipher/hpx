@@ -219,7 +219,6 @@ Six known mismatches:
 - **Impact:** HIGH — untested critical path (all cookie-enabled HTTP requests)
 - **Effort:** S
 
-
 ---
 
 ### Finding 9: Retry module zero unit tests (TEST-06)

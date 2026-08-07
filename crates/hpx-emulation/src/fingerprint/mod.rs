@@ -103,6 +103,141 @@ impl std::fmt::Display for Curve {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn curve_openssl_name_matches_all_variants() {
+        assert_eq!(Curve::X25519.openssl_name(), "X25519");
+        assert_eq!(
+            Curve::X25519Kyber768Draft00.openssl_name(),
+            "X25519Kyber768Draft00"
+        );
+        assert_eq!(Curve::X25519MLKEM768.openssl_name(), "X25519MLKEM768");
+        assert_eq!(Curve::Secp256r1.openssl_name(), "P-256");
+        assert_eq!(Curve::Secp384r1.openssl_name(), "P-384");
+        assert_eq!(Curve::Secp521r1.openssl_name(), "P-521");
+    }
+
+    #[test]
+    fn curve_display_roundtrips_openssl_name() {
+        for curve in [
+            Curve::X25519,
+            Curve::X25519Kyber768Draft00,
+            Curve::X25519MLKEM768,
+            Curve::Secp256r1,
+            Curve::Secp384r1,
+            Curve::Secp521r1,
+        ] {
+            assert_eq!(curve.to_string(), curve.openssl_name());
+        }
+    }
+
+    #[cfg(feature = "emulation")]
+    #[test]
+    fn tls_presets_map_to_distinct_fingerprints() {
+        let base = tls_fingerprint_from_preset(TlsPreset::ChromeBase);
+        assert!(!base.permute_extensions, "ChromeBase must not permute");
+        assert_eq!(base.ech_mode, EchMode::Disabled);
+
+        let permute = tls_fingerprint_from_preset(TlsPreset::ChromePermute);
+        assert!(
+            permute.permute_extensions,
+            "ChromePermute must permute extensions"
+        );
+
+        let ech = tls_fingerprint_from_preset(TlsPreset::ChromeEchGrease);
+        assert_eq!(
+            ech.ech_mode,
+            EchMode::Grease,
+            "ChromeEchGrease must use ECH grease"
+        );
+
+        let permute_ech = tls_fingerprint_from_preset(TlsPreset::ChromePermuteEch);
+        assert!(permute_ech.permute_extensions);
+        assert_eq!(permute_ech.ech_mode, EchMode::Grease);
+
+        let kyber = tls_fingerprint_from_preset(TlsPreset::ChromeKyber);
+        assert!(
+            kyber.permute_extensions,
+            "ChromeKyber must permute extensions"
+        );
+        assert_eq!(
+            kyber.ech_mode,
+            EchMode::Grease,
+            "ChromeKyber must use ECH grease"
+        );
+        assert!(kyber.pre_shared_key, "ChromeKyber must set PSK");
+
+        let mlkem = tls_fingerprint_from_preset(TlsPreset::ChromeMlkem768);
+        assert!(
+            mlkem.permute_extensions,
+            "ChromeMlkem768 must permute extensions"
+        );
+        assert_eq!(
+            mlkem.ech_mode,
+            EchMode::Grease,
+            "ChromeMlkem768 must use ECH grease"
+        );
+        assert!(
+            mlkem.alps_use_new_codepoint,
+            "ChromeMlkem768 must use new ALPS codepoint"
+        );
+
+        let ff_base = tls_fingerprint_from_preset(TlsPreset::FirefoxBase);
+        assert_eq!(
+            ff_base.ech_mode,
+            EchMode::Disabled,
+            "FirefoxBase must not use ECH"
+        );
+
+        let ff_ech = tls_fingerprint_from_preset(TlsPreset::FirefoxEchGrease);
+        assert_eq!(
+            ff_ech.ech_mode,
+            EchMode::Grease,
+            "FirefoxEchGrease must use ECH grease"
+        );
+
+        let safari_base = tls_fingerprint_from_preset(TlsPreset::SafariBase);
+        assert_eq!(
+            safari_base.ech_mode,
+            EchMode::Disabled,
+            "SafariBase must not use ECH"
+        );
+
+        let okhttp_base = tls_fingerprint_from_preset(TlsPreset::OkHttpBase);
+        assert_eq!(
+            okhttp_base.ech_mode,
+            EchMode::Disabled,
+            "OkHttpBase must not use ECH"
+        );
+    }
+
+    #[cfg(feature = "emulation-serde")]
+    #[test]
+    fn browser_fingerprint_serializes_to_object() {
+        let fp = BrowserFingerprint::new(
+            "chrome",
+            "133",
+            TlsFingerprint::default(),
+            Http2Fingerprint::default(),
+            vec![("user-agent", "test")],
+        );
+        let value = serde_json::to_value(&fp).expect("BrowserFingerprint must serialize");
+        assert!(
+            value.is_object(),
+            "expected a serialized object, got: {value}"
+        );
+        assert_eq!(value.get("name").and_then(|v| v.as_str()), Some("chrome"));
+        assert_eq!(value.get("version").and_then(|v| v.as_str()), Some("133"));
+        assert!(
+            value.get("tls_curves").and_then(|v| v.as_str()).is_some(),
+            "tls_curves field missing"
+        );
+    }
+}
+
 /// TLS cipher suites.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CipherSuite {

@@ -60,3 +60,57 @@ pub fn clear_tls_cache() {
 pub fn tls_cache_len() -> usize {
     TLS_CACHE.load().len()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    #[test]
+    fn get_or_build_tls_caches_builds_and_clears() {
+        clear_tls_cache();
+        assert_eq!(tls_cache_len(), 0, "cache must start empty");
+
+        let fp1 = TlsFingerprint::default();
+        let mut fp2 = fp1.clone();
+        fp2.pre_shared_key = true; // distinct fingerprint key
+
+        let calls = AtomicUsize::new(0);
+        let build = |_: &TlsFingerprint| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            TlsOptions::default()
+        };
+
+        // First build populates the cache.
+        let a = get_or_build_tls(&fp1, build);
+        // Cache hit: the build closure must not run again.
+        let b = get_or_build_tls(&fp1, |_| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            TlsOptions::default()
+        });
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "a cached fingerprint must not rebuild"
+        );
+
+        // A distinct fingerprint must build again.
+        get_or_build_tls(&fp2, |_| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            TlsOptions::default()
+        });
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "a distinct fingerprint must trigger a new build"
+        );
+        assert_eq!(tls_cache_len(), 2, "two distinct fingerprints cached");
+
+        // Clearing empties the cache.
+        clear_tls_cache();
+        assert_eq!(tls_cache_len(), 0, "clear_tls_cache must empty the cache");
+
+        drop((a, b));
+    }
+}

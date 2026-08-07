@@ -71,6 +71,72 @@ impl From<OkHttpTlsConfig> for TlsOptions {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn okhttp_tls_config_converts_to_configured_tls_options() {
+        // The `From` conversion must map the config onto the resulting
+        // `TlsOptions`; a degenerate `Default::default()` would lose the
+        // version bounds and curve/sigalg/cipher lists.
+        let opts: TlsOptions = OkHttpTlsConfig::builder()
+            .cipher_list(CIPHER_LIST)
+            .build()
+            .into();
+
+        assert_eq!(opts.min_tls_version, Some(TlsVersion::TLS_1_2));
+        assert_eq!(opts.max_tls_version, Some(TlsVersion::TLS_1_3));
+        assert_eq!(opts.aes_hw_override, Some(true));
+        assert_eq!(opts.curves_list.as_deref(), Some(CURVES));
+        assert_eq!(opts.sigalgs_list.as_deref(), Some(SIGALGS_LIST));
+        assert_eq!(opts.cipher_list.as_deref(), Some(CIPHER_LIST));
+    }
+
+    #[test]
+    fn build_emulation_sets_tls_http2_and_headers() {
+        // A degenerate `build_emulation` returning `Default::default()` would
+        // drop all transport options and headers.
+        let mut emu = build_emulation(EmulationOption::default(), CIPHER_LIST, "okhttp-test");
+        assert!(
+            emu.tls_options_mut().is_some(),
+            "okhttp emulation must set TLS options"
+        );
+        assert!(
+            emu.http2_options_mut().is_some(),
+            "okhttp emulation must set HTTP/2 options"
+        );
+        assert!(
+            emu.headers_mut().contains_key(USER_AGENT),
+            "okhttp emulation must set the User-Agent header"
+        );
+    }
+
+    #[test]
+    fn build_emulation_honors_skip_flags() {
+        let mut emu = build_emulation(
+            EmulationOption::builder()
+                .skip_http2(true)
+                .skip_headers(true)
+                .build(),
+            CIPHER_LIST,
+            "okhttp-test",
+        );
+        assert!(
+            emu.http2_options_mut().is_none(),
+            "skip_http2 must omit HTTP/2 options"
+        );
+        assert!(
+            emu.headers_mut().is_empty(),
+            "skip_headers must omit headers"
+        );
+        assert!(
+            emu.tls_options_mut().is_some(),
+            "TLS options must remain set even with skip flags"
+        );
+    }
+}
+
 fn build_emulation(
     option: EmulationOption,
     cipher_list: &'static str,

@@ -74,3 +74,26 @@ pub fn header_initializer_for_18(ua: &'static str) -> HeaderMap {
     );
     headers
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
+
+    #[test]
+    fn all_safari_header_initializers_populate_headers() {
+        for headers in [
+            header_initializer_for_14(UA),
+            header_initializer_for_15(UA),
+            header_initializer_for_16_17(UA),
+            header_initializer_for_18(UA),
+        ] {
+            assert!(
+                headers.contains_key(http::header::USER_AGENT),
+                "missing User-Agent"
+            );
+            assert!(headers.contains_key(http::header::ACCEPT), "missing Accept");
+        }
+    }
+}

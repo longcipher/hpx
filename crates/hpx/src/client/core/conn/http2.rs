@@ -33,16 +33,24 @@ static CONN_SEQ: AtomicU64 = AtomicU64::new(1);
 /// Upper bound on how long a request may wait for the connection's dispatch
 /// task to produce a response before we treat the connection as stalled.
 ///
-/// Normally the dispatch oneshot resolves almost instantly once the request is
-/// queued (the venue TTFB here is ~250 ms). If the `ClientTask` ever parks
-/// permanently (a stall observed in production where a connection's watchdog
-/// timer and mpsc wakeups both stop being delivered), an unbounded `rx.await`
-/// here would pin the request until the outer request `Timeout` fires
-/// (~15 s). A bounded wait converts that into a fast, retryable failure: the
-/// connection gets poisoned so the pool discards it, and idempotent requests
-/// are retried on a fresh connection. 1 s keeps the worst-case recovery at
-/// ~1.3 s while leaving >3x headroom over the normal TTFB.
-const DISPATCH_RESPONSE_TIMEOUT: Duration = Duration::from_secs(1);
+/// The dispatch oneshot resolves when response headers arrive. It must NOT be
+/// a tight per-request deadline: a healthy server that is simply slow — e.g.
+/// one that delays the connection preface or limits `max_concurrent_streams`
+/// to 1, forcing queued requests to wait behind earlier ones — legitimately
+/// resolves its oneshot well past 1 s. A tight timeout (1 s) therefore kills
+/// requests to such servers and misclassifies normal backpressure as a stall.
+///
+/// If the `ClientTask` ever parks permanently (a stall observed in production
+/// where a connection's watchdog timer and mpsc wakeups both stop being
+/// delivered), an unbounded `rx.await` here would pin the request until the
+/// outer request `Timeout` fires (~15 s). The `ClientTask` dispatch watchdog
+/// (5 s interval) provides the primary fast-path detection; this timeout is a
+/// final safety net that converts a never-resolving dispatch into a retryable
+/// failure. 30 s leaves ample headroom for slow but healthy servers, at the
+/// cost of a longer worst-case recovery for genuinely stalled connections
+/// (previously ~1.3 s). Prefer keeping the user-facing request `Timeout` tight
+/// so stalled connections are bounded by it in practice.
+const DISPATCH_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The sender side of an established connection.
 pub(crate) struct SendRequest<B> {

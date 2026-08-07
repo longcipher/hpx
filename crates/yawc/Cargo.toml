@@ -122,6 +122,7 @@ web-sys = { workspace = true, features = [
 # ==============================================================================
 [dev-dependencies]
 eyre = { workspace = true }
+hyper = { workspace = true, features = ["server"] }
 serde_json = { workspace = true }
 
 # ==============================================================================

@@ -432,6 +432,6 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 2. [ ] **Tested:** `cargo test -p hpxless` and `cargo test -p hpx-browser` pass
 3. [ ] **Formatted:** `just format` applied
 4. [ ] **Verified:** All task-specific Verification criteria met
-6. [ ] **Runtime Working:** `hpxless --port 9222` starts, Puppeteer `page.goto("https://example.com")` succeeds
-7. [ ] **Memory Target:** < 64MB RSS per page (text-heavy)
-8. [ ] **Performance Target:** Navigation to DOMContentLoaded < 2s for typical pages
+5. [ ] **Runtime Working:** `hpxless --port 9222` starts, Puppeteer `page.goto("https://example.com")` succeeds
+6. [ ] **Memory Target:** < 64MB RSS per page (text-heavy)
+7. [ ] **Performance Target:** Navigation to DOMContentLoaded < 2s for typical pages

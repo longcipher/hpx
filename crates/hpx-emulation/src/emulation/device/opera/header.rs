@@ -30,3 +30,21 @@ pub fn header_initializer_with_zstd_priority(
     );
     headers
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SEC_CH_UA: &str = "\"Chromium\";v=\"131\", \"Not.A/Brand\";v=\"99\"";
+    const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 OPR/131.0.0.0";
+
+    #[test]
+    fn opera_header_initializer_populates_headers() {
+        let headers = header_initializer_with_zstd_priority(SEC_CH_UA, UA, EmulationOS::Linux);
+        assert!(
+            headers.contains_key(http::header::USER_AGENT),
+            "missing User-Agent"
+        );
+        assert!(headers.contains_key(http::header::ACCEPT), "missing Accept");
+    }
+}

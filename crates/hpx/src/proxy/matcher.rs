@@ -191,16 +191,29 @@ impl Builder {
     }
 
     fn from_system() -> Self {
-        #[expect(unused_mut)]
-        let mut builder = Self::from_env();
+        #[cfg(any(
+            all(target_os = "macos", feature = "system-proxy"),
+            all(windows, feature = "system-proxy")
+        ))]
+        {
+            let mut builder = Self::from_env();
 
-        #[cfg(all(target_os = "macos", feature = "system-proxy"))]
-        super::mac::with_system(&mut builder);
+            #[cfg(all(target_os = "macos", feature = "system-proxy"))]
+            super::mac::with_system(&mut builder);
 
-        #[cfg(all(windows, feature = "system-proxy"))]
-        super::win::with_system(&mut builder);
+            #[cfg(all(windows, feature = "system-proxy"))]
+            super::win::with_system(&mut builder);
 
-        builder
+            builder
+        }
+
+        #[cfg(not(any(
+            all(target_os = "macos", feature = "system-proxy"),
+            all(windows, feature = "system-proxy")
+        )))]
+        {
+            Self::from_env()
+        }
     }
 
     /// Set the target proxy for all destinations.
