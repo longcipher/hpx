@@ -463,11 +463,16 @@ impl Default for Http2Options {
             max_frame_size: None,
             max_header_list_size: None,
             // Keep-alive pings keep idle connections warm so they stay usable in
-            // the pool (no re-handshake latency on the next request). 10s ping
-            // interval with a 20s acknowledgement timeout balances liveness
-            // detection against unnecessary traffic.
-            keep_alive_interval: Some(Duration::from_secs(10)),
-            keep_alive_timeout: Duration::from_secs(20),
+            // the pool (no re-handshake latency on the next request). 5s ping
+            // interval with a 10s acknowledgement timeout keeps connections
+            // alive past aggressive datacenter egress NAT idle timeouts
+            // (observed ~10s) while still failing fast on genuinely dead
+            // connections. The old 10s ping interval sat right at the NAT
+            // idle boundary, so idle pooled connections were silently dropped
+            // by the middlebox and the next request hung until the kernel TCP
+            // retransmission timer (tcp_retries1) fired ~15s later.
+            keep_alive_interval: Some(Duration::from_secs(5)),
+            keep_alive_timeout: Duration::from_secs(10),
             keep_alive_while_idle: true,
             max_concurrent_reset_streams: None,
             max_send_buffer_size: DEFAULT_MAX_SEND_BUF_SIZE,

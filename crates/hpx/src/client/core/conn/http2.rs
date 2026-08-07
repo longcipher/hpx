@@ -5,7 +5,9 @@ use std::{
     future::Future,
     marker::PhantomData,
     pin::Pin,
+    sync::atomic::{AtomicU64, Ordering},
     task::{Context, Poll, ready},
+    time::Duration,
 };
 
 use http::{Request, Response};
@@ -24,15 +26,43 @@ use crate::{
     http2::Http2Options,
 };
 
+/// Monotonically increasing per-process counter used to tag every h2
+/// connection with a stable `conn_id` for trace correlation.
+static CONN_SEQ: AtomicU64 = AtomicU64::new(1);
+
+/// Upper bound on how long a request may wait for the connection's dispatch
+/// task to produce a response before we treat the connection as stalled.
+///
+/// Normally the dispatch oneshot resolves almost instantly once the request is
+/// queued (the venue TTFB here is ~250 ms). If the `ClientTask` ever parks
+/// permanently (a stall observed in production where a connection's watchdog
+/// timer and mpsc wakeups both stop being delivered), an unbounded `rx.await`
+/// here would pin the request until the outer request `Timeout` fires
+/// (~15 s). A bounded wait converts that into a fast, retryable failure: the
+/// connection gets poisoned so the pool discards it, and idempotent requests
+/// are retried on a fresh connection. 1 s keeps the worst-case recovery at
+/// ~1.3 s while leaving >3x headroom over the normal TTFB.
+const DISPATCH_RESPONSE_TIMEOUT: Duration = Duration::from_secs(1);
+
 /// The sender side of an established connection.
 pub(crate) struct SendRequest<B> {
     dispatch: dispatch::UnboundedSender<Request<B>, Response<IncomingBody>>,
+    /// Identifier assigned when the connection is created; correlates
+    /// dispatch-side traces with pool/connector logs across connections.
+    conn_id: u64,
+    /// Name of the thread that created the connection. Its dispatch task is
+    /// spawned onto whatever tokio runtime was current at creation time, so a
+    /// connection created on one runtime can stall if a request is later sent
+    /// from a different runtime whose executor does not drive this task.
+    created_on_thread: String,
 }
 
 impl<B> Clone for SendRequest<B> {
     fn clone(&self) -> Self {
         Self {
             dispatch: self.dispatch.clone(),
+            conn_id: self.conn_id,
+            created_on_thread: self.created_on_thread.clone(),
         }
     }
 }
@@ -122,19 +152,48 @@ where
     ) -> impl Future<Output = std::result::Result<Response<IncomingBody>, TrySendError<Request<B>>>>
     {
         let sent = self.dispatch.try_send(req);
+        match &sent {
+            Ok(_) => trace!("h2 dispatch try_send ok conn_id={}", self.conn_id),
+            Err(_) => trace!(
+                "h2 dispatch try_send failed conn_id={}; channel closed",
+                self.conn_id
+            ),
+        }
+        let conn_id = self.conn_id;
+        let created_on_thread = self.created_on_thread.clone();
         async move {
             match sent {
-                Ok(rx) => match rx.await {
-                    Ok(Ok(res)) => Ok(res),
-                    Ok(Err(err)) => Err(err),
+                Ok(rx) => match tokio::time::timeout(DISPATCH_RESPONSE_TIMEOUT, rx).await {
+                    Ok(Ok(Ok(res))) => Ok(res),
+                    Ok(Ok(Err(err))) => Err(err),
                     // The dispatch task dropped its callback sender without
                     // returning a result. This indicates a bug in the
                     // connection lifecycle; surface it as a closed-connection
                     // error rather than panicking.
-                    Err(_) => Err(TrySendError {
+                    Ok(Err(_)) => Err(TrySendError {
                         error: Error::new_closed().with("dispatch dropped without result"),
                         message: None,
                     }),
+                    // The connection's dispatch task never answered within the
+                    // bound. The request was queued but may never be written
+                    // (stalled ClientTask), so surface a transport timeout with
+                    // no message: the retry layer will retry idempotent methods
+                    // on a fresh connection and the pool poisons this one.
+                    Err(_) => {
+                        warn!(
+                            "h2 dispatch response timed out conn_id={}; connection stalled (created on {:?}, requested from {:?})",
+                            conn_id,
+                            created_on_thread,
+                            std::thread::current().name().unwrap_or("<unnamed>")
+                        );
+                        Err(TrySendError {
+                            error: Error::new_io(std::io::Error::new(
+                                std::io::ErrorKind::TimedOut,
+                                "dispatch wait timed out",
+                            )),
+                            message: None,
+                        })
+                    }
                 },
                 Err(req) => {
                     debug!("connection was not ready");
@@ -302,11 +361,30 @@ where
         );
 
         let (tx, rx) = dispatch::channel();
-        let h2 = proto::h2::client::handshake(io, rx, builder, ping_config, self.exec, self.timer)
-            .await?;
+        let conn_id = CONN_SEQ.fetch_add(1, Ordering::Relaxed);
+        let created_on_thread = std::thread::current()
+            .name()
+            .unwrap_or("<unnamed>")
+            .to_string();
+        trace!(
+            "h2 connection created conn_id={} on {:?}",
+            conn_id, created_on_thread
+        );
+        let h2 = proto::h2::client::handshake(
+            io,
+            rx,
+            builder,
+            ping_config,
+            self.exec,
+            self.timer,
+            conn_id,
+        )
+        .await?;
         Ok((
             SendRequest {
                 dispatch: tx.unbound(),
+                conn_id,
+                created_on_thread,
             },
             Connection {
                 inner: (PhantomData, h2),

@@ -116,29 +116,33 @@ pub(crate) type InnerResponseBody =
 )))]
 pub(crate) type InnerResponseBody = TimeoutBody<Incoming>;
 
-/// The complete HTTP client service stack before outer timeout decoration.
+/// The complete HTTP client service stack before retry decoration.
+///
+/// Retry is deliberately NOT part of this stack: it is applied as the
+/// outermost layer (wrapping the request `Timeout`) so that a timed-out
+/// attempt is visible to the retry classifier and retried with a fresh
+/// timeout budget.
 type BaseClientService = ResponseBodyTimeout<
     ConfigService<
         Decompression<
-            Retry<
-                RetryPolicy,
-                FollowRedirect<
-                    CookieService<
-                        MapErr<HttpClient<Connector, Body>, fn(client::error::Error) -> BoxError>,
-                    >,
-                    FollowRedirectPolicy,
+            FollowRedirect<
+                CookieService<
+                    MapErr<HttpClient<Connector, Body>, fn(client::error::Error) -> BoxError>,
                 >,
+                FollowRedirectPolicy,
             >,
         >,
     >,
 >;
 
 /// The complete HTTP client service stack with all middleware layers.
-pub(super) type ClientService = Timeout<ResponseRecovery<BaseClientService>>;
+pub(super) type ClientService = Retry<RetryPolicy, Timeout<ResponseRecovery<BaseClientService>>>;
 
 /// Hooks-enabled client service path that remains statically dispatched.
-type HookedClientService =
-    Timeout<super::layer::hooks::HooksService<ResponseRecovery<BaseClientService>>>;
+type HookedClientService = Retry<
+    RetryPolicy,
+    Timeout<super::layer::hooks::HooksService<ResponseRecovery<BaseClientService>>>,
+>;
 
 /// Type-erased client service for dynamic middleware composition.
 pub(super) type BoxedClientService =

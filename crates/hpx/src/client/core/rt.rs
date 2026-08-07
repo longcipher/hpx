@@ -13,7 +13,7 @@ mod tokio;
 
 pub(crate) use self::{
     timer::{ArcTimer, Sleep, Time, Timer},
-    tokio::{TokioExecutor, TokioTimer},
+    tokio::{TokioExecutor, TokioTimer, on_hpx_runtime},
 };
 
 /// An executor of futures.

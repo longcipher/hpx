@@ -224,7 +224,7 @@ hpx-yawc = { workspace = true, optional = true }
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
-http2 = { workspace = true, features = ["unstable"], optional = true }
+http2 = { workspace = true, features = ["unstable", "tracing"], optional = true }
 httparse = { workspace = true, optional = true }
 ipnet = { workspace = true }
 memchr = { workspace = true, optional = true }
@@ -267,6 +267,7 @@ tokio = { workspace = true, features = [
     "net",
     "time",
     "rt",
+    "rt-multi-thread",
     "io-util",
     "sync",
     "macros",

@@ -98,7 +98,9 @@ impl Classifier {
         match self {
             Self::Never => Action::Success,
             Self::ProtocolNacks => {
-                let is_protocol_nack = req_rep.error().is_some_and(super::is_retryable_error);
+                let is_protocol_nack = req_rep
+                    .error()
+                    .is_some_and(|err| super::is_retryable_error(err, req_rep.method()));
                 if is_protocol_nack {
                     Action::Retryable
                 } else {

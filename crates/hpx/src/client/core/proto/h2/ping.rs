@@ -30,6 +30,7 @@ use std::{
 
 use http2::{Ping, PingPong};
 use parking_lot::Mutex;
+use tokio::sync::Notify;
 
 use crate::client::core::{
     self, Error,
@@ -74,6 +75,8 @@ pub(super) fn channel(ping_pong: PingPong, config: Config, timer: Time) -> (Reco
         bytes: AtomicU64::new(0),
         last_read_at: AtomicU64::new(0),
         is_keep_alive_timed_out: AtomicBool::new(false),
+        conn_closed: AtomicBool::new(false),
+        closed_notify: Arc::new(Notify::new()),
         bdp_enabled,
         keep_alive_enabled,
         start: now,
@@ -124,6 +127,13 @@ struct Shared {
     bytes: AtomicU64,
     last_read_at: AtomicU64,
     is_keep_alive_timed_out: AtomicBool,
+    /// Set once when the underlying h2 connection has ended (keep-alive
+    /// timeout, GOAWAY, I/O error, ...). Guards `closed_notify` and lets
+    /// in-flight request futures fail fast instead of parking until the
+    /// caller's request timeout.
+    conn_closed: AtomicBool,
+    /// Wakes tasks waiting on in-flight requests when the connection ends.
+    closed_notify: Arc<Notify>,
     bdp_enabled: bool,
     keep_alive_enabled: bool,
     start: Instant,
@@ -273,6 +283,27 @@ impl Recorder {
         // else
         Ok(())
     }
+
+    /// Returns true if the underlying h2 connection has ended.
+    pub(super) fn is_conn_closed(&self) -> bool {
+        self.shared
+            .as_ref()
+            .is_some_and(|shared| shared.is_conn_closed())
+    }
+
+    /// Returns a future that resolves once the underlying h2 connection has
+    /// ended. Tasks waiting on in-flight requests should poll this alongside
+    /// their own future so a dead connection fails fast instead of parking
+    /// until the caller's request timeout.
+    pub(super) fn closed_notified(&self) -> Option<Pin<Box<dyn Future<Output = ()> + Send>>> {
+        self.shared.as_ref().map(|shared| {
+            let notify = shared.closed_notify.clone();
+            let fut: Pin<Box<dyn Future<Output = ()> + Send>> = Box::pin(async move {
+                notify.notified().await;
+            });
+            fut
+        })
+    }
 }
 
 // ===== impl Ponger =====
@@ -293,7 +324,17 @@ impl Ponger {
         }
 
         if !inner.is_ping_sent() {
-            // XXX: this doesn't register a waker...?
+            // Ensure the keep-alive timer stays armed: poll the sleep so its
+            // waker is (re)registered even on rounds where `maybe_ping`
+            // returned early with a pending sleep, and process an expired
+            // deadline that was never polled. Without this, an idle h2
+            // connection whose Conn task is only woken by this timer can
+            // stop sending keep-alive PINGs; the server then silently closes
+            // the idle connection and the pool later reuses a dead
+            // connection, hanging requests until the TCP retransmit timeout.
+            if let Some(ref mut ka) = self.keep_alive {
+                ka.ensure_armed(cx, is_idle, &self.shared, &mut inner);
+            }
             return Poll::Pending;
         }
 
@@ -346,6 +387,11 @@ impl Ponger {
     fn is_idle(&self) -> bool {
         Arc::strong_count(&self.shared) <= 2
     }
+
+    /// Mark the connection as closed so in-flight request tasks fail fast.
+    pub(super) fn mark_conn_closed(&self) {
+        self.shared.mark_conn_closed();
+    }
 }
 
 // ===== impl Shared =====
@@ -361,6 +407,18 @@ impl Shared {
     fn last_read_at(&self) -> Instant {
         let nanos = self.last_read_at.load(Ordering::Acquire);
         self.start + Duration::from_nanos(nanos)
+    }
+
+    /// Record that the underlying h2 connection has ended and wake any task
+    /// waiting on in-flight requests so they can fail fast.
+    fn mark_conn_closed(&self) {
+        if !self.conn_closed.swap(true, Ordering::AcqRel) {
+            self.closed_notify.notify_waiters();
+        }
+    }
+
+    fn is_conn_closed(&self) -> bool {
+        self.conn_closed.load(Ordering::Acquire)
     }
 }
 
@@ -519,6 +577,29 @@ impl KeepAlive {
                 Err(KeepAliveTimedOut)
             }
             KeepAliveState::Init | KeepAliveState::Scheduled(..) => Ok(()),
+        }
+    }
+
+    /// Re-arm the keep-alive timer from the caller's poll round.
+    ///
+    /// `Ponger::poll` returns `Poll::Pending` whenever no PING is
+    /// outstanding. If the scheduled sleep was already polled in that same
+    /// round its waker is registered and nothing further is needed; but if
+    /// the deadline has since elapsed without being processed (e.g. the Conn
+    /// task was woken by an unrelated event), fall through to `maybe_ping` so
+    /// the PING is sent (or the timer re-armed) instead of stalling until the
+    /// next poll.
+    fn ensure_armed(
+        &mut self,
+        cx: &mut task::Context<'_>,
+        is_idle: bool,
+        shared: &Shared,
+        inner: &mut PingInner,
+    ) {
+        if matches!(self.state, KeepAliveState::Scheduled(_))
+            && Pin::new(&mut self.sleep).poll(cx).is_ready()
+        {
+            self.maybe_ping(cx, is_idle, shared, inner);
         }
     }
 }

@@ -2,6 +2,7 @@
 use std::{
     future::Future,
     pin::Pin,
+    sync::OnceLock,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -9,6 +10,65 @@ use std::{
 use pin_project_lite::pin_project;
 
 use super::{Executor, Sleep, Timer};
+
+/// hpx-owned runtime that drives every connection task (ConnTask, ClientTask,
+/// idle-sender re-polls, ...).
+///
+/// Connection tasks are spawned with [`tokio::spawn`], which binds them to
+/// whatever runtime happens to be current on the *creating* thread. In this
+/// workspace a client's connections are created and reused across several
+/// independent runtimes (executor worker, accounting re-sync thread, ...).
+/// A connection created on runtime A then reused from runtime B stalls:
+/// its request is queued onto the dispatch channel, but the task that must
+/// poll it lives on A, which is idle at that moment — the request hangs until
+/// the bounded dispatch timeout fires. Driving all connection tasks on this
+/// single hpx-owned multi-thread runtime keeps them schedulable regardless of
+/// which thread issues the request, making cross-runtime pool reuse safe.
+static HPX_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+
+#[expect(
+    clippy::expect_used,
+    reason = "tokio runtime build failure is unrecoverable"
+)]
+fn hpx_runtime() -> tokio::runtime::Handle {
+    HPX_RUNTIME
+        .get_or_init(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_name("hpx-net")
+                .worker_threads(4)
+                .build()
+                .expect("failed to build the hpx connection runtime")
+        })
+        .handle()
+        .clone()
+}
+
+/// Runs `fut` on the hpx-owned connection runtime, or awaits it directly
+/// when already running there.
+///
+/// Connection establishment creates runtime-bound resources — most
+/// importantly the socket's I/O-driver registration, and any timers created
+/// during the handshake. A socket binds to whichever runtime is current when
+/// it is created. If a connection is established inside a caller runtime that
+/// is only driven periodically (e.g. a background thread that `block_on`s its
+/// own current-thread runtime every 60s), the socket's read-ready events are
+/// dispatched only by that dormant driver: writes still drain (the kernel
+/// buffer is writable without a driver) but reads stall forever once the
+/// runtime goes idle, surfacing as a fixed stall on the first request sent
+/// after the connection has been idle. Establishing connections on this
+/// continuously-driven runtime makes them usable from any thread.
+pub(crate) async fn on_hpx_runtime<F, T>(fut: F) -> Result<T, tokio::task::JoinError>
+where
+    F: Future<Output = T> + Send + 'static,
+    T: Send + 'static,
+{
+    let handle = hpx_runtime();
+    match tokio::runtime::Handle::try_current() {
+        Ok(current) if current.id() == handle.id() => Ok(fut.await),
+        _ => handle.spawn(fut).await,
+    }
+}
 
 /// Future executor that utilises `tokio` threads.
 #[non_exhaustive]
@@ -38,7 +98,7 @@ where
     Fut::Output: Send + 'static,
 {
     fn execute(&self, fut: Fut) {
-        tokio::spawn(fut);
+        hpx_runtime().spawn(fut);
     }
 }
 

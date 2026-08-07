@@ -267,9 +267,6 @@ impl ClientBuilder {
                 .service(service);
 
             let service = ServiceBuilder::new()
-                .layer(RetryLayer::new(RetryPolicy::new(
-                    config.protocol.retry_policy,
-                )))
                 .layer({
                     let policy = FollowRedirectPolicy::new(config.protocol.redirect_policy)
                         .with_referer(config.protocol.referer)
@@ -301,10 +298,16 @@ impl ClientBuilder {
                 .service(service);
 
             if config.middleware.layers.is_empty() {
+                // The retry layer must wrap the request `Timeout` layer (and
+                // the hooks) so that a timed-out attempt is visible to the
+                // retry classifier and retried with a fresh timeout budget.
                 if let Some(hooks) = config.middleware.hooks
                     && !hooks.is_empty()
                 {
                     let service = ServiceBuilder::new()
+                        .layer(RetryLayer::new(RetryPolicy::new(
+                            config.protocol.retry_policy,
+                        )))
                         .layer(TimeoutLayer::new(config.protocol.timeout_options))
                         .layer(super::super::layer::hooks::HooksLayer::new(hooks))
                         .service(service);
@@ -312,6 +315,9 @@ impl ClientBuilder {
                     ClientRef::Hooked(service)
                 } else {
                     let service = ServiceBuilder::new()
+                        .layer(RetryLayer::new(RetryPolicy::new(
+                            config.protocol.retry_policy,
+                        )))
                         .layer(TimeoutLayer::new(config.protocol.timeout_options))
                         .service(service);
 
@@ -341,6 +347,9 @@ impl ClientBuilder {
                     });
 
                 let service = ServiceBuilder::new()
+                    .layer(RetryLayer::new(RetryPolicy::new(
+                        config.protocol.retry_policy,
+                    )))
                     .layer(TimeoutLayer::new(config.protocol.timeout_options))
                     .service(service)
                     .map_err(error::map_timeout_to_request_error);
