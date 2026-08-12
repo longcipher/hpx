@@ -186,6 +186,7 @@ impl Response {
     /// # Ok(())
     /// # }
     /// ```
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub async fn text(self) -> crate::Result<String> {
         #[cfg(feature = "charset")]
         {
@@ -409,6 +410,7 @@ impl Response {
     /// # Ok(())
     /// # }
     /// ```
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub async fn bytes(self) -> crate::Result<Bytes> {
         BodyExt::collect(self.res.into_body())
             .await

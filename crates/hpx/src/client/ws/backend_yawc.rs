@@ -306,6 +306,10 @@ impl WebSocketRequestBuilder {
     }
 
     /// Sends the request and returns a [`WebSocketResponse`].
+    ///
+    /// Measured as the WebSocket handshake phase when the `hotpath` feature
+    /// is enabled.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub async fn send(self) -> Result<WebSocketResponse, Error> {
         self.unsupported.check()?;
 
@@ -634,17 +638,26 @@ impl WebSocket {
     ///
     /// Returns `None` if the stream has closed.
     #[inline]
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub async fn recv(&mut self) -> Option<Result<Message, Error>> {
-        self.inner
+        let msg = self
+            .inner
             .next()
             .await
-            .map(|frame| Ok(frame_to_message(frame)))
+            .map(|frame| Ok(frame_to_message(frame)));
+        if let Some(Ok(message)) = &msg {
+            crate::hotpath::record_ws_bytes_recv(message.len());
+        }
+        msg
     }
 
     /// Send a message.
     #[inline]
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub async fn send(&mut self, msg: Message) -> Result<(), Error> {
+        let bytes = msg.len();
         let frame = message_to_frame(msg);
+        crate::hotpath::record_ws_bytes_sent(bytes);
         self.inner
             .send(frame)
             .await
@@ -652,6 +665,7 @@ impl WebSocket {
     }
 
     /// Closes the connection with a given code and (optional) reason.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub async fn close<C, R>(mut self, code: C, reason: R) -> Result<(), Error>
     where
         C: Into<CloseCode>,
@@ -703,7 +717,11 @@ impl Stream for WebSocketRead {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match Pin::new(&mut self.inner).poll_next(cx) {
-            Poll::Ready(Some(frame)) => Poll::Ready(Some(Ok(frame_to_message(frame)))),
+            Poll::Ready(Some(frame)) => {
+                let msg = frame_to_message(frame);
+                crate::hotpath::record_ws_bytes_recv(msg.len());
+                Poll::Ready(Some(Ok(msg)))
+            }
             Poll::Ready(None) => Poll::Ready(None),
             Poll::Pending => Poll::Pending,
         }
@@ -718,11 +736,17 @@ impl WebSocketRead {
     }
 
     /// Receive another message.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub async fn recv(&mut self) -> Option<Result<Message, Error>> {
-        self.inner
+        let msg = self
+            .inner
             .next()
             .await
-            .map(|frame| Ok(frame_to_message(frame)))
+            .map(|frame| Ok(frame_to_message(frame)));
+        if let Some(Ok(message)) = &msg {
+            crate::hotpath::record_ws_bytes_recv(message.len());
+        }
+        msg
     }
 }
 
@@ -749,8 +773,11 @@ impl WebSocketWrite {
     }
 
     /// Send a message.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub async fn send(&mut self, msg: Message) -> Result<(), Error> {
+        let bytes = msg.len();
         let frame = message_to_frame(msg);
+        crate::hotpath::record_ws_bytes_sent(bytes);
         self.inner
             .send(frame)
             .await
@@ -758,6 +785,7 @@ impl WebSocketWrite {
     }
 
     /// Closes the connection with a given code and (optional) reason.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub async fn close<C, R>(mut self, code: C, reason: R) -> Result<(), Error>
     where
         C: Into<CloseCode>,

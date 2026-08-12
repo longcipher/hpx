@@ -236,6 +236,26 @@ pub enum Message {
 }
 
 impl Message {
+    /// Returns the payload length of the message in bytes.
+    ///
+    /// Text messages count their UTF-8 encoded length, binary/ping/pong
+    /// messages count their raw payload, and close frames count their reason.
+    #[inline]
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Text(text) => text.as_str().len(),
+            Self::Binary(data) | Self::Ping(data) | Self::Pong(data) => data.len(),
+            Self::Close(None) => 0,
+            Self::Close(Some(frame)) => frame.reason.as_str().len(),
+        }
+    }
+
+    /// Returns `true` if the message has an empty payload.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Consume the WebSocket and return it as binary data.
     pub fn into_data(self) -> Bytes {
         match self {
