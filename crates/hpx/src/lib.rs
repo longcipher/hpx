@@ -319,7 +319,6 @@ pub mod delay;
 mod error;
 mod ext;
 mod hash;
-/// Hotpath profiling integration for the HTTP/WebSocket clients.
 pub mod hotpath;
 mod into_uri;
 mod proxy;

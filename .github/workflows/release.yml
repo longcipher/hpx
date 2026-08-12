@@ -67,6 +67,11 @@ jobs:
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
+        env:
+          # Node actions can fail TLS verification against api.github.com when
+          # forced onto newer runtimes (Node 20 -> 24); use the runner's system
+          # CA store to avoid "self-signed certificate" errors.
+          NODE_OPTIONS: --use-system-ca
         with:
           body: ${{ steps.git-cliff.outputs.content }}
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}
