@@ -26,16 +26,15 @@ use std::net::TcpListener;
 
 use axum::{
     Router,
-    extract::{Path, ws::{Message as WsMessage, WebSocket, WebSocketUpgrade}},
+    extract::{
+        Path,
+        ws::{Message as WsMessage, WebSocket, WebSocketUpgrade},
+    },
     response::IntoResponse,
     routing::get,
 };
 use futures_util::StreamExt;
-use hpx::{
-    Client,
-    hotpath::HotpathLayer,
-    ws::message::Message,
-};
+use hpx::{Client, hotpath::HotpathLayer, ws::message::Message};
 use tokio::net::TcpListener as TokioTcpListener;
 
 /// Echoes back the first text/binary message it receives.
@@ -60,8 +59,14 @@ async fn echo_ws(mut ws: WebSocket) {
 async fn start_server() -> (String, String) {
     let app = Router::new()
         .route("/ok", get(|| async { "ok" }))
-        .route("/users/{id}", get(|Path(id): Path<u32>| async move { format!("user {id}") }))
-        .route("/missing", get(|| async { (axum::http::StatusCode::NOT_FOUND, "nope") }))
+        .route(
+            "/users/{id}",
+            get(|Path(id): Path<u32>| async move { format!("user {id}") }),
+        )
+        .route(
+            "/missing",
+            get(|| async { (axum::http::StatusCode::NOT_FOUND, "nope") }),
+        )
         .route("/ws", get(ws_handler));
 
     let listener = TokioTcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -111,9 +116,7 @@ async fn main() -> Result<(), hpx::Error> {
 
     let (http_addr, ws_url) = start_server().await;
 
-    let client = Client::builder()
-        .layer(HotpathLayer::new())
-        .build()?;
+    let client = Client::builder().layer(HotpathLayer::new()).build()?;
 
     // Two ids collapse into one normalized endpoint bucket.
     for id in 1..=2 {
@@ -141,7 +144,10 @@ async fn main() -> Result<(), hpx::Error> {
         .get(format!("http://127.0.0.1:{dead}/dead"))
         .send()
         .await;
-    println!("GET /dead (refused) -> {}", if result.is_err() { "error" } else { "ok" });
+    println!(
+        "GET /dead (refused) -> {}",
+        if result.is_err() { "error" } else { "ok" }
+    );
 
     // WebSocket echo conversation through the yawc backend.
     let ws_resp = hpx::websocket(&ws_url).send().await?;
@@ -154,7 +160,8 @@ async fn main() -> Result<(), hpx::Error> {
             println!("ws echo: {echo}");
         }
     }
-    tx.close(hpx::ws::message::CloseCode::NORMAL, "done").await?;
+    tx.close(hpx::ws::message::CloseCode::NORMAL, "done")
+        .await?;
 
     print_hpx_report();
     println!("hpx_hotpath_demo completed");

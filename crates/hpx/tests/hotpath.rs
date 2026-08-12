@@ -51,7 +51,10 @@ async fn echo_ws(mut ws: WebSocket) {
     }
 }
 
-fn find_stat<'a>(stats: &'a [hpx::hotpath::EndpointStat], endpoint: &str) -> Option<&'a hpx::hotpath::EndpointStat> {
+fn find_stat<'a>(
+    stats: &'a [hpx::hotpath::EndpointStat],
+    endpoint: &str,
+) -> Option<&'a hpx::hotpath::EndpointStat> {
     stats.iter().find(|s| s.endpoint == endpoint)
 }
 
@@ -104,8 +107,7 @@ async fn hotpath_layer_records_normalized_endpoint_stats() {
     assert_eq!(users.error_count, 0);
     assert_eq!(users.statuses, vec![(200, 2)]);
 
-    let ok = find_stat(&stats, &format!("GET {}/ok", server.addr()))
-        .expect("ok endpoint recorded");
+    let ok = find_stat(&stats, &format!("GET {}/ok", server.addr())).expect("ok endpoint recorded");
     assert_eq!(ok.count, 1);
     assert_eq!(ok.statuses, vec![(200, 1)]);
 

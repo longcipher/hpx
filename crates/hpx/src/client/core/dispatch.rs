@@ -308,7 +308,6 @@ where
         match Pin::new(&mut this.when).poll(cx) {
             Poll::Ready(Ok(res)) => {
                 call_back.send(Ok(res));
-                Poll::Ready(())
             }
             Poll::Pending => {
                 // check if the callback is canceled
@@ -321,12 +320,11 @@ where
                     }
                 }
                 trace!("send_when canceled");
-                Poll::Ready(())
             }
             Poll::Ready(Err((error, message))) => {
                 call_back.send(Err(TrySendError { error, message }));
-                Poll::Ready(())
             }
         }
+        Poll::Ready(())
     }
 }

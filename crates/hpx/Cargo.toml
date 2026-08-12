@@ -86,7 +86,7 @@ system-proxy = ["dep:system-configuration", "dep:windows-registry"]
 tracing = ["http2/tracing", "dep:tracing"]
 
 # Enable hotpath profiling instrumentation.
-hotpath = ["dep:hotpath"]
+hotpath = ["dep:hotpath", "hpx-yawc/hotpath"]
 
 # Enable TLS key logging for debugging (writes session keys to SSLKEYLOGFILE).
 # NOT for production — disabled by default for security.
@@ -457,6 +457,10 @@ required-features = ["http3"]
 
 [[example]]
 name = "hpx_hotpath_demo"
+required-features = ["hotpath", "ws"]
+
+[[example]]
+name = "hpx_hotpath_load"
 required-features = ["hotpath", "ws"]
 # Benchmarks
 [[bench]]

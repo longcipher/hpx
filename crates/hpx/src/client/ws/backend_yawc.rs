@@ -564,7 +564,19 @@ fn frame_to_message(frame: hpx_yawc::Frame) -> Message {
     let (opcode, _is_fin, payload) = frame.into_parts();
     match opcode {
         hpx_yawc::OpCode::Text => {
-            let s = String::from_utf8_lossy(&payload).to_string();
+            // Zero-copy fast path: yawc already validated UTF-8 on the read
+            // path, so a uniquely-owned `Bytes` (refcount 1, the common case
+            // for freshly decoded frames) converts to a `String` with no copy.
+            let s = match payload.try_into_mut() {
+                Ok(bytes_mut) => {
+                    let vec: Vec<u8> = Vec::from(bytes_mut);
+                    match String::from_utf8(vec) {
+                        Ok(s) => s,
+                        Err(err) => String::from_utf8_lossy(err.as_bytes()).into_owned(),
+                    }
+                }
+                Err(shared) => String::from_utf8_lossy(&shared).into_owned(),
+            };
             Message::Text(Utf8Bytes::from(s))
         }
         hpx_yawc::OpCode::Binary => Message::Binary(payload),
@@ -589,7 +601,9 @@ fn frame_to_message(frame: hpx_yawc::Frame) -> Message {
 /// Convert our Message type to a yawc Frame.
 fn message_to_frame(msg: Message) -> hpx_yawc::Frame {
     match msg {
-        Message::Text(text) => hpx_yawc::Frame::text(bytes::Bytes::from(text.as_str().to_owned())),
+        // Zero-copy: `Bytes::from(Utf8Bytes)` reuses the String allocation
+        // instead of cloning the payload (previous `to_owned()` copy).
+        Message::Text(text) => hpx_yawc::Frame::text(text),
         Message::Binary(data) => hpx_yawc::Frame::binary(data),
         Message::Ping(data) => hpx_yawc::Frame::ping(data),
         Message::Pong(data) => hpx_yawc::Frame::pong(data),

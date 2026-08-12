@@ -4,7 +4,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 #[cfg(feature = "charset")]
 use encoding_rs::{Encoding, UTF_8};
 #[cfg(feature = "stream")]
@@ -31,6 +31,26 @@ fn simd_json_input(bytes: Bytes) -> bytes::BytesMut {
     match bytes.try_into_mut() {
         Ok(bytes_mut) => bytes_mut,
         Err(bytes) => bytes::BytesMut::from(bytes.as_ref()),
+    }
+}
+
+/// Converts a response body `Bytes` into a `String`, preferring the zero-copy
+/// path when the buffer is uniquely owned and valid UTF-8; falls back to
+/// lossy decoding otherwise (same semantics as `String::from_utf8_lossy`).
+///
+/// Only used by the `charset`-off `text()` path (`encoding_rs` handles the
+/// `charset`-on path).
+#[cfg(not(feature = "charset"))]
+fn bytes_to_utf8_lossy(bytes: Bytes) -> String {
+    match bytes.try_into_mut() {
+        Ok(bytes_mut) => {
+            let vec: Vec<u8> = Vec::from(bytes_mut);
+            match String::from_utf8(vec) {
+                Ok(s) => s,
+                Err(err) => String::from_utf8_lossy(err.as_bytes()).into_owned(),
+            }
+        }
+        Err(shared) => String::from_utf8_lossy(&shared).into_owned(),
     }
 }
 
@@ -196,8 +216,7 @@ impl Response {
         #[cfg(not(feature = "charset"))]
         {
             let full = self.bytes().await?;
-            let text = String::from_utf8_lossy(&full);
-            Ok(text.into_owned())
+            Ok(bytes_to_utf8_lossy(full))
         }
     }
 
@@ -412,7 +431,40 @@ impl Response {
     /// ```
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub async fn bytes(self) -> crate::Result<Bytes> {
-        BodyExt::collect(self.res.into_body())
+        let mut body = self.res.into_body();
+
+        // Fast path: when the whole body arrives as a single data frame (the
+        // common case for small responses), return the chunk directly with no
+        // allocation or copy. Multi-frame bodies recombine into one buffer.
+        // Trailers are dropped exactly like `Collected::to_bytes` does today.
+        // Errors propagate untouched (`Body::Error` is `hpx::Error`), so the
+        // error kind/classification is preserved.
+        if let Some(first) = body.frame().await
+            && let Ok(data) = first?.into_data()
+        {
+            // Peek for a second frame. NOTE: the peeked frame must be kept —
+            // discarding it would drop one chunk of the body.
+            return match body.frame().await {
+                None => Ok(data),
+                Some(next) => {
+                    let mut buf = BytesMut::with_capacity(
+                        data.len().saturating_add(body.size_hint().lower() as usize),
+                    );
+                    buf.extend_from_slice(&data);
+                    if let Ok(chunk) = next?.into_data() {
+                        buf.extend_from_slice(&chunk);
+                    }
+                    while let Some(frame) = body.frame().await {
+                        if let Ok(chunk) = frame?.into_data() {
+                            buf.extend_from_slice(&chunk);
+                        }
+                    }
+                    Ok(buf.freeze())
+                }
+            };
+        }
+
+        BodyExt::collect(body)
             .await
             .map(Collected::<Bytes>::to_bytes)
     }

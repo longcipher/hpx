@@ -15,9 +15,7 @@
 //! ```no_run
 //! use hpx::hotpath::HotpathLayer;
 //!
-//! let client = hpx::Client::builder()
-//!     .layer(HotpathLayer::new())
-//!     .build()?;
+//! let client = hpx::Client::builder().layer(HotpathLayer::new()).build()?;
 //! # Ok::<(), hpx::Error>(())
 //! ```
 //!
@@ -37,6 +35,8 @@
 //! (`hpx_ws_sent_bytes`, `hpx_ws_recv_bytes`), visible in hotpath's `debug`
 //! report section.
 
+#[cfg(feature = "hotpath")]
+use std::{collections::HashMap, sync::OnceLock};
 use std::{
     future::Future,
     pin::Pin,
@@ -45,13 +45,9 @@ use std::{
 };
 
 use http::{Method, Uri};
-use tower::{BoxError, Layer, Service};
-
-#[cfg(feature = "hotpath")]
-use std::{collections::HashMap, sync::OnceLock};
-
 #[cfg(feature = "hotpath")]
 use parking_lot::Mutex;
+use tower::{BoxError, Layer, Service};
 
 use crate::{Body, ClientResponseBody};
 
@@ -74,7 +70,9 @@ impl EndpointStat {
     /// Average request duration for this endpoint.
     #[must_use]
     pub fn avg(&self) -> Duration {
-        self.total.checked_div(self.count.max(1) as u32).unwrap_or_default()
+        self.total
+            .checked_div(self.count.max(1) as u32)
+            .unwrap_or_default()
     }
 }
 
@@ -129,8 +127,11 @@ pub struct HotpathService<S> {
 
 impl<S> Service<http::Request<Body>> for HotpathService<S>
 where
-    S: Service<http::Request<Body>, Response = http::Response<ClientResponseBody>, Error = BoxError>
-        + Clone
+    S: Service<
+            http::Request<Body>,
+            Response = http::Response<ClientResponseBody>,
+            Error = BoxError,
+        > + Clone
         + Send
         + 'static,
     S::Future: Send + 'static,
@@ -237,7 +238,7 @@ fn record_endpoint(
 pub fn snapshot() -> Vec<EndpointStat> {
     #[cfg(not(feature = "hotpath"))]
     {
-        return Vec::new();
+        Vec::new()
     }
     #[cfg(feature = "hotpath")]
     {
@@ -332,9 +333,7 @@ fn normalize_endpoint(endpoint: &str) -> String {
 
 fn is_id_segment(segment: &str) -> bool {
     !segment.is_empty()
-        && (segment.bytes().all(|b| b.is_ascii_digit())
-            || is_uuid(segment)
-            || is_long_hex(segment))
+        && (segment.bytes().all(|b| b.is_ascii_digit()) || is_uuid(segment) || is_long_hex(segment))
 }
 
 fn is_uuid(segment: &str) -> bool {
@@ -417,7 +416,10 @@ mod tests {
 
     #[test]
     fn root_path() {
-        assert_eq!(normalize_endpoint("GET api.example.com/"), "GET api.example.com/");
+        assert_eq!(
+            normalize_endpoint("GET api.example.com/"),
+            "GET api.example.com/"
+        );
     }
 
     #[test]
@@ -446,8 +448,18 @@ mod tests {
     #[cfg(feature = "hotpath")]
     #[test]
     fn record_and_snapshot_aggregate() {
-        record_endpoint("GET test.local/a", Duration::from_millis(10), Some(200), false);
-        record_endpoint("GET test.local/a", Duration::from_millis(20), Some(500), false);
+        record_endpoint(
+            "GET test.local/a",
+            Duration::from_millis(10),
+            Some(200),
+            false,
+        );
+        record_endpoint(
+            "GET test.local/a",
+            Duration::from_millis(20),
+            Some(500),
+            false,
+        );
         record_endpoint("GET test.local/a", Duration::from_millis(30), None, true);
 
         let stats = snapshot();
@@ -458,10 +470,7 @@ mod tests {
         assert_eq!(entry.count, 3);
         assert_eq!(entry.error_count, 2);
         assert_eq!(entry.total, Duration::from_millis(60));
-        assert_eq!(
-            entry.statuses,
-            vec![(200, 1), (500, 1)],
-        );
+        assert_eq!(entry.statuses, vec![(200, 1), (500, 1)],);
     }
 
     #[cfg(not(feature = "hotpath"))]

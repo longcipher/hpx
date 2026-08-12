@@ -76,6 +76,7 @@ hpx = { workspace = true }
 libc = { workspace = true }
 proptest = { workspace = true }
 sha1 = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 [[bench]]
 name = "page_throughput"
