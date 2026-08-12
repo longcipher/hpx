@@ -389,35 +389,146 @@ mod tests {
         assert!(urls.is_empty());
     }
 
+    /// Serve `routes` (path -> (content-type, body)) over HTTP/1.1, one
+    /// connection at a time. Each accepted connection keeps reading requests
+    /// until the client closes it, because the hpx client pools and reuses
+    /// keep-alive connections for concurrent requests to the same host. The
+    /// accept loop stops once all routes have been served or `timeout` elapses,
+    /// then drains the connection handlers, so the task never hangs even if
+    /// requests fail.
+    async fn serve_resources(
+        listener: tokio::net::TcpListener,
+        routes: std::collections::HashMap<String, (String, String)>,
+        timeout: std::time::Duration,
+    ) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let served = std::sync::Arc::new(AtomicUsize::new(0));
+        let total = routes.len();
+        let served_total = total;
+        let deadline = tokio::time::Instant::now() + timeout;
+        let mut handles = tokio::task::JoinSet::new();
+
+        // Completes once every route has been served; polled alongside `accept`
+        // so the loop stops as soon as the requests are done instead of waiting
+        // for `deadline` while blocked on `accept`.
+        let all_served = {
+            let served = served.clone();
+            async move {
+                while served.load(Ordering::Relaxed) < total {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            }
+        };
+        tokio::pin!(all_served);
+
+        loop {
+            tokio::select! {
+                _ = &mut all_served => break,
+                _ = tokio::time::sleep_until(deadline) => break,
+                accepted = listener.accept() => {
+                    let Ok((mut stream, _)) = accepted else { break };
+                    let routes = routes.clone();
+                    let served = served.clone();
+                    let total = served_total;
+                    handles.spawn(async move {
+                        let mut buf = [0u8; 2048];
+                        loop {
+                            // Read one request head (headers end at CRLFCRLF);
+                            // EOF means the client closed the pooled connection.
+                            let mut head = Vec::new();
+                            let mut got_request = false;
+                            loop {
+                                match stream.read(&mut buf).await {
+                                    Ok(0) | Err(_) => {
+                                        got_request = !head.is_empty();
+                                        break;
+                                    }
+                                    Ok(n) => {
+                                        head.extend_from_slice(&buf[..n]);
+                                        if head.windows(4).any(|w| w == b"\r\n\r\n")
+                                            || head.len() > 64 * 1024
+                                        {
+                                            got_request = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            if !got_request {
+                                break;
+                            }
+                            let path = head
+                                .split(|&b| b == b' ')
+                                .nth(1)
+                                .and_then(|p| std::str::from_utf8(p).ok())
+                                .unwrap_or("/");
+                            let response = match routes.get(path) {
+                                Some((ct, body)) => format!(
+                                    "HTTP/1.1 200 OK\r\nContent-Type: {ct}\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\r\n{body}",
+                                    body.len()
+                                ),
+                                None => {
+                                    "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                                        .to_string()
+                                }
+                            };
+                            if stream.write_all(response.as_bytes()).await.is_err() {
+                                break;
+                            }
+                            served.fetch_add(1, Ordering::Relaxed);
+                            // Once every route has been served the client has
+                            // everything it needs; close the connection so this
+                            // handler exits without waiting for the idle
+                            // timeout on the client's pooled connection.
+                            if served.load(Ordering::Relaxed) >= total {
+                                let _ = stream.shutdown().await;
+                                break;
+                            }
+                        }
+                    });
+                }
+            }
+        }
+        while handles.join_next().await.is_some() {}
+    }
+
     #[tokio::test]
     async fn fetch_resources_concurrent() {
-        use tokio::io::AsyncWriteExt;
+        use std::collections::HashMap;
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let base = format!("http://{addr}");
 
-        let resources = vec![
-            ("/style.css", "text/css", "body{}"),
-            ("/app.js", "application/javascript", "alert(1)"),
-            ("/logo.png", "image/png", "PNGDATA"),
-        ];
+        let routes: HashMap<String, (String, String)> = [
+            (
+                "/style.css".to_string(),
+                ("text/css".to_string(), "body{}".to_string()),
+            ),
+            (
+                "/app.js".to_string(),
+                ("application/javascript".to_string(), "alert(1)".to_string()),
+            ),
+            (
+                "/logo.png".to_string(),
+                ("image/png".to_string(), "PNGDATA".to_string()),
+            ),
+        ]
+        .into_iter()
+        .collect();
 
-        let server_resources = resources.clone();
-        let server = tokio::spawn(async move {
-            for (_path, ct, body) in &server_resources {
-                let (mut stream, _) = listener.accept().await.unwrap();
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: {ct}\r\nContent-Length: {}\r\n\r\n{body}",
-                    body.len()
-                );
-                stream.write_all(response.as_bytes()).await.unwrap();
-            }
-        });
+        let server = tokio::spawn(serve_resources(
+            listener,
+            routes.clone(),
+            std::time::Duration::from_secs(10),
+        ));
 
-        let urls: Vec<ResourceUrl> = resources
+        let urls: Vec<ResourceUrl> = routes
             .iter()
-            .map(|(path, _, _)| ResourceUrl {
+            .map(|(path, _)| ResourceUrl {
                 resource_type: if path.ends_with(".css") {
                     ResourceType::Stylesheet
                 } else if path.ends_with(".js") {

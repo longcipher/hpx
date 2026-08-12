@@ -391,7 +391,6 @@ impl<T: Poolable, K: Key> PoolShard<T, K> {
             return;
         }
         trace!("put; add idle connection for {:?}", key);
-        let mut remove_waiters = false;
         let mut value = Some(value);
         if let Some(waiters) = self.waiters.get_mut(key) {
             while let Some(tx) = waiters.pop_front() {
@@ -422,11 +421,12 @@ impl<T: Poolable, K: Key> PoolShard<T, K> {
 
                 trace!("put; removing canceled waiter for {:?}", key);
             }
-            remove_waiters = waiters.is_empty();
-        }
-
-        if remove_waiters {
-            self.waiters.remove(key);
+            // Polonius: the borrow from `self.waiters.get_mut()` is dead after
+            // `is_empty()`, so we can reborrow `self.waiters` to drop the now
+            // empty queue without an extra flag.
+            if waiters.is_empty() {
+                self.waiters.remove(key);
+            }
         }
 
         if let Some(value) = value {
@@ -528,14 +528,13 @@ impl<T, K: Key> PoolShard<T, K> {
     /// connection. If a user ever dropped that future, we need to clean out
     /// those parked senders.
     fn clean_waiters(&mut self, key: &K) {
-        let remove_waiters = if let Some(waiters) = self.waiters.get_mut(key) {
+        if let Some(waiters) = self.waiters.get_mut(key) {
             waiters.retain(|tx| !tx.is_closed());
-            waiters.is_empty()
-        } else {
-            false
-        };
-        if remove_waiters {
-            self.waiters.remove(key);
+            // Polonius: the `waiters` borrow is dead after `is_empty()`, so we
+            // can reborrow `self.waiters` to remove the empty queue directly.
+            if waiters.is_empty() {
+                self.waiters.remove(key);
+            }
         }
     }
 }
@@ -570,7 +569,9 @@ impl<T: Poolable, K: Key> PoolShard<T, K> {
                     });
 
                     if list.is_empty() {
-                        drop(list);
+                        // Polonius: `list` is dead after `is_empty()`, so the
+                        // explicit `drop(list)` is no longer needed before
+                        // reborrowing `self.idle`.
                         trace!("idle interval removing empty key {:?}", key);
                         self.idle.remove(key);
                         false
@@ -745,8 +746,10 @@ impl<T: Poolable, K: Key> Checkout<T, K> {
             let maybe_entry = inner.idle.get(&self.key).and_then(|arc_list| {
                 let mut list = arc_list.lock();
                 trace!("take? {:?}: expiration = {:?}", self.key, expiration.0);
-                // A block to end the mutable borrow on list,
-                // so the map below can check is_empty()
+                // Polonius: `IdlePopper`'s borrow of `list` is dead after
+                // `pop()`, and `list` itself is dead after `is_empty()`, so the
+                // explicit scope block and `drop(list)` are no longer needed
+                // before reborrowing `inner.idle` below.
                 let pop_result = {
                     let popper = IdlePopper {
                         key: &self.key,
@@ -755,7 +758,6 @@ impl<T: Poolable, K: Key> Checkout<T, K> {
                     popper.pop(&expiration)
                 };
                 let is_empty = list.is_empty();
-                drop(list);
                 pop_result.map(|e| (e, is_empty))
             });
 

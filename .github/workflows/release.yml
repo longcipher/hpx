@@ -5,6 +5,10 @@ on:
     tags:
       - "v*.*.*"
 
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_RUSTC_WRAPPER: ""
+
 permissions:
   contents: write
 
@@ -16,7 +20,7 @@ jobs:
       RUSTC_WRAPPER: ""
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -66,7 +70,7 @@ jobs:
           OUTPUT: CHANGELOG.md
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         env:
           # Node actions can fail TLS verification against api.github.com when
           # forced onto newer runtimes (Node 20 -> 24); use the runner's system
