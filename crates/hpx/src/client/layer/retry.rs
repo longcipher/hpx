@@ -256,7 +256,7 @@ mod tests {
         let mut policy = make_retry_policy(2);
         // Create a request with a non-clonable body (streaming/boxed).
         let body: Body = http_body_util::Empty::new()
-            .map_err(|e| -> crate::error::BoxError { e.into() })
+            .map_err(|e| -> crate::error::BoxError { match e {} })
             .boxed()
             .into();
         let req = Request::new(body);

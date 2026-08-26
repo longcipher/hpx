@@ -3,10 +3,14 @@
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 use async_trait::async_trait;
-use sqlx::{Row, SqlitePool, sqlite::SqlitePoolOptions};
+use sqlx::{
+    Row, SqlitePool,
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
+};
 
 use super::{DownloadRecord, SegmentState, SegmentStatus, Storage};
 use crate::{DownloadError, DownloadId, DownloadPriority, DownloadRequest, DownloadState};
@@ -36,21 +40,32 @@ pub struct SqliteStorage {
     pool: SqlitePool,
 }
 
+/// Current schema version tracked via `PRAGMA user_version`.
+///
+/// - v1: initial `downloads` table.
+/// - v2: `segments` table, plus legacy column patching (`request_json`,
+///   `last_error`) for databases created before version tracking existed.
+const SCHEMA_VERSION: i64 = 2;
+// The PRAGMA statement in `migrate` cannot interpolate constants; this pins
+// the literal to the version constant at compile time.
+const _: () = assert!(SCHEMA_VERSION == 2);
+
 impl SqliteStorage {
     /// Create a new SQLite storage at the given path.
     ///
-    /// Creates the database file and runs migrations if needed.
-    /// Enables WAL mode for crash recovery support.
+    /// Creates the database file and runs versioned migrations if needed.
+    /// Enables WAL mode for crash recovery support and enforces foreign keys
+    /// on every pooled connection.
     pub async fn new(path: &Path) -> Result<Self, DownloadError> {
         let db_url = format!("sqlite://{}?mode=rwc", path.display());
+        let options = SqliteConnectOptions::from_str(&db_url)
+            .map_err(|e| DownloadError::Storage(e.to_string()))?
+            .journal_mode(SqliteJournalMode::Wal)
+            .foreign_keys(true);
+
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
-            .connect(&db_url)
-            .await
-            .map_err(|e| DownloadError::Storage(e.to_string()))?;
-
-        sqlx::query("PRAGMA journal_mode=WAL")
-            .execute(&pool)
+            .connect_with(options)
             .await
             .map_err(|e| DownloadError::Storage(e.to_string()))?;
 
@@ -59,13 +74,19 @@ impl SqliteStorage {
         Ok(Self { pool })
     }
 
-    /// Create a new SQLite storage from an existing pool.
+    /// Create a new in-memory SQLite storage for testing.
     ///
-    /// Useful for in-memory testing with `sqlite::memory:`.
+    /// Uses a single connection so all queries share the same memory database,
+    /// with foreign keys enforced.
     #[cfg(test)]
-    async fn from_pool(pool: SqlitePool) -> Result<Self, DownloadError> {
-        sqlx::query("PRAGMA journal_mode=WAL")
-            .execute(&pool)
+    async fn in_memory() -> Result<Self, DownloadError> {
+        let options = SqliteConnectOptions::from_str("sqlite::memory:")
+            .map_err(|e| DownloadError::Storage(e.to_string()))?
+            .foreign_keys(true);
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
             .await
             .map_err(|e| DownloadError::Storage(e.to_string()))?;
 
@@ -75,6 +96,18 @@ impl SqliteStorage {
     }
 
     async fn migrate(pool: &SqlitePool) -> Result<(), DownloadError> {
+        let version = sqlx::query("PRAGMA user_version")
+            .fetch_one(pool)
+            .await
+            .map_err(|e| DownloadError::Storage(e.to_string()))?
+            .get::<i64, _>(0);
+
+        if version >= SCHEMA_VERSION {
+            return Ok(());
+        }
+
+        // v1: downloads table. `IF NOT EXISTS` keeps this idempotent for
+        // databases created before version tracking existed.
         sqlx::query(
             "
             CREATE TABLE IF NOT EXISTS downloads (
@@ -98,8 +131,10 @@ impl SqliteStorage {
         .await
         .map_err(|e| DownloadError::Storage(e.to_string()))?;
 
+        // Legacy column patching for pre-versioning databases.
         Self::ensure_request_json_column(pool).await?;
 
+        // v2: segments table.
         sqlx::query(
             "
             CREATE TABLE IF NOT EXISTS segments (
@@ -118,6 +153,16 @@ impl SqliteStorage {
         .await
         .map_err(|e| DownloadError::Storage(e.to_string()))?;
 
+        // Persist the schema version. PRAGMA statements cannot bind
+        // parameters and sqlx requires literal SQL, so the version is spelled
+        // out here; the const assertion below fails the build if the two
+        // drift apart.
+        sqlx::query("PRAGMA user_version = 2")
+            .execute(pool)
+            .await
+            .map_err(|e| DownloadError::Storage(e.to_string()))?;
+
+        tracing::debug!(from = version, to = SCHEMA_VERSION, "schema migrated");
         Ok(())
     }
 
@@ -472,18 +517,18 @@ impl Storage for SqliteStorage {
             .await
             .map_err(|e| DownloadError::Storage(e.to_string()))?;
 
-        // Delete old segments and insert new ones
-        sqlx::query("DELETE FROM segments WHERE download_id = ?")
-            .bind(id.0.to_string())
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DownloadError::Storage(e.to_string()))?;
-
+        // Upsert segments in place instead of delete-all + reinsert: the
+        // row set is keyed by (download_id, idx) and only values change.
         for segment in segments {
             sqlx::query(
                 "
                 INSERT INTO segments (download_id, idx, start, end, state, bytes_downloaded)
                 VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(download_id, idx) DO UPDATE SET
+                    start = excluded.start,
+                    end = excluded.end,
+                    state = excluded.state,
+                    bytes_downloaded = excluded.bytes_downloaded
                 ",
             )
             .bind(id.0.to_string())
@@ -622,12 +667,9 @@ mod tests {
     use super::*;
 
     async fn memory_storage() -> SqliteStorage {
-        let pool = SqlitePool::connect("sqlite::memory:")
+        SqliteStorage::in_memory()
             .await
-            .expect("connect to in-memory sqlite");
-        SqliteStorage::from_pool(pool)
-            .await
-            .expect("create storage from pool")
+            .expect("create in-memory storage")
     }
 
     fn sample_record() -> DownloadRecord {
@@ -1138,5 +1180,67 @@ mod tests {
         let ids: Vec<DownloadId> = records.iter().map(|r| r.id).collect();
         assert!(ids.contains(&id1));
         assert!(ids.contains(&id2));
+    }
+
+    // --- Schema versioning and foreign key tests ---
+
+    #[tokio::test]
+    async fn schema_version_is_tracked() {
+        let storage = memory_storage().await;
+
+        let row = sqlx::query("PRAGMA user_version")
+            .fetch_one(&storage.pool)
+            .await
+            .expect("query pragma");
+        assert_eq!(row.get::<i64, _>(0), SCHEMA_VERSION);
+    }
+
+    #[tokio::test]
+    async fn migration_reopens_are_idempotent() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = temp_dir.path().join("test.db");
+
+        let record = sample_record();
+        {
+            let storage = SqliteStorage::new(&db_path).await.expect("first open");
+            storage.save(&record).await.expect("save");
+        }
+        {
+            let storage = SqliteStorage::new(&db_path).await.expect("reopen");
+            let loaded = storage
+                .load(record.id)
+                .await
+                .expect("load")
+                .expect("record persists");
+            assert_eq!(loaded.url(), record.url());
+        }
+
+        // A third open must not re-run migrations or corrupt the version.
+        let storage = SqliteStorage::new(&db_path).await.expect("third open");
+        let row = sqlx::query("PRAGMA user_version")
+            .fetch_one(&storage.pool)
+            .await
+            .expect("query pragma");
+        assert_eq!(row.get::<i64, _>(0), SCHEMA_VERSION);
+    }
+
+    #[tokio::test]
+    async fn foreign_keys_enforced_on_segments() {
+        let storage = memory_storage().await;
+
+        // Inserting a segment that references a non-existent download must be
+        // rejected now that foreign keys are enforced per pooled connection.
+        let result = sqlx::query(
+            "INSERT INTO segments (download_id, idx, start, end, state, bytes_downloaded) \
+             VALUES ('missing-download', 0, 0, 10, 'pending', 0)",
+        )
+        .execute(&storage.pool)
+        .await;
+
+        let err = result.expect_err("FK violation must be rejected");
+        assert!(
+            err.to_string().to_lowercase().contains("foreign key"),
+            "expected FK failure, got: {err}"
+        );
     }
 }

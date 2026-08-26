@@ -1,8 +1,84 @@
+use bytes::{Buf, BytesMut};
 use futures::{StreamExt, TryStreamExt};
 use serde::Deserialize;
-use tokio_util::io::StreamReader;
+use tokio_util::{codec::Decoder, io::StreamReader};
 
 use crate::{StreamBodyError, StreamBodyResult, error::StreamBodyKind};
+
+/// Incremental decoder yielding one complete RFC 4180 CSV record per item.
+///
+/// Splitting the byte stream on `\n` (as `LinesCodec` does) corrupts records
+/// whose quoted fields contain embedded newlines. This decoder tracks quote
+/// state across chunk boundaries so a record is only emitted once its closing
+/// unquoted newline has been seen.
+#[derive(Debug)]
+struct CsvRecordCodec {
+    max_obj_len: usize,
+    buf: Vec<u8>,
+    in_quotes: bool,
+}
+
+impl CsvRecordCodec {
+    fn new(max_obj_len: usize) -> Self {
+        Self {
+            max_obj_len,
+            buf: Vec::new(),
+            in_quotes: false,
+        }
+    }
+}
+
+impl Decoder for CsvRecordCodec {
+    type Item = String;
+    type Error = std::io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        for (index, byte) in src.iter().enumerate() {
+            match byte {
+                b'"' => self.in_quotes = !self.in_quotes,
+                b'\n' if !self.in_quotes => {
+                    let mut record = std::mem::take(&mut self.buf);
+                    // Strip a trailing CR from CRLF line endings.
+                    if record.last() == Some(&b'\r') {
+                        record.pop();
+                    }
+                    src.advance(index + 1);
+                    return Ok(Some(String::from_utf8_lossy(&record).into_owned()));
+                }
+                _ => {}
+            }
+            self.buf.push(*byte);
+
+            // Enforce the record limit incrementally so a hostile
+            // newline-free stream cannot buffer without bound.
+            if self.buf.len() > self.max_obj_len {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("CSV record exceeds maximum length of {}", self.max_obj_len),
+                ));
+            }
+        }
+
+        src.clear();
+        Ok(None)
+    }
+
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        match self.decode(src)? {
+            Some(item) => Ok(Some(item)),
+            None => {
+                // A final record without a trailing newline.
+                if self.buf.is_empty() {
+                    Ok(None)
+                } else {
+                    let record = std::mem::take(&mut self.buf);
+                    self.in_quotes = false;
+                    Ok(Some(String::from_utf8_lossy(&record).into_owned()))
+                }
+            }
+        }
+    }
+}
 
 /// Extension trait for [`hpx::Response`] that provides streaming support for the CSV format.
 pub trait CsvStreamResponse {
@@ -65,7 +141,7 @@ impl CsvStreamResponse for hpx::Response {
     {
         let reader = StreamReader::new(self.bytes_stream().map_err(std::io::Error::other));
 
-        let codec = tokio_util::codec::LinesCodec::new_with_max_length(max_obj_len);
+        let codec = CsvRecordCodec::new(max_obj_len);
         let frames_reader = tokio_util::codec::FramedRead::new(reader, codec);
 
         #[expect(clippy::bool_to_int_with_if)]
@@ -108,13 +184,99 @@ impl CsvStreamResponse for hpx::Response {
 
 #[cfg(test)]
 mod tests {
+    use bytes::BytesMut;
+    use proptest::prelude::*;
     use serde::Deserialize;
+    use tokio_util::codec::Decoder;
+
+    use super::CsvRecordCodec;
 
     #[derive(Debug, Deserialize, PartialEq)]
     struct Record {
         name: String,
         age: u32,
         city: String,
+    }
+
+    /// Feed `payload` to the codec in fixed-size chunks and collect records.
+    fn decode_chunked(payload: &[u8], chunk_size: usize) -> Vec<String> {
+        let mut codec = CsvRecordCodec::new(usize::MAX);
+        let mut records = Vec::new();
+
+        for chunk in payload.chunks(chunk_size.max(1)) {
+            let mut src = BytesMut::from(chunk);
+            while let Some(record) = codec.decode(&mut src).expect("decode") {
+                records.push(record);
+            }
+        }
+
+        let mut src = BytesMut::new();
+        if let Some(record) = codec.decode_eof(&mut src).expect("decode_eof") {
+            records.push(record);
+        }
+        records
+    }
+
+    #[test]
+    fn codec_splits_on_unquoted_newlines() {
+        let records = decode_chunked(b"name,age\nBob,25\n", 4);
+        assert_eq!(records, vec!["name,age", "Bob,25"]);
+    }
+
+    #[test]
+    fn codec_keeps_quoted_newlines_intact() {
+        let payload = b"name,age\n\"Alice\nSmith\",30\nBob,25";
+        let records = decode_chunked(payload, 3);
+        assert_eq!(records, vec!["name,age", "\"Alice\nSmith\",30", "Bob,25"]);
+    }
+
+    #[test]
+    fn codec_handles_escaped_quotes_inside_field() {
+        // "" inside a quoted field is an escaped quote; quote state must
+        // survive it.
+        let payload = b"\"say \"\"hi\"\"\",1\n";
+        let records = decode_chunked(payload, 5);
+        assert_eq!(records, vec!["\"say \"\"hi\"\"\",1"]);
+    }
+
+    #[test]
+    fn codec_strips_crlf_outside_quotes() {
+        let records = decode_chunked(b"a,b\r\nc,d\r\n", 100);
+        assert_eq!(records, vec!["a,b", "c,d"]);
+    }
+
+    #[test]
+    fn codec_enforces_max_record_length() {
+        let mut codec = CsvRecordCodec::new(8);
+        let mut src = BytesMut::from(&b"0123456789"[..]);
+        let err = codec.decode(&mut src).expect_err("must exceed limit");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    proptest! {
+        /// Chunk-boundary invariance: any chunking of a payload must produce
+        /// exactly the same records as single-shot decoding.
+        #[test]
+        fn codec_chunking_is_invariant(
+            rows in prop::collection::vec(
+                prop::sample::select(vec![
+                    "a,1,x",
+                    "\"multi\nline\",2,y",
+                    "\"quote\"\"d\",3,z",
+                    "plain,4,w",
+                    "",
+                ]),
+                1..8,
+            ),
+            chunk_size in 1usize..16,
+        ) {
+            let mut payload = rows.join("\n");
+            payload.push('\n');
+
+            let expected = decode_chunked(payload.as_bytes(), usize::MAX);
+            let actual = decode_chunked(payload.as_bytes(), chunk_size);
+            prop_assert_eq!(actual, expected);
+        }
     }
 
     fn deserialize_row(builder: &mut csv::ReaderBuilder, row: &str) -> Option<Record> {

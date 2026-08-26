@@ -47,12 +47,20 @@ pub(crate) struct HandshakeConfig {
 
 impl HandshakeConfigBuilder {
     /// Skips the session ticket.
+    ///
+    /// rustls manages tickets internally; the option is accepted for API
+    /// compatibility but has no effect on this backend.
     pub(crate) fn no_ticket(self, _skip: bool) -> Self {
+        tracing::warn!("rustls backend: `no_ticket` is not supported and was ignored");
         self
     }
 
     /// Enables or disables ECH grease.
+    ///
+    /// Not supported by the rustls backend; ignored with a warning so silent
+    /// fingerprint divergence from BoringSSL cannot go unnoticed.
     pub(crate) fn enable_ech_grease(self, _enable: bool) -> Self {
+        tracing::warn!("rustls backend: `enable_ech_grease` is not supported and was ignored");
         self
     }
 
@@ -63,7 +71,11 @@ impl HandshakeConfigBuilder {
     }
 
     /// Sets TLS SNI.
+    ///
+    /// rustls sends SNI automatically from the server name; explicit control
+    /// is not available on this backend.
     pub(crate) fn tls_sni(self, _sni: bool) -> Self {
+        tracing::warn!("rustls backend: `tls_sni` override is not supported and was ignored");
         self
     }
 
@@ -82,20 +94,31 @@ impl HandshakeConfigBuilder {
     }
 
     /// Sets ALPS protocol.
+    ///
+    /// ALPS is not negotiated by any backend at present; ignored with a
+    /// warning so configured-but-inert fingerprint options stay visible.
     pub(crate) fn alps_protocols<P>(self, _alps_protocols: P) -> Self
     where
         P: Into<Option<Cow<'static, [AlpsProtocol]>>>,
     {
+        tracing::warn!("rustls backend: `alps_protocols` is not supported and was ignored");
         self
     }
 
     /// Sets ALPS new codepoint usage.
+    ///
+    /// ALPS is not negotiated by the rustls backend; ignored with a warning.
     pub(crate) fn alps_use_new_codepoint(self, _use_new: bool) -> Self {
+        tracing::warn!("rustls backend: `alps_use_new_codepoint` is not supported and was ignored");
         self
     }
 
     /// Sets random AES hardware override.
+    ///
+    /// Hardware-specific randomization is a BoringSSL-only feature; ignored
+    /// with a warning on this backend.
     pub(crate) fn random_aes_hw_override(self, _override_: bool) -> Self {
+        tracing::warn!("rustls backend: `random_aes_hw_override` is not supported and was ignored");
         self
     }
 

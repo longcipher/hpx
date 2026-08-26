@@ -256,13 +256,13 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - **Behavioral Contract:** New functionality — additive
 - **Simplification Focus:** N/A
 - **Advanced Test Coverage:** N/A
-- **Status:** 🟢 DONE
-- [x] **Step 1:** Parse `--proxy` flag into `hpx::Proxy` in CLI
-- [x] **Step 2:** Pass proxy to `HttpClient::builder().proxy(proxy).build()`
-- [x] **Step 3:** Write test: CLI parsing with `--proxy socks5://...` → correct `Proxy` struct
-- [x] **Verification:** `cargo test -p hpxless cli::proxy` passes
-- [x] **Advanced Test Verification:** N/A
-- [x] **Runtime Verification:** N/A — requires proxy server
+- **Status:** 🔲 TODO — CLI flag parses, but navigation wiring is NOT implemented (`bin/hpxless/src/main.rs` warns "not yet implemented"); status reverted 2026-08-25 after code audit found the DONE mark was inaccurate
+- [ ] **Step 1:** Parse `--proxy` flag into `hpx::Proxy` in CLI
+- [ ] **Step 2:** Pass proxy to `HttpClient::builder().proxy(proxy).build()`
+- [ ] **Step 3:** Write test: CLI parsing with `--proxy socks5://...` → correct `Proxy` struct
+- [ ] **Verification:** `cargo test -p hpxless cli::proxy` passes
+- [ ] **Advanced Test Verification:** N/A
+- [ ] **Runtime Verification:** N/A — requires proxy server
 
 ### Task 3.4: Stealth profile integration
 
@@ -298,13 +298,13 @@ Build `bin/hpxless` — a standalone headless browser binary that reuses `hpx-br
 - **Behavioral Contract:** New functionality — additive
 - **Simplification Focus:** N/A
 - **Advanced Test Coverage:** Example-based only
-- **Status:** 🟢 DONE
-- [x] **Step 1:** Parse `--block` flag into `HashSet<ResourceType>` in CLI
-- [x] **Step 2:** Pass block types to `Page` and `ResourceLoader`
-- [x] **Step 3:** Write test: HTML with `<img>` + block images → no image fetch
-- [x] **Verification:** `cargo test -p hpx-browser resource_loader::block` passes
-- [x] **Advanced Test Verification:** N/A
-- [x] **Runtime Verification:** N/A
+- **Status:** 🔲 TODO — CLI flag parses, but blocking is NOT wired into navigation (`bin/hpxless/src/main.rs` warns "not yet implemented"); status reverted 2026-08-25 after code audit found the DONE mark was inaccurate
+- [ ] **Step 1:** Parse `--block` flag into `HashSet<ResourceType>` in CLI
+- [ ] **Step 2:** Pass block types to `Page` and `ResourceLoader`
+- [ ] **Step 3:** Write test: HTML with `<img>` + block images → no image fetch
+- [ ] **Verification:** `cargo test -p hpx-browser resource_loader::block` passes
+- [ ] **Advanced Test Verification:** N/A
+- [ ] **Runtime Verification:** N/A
 
 ### Task 3.6: Multi-page support
 

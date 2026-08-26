@@ -16,6 +16,7 @@
 
 pub mod challenge;
 pub mod dom;
+pub mod extract;
 pub mod html_parser;
 pub mod iframe;
 pub mod layout;

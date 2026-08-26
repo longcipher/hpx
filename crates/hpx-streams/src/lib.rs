@@ -84,3 +84,39 @@ pub mod error;
 
 /// Alias for the [`Result`] type returned by streaming responses.
 pub type StreamBodyResult<T> = std::result::Result<T, StreamBodyError>;
+
+use futures::StreamExt as _;
+
+/// Normalize any format-specific stream into the common boxed shape.
+///
+/// All four streaming families ([`JsonStreamResponse`], [`CsvStreamResponse`],
+/// [`ProtobufStreamResponse`], [`ArrowIpcStreamResponse`]) produce streams
+/// with the identical item type [`StreamBodyResult`]`<T>`; this helper erases
+/// the concrete stream type so generic consumers can mix formats behind a
+/// single return type without depending on which codec produced it.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use futures::StreamExt as _;
+/// use hpx_streams::{CsvStreamResponse as _, normalize_stream};
+/// # use serde::Deserialize;
+/// # #[derive(Deserialize)]
+/// # struct Row;
+/// #
+/// # async fn example(client: hpx::Client) {
+/// #     let csv_resp = client.get("http://localhost/csv").send().await.unwrap();
+/// #     let json_resp = client.get("http://localhost/json").send().await.unwrap();
+/// let streams: Vec<_> = vec![normalize_stream(csv_resp.csv_stream::<Row>(
+///     64 * 1024,
+///     true,
+///     b',',
+/// ))];
+/// # }
+/// ```
+pub fn normalize_stream<S, T>(stream: S) -> futures::stream::BoxStream<'static, StreamBodyResult<T>>
+where
+    S: futures::Stream<Item = StreamBodyResult<T>> + Send + 'static,
+{
+    stream.boxed()
+}

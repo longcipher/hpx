@@ -1,3 +1,14 @@
+//! Chrome emulation header sets.
+//!
+//! # Fidelity notes
+//!
+//! Header *values* are byte-exact per profile, but [`HeaderMap`] does not
+//! preserve insertion order, so HTTP/1.1 wire header ordering is unspecified
+//! here. HTTP/2 pseudo-header and SETTINGS frame ordering are handled
+//! separately through `SettingsOrder`/`PseudoOrder` in the device macros.
+//! Fingerprint checks that depend on H1 header sequence are therefore not
+//! covered by these profiles yet.
+
 use super::*;
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]

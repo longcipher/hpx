@@ -465,28 +465,10 @@ pub(crate) enum FormValue {
 
 /// Parse a proxy URL string into a [`hpx_dl::ProxyConfig`].
 ///
-/// Detects the protocol kind from the URL scheme:
-/// - `"http://..."` → [`ProxyKind::Http`]
-/// - `"https://..."` → [`ProxyKind::Https`]
-/// - `"socks5://..."` → [`ProxyKind::Socks5`]
-///
-/// Returns an error for unrecognized schemes.
+/// Thin adapter over [`hpx_dl::parse_proxy_config`]; the domain rules live in
+/// the library so other frontends reuse them unchanged.
 pub(crate) fn parse_proxy_config(url: &str) -> eyre::Result<hpx_dl::ProxyConfig> {
-    let kind = if url.starts_with("http://") {
-        hpx_dl::ProxyKind::Http
-    } else if url.starts_with("https://") {
-        hpx_dl::ProxyKind::Https
-    } else if url.starts_with("socks5://") {
-        hpx_dl::ProxyKind::Socks5
-    } else {
-        return Err(eyre::eyre!(
-            "unknown proxy scheme in '{url}', expected one of: http://, https://, socks5://"
-        ));
-    };
-    Ok(hpx_dl::ProxyConfig {
-        url: url.to_string(),
-        kind,
-    })
+    hpx_dl::parse_proxy_config(url).map_err(|e| eyre::eyre!(e.to_string()))
 }
 
 /// Parse header strings (from `-H` flags) into (name, value) pairs.
@@ -501,60 +483,16 @@ pub(crate) fn parsed_dl_headers(headers: &[String]) -> Vec<(String, String)> {
 
 /// Parse a human-readable speed string into bytes per second.
 ///
-/// Supported formats:
-/// - `"1024"` → raw bytes per second
-/// - `"1KB/s"`, `"500KB/s"` → kilobytes per second
-/// - `"1MB/s"`, `"2.5MB/s"` → megabytes per second
-/// - `"1GB/s"` → gigabytes per second
+/// Thin adapter over [`hpx_dl::parse_speed_limit`].
 pub(crate) fn parse_speed_limit(s: &str) -> eyre::Result<u64> {
-    let s = s.trim();
-
-    if let Some(n) = s.strip_suffix("GB/s") {
-        let n: f64 = n.trim().parse()?;
-        return Ok((n * 1_073_741_824.0) as u64);
-    }
-    if let Some(n) = s.strip_suffix("MB/s") {
-        let n: f64 = n.trim().parse()?;
-        return Ok((n * 1_048_576.0) as u64);
-    }
-    if let Some(n) = s.strip_suffix("KB/s") {
-        let n: f64 = n.trim().parse()?;
-        return Ok((n * 1_024.0) as u64);
-    }
-
-    let bytes: u64 = s.parse()?;
-    Ok(bytes)
+    hpx_dl::parse_speed_limit(s).map_err(|e| eyre::eyre!(e.to_string()))
 }
 
 /// Parse a checksum specification string in the format `"algorithm:hex_value"`.
 ///
-/// Supported algorithms: `md5`, `sha1`, `sha256`.
-/// The algorithm name is case-insensitive.
+/// Thin adapter over [`hpx_dl::parse_checksum`].
 pub(crate) fn parse_checksum(s: &str) -> eyre::Result<hpx_dl::ChecksumSpec> {
-    let s = s.trim();
-    let (algo_str, expected) = s
-        .split_once(':')
-        .ok_or_else(|| eyre::eyre!("invalid checksum format, expected 'algorithm:hex_value'"))?;
-
-    if expected.is_empty() {
-        return Err(eyre::eyre!("checksum hash value must not be empty"));
-    }
-
-    let algorithm = match algo_str.to_lowercase().as_str() {
-        "md5" => hpx_dl::HashAlgorithm::Md5,
-        "sha1" => hpx_dl::HashAlgorithm::Sha1,
-        "sha256" => hpx_dl::HashAlgorithm::Sha256,
-        other => {
-            return Err(eyre::eyre!(
-                "unknown hash algorithm '{other}', expected one of: md5, sha1, sha256"
-            ));
-        }
-    };
-
-    Ok(hpx_dl::ChecksumSpec {
-        algorithm,
-        expected: expected.to_string(),
-    })
+    hpx_dl::parse_checksum(s).map_err(|e| eyre::eyre!(e.to_string()))
 }
 
 #[cfg(test)]

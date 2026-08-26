@@ -1,0 +1,53 @@
+# cargo-deny configuration.
+# Run locally with `cargo deny check`, enforced in CI (.github/workflows/ci.yml).
+
+[graph]
+# Include dev-dependencies and build-dependencies in the advisory graph so
+# vulnerable tooling is caught too.
+all-features = true
+
+[advisories]
+version = 2
+# Fail on any published RUSTSEC vulnerability affecting the dependency graph.
+yanked = "deny"
+# Unmaintained (not vulnerable) transitive dependencies awaiting upstream
+# replacements; re-review when a replacement lands.
+ignore = [
+    "RUSTSEC-2025-0141", # bincode via sqlx — unmaintained, no vuln
+    "RUSTSEC-2024-0436", # paste via serde_v8/deno_core — unmaintained, no vuln
+    "RUSTSEC-2025-0134", # rustls-pemfile — superseded by rustls-pki-types
+    "RUSTSEC-2026-0206", # rustybuzz via blitz rendering stack — unmaintained
+    "RUSTSEC-2026-0192", # ttf-parser via blitz rendering stack — unmaintained
+]
+
+[licenses]
+version = 2
+# Standard permissive set; anything else must be explicitly reviewed and added.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "CDLA-Permissive-2.0",
+    "MPL-2.0",
+    "BSL-1.0",
+    "CC0-1.0",
+    "NCSA",
+]
+# Confidence threshold for the license detection heuristic.
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

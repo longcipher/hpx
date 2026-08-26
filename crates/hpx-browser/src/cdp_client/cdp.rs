@@ -217,10 +217,33 @@ impl CdpClient {
             .map_err(|_| CdpClientError::websocket("send_command", "writer channel closed"))?;
 
         // Await response with timeout
-        tokio::time::timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS), rx)
+        let message = tokio::time::timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS), rx)
             .await
             .map_err(|_| CdpClientError::timeout("send_command", DEFAULT_TIMEOUT_SECS))?
-            .map_err(|_| CdpClientError::websocket("send_command", "response channel closed"))
+            .map_err(|_| CdpClientError::websocket("send_command", "response channel closed"))?;
+
+        // Surface protocol-level error responses as real errors instead of
+        // returning them behind `msg.error`, where callers that forgot to
+        // hand-inspect would treat a failed command as success.
+        if let Some(err) = &message.error {
+            let code = i32::try_from(
+                err.get("code")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(-1),
+            )
+            .unwrap_or(-1);
+            let text = err
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("unknown CDP error");
+            return Err(CdpClientError::CdpError {
+                code,
+                method: method.to_string(),
+                message: text.to_string(),
+            });
+        }
+
+        Ok(message)
     }
 
     /// Subscribe to all CDP events.
@@ -268,6 +291,7 @@ impl CdpClient {
         let (ws_tx, mut ws_rx) = mpsc::unbounded_channel::<String>();
         client.ws_tx.store(Some(Arc::new(ws_tx)));
 
+        let writer_client = Arc::clone(&cdp);
         tokio::spawn(async move {
             while let Some(msg) = ws_rx.recv().await {
                 let frame = hpx_yawc::frame::Frame::text(msg);
@@ -276,6 +300,12 @@ impl CdpClient {
                     break;
                 }
             }
+            // The writer exited (sink error or channel closed): mark the
+            // connection dead so later commands fail fast instead of queueing
+            // into a channel nobody drains, and wake pending waiters now
+            // rather than letting each block until its timeout.
+            writer_client.ws_tx.store(None);
+            writer_client.fail_all_pending("websocket writer disconnected");
         });
 
         // Map yawc frames → connection::Frame and run the event loop

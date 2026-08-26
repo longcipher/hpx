@@ -9,6 +9,10 @@ use std::{
     future::Future,
     path::PathBuf,
     pin::Pin,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::Duration,
 };
 
@@ -212,6 +216,57 @@ pub fn range_header_value(range: &SegmentRange) -> ArrayString<64> {
     buf
 }
 
+/// Forward per-segment progress to the engine exactly once per byte.
+///
+/// Segment downloads are retried wholesale: a failed attempt may already have
+/// reported progress for bytes that the next attempt downloads again. A naive
+/// per-chunk delta feed therefore double-counts. The reporter keeps a
+/// monotonic high-water mark per segment and only emits the delta above it,
+/// so the sum of all emitted deltas equals the segment length exactly once
+/// the segment completes.
+#[derive(Debug)]
+pub(crate) struct SegmentProgressReporter {
+    tx: Option<tokio::sync::mpsc::Sender<u64>>,
+    reported: AtomicU64,
+}
+
+impl SegmentProgressReporter {
+    pub(crate) fn new(tx: Option<tokio::sync::mpsc::Sender<u64>>) -> Self {
+        Self {
+            tx,
+            reported: AtomicU64::new(0),
+        }
+    }
+
+    /// Record that `cumulative` bytes of this segment have been written and
+    /// emit only the not-yet-reported delta.
+    async fn record(&self, cumulative: u64) {
+        let Some(tx) = &self.tx else {
+            return;
+        };
+
+        let mut prev = self.reported.load(Ordering::Relaxed);
+        let delta = loop {
+            if cumulative <= prev {
+                return;
+            }
+            match self.reported.compare_exchange_weak(
+                prev,
+                cumulative,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break cumulative - prev,
+                Err(current) => prev = current,
+            }
+        };
+
+        // A closed receiver just means nobody is listening for progress;
+        // the download itself must not fail because of that.
+        let _ = tx.send(delta).await;
+    }
+}
+
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 #[expect(
     clippy::too_many_arguments,
@@ -222,7 +277,7 @@ async fn download_segment_with_options(
     url: &str,
     range: &SegmentRange,
     file: &mut tokio::fs::File,
-    progress_tx: Option<&tokio::sync::mpsc::Sender<u64>>,
+    progress: &SegmentProgressReporter,
     headers: &HashMap<String, String, impl std::hash::BuildHasher>,
     limiter: &CompositeLimiter,
     idle_timeout: Option<Duration>,
@@ -236,13 +291,27 @@ async fn download_segment_with_options(
     }
     let response = request.send().await?;
 
+    // Status handling is a correctness invariant, not a best-effort warning:
+    // writing a non-206 body at `range.start` silently corrupts the file.
     let status = response.status();
-    if status != hpx::StatusCode::PARTIAL_CONTENT && status != hpx::StatusCode::OK {
-        tracing::warn!(status = %status, "unexpected status for range request");
+    if status == hpx::StatusCode::PARTIAL_CONTENT {
+        // Expected path: the server honored the Range header.
+    } else if status == hpx::StatusCode::OK {
+        // 200 means the server ignored `Range` and returned the whole body.
+        // That is only safe when this segment starts at offset 0 (i.e. it
+        // covers the entire resource); any other start offset would scatter
+        // full-file bytes across the middle of the destination file.
+        if range.start != 0 {
+            return Err(DownloadError::NoRangeSupport);
+        }
+        tracing::debug!(status = %status, "server ignored Range; treating body as whole file");
+    } else {
+        return Err(DownloadError::UnexpectedStatus(status.as_u16()));
     }
 
     let mut stream = response.bytes_stream();
     let mut offset = range.start;
+    let mut remaining = range.len();
 
     file.seek(std::io::SeekFrom::Start(range.start)).await?;
 
@@ -264,15 +333,41 @@ async fn download_segment_with_options(
             .wait_for(u64::try_from(chunk_len).unwrap_or(u64::MAX))
             .await?;
 
-        file.write_all(&chunk).await?;
-        offset += u64::try_from(chunk_len).unwrap_or(u64::MAX);
+        // Never write past the segment boundary, even if the server sends
+        // more data than requested (over-long bodies indicate a broken or
+        // lying server; the extra bytes belong to other segments).
+        let take = usize::try_from(remaining)
+            .unwrap_or(usize::MAX)
+            .min(chunk_len);
+        file.write_all(&chunk[..take]).await?;
+        let taken = u64::try_from(take).unwrap_or(u64::MAX);
+        offset += taken;
+        remaining -= taken;
 
-        if let Some(tx) = progress_tx {
-            let _ = tx.send(u64::try_from(chunk_len).unwrap_or(u64::MAX)).await;
+        progress.record(offset - range.start).await;
+
+        if take < chunk_len {
+            return Err(DownloadError::LengthMismatch {
+                expected: range.len(),
+                actual: range.len() - remaining,
+            });
         }
     }
 
+    if remaining != 0 {
+        return Err(DownloadError::LengthMismatch {
+            expected: range.len(),
+            actual: range.len() - remaining,
+        });
+    }
+
     file.flush().await?;
+    // Durable-write barrier: bytes must reach the filesystem before the
+    // caller persists the segment as Completed. Without fsync, a crash can
+    // lose tail bytes from the page cache while SQLite (WAL-durable) already
+    // records the segment as complete — resume would then skip a corrupt
+    // segment permanently.
+    file.sync_all().await?;
     debug!(
         bytes_written = offset - range.start,
         "segment download complete"
@@ -780,12 +875,15 @@ impl SegmentDownloader {
                         index: segment_index,
                     });
                 }
+                // One reporter per segment task: shared across retry attempts so
+                // re-downloaded bytes are never double-counted in progress.
+                let reporter = Arc::new(SegmentProgressReporter::new(progress_tx));
                 let result = with_retry(max_retries, initial_delay, max_delay, jitter, || {
                     let client = client.clone();
                     let url = url.clone();
                     let seg = seg.clone();
                     let path = path.clone();
-                    let progress_tx = progress_tx.clone();
+                    let reporter = Arc::clone(&reporter);
                     let headers = headers.clone();
                     let limiter = limiter.clone();
 
@@ -799,7 +897,7 @@ impl SegmentDownloader {
                             &url,
                             &seg,
                             &mut file,
-                            progress_tx.as_ref(),
+                            &reporter,
                             &headers,
                             &limiter,
                             idle_timeout,

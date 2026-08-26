@@ -2,7 +2,10 @@ use std::collections::HashSet;
 
 use ahash::AHashSet;
 
-use crate::dom::{Dom, NodeId};
+use crate::{
+    dom::{Dom, NodeId},
+    net::RedirectPolicy,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ResourceType {
@@ -121,12 +124,19 @@ pub struct LoadedResource {
     pub content_type: Option<String>,
 }
 
-/// Fetch all resources concurrently.
+/// Fetch all resources concurrently through the SSRF-guarded
+/// [`HttpClient`](crate::net::HttpClient).
+///
+/// Subresource requests MUST go through the same guarded client as the main
+/// document: attacker-controlled HTML can reference internal endpoints
+/// (`<img src="http://169.254.169.254/...">`), and fetched scripts are later
+/// executed, so bypassing the SSRF check here would expose the host network.
 ///
 /// Respects `block_types` — blocked resources are skipped.
 /// Caps concurrent requests at `max_concurrent` (default 6).
 /// Individual resource timeout: 5s. Total timeout: 15s.
 pub async fn fetch_resources(
+    client: &crate::net::HttpClient,
     urls: Vec<ResourceUrl>,
     block_types: &HashSet<ResourceType>,
     max_concurrent: usize,
@@ -137,7 +147,6 @@ pub async fn fetch_resources(
     }
 
     let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(max_concurrent));
-    let client = hpx::Client::new();
 
     let total = tokio::time::timeout(std::time::Duration::from_secs(15), async {
         let mut set = tokio::task::JoinSet::new();
@@ -152,27 +161,21 @@ pub async fn fetch_resources(
                 };
                 let result = tokio::time::timeout(
                     std::time::Duration::from_secs(5),
-                    client.get(&resource.url).send(),
+                    client.request("GET", &resource.url, None, &[], RedirectPolicy::Manual),
                 )
                 .await;
 
                 match result {
                     Ok(Ok(resp)) => {
-                        let content_type = resp
-                            .headers()
-                            .get("content-type")
-                            .and_then(|v| v.to_str().ok())
-                            .map(|s| s.to_string());
-                        let url = resp.uri().to_string();
-                        match resp.text().await {
-                            Ok(text) => Some(LoadedResource {
-                                url,
-                                resource_type: resource.resource_type,
-                                content: text,
-                                content_type,
-                            }),
-                            Err(_) => None,
-                        }
+                        let content_type = resp.headers.get("content-type").map(|s| s.to_string());
+                        let url = resp.url.clone();
+                        let text = resp.text();
+                        Some(LoadedResource {
+                            url,
+                            resource_type: resource.resource_type,
+                            content: text,
+                            content_type,
+                        })
                     }
                     _ => None,
                 }
@@ -540,7 +543,10 @@ mod tests {
             })
             .collect();
 
-        let loaded = fetch_resources(urls, &HashSet::new(), 6).await;
+        let client = crate::net::HttpClient::new(hpx::BrowserProfile::Chrome)
+            .unwrap()
+            .allow_private_network(true);
+        let loaded = fetch_resources(&client, urls, &HashSet::new(), 6).await;
         server.await.unwrap();
 
         assert_eq!(loaded.len(), 3);
@@ -574,7 +580,10 @@ mod tests {
 
         let mut block = HashSet::new();
         block.insert(ResourceType::Stylesheet);
-        let loaded = fetch_resources(urls, &block, 6).await;
+        let client = crate::net::HttpClient::new(hpx::BrowserProfile::Chrome)
+            .unwrap()
+            .allow_private_network(true);
+        let loaded = fetch_resources(&client, urls, &block, 6).await;
 
         assert!(loaded.is_empty());
         // server never got a connection since it was blocked
@@ -582,7 +591,10 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_resources_empty_input() {
-        let loaded = fetch_resources(vec![], &HashSet::new(), 6).await;
+        let client = crate::net::HttpClient::new(hpx::BrowserProfile::Chrome)
+            .unwrap()
+            .allow_private_network(true);
+        let loaded = fetch_resources(&client, vec![], &HashSet::new(), 6).await;
         assert!(loaded.is_empty());
     }
 }

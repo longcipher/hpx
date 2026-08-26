@@ -288,6 +288,7 @@ webpki-root-certs = { workspace = true, optional = true }
 
 [dev-dependencies]
 axum = { workspace = true, features = ["ws"] }
+base64-simd = { workspace = true }
 criterion = { workspace = true }
 futures = { workspace = true, features = ["std"] }
 hyper = { workspace = true, features = ["http1", "http2", "server"] }
@@ -300,6 +301,7 @@ hyper-util = { workspace = true, features = [
 ] }
 proptest.workspace = true
 serde = { workspace = true, features = ["derive"] }
+sha1 = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tokio-test = { workspace = true }
 tower = { workspace = true, features = ["limit"] }

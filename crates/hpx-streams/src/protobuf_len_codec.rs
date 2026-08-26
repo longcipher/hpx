@@ -14,11 +14,20 @@ pub(crate) struct ProtobufLenPrefixCodec<T> {
 #[derive(Clone, Debug)]
 struct ProtobufCursor {
     current_obj_len: usize,
+    /// Whether `current_obj_len` holds a decoded length prefix.
+    ///
+    /// Using `current_obj_len == 0` as the "not yet read" sentinel silently
+    /// swallowed legitimate zero-length messages and desynchronized the
+    /// stream; an explicit flag keeps those states distinct.
+    have_len: bool,
 }
 
 impl<T> ProtobufLenPrefixCodec<T> {
     pub(crate) const fn new_with_max_length(max_length: usize) -> Self {
-        let initial_cursor = ProtobufCursor { current_obj_len: 0 };
+        let initial_cursor = ProtobufCursor {
+            current_obj_len: 0,
+            have_len: false,
+        };
 
         Self {
             max_length,
@@ -37,36 +46,52 @@ where
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<T>, StreamBodyError> {
-        let buf_len = buf.len();
-        if buf_len == 0 {
-            return Ok(None);
-        }
-
-        if self.cursor.current_obj_len == 0 {
+        // No length prefix read yet: we need at least one byte to start.
+        if !self.cursor.have_len {
+            if buf.is_empty() {
+                return Ok(None);
+            }
+            let buf_len = buf.len();
             let bytes = buf.chunk();
             let byte = bytes[0];
             if byte < 0x80 {
                 buf.advance(1);
                 self.cursor.current_obj_len = u64::from(byte) as usize;
+                self.cursor.have_len = true;
             } else if buf_len > 10 || bytes[buf_len - 1] < 0x80 {
                 let (value, advance) = decode_varint_slice(bytes)?;
                 buf.advance(advance);
-                self.cursor.current_obj_len = value as usize;
+                self.cursor.current_obj_len = usize::try_from(value).map_err(|_| {
+                    StreamBodyError::new(
+                        StreamBodyKind::MaxLenReachedError,
+                        None,
+                        Some("length prefix exceeds addressable size".into()),
+                    )
+                })?;
+                self.cursor.have_len = true;
             }
-            Ok(None)
-        } else if self.cursor.current_obj_len > self.max_length {
-            Err(StreamBodyError::new(
+            // Either we just read the prefix (have_len=true) or a multi-byte
+            // varint is still incomplete; in both cases wait for more data
+            // before attempting to yield a message.
+            return Ok(None);
+        }
+
+        // have_len == true: a length prefix is known; wait for the full body.
+        if self.cursor.current_obj_len > self.max_length {
+            return Err(StreamBodyError::new(
                 StreamBodyKind::MaxLenReachedError,
                 None,
                 Some("Max object length reached".into()),
-            ))
-        } else if buf_len >= self.cursor.current_obj_len {
+            ));
+        }
+        if buf.len() >= self.cursor.current_obj_len {
             let obj_bytes = buf.copy_to_bytes(self.cursor.current_obj_len);
             let result: Result<Option<T>, StreamBodyError> =
                 prost::Message::decode(obj_bytes).map(Some).map_err(|err| {
                     StreamBodyError::new(StreamBodyKind::CodecError, Some(Box::new(err)), None)
                 });
             self.cursor.current_obj_len = 0;
+            self.cursor.have_len = false;
             result
         } else {
             Ok(None)
@@ -74,22 +99,21 @@ where
     }
 
     fn decode_eof(&mut self, buf: &mut BytesMut) -> Result<Option<T>, StreamBodyError> {
-        if !buf.is_empty() {
-            match self.decode(buf) {
-                Ok(Some(item)) => Ok(Some(item)),
-                Ok(None) => {
-                    // Buffer has data but decode returned None, meaning the varint length
-                    // prefix or the message body is incomplete at EOF.
-                    Err(StreamBodyError::new(
-                        StreamBodyKind::CodecError,
-                        None,
-                        Some("incomplete varint length prefix at EOF".into()),
-                    ))
-                }
-                Err(e) => Err(e),
+        if buf.is_empty() {
+            return Ok(None);
+        }
+        match self.decode(buf) {
+            Ok(Some(item)) => Ok(Some(item)),
+            Ok(None) => {
+                // Buffer has data but decode returned None, meaning the varint length
+                // prefix or the message body is incomplete at EOF.
+                Err(StreamBodyError::new(
+                    StreamBodyKind::CodecError,
+                    None,
+                    Some("incomplete varint length prefix at EOF".into()),
+                ))
             }
-        } else {
-            Ok(None)
+            Err(e) => Err(e),
         }
     }
 }
@@ -297,24 +321,45 @@ mod tests {
     }
 
     #[test]
-    fn empty_message() {
-        // Empty message: varint=0 followed by 0 bytes of body.
-        // The codec requires two decode calls: first reads varint, second reads body.
-        // Note: when body length is 0, the second decode may need the buffer to contain
-        // at least one additional byte (or use decode_eof) to trigger the body read path.
-        let msg = TestMsg {
-            name: String::new(),
-            value: 0,
-        };
+    fn zero_length_message_is_delivered() {
+        // Empty message: varint=0 followed by 0 bytes of body. The message
+        // must be delivered, not silently dropped.
+        let msg = TestMsg::default();
         let data = encode_len_prefixed(&msg);
         let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(1024);
         let mut buf = BytesMut::from(&data[..]);
-        // First decode reads varint
-        let _ = codec.decode(&mut buf);
-        // Use decode_eof to flush the empty body
-        let result = codec.decode_eof(&mut buf);
-        // At minimum, verify no panic occurs
-        let _ = result;
+        // First decode reads the varint length prefix.
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+        // Second decode yields the zero-length message.
+        assert_eq!(codec.decode(&mut buf).unwrap(), Some(msg));
+    }
+
+    #[test]
+    fn zero_length_message_does_not_desync_stream() {
+        // A zero-length message followed by a normal one: the stream must
+        // stay aligned (the empty message previously consumed the next
+        // message's length prefix).
+        let first = TestMsg::default();
+        let second = TestMsg {
+            name: "after".into(),
+            value: 2,
+        };
+        let mut data = encode_len_prefixed(&first);
+        data.extend_from_slice(&encode_len_prefixed(&second));
+
+        let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(1024);
+        let mut buf = BytesMut::from(&data[..]);
+
+        let mut decoded = Vec::new();
+        while decoded.len() < 2 {
+            match codec.decode(&mut buf).expect("decode") {
+                Some(msg) => decoded.push(msg),
+                None if buf.is_empty() => break,
+                None => continue,
+            }
+        }
+
+        assert_eq!(decoded, vec![first, second]);
     }
 
     #[test]

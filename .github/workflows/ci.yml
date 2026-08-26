@@ -25,10 +25,11 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      # Only tools actually invoked by the Justfile recipes below.
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,cargo-hack,cargo-machete,cargo-shear,taplo-cli,typos-cli,rumdl,cargo-nextest
-      
+          tool: just,cargo-shear,rumdl,cargo-nextest
+
       - name: Install cargo-sort
         run: cargo install cargo-sort
 
@@ -40,3 +41,14 @@ jobs:
 
       - name: Check features
         run: just check-feature
+
+  supply-chain:
+    name: Supply Chain (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      # Fails on RUSTSEC vulnerabilities (and license/ban policy per deny.toml).
+      - uses: EmbarkStudios/cargo-deny-action@v2

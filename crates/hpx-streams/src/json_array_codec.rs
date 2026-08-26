@@ -602,7 +602,6 @@ mod tests {
 ///
 /// When the `simd-json` feature is enabled, `simd_buf` is used as a reusable scratch buffer
 /// to avoid allocating a new `Vec` on every call.
-#[allow(unused_variables)]
 fn parse_json_slice<T>(
     obj_slice: &[u8],
     #[cfg(feature = "simd-json")] simd_buf: &mut Vec<u8>,

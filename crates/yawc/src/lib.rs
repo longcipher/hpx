@@ -136,6 +136,13 @@ pub enum WebSocketError {
     #[cfg(not(target_arch = "wasm32"))]
     InvalidUpgradeHeader,
 
+    /// The server's `Sec-WebSocket-Accept` value did not match the expected
+    /// digest of the client key (RFC 6455 §4.1). The handshake response may
+    /// be forged or come from a non-WebSocket peer.
+    #[error("Invalid Sec-WebSocket-Accept header")]
+    #[cfg(not(target_arch = "wasm32"))]
+    InvalidSecWebSocketAccept,
+
     /// Missing or invalid "Connection: upgrade" header.
     #[error("Invalid connection header")]
     #[cfg(not(target_arch = "wasm32"))]

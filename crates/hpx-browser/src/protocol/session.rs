@@ -69,31 +69,27 @@ impl CdpSession {
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
 
+                    // Build responses with serde_json instead of string
+                    // interpolation: hand-rolled escaping produced invalid
+                    // JSON for values like `NaN`, and diverged from the
+                    // `Runtime.callFunctionOn` value semantics.
                     let resp_json = if return_by_value {
                         let raw_value = match ty {
-                            "number" | "boolean" => result_str.clone(),
-                            "undefined" => "null".to_string(),
-                            _ => {
-                                if serde_json::from_str::<serde_json::Value>(&result_str).is_ok() {
-                                    result_str.clone()
-                                } else {
-                                    json_escape_string(&result_str)
-                                }
-                            }
+                            "undefined" => serde_json::Value::Null,
+                            _ => serde_json::from_str::<serde_json::Value>(&result_str)
+                                .unwrap_or_else(|_| serde_json::Value::String(result_str.clone())),
                         };
-                        format!(
-                            r#"{{"id":{},"result":{{"result":{{"type":"{}","value":{}}}}}}}"#,
-                            req.id, ty, raw_value
-                        )
+                        serde_json::json!({
+                            "id": req.id,
+                            "result": { "result": { "type": ty, "value": raw_value } }
+                        })
                     } else {
-                        format!(
-                            r#"{{"id":{},"result":{{"type":"{}","value":{}}}}}"#,
-                            req.id,
-                            ty,
-                            json_escape_string(&result_str)
-                        )
+                        serde_json::json!({
+                            "id": req.id,
+                            "result": { "type": ty, "value": result_str }
+                        })
                     };
-                    (resp_json, Vec::new())
+                    (to_json(&resp_json), Vec::new())
                 }
                 Err(e) => {
                     let resp = to_json(&serde_json::json!({
@@ -130,110 +126,7 @@ impl CdpSession {
                 self.enable_domain("Page");
                 Ok(serde_json::json!({}))
             }
-            "Page.navigate" => {
-                let url = req
-                    .params
-                    .get("url")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("about:blank");
-                let loader_id = self.next_loader_id();
-
-                // 1. Page.frameNavigated — emitted before navigation starts.
-                if self.is_domain_enabled("Page") {
-                    events.push(CdpEvent::new(
-                        "Page.frameNavigated",
-                        serde_json::json!({
-                            "frame": {
-                                "id": self.frame_id,
-                                "loaderId": loader_id,
-                                "url": url,
-                                "securityOrigin": url,
-                                "mimeType": "text/html",
-                            }
-                        }),
-                    ));
-                }
-
-                // 2. Network.requestWillBeSent — main document request.
-                if self.is_domain_enabled("Network") {
-                    let request_id = self.next_request_id();
-                    events.push(CdpEvent::new(
-                        "Network.requestWillBeSent",
-                        serde_json::json!({
-                            "requestId": request_id,
-                            "loaderId": loader_id,
-                            "documentURL": url,
-                            "request": {
-                                "url": url,
-                                "method": "GET",
-                                "headers": {},
-                            },
-                            "timestamp": timestamp(),
-                            "wallTime": timestamp(),
-                            "type": "Document",
-                        }),
-                    ));
-
-                    // 3. Network.responseReceived — main document response.
-                    events.push(CdpEvent::new(
-                        "Network.responseReceived",
-                        serde_json::json!({
-                            "requestId": request_id,
-                            "loaderId": loader_id,
-                            "timestamp": timestamp(),
-                            "type": "Document",
-                            "response": {
-                                "url": url,
-                                "status": 200,
-                                "statusText": "OK",
-                                "headers": {},
-                                "mimeType": "text/html",
-                            },
-                        }),
-                    ));
-
-                    // Network loading finished for main document.
-                    events.push(CdpEvent::new(
-                        "Network.loadingFinished",
-                        serde_json::json!({
-                            "requestId": request_id,
-                            "timestamp": timestamp(),
-                        }),
-                    ));
-                }
-
-                // 4. Actually perform the navigation (fetch + parse + sub-resources).
-                // ponytail: about:blank skips network fetch — just emits lifecycle events.
-                // data: URLs are parsed directly without network fetch.
-                let nav_result = if url == "about:blank" {
-                    Ok(())
-                } else if let Some(html_payload) = url.strip_prefix("data:text/html,") {
-                    page.reload_html(html_payload, url);
-                    Ok(())
-                } else {
-                    page.navigate(url).await
-                };
-
-                // 5. Post-navigation lifecycle events.
-                if self.is_domain_enabled("Page") {
-                    events.push(CdpEvent::new(
-                        "Page.domContentEventFired",
-                        serde_json::json!({ "timestamp": timestamp() }),
-                    ));
-                    events.push(CdpEvent::new(
-                        "Page.loadEventFired",
-                        serde_json::json!({ "timestamp": timestamp() }),
-                    ));
-                }
-
-                match nav_result {
-                    Ok(()) => Ok(serde_json::json!({
-                        "frameId": self.frame_id,
-                        "loaderId": loader_id,
-                    })),
-                    Err(e) => Err(e.to_string()),
-                }
-            }
+            "Page.navigate" => self.handle_page_navigate(page, req, &mut events).await,
             "Page.getFrameTree" => Ok(serde_json::json!({
                 "frameTree": {
                     "frame": {
@@ -401,6 +294,118 @@ impl CdpSession {
         match result {
             Ok(value) => (to_json(&CdpResponse::ok(req.id, value)), events),
             Err(msg) => (to_json(&CdpError::internal(req.id, &msg)), events),
+        }
+    }
+
+    /// Handle `Page.navigate`: emit pre/post lifecycle events, perform the
+    /// navigation (fetch + parse + sub-resources), and build the response.
+    async fn handle_page_navigate(
+        &mut self,
+        page: &mut Page,
+        req: &CdpRequest,
+        events: &mut Vec<CdpEvent>,
+    ) -> Result<serde_json::Value, String> {
+        let url = req
+            .params
+            .get("url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("about:blank");
+        let loader_id = self.next_loader_id();
+
+        // 1. Page.frameNavigated — emitted before navigation starts.
+        if self.is_domain_enabled("Page") {
+            events.push(CdpEvent::new(
+                "Page.frameNavigated",
+                serde_json::json!({
+                    "frame": {
+                        "id": self.frame_id,
+                        "loaderId": loader_id,
+                        "url": url,
+                        "securityOrigin": url,
+                        "mimeType": "text/html",
+                    }
+                }),
+            ));
+        }
+
+        // 2. Network.requestWillBeSent — main document request.
+        if self.is_domain_enabled("Network") {
+            let request_id = self.next_request_id();
+            events.push(CdpEvent::new(
+                "Network.requestWillBeSent",
+                serde_json::json!({
+                    "requestId": request_id,
+                    "loaderId": loader_id,
+                    "documentURL": url,
+                    "request": {
+                        "url": url,
+                        "method": "GET",
+                        "headers": {},
+                    },
+                    "timestamp": timestamp(),
+                    "wallTime": timestamp(),
+                    "type": "Document",
+                }),
+            ));
+
+            // 3. Network.responseReceived — main document response.
+            events.push(CdpEvent::new(
+                "Network.responseReceived",
+                serde_json::json!({
+                    "requestId": request_id,
+                    "loaderId": loader_id,
+                    "timestamp": timestamp(),
+                    "type": "Document",
+                    "response": {
+                        "url": url,
+                        "status": 200,
+                        "statusText": "OK",
+                        "headers": {},
+                        "mimeType": "text/html",
+                    },
+                }),
+            ));
+
+            // Network loading finished for main document.
+            events.push(CdpEvent::new(
+                "Network.loadingFinished",
+                serde_json::json!({
+                    "requestId": request_id,
+                    "timestamp": timestamp(),
+                }),
+            ));
+        }
+
+        // 4. Actually perform the navigation (fetch + parse + sub-resources).
+        // about:blank skips network fetch — just emits lifecycle events.
+        // data: URLs are parsed directly without network fetch.
+        let nav_result = if url == "about:blank" {
+            Ok(())
+        } else if let Some(html_payload) = url.strip_prefix("data:text/html,") {
+            page.reload_html(html_payload, url);
+            Ok(())
+        } else {
+            page.navigate(url).await
+        };
+
+        // 5. Post-navigation lifecycle events.
+        if self.is_domain_enabled("Page") {
+            events.push(CdpEvent::new(
+                "Page.domContentEventFired",
+                serde_json::json!({ "timestamp": timestamp() }),
+            ));
+            events.push(CdpEvent::new(
+                "Page.loadEventFired",
+                serde_json::json!({ "timestamp": timestamp() }),
+            ));
+        }
+
+        match nav_result {
+            Ok(()) => Ok(serde_json::json!({
+                "frameId": self.frame_id,
+                "loaderId": loader_id,
+            })),
+            Err(e) => Err(e.to_string()),
         }
     }
 }

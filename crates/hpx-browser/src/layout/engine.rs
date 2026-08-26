@@ -1,3 +1,4 @@
+use blitz_dom::NodeId as BlitzNodeId;
 use blitz_traits::shell::Viewport;
 
 use crate::{
@@ -45,7 +46,7 @@ impl LayoutEngine {
         let Some(node) = inner.get_node(node_id.to_blitz()) else {
             return DOMRect::default();
         };
-        let layout = node.final_layout;
+        let layout = node.final_layout();
         let (abs_x, abs_y) = self.absolute_position(inner, node_id.to_blitz());
         DOMRect::new(
             abs_x as f64,
@@ -87,12 +88,16 @@ impl LayoutEngine {
         self.node_position(dom, node_id).0
     }
 
-    fn absolute_position(&self, inner: &blitz_dom::BaseDocument, node_id: usize) -> (f32, f32) {
+    fn absolute_position(
+        &self,
+        inner: &blitz_dom::BaseDocument,
+        node_id: BlitzNodeId,
+    ) -> (f32, f32) {
         let mut x = 0.0f32;
         let mut y = 0.0f32;
         let mut current_id = node_id;
         while let Some(node) = inner.get_node(current_id) {
-            let layout = node.final_layout;
+            let layout = node.final_layout();
             x += layout.location.x;
             y += layout.location.y;
             match node.parent {
@@ -108,7 +113,7 @@ impl LayoutEngine {
         let Some(node) = inner.get_node(node_id.to_blitz()) else {
             return (0.0, 0.0);
         };
-        let layout = node.final_layout;
+        let layout = node.final_layout();
         (layout.size.width as f64, layout.size.height as f64)
     }
 
@@ -117,7 +122,7 @@ impl LayoutEngine {
         let Some(node) = inner.get_node(node_id.to_blitz()) else {
             return (0.0, 0.0);
         };
-        let layout = node.final_layout;
+        let layout = node.final_layout();
         (layout.location.x as f64, layout.location.y as f64)
     }
 }
@@ -479,9 +484,9 @@ mod tests {
                         n.data,
                         BlitzNodeData::Element(_)
                             | BlitzNodeData::AnonymousBlock(_)
-                            | BlitzNodeData::Document
+                            | BlitzNodeData::Document(_)
                     ) {
-                        let l = n.final_layout;
+                        let l = n.final_layout();
                         format!(
                             "({:.0},{:.0} {:.0}x{:.0})",
                             l.location.x, l.location.y, l.size.width, l.size.height

@@ -101,6 +101,7 @@ impl Browser {
             "Target.setAutoAttach",
             Some(serde_json::json!({
                 "autoAttach": true,
+                "waitForDebuggerOnStart": false,
                 "flatten": true
             })),
         )
@@ -234,6 +235,33 @@ pub enum BrowserError {
 /// # Errors
 ///
 /// Returns [`BrowserError`] if Chrome cannot be found, spawned, or connected to.
+/// RAII guard that kills the spawned Chrome process on any early-return path
+/// between spawn and successful hand-off to [`Browser`] (DevTools-URL timeout,
+/// channel closure, CDP connect failure), preventing orphaned browsers.
+struct ChildGuard(Option<Child>);
+
+impl ChildGuard {
+    fn new(child: Child) -> Self {
+        Self(Some(child))
+    }
+
+    /// Transfer ownership of the child out of the guard, cancelling cleanup.
+    fn release(&mut self) -> Option<Child> {
+        self.0.take()
+    }
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if let Some(child) = self.0.as_mut() {
+            // `kill` sends SIGKILL and reaps, so no zombie remains.
+            if let Err(err) = child.kill() {
+                tracing::debug!(%err, "failed to kill leaked Chrome child");
+            }
+        }
+    }
+}
+
 #[cfg(feature = "cdp")]
 pub async fn launch_chrome(config: BrowserConfig) -> Result<Browser, BrowserError> {
     let chrome_path = find_chrome()?;
@@ -253,16 +281,23 @@ pub async fn launch_chrome(config: BrowserConfig) -> Result<Browser, BrowserErro
 
     args.extend(config.args);
 
-    let mut child = Command::new(&chrome_path)
+    let child = Command::new(&chrome_path)
         .args(&args)
         .stderr(Stdio::piped())
         .stdout(Stdio::null())
         .stdin(Stdio::null())
         .spawn()?;
 
-    let stderr = child.stderr.take().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::Other, "failed to capture stderr")
-    })?;
+    // From spawn onward every error path must tear the process down.
+    let mut child_guard = ChildGuard::new(child);
+
+    let stderr = child_guard
+        .0
+        .as_mut()
+        .and_then(|child| child.stderr.take())
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::Other, "failed to capture stderr")
+        })?;
 
     let (url_tx, url_rx) = tokio::sync::oneshot::channel();
 
@@ -301,6 +336,7 @@ pub async fn launch_chrome(config: BrowserConfig) -> Result<Browser, BrowserErro
         "Target.setAutoAttach",
         Some(serde_json::json!({
             "autoAttach": true,
+            "waitForDebuggerOnStart": false,
             "flatten": true
         })),
     )
@@ -310,7 +346,7 @@ pub async fn launch_chrome(config: BrowserConfig) -> Result<Browser, BrowserErro
     Ok(Browser {
         cdp,
         pages: Arc::new(RwLock::new(Vec::new())),
-        child: Some(child),
+        child: child_guard.release(),
     })
 }
 

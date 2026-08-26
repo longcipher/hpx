@@ -164,7 +164,6 @@ impl JsonStreamResponse for hpx::Response {
 ///
 /// When the `simd-json` feature is enabled, `simd_buf` is used as a reusable scratch buffer
 /// to avoid allocating a new `Vec` on every call.
-#[allow(unused_variables)]
 fn parse_json_line<T>(
     s: &str,
     #[cfg(feature = "simd-json")] simd_buf: &mut Vec<u8>,

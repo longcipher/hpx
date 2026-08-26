@@ -578,7 +578,11 @@ impl Page {
         if filtered.is_empty() {
             return Ok(());
         }
-        let loaded = fetch_resources(filtered, &self.subresource_block_types, 6).await;
+        // Route subresources through the SSRF-guarded client so private
+        // networks referenced by page markup are rejected like main-document
+        // navigations are.
+        let client = HttpClient::new(hpx::BrowserProfile::Chrome).map_err(PageError::Net)?;
+        let loaded = fetch_resources(&client, filtered, &self.subresource_block_types, 6).await;
 
         let styles: Vec<_> = loaded
             .iter()

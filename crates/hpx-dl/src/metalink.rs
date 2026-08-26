@@ -72,7 +72,7 @@ pub fn parse_metalink(xml: &[u8]) -> Result<Vec<MetalinkFile>, DownloadError> {
                 match local_name.as_str() {
                     "file" => {
                         in_file = true;
-                        current_name = extract_attr(e, b"name").unwrap_or_default();
+                        current_name = extract_attr(e, "name").unwrap_or_default();
                         current_size = None;
                         current_urls.clear();
                         current_hashes.clear();
@@ -80,11 +80,11 @@ pub fn parse_metalink(xml: &[u8]) -> Result<Vec<MetalinkFile>, DownloadError> {
                     "url" if in_file => {
                         current_element = ElementKind::Url;
                         current_url_priority =
-                            extract_attr(e, b"priority").and_then(|v| v.parse().ok());
+                            extract_attr(e, "priority").and_then(|v| v.parse().ok());
                     }
                     "hash" if in_file => {
                         current_element = ElementKind::Hash;
-                        current_hash_type = extract_attr(e, b"type");
+                        current_hash_type = extract_attr(e, "type");
                     }
                     "size" if in_file => {
                         current_element = ElementKind::Size;
@@ -95,7 +95,7 @@ pub fn parse_metalink(xml: &[u8]) -> Result<Vec<MetalinkFile>, DownloadError> {
             Ok(Event::Empty(ref e)) => {
                 let local_name = resolve_local_name(e.name());
                 if local_name.as_str() == "file" {
-                    let name = extract_attr(e, b"name").unwrap_or_default();
+                    let name = extract_attr(e, "name").unwrap_or_default();
                     // Self-closing <file/> — push immediately
                     files.push(MetalinkFile {
                         name,
@@ -126,13 +126,13 @@ pub fn parse_metalink(xml: &[u8]) -> Result<Vec<MetalinkFile>, DownloadError> {
                 }
             }
             Ok(Event::Text(ref e)) => {
-                let text = e.decode().map_err(|err| {
-                    DownloadError::MetalinkParse(format!("text decode error: {err}"))
-                })?;
+                // quick-xml 0.42 stores text as validated UTF-8, so it
+                // derefs to `&str` directly (no `decode()` round-trip).
+                let text: &str = e;
                 match current_element {
                     ElementKind::Url if in_file => {
                         current_urls.push(MetalinkUrl {
-                            url: text.into_owned(),
+                            url: text.to_string(),
                             priority: current_url_priority,
                         });
                     }
@@ -141,7 +141,7 @@ pub fn parse_metalink(xml: &[u8]) -> Result<Vec<MetalinkFile>, DownloadError> {
                             if let Some(algorithm) = map_hash_algorithm(hash_type) {
                                 current_hashes.push(ChecksumSpec {
                                     algorithm,
-                                    expected: text.into_owned(),
+                                    expected: text.to_string(),
                                 });
                             } else {
                                 warn!(hash_type = %hash_type, "unsupported hash algorithm in metalink");
@@ -218,7 +218,8 @@ enum ElementKind {
 
 /// Strip an optional namespace prefix and return the local element name.
 fn resolve_local_name(name: quick_xml::name::QName<'_>) -> String {
-    let raw = std::str::from_utf8(name.into_inner()).unwrap_or("");
+    // `QName::into_inner` yields the full (possibly prefixed) name as `&str`.
+    let raw: &str = name.into_inner();
     if let Some(pos) = raw.rfind(':') {
         raw[pos + 1..].to_string()
     } else {
@@ -227,18 +228,17 @@ fn resolve_local_name(name: quick_xml::name::QName<'_>) -> String {
 }
 
 /// Extract an attribute value by its local name, ignoring namespace prefixes.
-fn extract_attr(event: &quick_xml::events::BytesStart<'_>, attr_name: &[u8]) -> Option<String> {
+fn extract_attr(event: &quick_xml::events::BytesStart<'_>, attr_name: &str) -> Option<String> {
     for attr in event.attributes().flatten() {
-        let key = attr.key;
-        let local = if let Some(pos) = key.into_inner().iter().rposition(|&b| b == b':') {
-            &key.into_inner()[pos + 1..]
+        let key: &str = attr.key.into_inner();
+        let local = if let Some(pos) = key.rfind(':') {
+            &key[pos + 1..]
         } else {
-            key.into_inner()
+            key
         };
         if local == attr_name {
-            return std::str::from_utf8(&attr.value)
-                .ok()
-                .map(std::string::ToString::to_string);
+            // `attr.value` is now `Cow<'_, str>` in quick-xml 0.42.
+            return Some(attr.value.into_owned());
         }
     }
     None

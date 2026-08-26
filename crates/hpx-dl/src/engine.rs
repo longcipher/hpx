@@ -438,14 +438,41 @@ impl EngineInner {
         id: DownloadId,
         state: DownloadState,
     ) -> Result<(), DownloadError> {
-        let entry = self
-            .update_entry(id, |entry| {
-                entry.state = state;
-                if state != DownloadState::Failed {
-                    entry.last_error = None;
-                }
-            })
-            .await?;
+        // Validate the transition inside the atomic update so concurrent
+        // pause/remove cannot slip a state change in between check and write.
+        let mut rejected_from: Option<DownloadState> = None;
+        // `update_sync` returns `Option<R>` where `R` is the closure's return
+        // type (`Option<DownloadEntry>` here); `None` from the outer wrapper
+        // means the key was absent, while an inner `None` means rejected.
+        let updated = self.downloads.update_sync(&id, |_, entry| {
+            if !is_valid_transition(entry.state, state) {
+                rejected_from = Some(entry.state);
+                return None;
+            }
+            entry.state = state;
+            if state != DownloadState::Failed {
+                entry.last_error = None;
+            }
+            entry.touch();
+            Some(entry.clone())
+        });
+
+        let inner = match updated {
+            Some(inner) => inner,
+            None => return Err(DownloadError::NotFound(id.0)),
+        };
+        let entry = if let Some(entry) = inner {
+            entry
+        } else {
+            let actual = rejected_from.unwrap_or(state);
+            return Err(DownloadError::InvalidState {
+                expected: state.to_string(),
+                actual: actual.to_string(),
+            });
+        };
+
+        let record = entry.to_record(id);
+        Arc::clone(&self.persistence).upsert_async(record).await?;
 
         let _ = self.events.emit(DownloadEvent::StateChanged {
             id,
@@ -872,7 +899,12 @@ impl EngineInner {
         let remote = tokio::time::timeout(self.config.probe_timeout, probe)
             .await
             .map_err(|_| DownloadError::Timeout(self.config.probe_timeout))??;
-        let total_bytes = remote.content_length.unwrap_or(0);
+        // A missing Content-Length (chunked responses, proxies that strip the
+        // header) means the size is genuinely unknown. Treating it as 0 would
+        // silently produce an empty file marked Completed.
+        let Some(total_bytes) = remote.content_length else {
+            return Err(DownloadError::UnknownContentLength);
+        };
         let max_connections = request
             .max_connections
             .unwrap_or(self.config.max_connections_per_download)
@@ -1366,6 +1398,39 @@ const fn is_active_state(state: DownloadState) -> bool {
     )
 }
 
+/// Validate a download lifecycle transition.
+///
+/// The state machine is enforced centrally here instead of by caller
+/// convention. Rules:
+/// - `Completed` is terminal: no outgoing transitions.
+/// - Forward progress: `Queued -> Connecting -> Downloading` (with a
+///   `Queued -> Downloading` shortcut for single-shot flows).
+/// - Active states may pause or fail.
+/// - `Paused`/`Failed` may only be re-queued.
+/// - Same-state transitions are valid no-ops so mirror failover can re-enter
+///   `Connecting` for the next candidate URL.
+const fn is_valid_transition(from: DownloadState, to: DownloadState) -> bool {
+    use DownloadState::{Completed, Connecting, Downloading, Failed, Paused, Queued};
+
+    if matches!(from, Completed) {
+        return false;
+    }
+
+    match (from, to) {
+        (Queued, Connecting | Downloading) => true,
+        (Connecting, Downloading | Paused | Failed) => true,
+        (Downloading, Paused | Failed) => true,
+        (Paused | Failed, Queued) => true,
+        // Same-state no-op re-entry for non-terminal states.
+        (Queued, Queued)
+        | (Connecting, Connecting)
+        | (Downloading, Downloading)
+        | (Paused, Paused)
+        | (Failed, Failed) => true,
+        _ => false,
+    }
+}
+
 fn build_client(
     base: &hpx::Client,
     proxy: Option<&crate::types::ProxyConfig>,
@@ -1846,5 +1911,126 @@ mod tests {
         // only rejects `..` escape attempts.
         let result = validate_download_path(Path::new("/"));
         assert!(result.is_ok(), "should accept root path");
+    }
+
+    // --- State transition table tests ---
+
+    #[test]
+    fn transition_table_allows_forward_progress() {
+        assert!(is_valid_transition(
+            DownloadState::Queued,
+            DownloadState::Connecting
+        ));
+        assert!(is_valid_transition(
+            DownloadState::Queued,
+            DownloadState::Downloading
+        ));
+        assert!(is_valid_transition(
+            DownloadState::Connecting,
+            DownloadState::Downloading
+        ));
+    }
+
+    #[test]
+    fn transition_table_allows_pause_fail_and_requeue() {
+        assert!(is_valid_transition(
+            DownloadState::Connecting,
+            DownloadState::Paused
+        ));
+        assert!(is_valid_transition(
+            DownloadState::Downloading,
+            DownloadState::Failed
+        ));
+        assert!(is_valid_transition(
+            DownloadState::Paused,
+            DownloadState::Queued
+        ));
+        assert!(is_valid_transition(
+            DownloadState::Failed,
+            DownloadState::Queued
+        ));
+    }
+
+    #[test]
+    fn transition_table_rejects_invalid_jumps() {
+        assert!(!is_valid_transition(
+            DownloadState::Queued,
+            DownloadState::Completed
+        ));
+        assert!(!is_valid_transition(
+            DownloadState::Paused,
+            DownloadState::Downloading
+        ));
+        assert!(!is_valid_transition(
+            DownloadState::Failed,
+            DownloadState::Connecting
+        ));
+        assert!(!is_valid_transition(
+            DownloadState::Queued,
+            DownloadState::Failed
+        ));
+    }
+
+    #[test]
+    fn completed_is_terminal() {
+        for state in [
+            DownloadState::Queued,
+            DownloadState::Connecting,
+            DownloadState::Downloading,
+            DownloadState::Paused,
+            DownloadState::Failed,
+            DownloadState::Completed,
+        ] {
+            assert!(
+                !is_valid_transition(DownloadState::Completed, state),
+                "no transition may leave Completed"
+            );
+        }
+    }
+
+    #[test]
+    fn same_state_reentry_allowed_for_non_terminal() {
+        assert!(is_valid_transition(
+            DownloadState::Connecting,
+            DownloadState::Connecting
+        ));
+        assert!(is_valid_transition(
+            DownloadState::Downloading,
+            DownloadState::Downloading
+        ));
+        assert!(!is_valid_transition(
+            DownloadState::Completed,
+            DownloadState::Completed
+        ));
+    }
+
+    #[tokio::test]
+    async fn transition_state_rejects_illegal_transition() {
+        let engine = EngineBuilder::new()
+            .storage(Arc::new(TestStorage::default()))
+            .build()
+            .expect("build engine");
+
+        // Insert directly (bypassing the queue + scheduler) so the probe
+        // cannot race this test's state assertions.
+        let request = DownloadRequest::builder("https://example.com/file.bin", "/tmp/file.bin")
+            .build()
+            .unwrap();
+        let id = DownloadId::new();
+        let _ = engine
+            .inner
+            .downloads
+            .insert_sync(id, DownloadEntry::new(request));
+
+        let err = engine
+            .inner
+            .transition_state(id, DownloadState::Completed)
+            .await
+            .expect_err("Queued -> Completed must be rejected");
+        assert!(matches!(err, DownloadError::InvalidState { .. }));
+
+        // State must remain unchanged after a rejected transition.
+        let status = engine.status(id).expect("status");
+        assert_eq!(status.state, DownloadState::Queued);
     }
 }

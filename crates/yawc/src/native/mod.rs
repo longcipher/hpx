@@ -242,7 +242,10 @@ impl Negotiation {
         );
 
         // configure the decompressor using the assigned role and preferred flags.
-        Some(if role == Role::Server {
+        // The per-frame decompressed output is capped at `max_read_buffer` so a
+        // highly-compressible payload (a "decompression bomb") cannot make a
+        // small frame expand into unbounded memory.
+        let mut decompressor = if role == Role::Server {
             if config.client_no_context_takeover {
                 Decompressor::no_context_takeover()
             } else {
@@ -269,7 +272,9 @@ impl Negotiation {
                 #[cfg(not(feature = "zlib"))]
                 Decompressor::new()
             }
-        })
+        };
+        decompressor = decompressor.with_max_output(self.max_read_buffer);
+        Some(decompressor)
     }
 
     pub(crate) fn compressor(&self, role: Role) -> Option<Compressor> {
@@ -989,12 +994,16 @@ where
 
         let target_url = &url[url::Position::BeforePath..];
 
+        // Retain the client key so the handshake response's
+        // `Sec-WebSocket-Accept` can be verified (RFC 6455 §4.1).
+        let ws_key = generate_key();
+
         let mut req = builder
             .method("GET")
             .uri(target_url)
             .header(header::UPGRADE, "websocket")
             .header(header::CONNECTION, "upgrade")
-            .header(header::SEC_WEBSOCKET_KEY, generate_key())
+            .header(header::SEC_WEBSOCKET_KEY, ws_key.as_str())
             .header(header::SEC_WEBSOCKET_VERSION, "13")
             .body(Empty::<Bytes>::new())
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
@@ -1030,7 +1039,7 @@ where
         .detach();
 
         let mut response = sender.send_request(req).await?;
-        let negotiated = verify(&response, options)?;
+        let negotiated = verify(&response, options, &ws_key)?;
 
         let upgraded = hyper::upgrade::on(&mut response).await?;
         let parts = upgraded.downcast::<TokioIo<S>>().unwrap();
@@ -1347,7 +1356,17 @@ where
 
 // ================ Helper functions ====================
 
-fn verify(response: &Response<Incoming>, options: Options) -> Result<Negotiation> {
+/// Compute the expected `Sec-WebSocket-Accept` value for a client key.
+///
+/// Delegates to the same digest the server side uses
+/// (`base64(SHA1(key || GUID))`, RFC 6455 §4.2.1) so client verification and
+/// server generation can never drift apart.
+#[must_use]
+fn expected_accept(key: &str) -> String {
+    upgrade::sec_websocket_protocol(key.as_bytes())
+}
+
+fn verify(response: &Response<Incoming>, options: Options, key: &str) -> Result<Negotiation> {
     if response.status() != StatusCode::SWITCHING_PROTOCOLS {
         return Err(WebSocketError::InvalidStatusCode(
             response.status().as_u16(),
@@ -1373,6 +1392,18 @@ fn verify(response: &Response<Incoming>, options: Options) -> Result<Negotiation
         .unwrap_or(false)
     {
         return Err(WebSocketError::InvalidConnectionHeader);
+    }
+
+    // RFC 6455 §4.1: the client MUST verify that `Sec-WebSocket-Accept`
+    // matches the digest of the sent key. Without this check any HTTP
+    // endpoint (or an injected/cached 101 response) can complete the
+    // handshake and receive WebSocket frames from a non-WebSocket peer.
+    let accept_ok = headers
+        .get(header::SEC_WEBSOCKET_ACCEPT)
+        .and_then(|h| h.to_str().ok())
+        .is_some_and(|accept| accept == expected_accept(key));
+    if !accept_ok {
+        return Err(WebSocketError::InvalidSecWebSocketAccept);
     }
 
     let extensions = headers
@@ -2377,6 +2408,24 @@ mod tests {
         // Pin the memory-limit constants: 1 MiB payload, 2 MiB read buffer.
         assert_eq!(MAX_PAYLOAD_READ, 1024 * 1024);
         assert_eq!(MAX_READ_BUFFER, 2 * 1024 * 1024);
+    }
+
+    #[test]
+    fn expected_accept_matches_rfc6455_example() {
+        // RFC 6455 §1.3 open-handshake example vector.
+        assert_eq!(
+            expected_accept("dGhlIHNhbXBsZSBub25jZQ=="),
+            "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+        );
+    }
+
+    #[test]
+    fn expected_accept_is_deterministic_and_key_sensitive() {
+        let a = expected_accept("dGhlIHNhbXBsZSBub25jZQ==");
+        let b = expected_accept("dGhlIHNhbXBsZSBub25jZQ==");
+        let c = expected_accept("another-key==");
+        assert_eq!(a, b);
+        assert_ne!(a, c);
     }
 
     #[test]

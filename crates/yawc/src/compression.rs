@@ -517,6 +517,24 @@ impl Decompressor {
         }
     }
 
+    /// Caps the decompressed output a single frame may produce.
+    ///
+    /// When a peer sends a highly-compressible payload (a "decompression
+    /// bomb"), inflating it without a limit can consume unbounded memory even
+    /// though the compressed input respects the payload size limit. Once the
+    /// cap is exceeded, [`Decompressor::decompress`] returns an I/O error and
+    /// the caller should terminate the connection.
+    #[must_use]
+    pub fn with_max_output(mut self, max_output: usize) -> Self {
+        match &mut self.decompressor_type {
+            DecompressorType::Contextual(inflate)
+            | DecompressorType::NoContextTakeover(inflate) => {
+                inflate.max_output = max_output;
+            }
+        }
+        self
+    }
+
     /// Decompresses a compressed data frame.
     ///
     /// This method decompresses the provided input data according to the configured mode
@@ -554,6 +572,13 @@ impl Decompressor {
 struct Inflate {
     output: BytesMut,
     decompress: flate2::Decompress,
+    /// Maximum number of bytes a single `decompress()` call may produce.
+    ///
+    /// Guards against decompression bombs: a small compressed frame can
+    /// expand by orders of magnitude, so the inflated output must be capped
+    /// independently of the (compressed) payload size limit. This bounds the
+    /// *total* payload of one message, not the rolling internal buffer.
+    max_output: usize,
 }
 
 impl Default for Inflate {
@@ -562,6 +587,9 @@ impl Default for Inflate {
         Self {
             output: BytesMut::with_capacity(1024),
             decompress: flate2::Decompress::new(false),
+            // Unbounded by default; production connections install an
+            // explicit limit via `Decompressor::with_max_output`.
+            max_output: usize::MAX,
         }
     }
 }
@@ -582,6 +610,7 @@ impl Inflate {
         Self {
             output: BytesMut::with_capacity(1024),
             decompress: flate2::Decompress::new_with_window_bits(false, window_bits),
+            max_output: usize::MAX,
         }
     }
 
@@ -596,11 +625,15 @@ impl Inflate {
 
     /// Decompresses input data while maintaining decompression context across frames.
     fn decompress(&mut self, input: &[u8], stream_end: bool) -> io::Result<Bytes> {
-        self.write(input)?;
+        // `output` is drained by the caller after each `decompress` (via
+        // `split`), so reset any leftover length accounting here; the
+        // bomb guard below tracks this message's produced bytes only.
+        let start_len = self.output.len();
+        self.write(input, start_len)?;
 
         if stream_end {
             // Add the required 4-byte suffix as per RFC 7692, Section 7.2.2
-            self.write(&[0x0, 0x0, 0xff, 0xff])?;
+            self.write(&[0x0, 0x0, 0xff, 0xff], start_len)?;
             self.flush()
         } else {
             Ok(self.output.split().freeze())
@@ -608,9 +641,15 @@ impl Inflate {
     }
 
     /// Writes compressed input data to the output buffer during decompression.
-    fn write(&mut self, mut input: &[u8]) -> io::Result<()> {
+    ///
+    /// `start_len` is the buffer length at the start of the current message
+    /// (as returned by `decompress`); the bomb guard compares total produced
+    /// bytes (`output.len() - start_len`) against `max_output`, so legitimate
+    /// multi-frame messages are not rejected.
+    fn write(&mut self, mut input: &[u8], start_len: usize) -> io::Result<()> {
         let output = &mut self.output;
         let decompressor = &mut self.decompress;
+        let max_output = self.max_output;
 
         while !input.is_empty() {
             let dst = chunk(output);
@@ -626,6 +665,17 @@ impl Inflate {
             unsafe { output.advance_mut(read) };
 
             input = &input[consumed..];
+
+            // `max_output == 0` means "unbounded" (no cap installed); only
+            // enforce a positive limit so opt-in callers that never set a
+            // bound — or configuration where 0 denotes unlimited — are not
+            // rejected on the first byte.
+            if max_output > 0 && output.len() - start_len > max_output {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("decompressed payload exceeds limit of {max_output} bytes"),
+                ));
+            }
 
             match status {
                 Ok(Status::Ok | Status::BufError | Status::StreamEnd) => {}
@@ -868,6 +918,40 @@ mod tests {
             .decompress(&compressed, true)
             .expect("Decompression failed");
         assert_eq!(decompressed.as_ref(), &data[..]);
+    }
+
+    #[test]
+    fn decompression_bomb_is_capped() {
+        // 1 MiB of zeros compresses to a few KB; a small output cap must abort
+        // inflation instead of materializing the full payload in memory.
+        let data = vec![0u8; 1024 * 1024];
+        let mut compressor = Compressor::new(Compression::default());
+        let compressed = compressor
+            .compress(&data, true)
+            .expect("Compression failed");
+        assert!(
+            compressed.len() < 64 * 1024,
+            "test relies on high compressibility"
+        );
+
+        let mut decompressor = Decompressor::new().with_max_output(16 * 1024);
+        let err = decompressor
+            .decompress(&compressed, true)
+            .expect_err("decompression must hit the output cap");
+        assert!(err.to_string().contains("exceeds limit"));
+    }
+
+    #[test]
+    fn decompression_within_cap_succeeds() {
+        let data = vec![7u8; 4096];
+        let mut compressor = Compressor::new(Compression::default());
+        let compressed = compressor.compress(&data, true).expect("compress");
+
+        let mut decompressor = Decompressor::new().with_max_output(8 * 1024);
+        let out = decompressor
+            .decompress(&compressed, true)
+            .expect("decompress within cap");
+        assert_eq!(&out[..], &data[..]);
     }
 
     #[test]

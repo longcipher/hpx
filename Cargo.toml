@@ -3,7 +3,7 @@ members = ["bin/*", "crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "2.5.20"
+version = "2.5.21"
 edition = "2024"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license = "Apache-2.0"
@@ -199,15 +199,15 @@ all = "warn"
 
 [workspace.dependencies]
 # local crates
-hpx = { path = "crates/hpx", version = "2.5.20" }
-hpx-browser = { path = "crates/hpx-browser", version = "2.5.20" }
-hpx-cli = { path = "bin/hpx-cli", version = "2.5.20" }
-hpx-dl = { path = "crates/hpx-dl", version = "2.5.20" }
-hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.20" }
-hpx-h3 = { path = "crates/hpx-h3", version = "2.5.20" }
-hpx-streams = { path = "crates/hpx-streams", version = "2.5.20" }
-hpx-yawc = { path = "crates/yawc", version = "2.5.20" }
-hpxless = { path = "bin/hpxless", version = "2.5.20" }
+hpx = { path = "crates/hpx", version = "2.5.21" }
+hpx-browser = { path = "crates/hpx-browser", version = "2.5.21" }
+hpx-cli = { path = "bin/hpx-cli", version = "2.5.21" }
+hpx-dl = { path = "crates/hpx-dl", version = "2.5.21" }
+hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.21" }
+hpx-h3 = { path = "crates/hpx-h3", version = "2.5.21" }
+hpx-streams = { path = "crates/hpx-streams", version = "2.5.21" }
+hpx-yawc = { path = "crates/yawc", version = "2.5.21" }
+hpxless = { path = "bin/hpxless", version = "2.5.21" }
 
 # external crates
 ahash = "0.8.12"
@@ -219,10 +219,10 @@ async-trait = "0.1.92"
 axum = "0.8.9"
 axum-core = "0.5.6"
 base64-simd = "0.8.0"
-blitz-dom = "0.3.0-beta.1"
-blitz-html = "0.3.0-beta.1"
-blitz-traits = "0.3.0-beta.1"
-bon = "3.9.3"
+blitz-dom = "0.3.0-beta.2"
+blitz-html = "0.3.0-beta.2"
+blitz-traits = "0.3.0-beta.2"
+bon = "3.10.0"
 boring = "5.2.0"
 brotli = "8.0.4"
 bytes = "1.12.1"
@@ -249,10 +249,10 @@ futures-util = "0.3.34"
 governor = "0.10"
 hickory-resolver = "0.26.1"
 hmac = "0.13.0"
-hotpath = "0.23.2"
+hotpath = "0.24.0"
 http = "1.5.0"
 http-body = "1.1.0"
-http-body-util = "0.1.4"
+http-body-util = "0.1.5"
 http2 = "0.5.20"
 httparse = "1.10.1"
 hyper = "1.11.0"
@@ -269,7 +269,7 @@ mime_guess = "2.0.5"
 moka = { version = "0.12.16", features = ["sync"] }
 openssl = "0.10.81"
 parking_lot = "0.12.5"
-parley = "0.11.0"
+parley = "0.11.1"
 percent-encoding = "2.3.2"
 pin-project-lite = "0.2.17"
 pkcs12 = "0.2.0-pre.0"
@@ -278,7 +278,7 @@ png = "0.18.1"
 proptest = "1.11.0"
 prost = "0.14.4"
 publicsuffix = "2"
-quick-xml = "0.41.0"
+quick-xml = "0.42.0"
 quinn = { version = "0.11.11", default-features = false }
 rand = "0.10.2"
 rand_chacha = "0.10.0"
@@ -297,7 +297,7 @@ serde_json = "1.0.151"
 serde_urlencoded = "0.7.1"
 sha1 = "0.11.0"
 sha2 = "0.11.0"
-simd-json = "0.17.3"
+simd-json = "0.18.1"
 simdutf8 = "0.1.5"
 skia-safe = "0.99.0"
 smallvec = "1.15.2"
@@ -310,7 +310,7 @@ stylo = "0.20.0"
 swash = "0.2.10"
 sync_wrapper = "1.0.2"
 system-configuration = "0.8.0"
-taffy = { version = "0.13.0", default-features = false }
+taffy = { version = "0.14.0", default-features = false }
 tempfile = "3.27.0"
 thiserror = "2.0.20"
 tokio = "1.53.1"
@@ -325,7 +325,7 @@ tower-http = "0.7.0"
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 url = "2.5.8"
-uuid = "1.24.0"
+uuid = "1.25.0"
 want = "0.3.1"
 wasm-bindgen = "0.2.127"
 web-sys = { version = "0.3.104", default-features = false }

@@ -18,7 +18,7 @@ test:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "$(uname)" = "Darwin" ]; then
-        cargo nextest run --workspace
+        cargo nextest run --workspace --all-features
     else
         cargo nextest run --workspace --all-features
     fi
@@ -26,7 +26,7 @@ test-full:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "$(uname)" = "Darwin" ]; then
-        cargo nextest run --workspace
+        cargo nextest run --workspace --all-features
     else
         cargo nextest run --workspace --all-features
     fi

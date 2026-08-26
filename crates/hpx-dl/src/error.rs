@@ -86,4 +86,24 @@ pub enum DownloadError {
     /// An HTTP request or stream read timed out.
     #[error("Request timed out after {0:?}")]
     Timeout(std::time::Duration),
+
+    /// Server answered a range request with an unexpected status code.
+    ///
+    /// Any non-success status (403, 404, 500, ...) means the response body is
+    /// not segment data; writing it into the destination file would corrupt it.
+    #[error("unexpected HTTP status {0} for range request")]
+    UnexpectedStatus(u16),
+
+    /// Segment body length did not match the requested byte range.
+    #[error("segment length mismatch: expected {expected} bytes, got {actual}")]
+    LengthMismatch {
+        /// Expected number of bytes for the segment (`range.len()`).
+        expected: u64,
+        /// Number of bytes actually received.
+        actual: u64,
+    },
+
+    /// Remote server did not provide `Content-Length`; download size unknown.
+    #[error("server did not provide Content-Length; cannot determine download size")]
+    UnknownContentLength,
 }

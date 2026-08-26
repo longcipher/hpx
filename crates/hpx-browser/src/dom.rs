@@ -1,7 +1,8 @@
 use ahash::AHashSet;
 use blitz_dom::{
     Attribute as BlitzAttribute, BaseDocument, DocumentConfig, ElementData as BlitzElementData,
-    Node as BlitzNode, NodeData as BlitzNodeData, QualName as H5QualName, ns,
+    Node as BlitzNode, NodeData as BlitzNodeData, NodeId as BlitzNodeId, QualName as H5QualName,
+    ns,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -44,21 +45,25 @@ impl NodeId {
         Self(v as u64)
     }
 
-    /// Convert to the blitz-dom node id (`usize`).
-    pub(crate) fn to_blitz(self) -> usize {
-        self.0 as usize
+    /// Convert to the blitz-dom node id.
+    ///
+    /// The full 64-bit value (slot index + version) round-trips through
+    /// `BlitzNodeId::from_u64`, so versioned ids stay resolvable across the
+    /// boundary instead of being truncated to a bare slot index.
+    pub(crate) fn to_blitz(self) -> BlitzNodeId {
+        BlitzNodeId::from_u64(self.0)
     }
 
-    /// Wrap a blitz-dom node id (`usize`) in our local newtype.
-    pub(crate) fn from_blitz(id: usize) -> Self {
-        Self(id as u64)
+    /// Wrap a blitz-dom node id in our local newtype.
+    pub(crate) fn from_blitz(id: BlitzNodeId) -> Self {
+        Self(id.as_u64())
     }
 }
 
 /// Iterator over the children of a node, reading directly from the
 /// underlying `BaseDocument` children vec without allocating.
 pub struct ChildrenIter<'a> {
-    iter: std::slice::Iter<'a, usize>,
+    iter: std::slice::Iter<'a, BlitzNodeId>,
 }
 
 impl<'a> Iterator for ChildrenIter<'a> {
@@ -249,11 +254,11 @@ impl<'a> NodeRef<'a> {
     }
 
     pub fn is_comment(&self) -> bool {
-        matches!(self.blitz_data(), Some(BlitzNodeData::Comment))
+        matches!(self.blitz_data(), Some(BlitzNodeData::Comment { .. }))
     }
 
     pub fn is_document(&self) -> bool {
-        matches!(self.blitz_data(), Some(BlitzNodeData::Document))
+        matches!(self.blitz_data(), Some(BlitzNodeData::Document(_)))
     }
 
     pub fn text(&self) -> Option<&'a str> {
@@ -317,8 +322,8 @@ impl<'a> NodeRef<'a> {
         match self.blitz_data() {
             Some(BlitzNodeData::Element(_)) | Some(BlitzNodeData::AnonymousBlock(_)) => 1,
             Some(BlitzNodeData::Text(_)) => 3,
-            Some(BlitzNodeData::Comment) => 8,
-            Some(BlitzNodeData::Document) => 9,
+            Some(BlitzNodeData::Comment { .. }) => 8,
+            Some(BlitzNodeData::Document(_)) => 9,
             None => 0,
         }
     }
@@ -335,8 +340,8 @@ impl<'a> std::fmt::Debug for NodeRef<'a> {
                 write!(f, ">")
             }
             Some(BlitzNodeData::Text(t)) => write!(f, "Text({:?})", t.content),
-            Some(BlitzNodeData::Comment) => write!(f, "Comment"),
-            Some(BlitzNodeData::Document) => write!(f, "Document"),
+            Some(BlitzNodeData::Comment { contents }) => write!(f, "Comment({contents:?})"),
+            Some(BlitzNodeData::Document(_)) => write!(f, "Document"),
             None => write!(f, "NodeRef(<invalid {}>)", self.id.0),
         }
     }
@@ -412,7 +417,9 @@ impl Dom {
         let blitz_attrs: Vec<BlitzAttribute> = attrs.iter().map(|a| a.to_blitz()).collect();
         let h5_name = name.to_h5();
         let elem_data = BlitzElementData::new(h5_name, blitz_attrs);
-        let id = self.inner.create_node(BlitzNodeData::Element(elem_data));
+        let id = self
+            .inner
+            .create_node(BlitzNodeData::Element(Box::new(elem_data)));
         NodeId::from_blitz(id)
     }
 
@@ -421,23 +428,31 @@ impl Dom {
         NodeId::from_blitz(id)
     }
 
-    pub fn create_comment(&mut self, _text: String) -> NodeId {
-        let id = self.inner.create_node(BlitzNodeData::Comment);
+    pub fn create_comment(&mut self, text: String) -> NodeId {
+        let id = self
+            .inner
+            .create_node(BlitzNodeData::Comment { contents: text });
         NodeId::from_blitz(id)
     }
 
     pub fn create_document_fragment(&mut self) -> NodeId {
-        let id = self.inner.create_node(BlitzNodeData::Document);
+        let id = self
+            .inner
+            .create_node(BlitzNodeData::Document(Box::default()));
         NodeId::from_blitz(id)
     }
 
     pub fn create_shadow_root(&mut self, _host: NodeId, _mode: ShadowRootMode) -> NodeId {
-        let id = self.inner.create_node(BlitzNodeData::Document);
+        let id = self
+            .inner
+            .create_node(BlitzNodeData::Document(Box::default()));
         NodeId::from_blitz(id)
     }
 
     pub fn allocate_pi(&mut self, _target: String, _data: String) -> NodeId {
-        let id = self.inner.create_node(BlitzNodeData::Comment);
+        let id = self.inner.create_node(BlitzNodeData::Comment {
+            contents: String::new(),
+        });
         NodeId::from_blitz(id)
     }
 
@@ -447,7 +462,9 @@ impl Dom {
         _public_id: String,
         _system_id: String,
     ) -> NodeId {
-        let id = self.inner.create_node(BlitzNodeData::Document);
+        let id = self
+            .inner
+            .create_node(BlitzNodeData::Document(Box::default()));
         NodeId::from_blitz(id)
     }
 
@@ -457,13 +474,12 @@ impl Dom {
         {
             return;
         }
-        self.detach(child);
-        if let Some(parent_node) = self.inner.get_node_mut(parent.to_blitz()) {
-            parent_node.children.push(child.to_blitz());
-        }
-        if let Some(child_node) = self.inner.get_node_mut(child.to_blitz()) {
-            child_node.parent = Some(parent.to_blitz());
-        }
+        // Route through blitz's mutator so `IS_IN_DOCUMENT` flags, style
+        // damage and the id map are maintained for the moved subtree.
+        // Detaching from the old parent is handled by the mutator itself.
+        self.inner
+            .mutate()
+            .append_children(parent.to_blitz(), &[child.to_blitz()]);
     }
 
     pub fn insert_before(&mut self, parent: NodeId, child: NodeId, reference: NodeId) {
@@ -473,41 +489,35 @@ impl Dom {
         {
             return;
         }
-        self.detach(child);
-        if let Some(parent_node) = self.inner.get_node_mut(parent.to_blitz()) {
-            if let Some(idx) = parent_node
-                .children
-                .iter()
-                .position(|&id| id == reference.to_blitz())
-            {
-                parent_node.children.insert(idx, child.to_blitz());
-            } else {
-                parent_node.children.push(child.to_blitz());
-            }
-        }
-        if let Some(child_node) = self.inner.get_node_mut(child.to_blitz()) {
-            child_node.parent = Some(parent.to_blitz());
+        // Only insert relative to `reference` when it actually lives under
+        // `parent`; otherwise fall back to appending (matching the previous
+        // behaviour of scanning `parent.children` for the reference).
+        let reference_is_child = self
+            .inner
+            .get_node(reference.to_blitz())
+            .and_then(|n| n.parent)
+            == Some(parent.to_blitz());
+        let mut mutator = self.inner.mutate();
+        if reference_is_child {
+            mutator.insert_nodes_before(reference.to_blitz(), &[child.to_blitz()]);
+        } else {
+            mutator.append_children(parent.to_blitz(), &[child.to_blitz()]);
         }
     }
 
     pub fn detach(&mut self, id: NodeId) {
-        let parent_id = match self.inner.get_node(id.to_blitz()) {
-            Some(n) => n.parent,
-            None => return,
-        };
-        if let Some(pid) = parent_id {
-            if let Some(parent) = self.inner.get_node_mut(pid) {
-                parent.children.retain(|&c| c != id.to_blitz());
-            }
+        if self.inner.get_node(id.to_blitz()).is_none() {
+            return;
         }
-        if let Some(node) = self.inner.get_node_mut(id.to_blitz()) {
-            node.parent = None;
-        }
+        // `remove_node` severs the parent link while keeping the (sub)tree
+        // alive, and clears `IS_IN_DOCUMENT`/interaction state via the
+        // mutator so stale flags never linger on detached subtrees.
+        self.inner.mutate().remove_node(id.to_blitz());
     }
 
     pub fn remove(&mut self, id: NodeId) {
         self.detach(id);
-        let children: Vec<usize> = self
+        let children: Vec<BlitzNodeId> = self
             .inner
             .get_node(id.to_blitz())
             .map(|n| n.children.to_vec())
@@ -518,14 +528,14 @@ impl Dom {
     }
 
     pub fn reparent_children(&mut self, source: NodeId, target: NodeId) {
-        let children: Vec<usize> = self
-            .inner
-            .get_node(source.to_blitz())
-            .map(|n| n.children.to_vec())
-            .unwrap_or_default();
-        for child_id in children {
-            self.append_child(target, NodeId::from_blitz(child_id));
+        if self.inner.get_node(source.to_blitz()).is_none()
+            || self.inner.get_node(target.to_blitz()).is_none()
+        {
+            return;
         }
+        self.inner
+            .mutate()
+            .reparent_children(source.to_blitz(), target.to_blitz());
     }
 
     pub fn children(&self, parent: NodeId) -> Vec<NodeId> {
@@ -684,11 +694,12 @@ impl Dom {
                                     .replace('>', "&gt;"),
                             );
                         }
-                        BlitzNodeData::Comment => {
+                        BlitzNodeData::Comment { contents } => {
                             out.push_str("<!--");
+                            out.push_str(contents);
                             out.push_str("-->");
                         }
-                        BlitzNodeData::Document => {
+                        BlitzNodeData::Document(_) => {
                             for c in self.children_of(id).rev() {
                                 stack.push(SerWork::Open(c));
                             }
@@ -835,7 +846,7 @@ impl Dom {
                 parent.children.get(pos + 1).map(|&c| NodeId::from_blitz(c))
             });
         let data = match &blitz_node.data {
-            BlitzNodeData::Document => NodeData::Document,
+            BlitzNodeData::Document(_) => NodeData::Document,
             BlitzNodeData::Element(e) => {
                 let name = QualName::from_h5(&e.name);
                 let attrs = e
@@ -869,7 +880,7 @@ impl Dom {
                 })
             }
             BlitzNodeData::Text(t) => NodeData::Text(t.content.clone()),
-            BlitzNodeData::Comment => NodeData::Comment(String::new()),
+            BlitzNodeData::Comment { contents } => NodeData::Comment(contents.clone()),
         };
         Node {
             id,

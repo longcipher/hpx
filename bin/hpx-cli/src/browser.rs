@@ -189,63 +189,12 @@ fn write_output(path: &Option<PathBuf>, data: &[u8]) -> eyre::Result<()> {
 }
 
 fn extract_links(html: &str) -> Vec<(String, String)> {
-    let dom = hpx_browser::html_parser::parse_html(html);
-    let anchors = dom.get_elements_by_tag_name(dom.document(), "a");
-    let mut results = Vec::with_capacity(anchors.len());
-    for &id in &anchors {
-        let Some(node) = dom.get(id) else {
-            continue;
-        };
-        let Some(elem) = node.as_element() else {
-            continue;
-        };
-        let href = elem
-            .attrs
-            .iter()
-            .find(|a| a.name.local == "href")
-            .map(|a| a.value.as_str());
-        let Some(href) = href else { continue };
-        let text = dom.text_content(id);
-        results.push((href.to_string(), text));
-    }
-    results
+    // Domain logic lives in the library so other frontends reuse it.
+    hpx_browser::extract::extract_links(html)
 }
 
 fn extract_assets(html: &str) -> Vec<(String, String)> {
-    let dom = hpx_browser::html_parser::parse_html(html);
-    let mut results = Vec::new();
-
-    for &id in &dom.get_elements_by_tag_name(dom.document(), "script") {
-        let Some(node) = dom.get(id) else { continue };
-        let Some(elem) = node.as_element() else {
-            continue;
-        };
-        if let Some(src) = elem.attrs.iter().find(|a| a.name.local == "src") {
-            results.push((src.value.clone(), "script".to_string()));
-        }
-    }
-
-    for &id in &dom.get_elements_by_tag_name(dom.document(), "link") {
-        let Some(node) = dom.get(id) else { continue };
-        let Some(elem) = node.as_element() else {
-            continue;
-        };
-        if let Some(href) = elem.attrs.iter().find(|a| a.name.local == "href") {
-            results.push((href.value.clone(), "link".to_string()));
-        }
-    }
-
-    for &id in &dom.get_elements_by_tag_name(dom.document(), "img") {
-        let Some(node) = dom.get(id) else { continue };
-        let Some(elem) = node.as_element() else {
-            continue;
-        };
-        if let Some(src) = elem.attrs.iter().find(|a| a.name.local == "src") {
-            results.push((src.value.clone(), "img".to_string()));
-        }
-    }
-
-    results
+    hpx_browser::extract::extract_assets(html)
 }
 
 fn format_links_tsv(links: &[(String, String)]) -> String {

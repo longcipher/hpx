@@ -167,7 +167,12 @@ impl<T: Send + 'static, K: Key> Pool<T, K> {
         M: Timer + Send + Sync + Clone + 'static,
     {
         let inner = config.is_enabled().then(|| {
-            // Preserve global max_pool_size semantics when a cap is configured.
+            // A configured `max_pool_size` is a *global* LRU bound across all
+            // hosts. True cross-shard LRU would need a shared eviction
+            // structure, so the pool intentionally collapses to one shard in
+            // that case: the cap stays exact at the cost of serialized
+            // checkout/put. This is opt-in configuration; uncapped pools get
+            // full `DEFAULT_SHARD_COUNT` concurrency.
             let shard_count = if config.max_pool_size.is_some() {
                 1
             } else {
@@ -478,11 +483,12 @@ impl<T: Poolable, K: Key> PoolShard<T, K> {
             return;
         }
 
-        let dur = if let Some(dur) = self.timeout {
-            dur
-        } else {
-            return;
-        };
+        // Even without an idle timeout, periodic sweeps are required to prune
+        // bookkeeping: closed connections and keys evicted from the moka cache
+        // would otherwise accumulate in `idle_keys` forever.
+        const NO_TIMEOUT_SWEEP: Duration = Duration::from_secs(90);
+
+        let dur = self.timeout.unwrap_or(NO_TIMEOUT_SWEEP);
 
         if dur == Duration::ZERO {
             return;
@@ -542,46 +548,74 @@ impl<T, K: Key> PoolShard<T, K> {
 impl<T: Poolable, K: Key> PoolShard<T, K> {
     /// This should *only* be called by the IdleTask
     fn clear_expired(&mut self) {
-        let Some(dur) = self.timeout else {
-            // No timeout configured; nothing to expire.
-            return;
-        };
         let now = Instant::now();
 
-        self.idle_keys.retain(|key| {
-            match self.idle.get(key) {
-                Some(arc_list) => {
-                    let mut list = arc_list.lock();
-                    list.retain(|entry| {
-                        if !entry.value.is_open() {
-                            trace!("idle interval evicting closed for {:?}", key);
-                            return false;
+        match self.timeout {
+            Some(dur) if dur != Duration::ZERO => {
+                self.idle_keys.retain(|key| {
+                    match self.idle.get(key) {
+                        Some(arc_list) => {
+                            let mut list = arc_list.lock();
+                            list.retain(|entry| {
+                                if !entry.value.is_open() {
+                                    trace!("idle interval evicting closed for {:?}", key);
+                                    return false;
+                                }
+
+                                // Avoid `Instant::sub` to avoid issues like rust-lang/rust#86470.
+                                if now.saturating_duration_since(entry.idle_at) > dur {
+                                    trace!("idle interval evicting expired for {:?}", key);
+                                    return false;
+                                }
+
+                                // Otherwise, keep this value...
+                                true
+                            });
+
+                            if list.is_empty() {
+                                // Polonius: `list` is dead after `is_empty()`, so the
+                                // explicit `drop(list)` is no longer needed before
+                                // reborrowing `self.idle`.
+                                trace!("idle interval removing empty key {:?}", key);
+                                self.idle.remove(key);
+                                false
+                            } else {
+                                true
+                            }
                         }
-
-                        // Avoid `Instant::sub` to avoid issues like rust-lang/rust#86470.
-                        if now.saturating_duration_since(entry.idle_at) > dur {
-                            trace!("idle interval evicting expired for {:?}", key);
-                            return false;
-                        }
-
-                        // Otherwise, keep this value...
-                        true
-                    });
-
-                    if list.is_empty() {
-                        // Polonius: `list` is dead after `is_empty()`, so the
-                        // explicit `drop(list)` is no longer needed before
-                        // reborrowing `self.idle`.
-                        trace!("idle interval removing empty key {:?}", key);
-                        self.idle.remove(key);
-                        false
-                    } else {
-                        true
+                        None => false, // evicted by moka or removed elsewhere
                     }
-                }
-                None => false, // evicted by moka or removed elsewhere
+                });
             }
-        });
+            _ => {
+                // No idle timeout configured: connections never expire by
+                // age, but bookkeeping must still drop entries whose
+                // connections were closed elsewhere and keys evicted from the
+                // moka cache — otherwise `idle_keys` grows without bound.
+                self.idle_keys.retain(|key| match self.idle.get(key) {
+                    Some(arc_list) => {
+                        let mut list = arc_list.lock();
+                        list.retain(|entry| {
+                            if entry.value.is_open() {
+                                true
+                            } else {
+                                trace!("sweep evicting closed connection for {:?}", key);
+                                false
+                            }
+                        });
+
+                        if list.is_empty() {
+                            trace!("sweep removing empty key {:?}", key);
+                            self.idle.remove(key);
+                            false
+                        } else {
+                            true
+                        }
+                    }
+                    None => false, // evicted by moka or removed elsewhere
+                });
+            }
+        }
     }
 }
 
@@ -615,8 +649,12 @@ impl<T: Poolable, K: Key> Pooled<T, K> {
         if let Some(v) = self.value.as_ref() {
             v
         } else {
-            debug_assert!(false, "Pooled value dropped while borrowed");
-            std::process::abort();
+            // Unreachable by construction: `Pooled` methods borrow the value
+            // only between checkout and Drop, and Drop takes the value out.
+            // Panic (not abort) so a violated invariant surfaces as a normal
+            // failure in the embedding application instead of killing the
+            // whole process.
+            unreachable!("Pooled value borrowed after Drop");
         }
     }
 
@@ -624,8 +662,7 @@ impl<T: Poolable, K: Key> Pooled<T, K> {
         if let Some(v) = self.value.as_mut() {
             v
         } else {
-            debug_assert!(false, "Pooled value dropped while borrowed");
-            std::process::abort();
+            unreachable!("Pooled value mutably borrowed after Drop");
         }
     }
 }
