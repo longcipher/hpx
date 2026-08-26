@@ -333,6 +333,11 @@ path = "tests/gzip.rs"
 required-features = ["gzip", "stream"]
 
 [[test]]
+name = "large_response"
+path = "tests/large_response.rs"
+required-features = ["gzip", "stream", "futures-util/std"]
+
+[[test]]
 name = "brotli"
 path = "tests/brotli.rs"
 required-features = ["brotli", "stream"]

@@ -9,7 +9,7 @@ use http::{
     header::{self, Entry, HeaderMap, HeaderName, HeaderValue},
 };
 #[cfg(feature = "http1")]
-use smallvec::{SmallVec, smallvec, smallvec_inline};
+use smallvec::{SmallVec, smallvec};
 
 use crate::{
     client::core::{
@@ -134,21 +134,27 @@ impl Http1Transaction for Client {
     fn parse(buf: &mut BytesMut, ctx: ParseContext<'_>) -> ParseResult<StatusCode> {
         debug_assert!(!buf.is_empty(), "parse called with empty buf");
 
+        // Ceiling for the automatic header-budget escalation below. Guards
+        // against unbounded allocation when a peer streams endless headers.
+        const AUTO_HEADER_BUDGET_CEILING: usize = 4096;
+
         // Loop to skip information status code headers (100 Continue, etc).
         loop {
-            let mut headers_indices: SmallVec<[MaybeUninit<HeaderIndices>; DEFAULT_MAX_HEADERS]> =
-                match ctx.h1_max_headers {
-                    Some(cap) => smallvec![MaybeUninit::uninit(); cap],
-                    None => smallvec_inline![MaybeUninit::uninit(); DEFAULT_MAX_HEADERS],
-                };
+            // Budget for the header-count fast path. When the user has not
+            // pinned an explicit cap and the response carries more headers
+            // than the inline budget, escalate to larger heap allocations
+            // instead of failing with `Parse::TooLarge` — real-world CDNs and
+            // auth gateways routinely emit hundreds of `Set-Cookie` lines.
+            let mut budget = ctx.h1_max_headers.unwrap_or(DEFAULT_MAX_HEADERS);
 
-            let (len, status, reason, version, headers_len) = {
+            let (len, status, reason, version, headers_len, mut headers_indices) = loop {
+                let mut headers_indices: SmallVec<
+                    [MaybeUninit<HeaderIndices>; DEFAULT_MAX_HEADERS],
+                > = smallvec![MaybeUninit::uninit(); budget];
+
                 let mut headers: SmallVec<
                     [MaybeUninit<httparse::Header<'_>>; DEFAULT_MAX_HEADERS],
-                > = match ctx.h1_max_headers {
-                    Some(cap) => smallvec![MaybeUninit::uninit(); cap],
-                    None => smallvec_inline![MaybeUninit::uninit(); DEFAULT_MAX_HEADERS],
-                };
+                > = smallvec![MaybeUninit::uninit(); budget];
 
                 trace!(bytes = buf.len(), "Response.parse");
 
@@ -177,13 +183,28 @@ impl Http1Transaction for Client {
                         };
                         record_header_indices(bytes, res.headers, &mut headers_indices)?;
                         let headers_len = res.headers.len();
-                        (len, status, reason, version, headers_len)
+                        break (len, status, reason, version, headers_len, headers_indices);
                     }
                     Ok(httparse::Status::Partial) => return Ok(None),
                     Err(httparse::Error::Version) if ctx.h09_responses => {
                         trace!("Response.parse accepted HTTP/0.9 response");
 
-                        (0, StatusCode::OK, None, Version::HTTP_09, 0)
+                        break (
+                            0,
+                            StatusCode::OK,
+                            None,
+                            Version::HTTP_09,
+                            0,
+                            headers_indices,
+                        );
+                    }
+                    Err(httparse::Error::TooManyHeaders)
+                        if ctx.h1_max_headers.is_none() && budget < AUTO_HEADER_BUDGET_CEILING =>
+                    {
+                        debug!(
+                            "response exceeded {budget} headers; retrying parse with a larger budget"
+                        );
+                        budget = (budget * 2).min(AUTO_HEADER_BUDGET_CEILING);
                     }
                     Err(e) => return Err(e.into()),
                 }

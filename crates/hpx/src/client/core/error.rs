@@ -296,7 +296,9 @@ impl Error {
             Kind::Parse(Parse::Header(Header::DuplicateChunkedInTransferEncoding)) => {
                 "duplicate chunked in transfer-encoding"
             }
-            Kind::Parse(Parse::TooLarge) => "message head is too large",
+            Kind::Parse(Parse::TooLarge) => {
+                "message head is too large (raise `Http1Options::max_headers` / `max_buf_size` for header-heavy responses)"
+            }
             Kind::Parse(Parse::Status) => "invalid HTTP status-code parsed",
             Kind::Parse(Parse::Internal) => {
                 "internal error inside hpx and/or its dependencies, please report"
