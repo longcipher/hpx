@@ -105,6 +105,7 @@ webpki-root-certs = { workspace = true }
 # WebAssembly target-specific dependencies
 # ==============================================================================
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.4.3", features = ["wasm_js"] }
 js-sys = { workspace = true }
 # Tokio without net features for WASM
 tokio = { workspace = true }

@@ -3361,6 +3361,7 @@ dependencies = [
  "flate2",
  "futures",
  "futures-rustls",
+ "getrandom 0.4.3",
  "hotpath",
  "http",
  "http-body-util",
