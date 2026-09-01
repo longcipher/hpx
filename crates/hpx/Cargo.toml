@@ -232,7 +232,7 @@ ipnet = { workspace = true }
 memchr = { workspace = true, optional = true }
 mime = { workspace = true, optional = true }
 mime_guess = { workspace = true, optional = true }
-moka = { workspace = true }
+moka = { workspace = true, features = ["sync"] }
 openssl = { workspace = true, optional = true }
 parking_lot = { workspace = true }
 percent-encoding = { workspace = true }
