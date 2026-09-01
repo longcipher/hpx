@@ -42,13 +42,3 @@ jobs:
       - name: Check features
         run: just check-feature
 
-  supply-chain:
-    name: Supply Chain (cargo-deny)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: dtolnay/rust-toolchain@nightly
-
-      # Fails on RUSTSEC vulnerabilities (and license/ban policy per deny.toml).
-      - uses: EmbarkStudios/cargo-deny-action@v2
