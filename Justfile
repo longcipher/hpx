@@ -13,7 +13,7 @@ lint:
     cargo fmt --all -- --check
     cargo clippy --all -- -D warnings
     cargo shear
-    cargo workspace-inheritance-check
+    cargo +nightly workspace-inheritance-check
     just check-agents-md
 test:
     #!/usr/bin/env bash
