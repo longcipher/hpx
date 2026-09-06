@@ -28,7 +28,7 @@ jobs:
       # Only tools actually invoked by the Justfile recipes below.
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,cargo-shear,rumdl,cargo-nextest
+          tool: just,cargo-shear,rumdl,cargo-nextest,cargo-workspace-inheritance-check
 
       - name: Install cargo-sort
         run: cargo install cargo-sort
