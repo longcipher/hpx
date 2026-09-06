@@ -1,6 +1,8 @@
 //! Extension utilities.
 
 use bytes::Bytes;
+#[cfg(feature = "query")]
+use bytes::BytesMut;
 use http::uri::{Authority, Scheme, Uri};
 use percent_encoding::{AsciiSet, CONTROLS};
 
@@ -114,7 +116,13 @@ impl UriExt for Uri {
         }
 
         let path = self.path();
-        let parts = match PathAndQuery::from_maybe_shared(Bytes::from(format!("{path}?{query}"))) {
+        // Single allocation: reserve path + '?' + query up front instead of
+        // `format!` (String alloc) followed by `Bytes::from` (second alloc).
+        let mut buf = BytesMut::with_capacity(path.len() + 1 + query.len());
+        buf.extend_from_slice(path.as_bytes());
+        buf.extend_from_slice(b"?");
+        buf.extend_from_slice(query.as_bytes());
+        let parts = match PathAndQuery::from_maybe_shared(buf.freeze()) {
             Ok(path_and_query) => {
                 let mut parts = self.clone().into_parts();
                 parts.path_and_query.replace(path_and_query);
@@ -369,6 +377,41 @@ mod tests {
         uri.set_query("".to_string());
 
         assert_eq!(uri.to_string(), "http://example.com/path");
+    }
+
+    #[cfg(feature = "query")]
+    #[test]
+    fn test_set_query_with_special_chars() {
+        let mut uri: Uri = "http://example.com/search".parse().unwrap();
+        uri.set_query("q=hello%20world&tag=a%2Bb".to_string());
+
+        assert_eq!(
+            uri.to_string(),
+            "http://example.com/search?q=hello%20world&tag=a%2Bb"
+        );
+        assert_eq!(uri.query(), Some("q=hello%20world&tag=a%2Bb"));
+    }
+
+    #[cfg(feature = "query")]
+    #[test]
+    fn test_set_query_replaces_existing_with_special_chars() {
+        let mut uri: Uri = "http://example.com/search?old=%2F".parse().unwrap();
+        uri.set_query("q=%E4%B8%AD%E6%96%87&lang=zh-CN".to_string());
+
+        assert_eq!(
+            uri.to_string(),
+            "http://example.com/search?q=%E4%B8%AD%E6%96%87&lang=zh-CN"
+        );
+        assert_eq!(uri.query(), Some("q=%E4%B8%AD%E6%96%87&lang=zh-CN"));
+    }
+
+    #[cfg(feature = "query")]
+    #[test]
+    fn test_set_query_empty_keeps_original_query() {
+        let mut uri: Uri = "http://example.com/path?keep=me".parse().unwrap();
+        uri.set_query(String::new());
+
+        assert_eq!(uri.to_string(), "http://example.com/path?keep=me");
     }
 
     #[test]

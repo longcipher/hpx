@@ -55,10 +55,16 @@ pin_project! {
     ///
     /// The timeout resets after every successful read. If a single read
     /// takes longer than the specified duration, an error is returned.
+    /// The timer is held and reused via `Sleep::reset` (same shape as
+    /// [`TotalTimeoutBody`]) instead of allocating a new timer per chunk.
     pub struct ReadTimeoutBody<B> {
         timeout: Duration,
-        #[pin]
-        sleep: Option<Sleep>,
+        // NOTE: deliberately NOT `#[pin]` — like `TotalTimeoutBody::timeout`,
+        // the field is already a `Pin<Box<Sleep>>`, so projection yields
+        // `&mut Pin<Box<Sleep>>` and `.as_mut()` recovers `Pin<&mut Sleep>`
+        // for `poll`/`reset`. Marking it `#[pin]` would double-pin and
+        // break method resolution.
+        sleep: Pin<Box<Sleep>>,
         #[pin]
         body: B,
     }
@@ -75,7 +81,7 @@ impl<B> TimeoutBody<B> {
                     timeout: total_timeout,
                     body: ReadTimeoutBody {
                         timeout: read_timeout,
-                        sleep: None,
+                        sleep: Box::pin(sleep(read_timeout)),
                         body,
                     },
                 },
@@ -86,7 +92,7 @@ impl<B> TimeoutBody<B> {
             (None, Some(timeout)) => Self::ReadTimeout {
                 body: ReadTimeoutBody {
                     timeout,
-                    sleep: None,
+                    sleep: Box::pin(sleep(timeout)),
                     body,
                 },
             },
@@ -193,25 +199,21 @@ where
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
-        let mut this = self.project();
+        let this = self.project();
 
-        // Error if the timeout has expired.
-        if this.sleep.is_none() {
-            this.sleep.set(Some(sleep(*this.timeout)));
-        }
-
-        // Error if the timeout has expired.
-        if let Some(sleep) = this.sleep.as_mut().as_pin_mut()
-            && sleep.poll(cx).is_ready()
-        {
+        // Error if the per-read timeout has expired. The timer is reused
+        // across chunks via `reset` instead of allocating a new `Sleep`.
+        if this.sleep.as_mut().poll(cx).is_ready() {
             return Poll::Ready(Some(Err(Box::new(TimedOut))));
         }
 
         // Poll the actual body
         match ready!(this.body.poll_frame(cx)) {
             Some(Ok(frame)) => {
-                // Reset timeout on successful read
-                this.sleep.set(None);
+                // Reset deadline for the next read, reusing the timer allocation.
+                // Dropping the body (end of stream) cancels the timer.
+                let deadline = tokio::time::Instant::now() + *this.timeout;
+                this.sleep.as_mut().reset(deadline);
                 Poll::Ready(Some(Ok(frame)))
             }
             Some(Err(err)) => Poll::Ready(Some(Err(err.into()))),
@@ -227,5 +229,111 @@ where
     #[inline]
     fn is_end_stream(&self) -> bool {
         self.body.is_end_stream()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        pin::Pin,
+        task::{Context, Poll},
+        time::Duration,
+    };
+
+    use bytes::Bytes;
+    use http_body::{Body, Frame};
+    use tokio::time::sleep;
+
+    use super::{ReadTimeoutBody, TimeoutBody};
+    use crate::error::TimedOut;
+
+    struct ImmediateBody {
+        remaining: usize,
+    }
+
+    impl Body for ImmediateBody {
+        type Data = Bytes;
+        type Error = std::convert::Infallible;
+
+        fn poll_frame(
+            mut self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+            if self.remaining == 0 {
+                Poll::Ready(None)
+            } else {
+                self.remaining -= 1;
+                Poll::Ready(Some(Ok(Frame::data(Bytes::from_static(b"chunk")))))
+            }
+        }
+    }
+
+    struct StalledBody;
+
+    impl Body for StalledBody {
+        type Data = Bytes;
+        type Error = std::convert::Infallible;
+
+        fn poll_frame(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+            Poll::Pending
+        }
+    }
+
+    #[tokio::test]
+    async fn read_timeout_body_delivers_fast_stream_without_false_trigger() {
+        let inner = ImmediateBody { remaining: 2 };
+        let mut body = Box::pin(ReadTimeoutBody {
+            timeout: Duration::from_millis(100),
+            sleep: Box::pin(sleep(Duration::from_millis(100))),
+            body: inner,
+        });
+
+        for _ in 0..2 {
+            let frame = futures_util::future::poll_fn(|cx| body.as_mut().poll_frame(cx)).await;
+            assert!(frame.is_some());
+            assert!(frame.unwrap().is_ok());
+        }
+        let end = futures_util::future::poll_fn(|cx| body.as_mut().poll_frame(cx)).await;
+        assert!(end.is_none());
+    }
+
+    #[tokio::test]
+    async fn read_timeout_body_still_triggers_on_stalled_stream() {
+        let mut body = Box::pin(ReadTimeoutBody {
+            timeout: Duration::from_millis(10),
+            sleep: Box::pin(sleep(Duration::from_millis(10))),
+            body: StalledBody,
+        });
+
+        let frame = tokio::time::timeout(
+            Duration::from_secs(5),
+            futures_util::future::poll_fn(|cx| body.as_mut().poll_frame(cx)),
+        )
+        .await
+        .expect("stalled read must resolve via read timeout");
+        let err = frame.expect("timeout returns an error frame").unwrap_err();
+        assert!(
+            err.downcast_ref::<TimedOut>().is_some(),
+            "expected TimedOut, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_timeout_body_resets_deadline_between_chunks() {
+        // Timeout wrapper built through the shared constructor must also
+        // deliver a fast stream without false triggers.
+        let inner = ImmediateBody { remaining: 3 };
+        let mut body = Box::pin(TimeoutBody::new(None, Some(Duration::from_millis(50)), inner));
+
+        for _ in 0..3 {
+            let frame = futures_util::future::poll_fn(|cx| body.as_mut().poll_frame(cx)).await;
+            assert!(frame.is_some());
+            assert!(frame.unwrap().is_ok());
+        }
+        let end = futures_util::future::poll_fn(|cx| body.as_mut().poll_frame(cx)).await;
+        assert!(end.is_none());
     }
 }

@@ -169,7 +169,9 @@ impl<S> Layer<S> for CircuitBreakerLayer {
     fn layer(&self, inner: S) -> Self::Service {
         CircuitBreakerService {
             inner,
-            config: self.config.clone(),
+            // Share config via Arc so per-request `call` only bumps a refcount
+            // instead of cloning the whole struct on the hot path.
+            config: Arc::new(self.config.clone()),
             state: Arc::new(Mutex::new(CircuitBreakerState::new())),
         }
     }
@@ -198,7 +200,9 @@ impl std::error::Error for CircuitOpenError {}
 #[derive(Clone)]
 pub struct CircuitBreakerService<S> {
     inner: S,
-    config: CircuitBreakerConfig,
+    // Shared via Arc: the hot path clones only the pointer, and state
+    // transitions still take the Mutex only when recording results.
+    config: Arc<CircuitBreakerConfig>,
     state: Arc<Mutex<CircuitBreakerState>>,
 }
 
@@ -229,7 +233,9 @@ where
     }
 
     fn call(&mut self, req: Request<Body>) -> Self::Future {
-        // Check circuit state
+        // Fast path: single short lock to check/admit the request. State
+        // transitions only happen under this lock; per-request work after
+        // admission uses the shared Arc config without further locking.
         {
             let mut state = self.state.lock();
             if !state.should_allow_request(&self.config) {
@@ -240,6 +246,8 @@ where
                     req.uri(),
                     retry_after
                 );
+                // Boxed future is required by the tower `Service::Future`
+                // associated type; the fallback path must box as well.
                 return Box::pin(async move { Err(CircuitOpenError { retry_after }.into()) });
             }
         }
@@ -248,7 +256,8 @@ where
 
         let mut inner = self.inner.clone();
         let state = self.state.clone();
-        let config = self.config.clone();
+        // Cheap Arc bump (was a full `CircuitBreakerConfig` clone).
+        let config = Arc::clone(&self.config);
 
         Box::pin(async move {
             let result = inner.call(req).await;

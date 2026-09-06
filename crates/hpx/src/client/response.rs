@@ -447,10 +447,13 @@ impl Response {
             return match body.frame().await {
                 None => Ok(data),
                 Some(next) => {
-                    let mut buf = BytesMut::with_capacity(
-                        data.len().saturating_add(body.size_hint().lower() as usize),
-                    );
-                    buf.extend_from_slice(&data);
+                    // Reuse the first chunk's buffer when it is uniquely owned:
+                    // `BytesMut::from(Bytes)` moves the allocation without copying
+                    // when the refcount is 1 and copies otherwise, so the combined
+                    // content is identical either way while the common single-owner
+                    // case saves one copy of the head chunk.
+                    let mut buf = BytesMut::from(data);
+                    buf.reserve(body.size_hint().lower() as usize);
                     if let Ok(chunk) = next?.into_data() {
                         buf.extend_from_slice(&chunk);
                     }
@@ -888,5 +891,47 @@ mod tests {
         response.forbid_recycle();
 
         assert!(connected.poisoned());
+    }
+
+    #[tokio::test]
+    async fn response_bytes_single_frame_body() {
+        let response = response_with_body(Bytes::from_static(b"hello"));
+        let bytes = response.bytes().await.unwrap();
+        assert_eq!(&bytes[..], b"hello");
+    }
+
+    #[tokio::test]
+    async fn response_bytes_two_frame_body() {
+        let stream = futures_util::stream::iter(vec![
+            Ok::<http_body::Frame<Bytes>, std::convert::Infallible>(
+                http_body::Frame::data(Bytes::from_static(b"hello ")),
+            ),
+            Ok::<http_body::Frame<Bytes>, std::convert::Infallible>(
+                http_body::Frame::data(Bytes::from_static(b"world")),
+            ),
+        ]);
+        let body = Body::wrap(http_body_util::StreamBody::new(stream));
+        let response = response_with_body(body);
+        let bytes = response.bytes().await.unwrap();
+        assert_eq!(&bytes[..], b"hello world");
+    }
+
+    #[tokio::test]
+    async fn response_bytes_three_frame_body() {
+        let stream = futures_util::stream::iter(vec![
+            Ok::<http_body::Frame<Bytes>, std::convert::Infallible>(
+                http_body::Frame::data(Bytes::from_static(b"one-")),
+            ),
+            Ok::<http_body::Frame<Bytes>, std::convert::Infallible>(
+                http_body::Frame::data(Bytes::from_static(b"two-")),
+            ),
+            Ok::<http_body::Frame<Bytes>, std::convert::Infallible>(
+                http_body::Frame::data(Bytes::from_static(b"three")),
+            ),
+        ]);
+        let body = Body::wrap(http_body_util::StreamBody::new(stream));
+        let response = response_with_body(body);
+        let bytes = response.bytes().await.unwrap();
+        assert_eq!(&bytes[..], b"one-two-three");
     }
 }

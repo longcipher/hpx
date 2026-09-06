@@ -61,7 +61,10 @@ pub(super) fn authority_form(uri: &mut Uri) {
     reason = "scheme+authority+static '/' path always builds a valid base URI"
 )]
 pub(super) fn normalize_uri<B>(req: &mut Request<B>, is_http_connect: bool) -> Result<Uri, Error> {
-    let uri = req.uri().clone();
+    // Clone only the already-parsed scheme + authority instead of the full URI
+    // (which would also copy path_and_query); the base URI needs nothing else.
+    let scheme = req.uri().scheme().cloned();
+    let authority = req.uri().authority().cloned();
 
     let build_base_uri = |scheme: Scheme, authority: Authority| {
         Uri::builder()
@@ -72,18 +75,18 @@ pub(super) fn normalize_uri<B>(req: &mut Request<B>, is_http_connect: bool) -> R
             .expect("valid base URI")
     };
 
-    match (uri.scheme(), uri.authority()) {
-        (Some(scheme), Some(auth)) => Ok(build_base_uri(scheme.clone(), auth.clone())),
+    match (scheme, authority) {
+        (Some(scheme), Some(auth)) => Ok(build_base_uri(scheme, auth)),
         (None, Some(auth)) if is_http_connect => {
             let scheme = match auth.port_u16() {
                 Some(443) => Scheme::HTTPS,
                 _ => Scheme::HTTP,
             };
             set_scheme(req.uri_mut(), scheme.clone());
-            Ok(build_base_uri(scheme, auth.clone()))
+            Ok(build_base_uri(scheme, auth))
         }
         _ => {
-            debug!("Client requires absolute-form URIs, received: {:?}", uri);
+            debug!("Client requires absolute-form URIs, received: {:?}", req.uri());
             Err(Error::new_kind(ErrorKind::UserAbsoluteUriRequired))
         }
     }

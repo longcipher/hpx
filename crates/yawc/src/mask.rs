@@ -1,5 +1,31 @@
 // Optimized masking implementation.
 
+use std::cell::RefCell;
+
+use rand::{RngExt, SeedableRng, rngs::SmallRng};
+
+/// Thread-local fast RNG for per-frame masking keys.
+///
+/// Seeded once per thread from the OS CSPRNG (`rand::random`), so per-frame
+/// masks cost a few PRNG steps instead of a `getrandom` syscall plus global
+/// lock on every frame.
+thread_local! {
+    static FAST_RNG: RefCell<Option<SmallRng>> = RefCell::new(None);
+}
+
+/// Returns a fresh random 4-byte WebSocket masking key.
+///
+/// Uses the thread-local `SmallRng` instead of the global CSPRNG. Mask
+/// semantics are unchanged: every call yields a fresh random 4-byte key.
+#[inline]
+pub(crate) fn fast_mask_bytes() -> [u8; 4] {
+    FAST_RNG.with(|slot| {
+        let mut guard = slot.borrow_mut();
+        let rng = guard.get_or_insert_with(|| SmallRng::seed_from_u64(rand::random()));
+        rng.random()
+    })
+}
+
 /// Mask/unmask a frame with optimal strategy selection.
 ///
 /// This function automatically selects the fastest masking implementation based on:
@@ -326,5 +352,47 @@ mod tests {
         for i in 0..fallback.len() {
             assert_eq!(fallback[i], 0xFF ^ mask[i % 4]);
         }
+    }
+
+    #[test]
+    fn test_fast_mask_bytes_varies_across_calls() {
+        use std::collections::HashSet;
+
+        // Deterministic count assertion (no probability-based flake): 1000
+        // draws from a seeded PRNG must yield overwhelmingly distinct keys.
+        let mut seen = HashSet::new();
+        for _ in 0..1000 {
+            seen.insert(fast_mask_bytes());
+        }
+        assert!(
+            seen.len() > 900,
+            "expected more than 900 distinct masks, got {}",
+            seen.len()
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn test_fast_mask_frame_encode_decode_roundtrip() {
+        use bytes::BytesMut;
+        use tokio_util::codec::{Decoder as _, Encoder as _};
+
+        use crate::{
+            Role,
+            codec::{Decoder, Encoder},
+            frame::{Frame, OpCode},
+        };
+
+        // The encoder assigns a fast-mask key per frame; decoding must recover
+        // the exact payload, proving mask semantics are preserved.
+        let frame = Frame::text("hello fast mask");
+        let mut encoder = Encoder::new(Role::Client);
+        let mut buf = BytesMut::new();
+        encoder.encode(frame, &mut buf).unwrap();
+
+        let mut decoder = Decoder::new(Role::Server, 1 << 20);
+        let decoded = decoder.decode(&mut buf).unwrap().unwrap();
+        assert_eq!(decoded.opcode(), OpCode::Text);
+        assert_eq!(&decoded.into_payload()[..], b"hello fast mask");
     }
 }

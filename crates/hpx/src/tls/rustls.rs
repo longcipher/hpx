@@ -1,11 +1,12 @@
 #![expect(unused)]
 use std::{
     borrow::Cow,
+    collections::HashMap,
     fmt::{self, Debug, Write as _},
     future::Future,
     io,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     task::{Context, Poll},
 };
 
@@ -151,6 +152,31 @@ pub(crate) struct TlsConnectorBuilder {
     keylog: Option<KeyLog>,
 }
 
+/// Cache key for a single `Arc<RustlsConnector>`.
+///
+/// Covers everything that affects the built `ClientConfig` on the cacheable
+/// path (no client identity, no keylog): ALPN bytes, min/max TLS versions,
+/// verifier mode, and the root-store identity (pointer for custom stores,
+/// marker for the default webpki roots). Builders with an identity or keylog
+/// bypass the cache to preserve exact behavior.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+struct CachedConnectorKey {
+    alpn: Option<Vec<Vec<u8>>>,
+    min_version: Option<TlsVersion>,
+    max_version: Option<TlsVersion>,
+    cert_verification: bool,
+    store_ptr: usize,
+    store_is_default: bool,
+}
+
+static CONNECTOR_CACHE: OnceLock<parking_lot::Mutex<HashMap<CachedConnectorKey, Arc<RustlsConnector>>>> =
+    OnceLock::new();
+
+fn connector_cache(
+) -> &'static parking_lot::Mutex<HashMap<CachedConnectorKey, Arc<RustlsConnector>>> {
+    CONNECTOR_CACHE.get_or_init(|| parking_lot::Mutex::new(HashMap::new()))
+}
+
 impl TlsConnectorBuilder {
     /// Sets the alpn protocol to be used.
     #[inline]
@@ -225,23 +251,15 @@ impl TlsConnectorBuilder {
     }
 
     /// Build the `TlsConnector` with the provided configuration.
+    ///
+    /// The common path (no client identity, no keylog) is served from a
+    /// global cache keyed by ALPN, min/max TLS versions, verifier mode, and
+    /// root-store identity. Cache hits return cloned `Arc`s without rebuilding
+    /// `ClientConfig`; identity/keylog builds bypass the cache to keep
+    /// behavior exact. This also covers the per-request rebuilds issued from
+    /// the connector proxy-tunnel and `tls_options` paths.
     pub(crate) fn build(&self, opts: &TlsOptions) -> crate::Result<TlsConnector> {
-        let root_store = if let Some(store) = &self.cert_store {
-            (*store.0).clone()
-        } else {
-            let mut root_store = rustls::RootCertStore::empty();
-            root_store.add_parsable_certificates(
-                webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().cloned(),
-            );
-            root_store
-        };
         let protocol_versions = protocol_versions(self.min_version, self.max_version)?;
-        let key_log = match self.keylog.clone() {
-            Some(policy) => Some(Arc::new(KeyLogBridge {
-                handle: policy.handle().map_err(Error::tls)?,
-            }) as Arc<dyn RustlsKeyLog>),
-            None => None,
-        };
 
         // ALPN — use raw protocol name bytes for rustls (not wire-format
         // length-prefixed encoding which is only correct for BoringSSL).
@@ -254,7 +272,72 @@ impl TlsConnectorBuilder {
                     .map(|protos| protos.iter().map(|p| p.as_wire_bytes().to_vec()).collect())
             });
 
-        let create_config = |alpn: Option<Vec<Vec<u8>>>| -> crate::Result<_> {
+        // Only the common path is cached; identity/keylog builds stay uncached.
+        let cacheable = self.identity.is_none() && self.keylog.is_none();
+        let store_ptr = self
+            .cert_store
+            .as_ref()
+            .map(|s| Arc::as_ptr(&s.0) as usize)
+            .unwrap_or(0);
+        let store_is_default = self.cert_store.is_none();
+
+        // Fast path: all four ALPN variants already cached — return cloned
+        // Arcs without touching root stores or `ClientConfig` construction.
+        if cacheable {
+            let h2: Option<Vec<Vec<u8>>> =
+                Some(vec![AlpnProtocol::HTTP2.as_wire_bytes().to_vec()]);
+            let http1: Option<Vec<Vec<u8>>> =
+                Some(vec![AlpnProtocol::HTTP1.as_wire_bytes().to_vec()]);
+            let no_alpn: Option<Vec<Vec<u8>>> = None;
+            let lookup = |alpn: &Option<Vec<Vec<u8>>>| {
+                let key = CachedConnectorKey {
+                    alpn: alpn.clone(),
+                    min_version: self.min_version,
+                    max_version: self.max_version,
+                    cert_verification: self.cert_verification,
+                    store_ptr,
+                    store_is_default,
+                };
+                connector_cache().lock().get(&key).cloned()
+            };
+            if let (
+                Some(connector),
+                Some(connector_no_alpn),
+                Some(connector_h2),
+                Some(connector_http1),
+            ) = (
+                lookup(&alpn_protocols),
+                lookup(&no_alpn),
+                lookup(&h2),
+                lookup(&http1),
+            ) {
+                return Ok(TlsConnector {
+                    connector,
+                    connector_h2,
+                    connector_http1,
+                    connector_no_alpn,
+                    config: HandshakeConfig::default(),
+                });
+            }
+        }
+
+        let root_store = if let Some(store) = &self.cert_store {
+            (*store.0).clone()
+        } else {
+            let mut root_store = rustls::RootCertStore::empty();
+            root_store.add_parsable_certificates(
+                webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().cloned(),
+            );
+            root_store
+        };
+        let key_log = match self.keylog.clone() {
+            Some(policy) => Some(Arc::new(KeyLogBridge {
+                handle: policy.handle().map_err(Error::tls)?,
+            }) as Arc<dyn RustlsKeyLog>),
+            None => None,
+        };
+
+        let build_one = |alpn: Option<Vec<Vec<u8>>>| -> crate::Result<Arc<RustlsConnector>> {
             let provider = rustls_provider();
             let builder = ClientConfig::builder_with_provider(provider)
                 .with_protocol_versions(protocol_versions)
@@ -284,6 +367,27 @@ impl TlsConnectorBuilder {
             }
 
             Ok(Arc::new(RustlsConnector::from(Arc::new(config))))
+        };
+
+        let create_config = |alpn: Option<Vec<Vec<u8>>>| -> crate::Result<Arc<RustlsConnector>> {
+            if cacheable {
+                let key = CachedConnectorKey {
+                    alpn: alpn.clone(),
+                    min_version: self.min_version,
+                    max_version: self.max_version,
+                    cert_verification: self.cert_verification,
+                    store_ptr,
+                    store_is_default,
+                };
+                if let Some(hit) = connector_cache().lock().get(&key).cloned() {
+                    return Ok(hit);
+                }
+                let fresh = build_one(alpn)?;
+                connector_cache().lock().insert(key, fresh.clone());
+                Ok(fresh)
+            } else {
+                build_one(alpn)
+            }
         };
 
         let connector = create_config(alpn_protocols)?;
@@ -872,6 +976,49 @@ mod tests {
             .unwrap_err();
         assert!(err.is_tls());
         assert!(err.to_string().contains("minimum TLS version"));
+    }
+
+    #[test]
+    fn rustls_connector_cache_reuses_arc_for_same_config() {
+        use crate::tls::TlsOptions;
+
+        let opts = TlsOptions::default();
+        let first = super::TlsConnector::builder().build(&opts).unwrap();
+        let second = super::TlsConnector::builder().build(&opts).unwrap();
+
+        assert!(Arc::ptr_eq(&first.connector, &second.connector));
+        assert!(Arc::ptr_eq(
+            &first.connector_no_alpn,
+            &second.connector_no_alpn
+        ));
+        assert!(Arc::ptr_eq(&first.connector_h2, &second.connector_h2));
+        assert!(Arc::ptr_eq(
+            &first.connector_http1,
+            &second.connector_http1
+        ));
+    }
+
+    #[test]
+    fn rustls_connector_cache_isolates_different_configs() {
+        use crate::tls::{AlpnProtocol, TlsOptions};
+
+        let opts = TlsOptions::default();
+        let base = super::TlsConnector::builder().build(&opts).unwrap();
+        let tls13 = super::TlsConnector::builder()
+            .min_version(Some(TlsVersion::TLS_1_3))
+            .build(&opts)
+            .unwrap();
+        assert!(!Arc::ptr_eq(&base.connector, &tls13.connector));
+
+        let h2 = super::TlsConnector::builder()
+            .alpn_protocol(Some(AlpnProtocol::HTTP2))
+            .build(&opts)
+            .unwrap();
+        let http1 = super::TlsConnector::builder()
+            .alpn_protocol(Some(AlpnProtocol::HTTP1))
+            .build(&opts)
+            .unwrap();
+        assert!(!Arc::ptr_eq(&h2.connector, &http1.connector));
     }
 
     #[test]

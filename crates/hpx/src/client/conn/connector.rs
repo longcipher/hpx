@@ -341,6 +341,9 @@ impl ConnectorService {
         let mut tls_options = extra.tls_options().cloned().unwrap_or_default();
         tls_options.alpn_protocols = None;
 
+        // The TLS builder caches identical configs globally (rustls backend),
+        // so this per-tunnel rebuild hits the cache and clones Arcs instead
+        // of reconstructing `ClientConfig`s.
         let tls = self
             .tls_builder
             .as_ref()
@@ -373,7 +376,9 @@ impl ConnectorService {
         S::Future: Unpin + Send + 'static,
         T: AsyncRead + AsyncWrite + Connection + Unpin + std::fmt::Debug + Sync + Send + 'static,
     {
-        // Prefer TLS options from metadata, fallback to default
+        // Prefer TLS options from metadata, fallback to default. Per-request
+        // rebuilds hit the global TLS builder cache when the config matches,
+        // so this stays a cheap Arc clone on the hot path.
         let tls = extra
             .tls_options()
             .map(|opts| self.tls_builder.build(opts))

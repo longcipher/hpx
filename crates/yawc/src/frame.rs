@@ -655,7 +655,7 @@ impl Frame {
     /// ```
     #[inline(always)]
     pub fn set_random_mask(&mut self) {
-        self.mask = Some(rand::random());
+        self.mask = Some(crate::mask::fast_mask_bytes());
     }
 
     /// Sets a randomly generated masking key for this frame (builder pattern).
@@ -670,7 +670,7 @@ impl Frame {
     /// ```
     #[inline(always)]
     pub fn with_random_mask(mut self) -> Self {
-        self.mask = Some(rand::random());
+        self.mask = Some(crate::mask::fast_mask_bytes());
         self
     }
 
@@ -751,7 +751,7 @@ impl Frame {
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub(super) fn set_random_mask_if_not_set(&mut self) {
         if self.mask.is_none() {
-            let mask: [u8; 4] = rand::random();
+            let mask: [u8; 4] = crate::mask::fast_mask_bytes();
             self.mask = Some(mask);
         }
     }

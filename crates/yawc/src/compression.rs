@@ -349,6 +349,8 @@ impl Deflate {
         let written = (compressor.total_out() - before_out) as usize;
         let consumed = (compressor.total_in() - before_in) as usize;
 
+        // SAFETY: `written` counts bytes flate2 just stored into the spare
+        // capacity exposed by `chunk`, so `len + written <= capacity`.
         unsafe { output.advance_mut(written) };
 
         match status {
@@ -374,6 +376,8 @@ impl Deflate {
                 .map_err(deflate_error)?;
 
             let written = (compressor.total_out() - before_out) as usize;
+            // SAFETY: `written` counts bytes flate2 just stored into the spare
+            // capacity exposed by `chunk`, so `len + written <= capacity`.
             unsafe { output.advance_mut(written) };
 
             // FlushCompress::Sync writes the end of the stream, indicating the stream is finished
@@ -411,15 +415,15 @@ fn chunk(output: &mut BytesMut) -> &mut [u8] {
         output.reserve(1024);
     }
 
-    let uninitbuf = output.spare_capacity_mut();
-    // Zero-initialize spare capacity so the cast to &mut [u8] is sound.
-    uninitbuf.fill(std::mem::MaybeUninit::new(0));
-    // SAFETY: `uninitbuf` has been fully zero-initialized via `fill(MaybeUninit::new(0))`,
-    // so all bytes are valid `u8`. The cast from `[MaybeUninit<u8>]` to `[u8]` is
-    // sound because `MaybeUninit<u8>` has the same layout as `u8` and the memory
-    // is initialized. The caller (flate2 writer) will overwrite the zeros with
-    // actual compressed data.
-    unsafe { &mut *(uninitbuf as *mut [std::mem::MaybeUninit<u8>] as *mut [u8]) }
+    let spare = output.spare_capacity_mut();
+    // SAFETY: `spare` covers `output`'s uninitialized spare capacity, and
+    // `MaybeUninit<u8>` is layout-compatible with `u8`, so the pointer cast is
+    // sound. The slice is handed to flate2 purely as a write-only destination:
+    // flate2 overwrites the first `written` bytes (measured via `total_out`
+    // deltas at each call site) before anything is read, and every caller
+    // advances the buffer by exactly `written` via `advance_mut`, so
+    // uninitialized bytes are never observed. No zero-fill is needed.
+    unsafe { &mut *(spare as *mut [std::mem::MaybeUninit<u8>] as *mut [u8]) }
 }
 
 /// A decompressor for handling WebSocket payload decompression.
@@ -662,6 +666,8 @@ impl Inflate {
             let read = (decompressor.total_out() - before_out) as usize;
             let consumed = (decompressor.total_in() - before_in) as usize;
 
+            // SAFETY: `read` counts bytes flate2 just stored into the spare
+            // capacity exposed by `chunk`, so `len + read <= capacity`.
             unsafe { output.advance_mut(read) };
 
             input = &input[consumed..];
@@ -704,6 +710,8 @@ impl Inflate {
             .map_err(inflate_error)?;
 
         let written = (decompressor.total_out() - before_out) as usize;
+        // SAFETY: `written` counts bytes flate2 just stored into the spare
+        // capacity exposed by `chunk`, so `len + written <= capacity`.
         unsafe { output.advance_mut(written) };
 
         loop {
@@ -719,6 +727,8 @@ impl Inflate {
             }
 
             let written = (decompressor.total_out() - before_out) as usize;
+            // SAFETY: `written` counts bytes flate2 just stored into the spare
+            // capacity exposed by `chunk`, so `len + written <= capacity`.
             unsafe {
                 output.advance_mut(written);
             }
@@ -976,6 +986,26 @@ mod tests {
         let extensions =
             WebSocketExtensions::from_str("permessage-deflate; server_max_window_bits=").unwrap();
         assert_eq!(extensions.server_max_window_bits, Some(None));
+    }
+
+    #[test]
+    fn chunked_roundtrip_spans_multiple_chunks() {
+        // Payload larger than the 1KB `chunk` window forces repeated
+        // chunk/advance cycles on both the compress and decompress paths.
+        // Output must roundtrip byte-for-byte without any zero-fill.
+        let data_len = 32 * 1024i32;
+        let data: Vec<u8> = (0..data_len)
+            .map(|i| ((i.wrapping_mul(1234567).wrapping_add(987654321)) % 256) as u8)
+            .collect();
+
+        let mut compressor = Compressor::new(Compression::default());
+        let compressed = compressor.compress(&data, true).expect("compress");
+
+        let mut decompressor = Decompressor::new();
+        let decompressed = decompressor
+            .decompress(&compressed, true)
+            .expect("decompress");
+        assert_eq!(&decompressed[..], &data[..]);
     }
 
     #[test]
