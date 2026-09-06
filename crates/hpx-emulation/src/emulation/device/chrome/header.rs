@@ -12,7 +12,7 @@
 use super::*;
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
-pub fn header_initializer(
+pub(crate) fn header_initializer(
     sec_ch_ua: &'static str,
     ua: &'static str,
     emulation_os: EmulationOS,
@@ -31,7 +31,7 @@ pub fn header_initializer(
 }
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
-pub fn header_initializer_with_zstd(
+pub(crate) fn header_initializer_with_zstd(
     sec_ch_ua: &'static str,
     ua: &'static str,
     emulation_os: EmulationOS,
@@ -50,7 +50,7 @@ pub fn header_initializer_with_zstd(
 }
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
-pub fn header_initializer_with_zstd_priority(
+pub(crate) fn header_initializer_with_zstd_priority(
     sec_ch_ua: &'static str,
     ua: &'static str,
     emulation_os: EmulationOS,

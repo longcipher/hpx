@@ -15,7 +15,6 @@ categories = [
     "web-programming::websocket",
     "wasm",
 ]
-readme = "README.md"
 
 # Package build settings
 exclude = ["/.github/*", "/examples/*", "/tests/*", "/.gitignore"]

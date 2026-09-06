@@ -130,9 +130,8 @@ macro_rules! mod_generator {
         pub(crate) mod $mod_name {
             use super::*;
 
-            pub fn emulation(option: EmulationOption) -> Emulation {
+            pub(crate) fn emulation(option: EmulationOption) -> Emulation {
                 let default_headers = if !option.skip_headers {
-                    #[allow(unreachable_patterns)]
                     let default_headers = match option.emulation_os {
                         $(
                             EmulationOS::$other_os => $header_initializer(
@@ -155,7 +154,7 @@ macro_rules! mod_generator {
                 build_emulation(option, default_headers)
             }
 
-            pub fn build_emulation(
+            pub(crate) fn build_emulation(
                 option: EmulationOption,
                 default_headers: Option<HeaderMap>
             ) -> Emulation {
@@ -185,9 +184,8 @@ macro_rules! mod_generator {
         pub(crate) mod $mod_name {
             use super::*;
 
-            pub fn emulation(option: EmulationOption) -> Emulation {
+            pub(crate) fn emulation(option: EmulationOption) -> Emulation {
                 let default_headers = if !option.skip_headers {
-                    #[allow(unreachable_patterns)]
                     let default_headers = match option.emulation_os {
                         $(
                             EmulationOS::$other_os => $header_initializer(
@@ -210,7 +208,7 @@ macro_rules! mod_generator {
                 build_emulation(option, default_headers)
             }
 
-            pub fn build_emulation(
+            pub(crate) fn build_emulation(
                 option: EmulationOption,
                 default_headers: Option<HeaderMap>
             ) -> Emulation {
@@ -242,9 +240,8 @@ macro_rules! mod_generator {
         pub(crate) mod $mod_name {
             use super::*;
 
-            pub fn emulation(option: EmulationOption) -> Emulation {
+            pub(crate) fn emulation(option: EmulationOption) -> Emulation {
                 let default_headers = if !option.skip_headers {
-                    #[allow(unreachable_patterns)]
                     let default_headers = match option.emulation_os {
                         $(
                             EmulationOS::$other_os => $header_initializer(

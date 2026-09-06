@@ -903,12 +903,12 @@ mod tests {
     #[tokio::test]
     async fn response_bytes_two_frame_body() {
         let stream = futures_util::stream::iter(vec![
-            Ok::<http_body::Frame<Bytes>, std::convert::Infallible>(
-                http_body::Frame::data(Bytes::from_static(b"hello ")),
-            ),
-            Ok::<http_body::Frame<Bytes>, std::convert::Infallible>(
-                http_body::Frame::data(Bytes::from_static(b"world")),
-            ),
+            Ok::<http_body::Frame<Bytes>, std::convert::Infallible>(http_body::Frame::data(
+                Bytes::from_static(b"hello "),
+            )),
+            Ok::<http_body::Frame<Bytes>, std::convert::Infallible>(http_body::Frame::data(
+                Bytes::from_static(b"world"),
+            )),
         ]);
         let body = Body::wrap(http_body_util::StreamBody::new(stream));
         let response = response_with_body(body);
@@ -919,15 +919,15 @@ mod tests {
     #[tokio::test]
     async fn response_bytes_three_frame_body() {
         let stream = futures_util::stream::iter(vec![
-            Ok::<http_body::Frame<Bytes>, std::convert::Infallible>(
-                http_body::Frame::data(Bytes::from_static(b"one-")),
-            ),
-            Ok::<http_body::Frame<Bytes>, std::convert::Infallible>(
-                http_body::Frame::data(Bytes::from_static(b"two-")),
-            ),
-            Ok::<http_body::Frame<Bytes>, std::convert::Infallible>(
-                http_body::Frame::data(Bytes::from_static(b"three")),
-            ),
+            Ok::<http_body::Frame<Bytes>, std::convert::Infallible>(http_body::Frame::data(
+                Bytes::from_static(b"one-"),
+            )),
+            Ok::<http_body::Frame<Bytes>, std::convert::Infallible>(http_body::Frame::data(
+                Bytes::from_static(b"two-"),
+            )),
+            Ok::<http_body::Frame<Bytes>, std::convert::Infallible>(http_body::Frame::data(
+                Bytes::from_static(b"three"),
+            )),
         ]);
         let body = Body::wrap(http_body_util::StreamBody::new(stream));
         let response = response_with_body(body);

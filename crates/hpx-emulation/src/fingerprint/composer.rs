@@ -21,6 +21,7 @@ use hpx::header::{HeaderMap, HeaderName, HeaderValue};
 /// let headers = composer.compose();
 /// // The custom user-agent overrides the fingerprint one.
 /// ```
+#[derive(Debug)]
 pub struct HeaderComposer {
     fingerprint_headers: Vec<(String, String)>,
     custom_headers: Vec<(String, String)>,
@@ -119,8 +120,8 @@ pub enum ComposeError {
 impl std::fmt::Display for ComposeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ComposeError::InvalidHeaderName(name) => write!(f, "Invalid header name: {name}"),
-            ComposeError::InvalidHeaderValue(value) => {
+            Self::InvalidHeaderName(name) => write!(f, "Invalid header name: {name}"),
+            Self::InvalidHeaderValue(value) => {
                 write!(f, "Invalid header value: {value}")
             }
         }

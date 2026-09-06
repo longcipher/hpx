@@ -1,3 +1,5 @@
+//! hpx-browser test/example crate.
+
 #![allow(missing_docs)]
 use hpx_browser::{
     html_parser::parse_html,

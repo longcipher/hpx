@@ -1,3 +1,5 @@
+//! hpx-emulation test/example crate.
+
 use hpx::Client;
 use hpx_emulation::{Emulation, EmulationOS, EmulationOption};
 

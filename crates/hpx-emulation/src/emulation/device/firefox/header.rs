@@ -1,6 +1,6 @@
 use super::*;
 
-pub fn header_initializer(ua: &'static str) -> HeaderMap {
+pub(crate) fn header_initializer(ua: &'static str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     header_firefox_ua!(headers, ua);
     header_firefox_accept!(headers);
@@ -8,7 +8,7 @@ pub fn header_initializer(ua: &'static str) -> HeaderMap {
     headers
 }
 
-pub fn header_initializer_with_zstd(ua: &'static str) -> HeaderMap {
+pub(crate) fn header_initializer_with_zstd(ua: &'static str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     header_firefox_ua!(headers, ua);
     header_firefox_accept!(zstd, headers);

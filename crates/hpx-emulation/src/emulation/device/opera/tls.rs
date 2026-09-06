@@ -12,9 +12,9 @@ macro_rules! tls_options {
     };
 }
 
-pub const CURVES: &str = join!(":", "X25519MLKEM768", "X25519", "P-256", "P-384");
+pub(crate) const CURVES: &str = join!(":", "X25519MLKEM768", "X25519", "P-256", "P-384");
 
-pub const CIPHER_LIST: &str = join!(
+pub(crate) const CIPHER_LIST: &str = join!(
     ":",
     "TLS_AES_128_GCM_SHA256",
     "TLS_AES_256_GCM_SHA384",
@@ -33,7 +33,7 @@ pub const CIPHER_LIST: &str = join!(
     "TLS_RSA_WITH_AES_256_CBC_SHA"
 );
 
-pub const SIGALGS_LIST: &str = join!(
+pub(crate) const SIGALGS_LIST: &str = join!(
     ":",
     "ecdsa_secp256r1_sha256",
     "rsa_pss_rsae_sha256",
@@ -45,11 +45,11 @@ pub const SIGALGS_LIST: &str = join!(
     "rsa_pkcs1_sha512"
 );
 
-pub const CERT_COMPRESSION_ALGORITHM: &[CertificateCompressionAlgorithm] =
+pub(crate) const CERT_COMPRESSION_ALGORITHM: &[CertificateCompressionAlgorithm] =
     &[CertificateCompressionAlgorithm::BROTLI];
 
 #[derive(Builder)]
-pub struct OperaTlsConfig {
+pub(crate) struct OperaTlsConfig {
     #[builder(default = CURVES)]
     curves: &'static str,
 
@@ -77,7 +77,7 @@ pub struct OperaTlsConfig {
 
 impl From<OperaTlsConfig> for TlsOptions {
     fn from(val: OperaTlsConfig) -> Self {
-        TlsOptions::builder()
+        Self::builder()
             .grease_enabled(true)
             .enable_ocsp_stapling(true)
             .enable_signed_cert_timestamps(true)

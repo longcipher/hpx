@@ -10,7 +10,7 @@ use rand::{RngExt, SeedableRng, rngs::SmallRng};
 // masks cost a few PRNG steps instead of a `getrandom` syscall plus global
 // lock on every frame.
 thread_local! {
-    static FAST_RNG: RefCell<Option<SmallRng>> = RefCell::new(None);
+    static FAST_RNG: RefCell<Option<SmallRng>> = const { RefCell::new(None) };
 }
 
 /// Returns a fresh random 4-byte WebSocket masking key.

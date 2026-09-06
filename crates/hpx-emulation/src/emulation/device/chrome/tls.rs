@@ -79,7 +79,7 @@ const CHROME_SIGALGS: &[SigAlg] = &[
 
 /// Builds a structured `FpTls` from a `TlsPreset`.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
-pub fn tls_fingerprint_from_preset(preset: TlsPreset) -> FpTls {
+pub(crate) fn tls_fingerprint_from_preset(preset: TlsPreset) -> FpTls {
     match preset {
         TlsPreset::ChromeBase => FpTls {
             curves: vec![Curve::X25519, Curve::Secp256r1, Curve::Secp384r1],
@@ -172,11 +172,11 @@ pub fn tls_fingerprint_from_preset(preset: TlsPreset) -> FpTls {
     }
 }
 
-pub const CURVES_1: &str = join!(":", "X25519", "P-256", "P-384");
-pub const CURVES_2: &str = join!(":", "X25519Kyber768Draft00", "X25519", "P-256", "P-384");
-pub const CURVES_3: &str = join!(":", "X25519MLKEM768", "X25519", "P-256", "P-384");
+pub(crate) const CURVES_1: &str = join!(":", "X25519", "P-256", "P-384");
+pub(crate) const CURVES_2: &str = join!(":", "X25519Kyber768Draft00", "X25519", "P-256", "P-384");
+pub(crate) const CURVES_3: &str = join!(":", "X25519MLKEM768", "X25519", "P-256", "P-384");
 
-pub const CIPHER_LIST: &str = join!(
+pub(crate) const CIPHER_LIST: &str = join!(
     ":",
     "TLS_AES_128_GCM_SHA256",
     "TLS_AES_256_GCM_SHA384",
@@ -195,7 +195,7 @@ pub const CIPHER_LIST: &str = join!(
     "TLS_RSA_WITH_AES_256_CBC_SHA"
 );
 
-pub const SIGALGS_LIST: &str = join!(
+pub(crate) const SIGALGS_LIST: &str = join!(
     ":",
     "ecdsa_secp256r1_sha256",
     "rsa_pss_rsae_sha256",
@@ -207,11 +207,11 @@ pub const SIGALGS_LIST: &str = join!(
     "rsa_pkcs1_sha512"
 );
 
-pub const CERT_COMPRESSION_ALGORITHM: &[CertificateCompressionAlgorithm] =
+pub(crate) const CERT_COMPRESSION_ALGORITHM: &[CertificateCompressionAlgorithm] =
     &[CertificateCompressionAlgorithm::BROTLI];
 
 #[derive(Builder)]
-pub struct ChromeTlsConfig {
+pub(crate) struct ChromeTlsConfig {
     #[builder(default = CURVES_1)]
     curves: &'static str,
 
@@ -239,7 +239,7 @@ pub struct ChromeTlsConfig {
 
 impl From<ChromeTlsConfig> for TlsOptions {
     fn from(val: ChromeTlsConfig) -> Self {
-        TlsOptions::builder()
+        Self::builder()
             .grease_enabled(true)
             .enable_ocsp_stapling(true)
             .enable_signed_cert_timestamps(true)

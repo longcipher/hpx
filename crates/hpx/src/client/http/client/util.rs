@@ -86,7 +86,10 @@ pub(super) fn normalize_uri<B>(req: &mut Request<B>, is_http_connect: bool) -> R
             Ok(build_base_uri(scheme, auth))
         }
         _ => {
-            debug!("Client requires absolute-form URIs, received: {:?}", req.uri());
+            debug!(
+                "Client requires absolute-form URIs, received: {:?}",
+                req.uri()
+            );
             Err(Error::new_kind(ErrorKind::UserAbsoluteUriRequired))
         }
     }

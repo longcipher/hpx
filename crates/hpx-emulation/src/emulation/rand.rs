@@ -223,7 +223,7 @@ impl Emulation {
     /// This method will panic if the `Emulation::VARIANTS` array is empty.
     #[inline]
     pub fn random() -> EmulationOption {
-        let emulation = Emulation::VARIANTS;
+        let emulation = Self::VARIANTS;
         let emulation_os = EmulationOS::VARIANTS;
         let rand = rand::random::<u64>() as usize;
         EmulationOption::builder()
@@ -261,7 +261,7 @@ impl Emulation {
                 }
             }
             // ponytail: float rounding tail — pick last variant.
-            Emulation::OkHttp5
+            Self::OkHttp5
         };
         let emulation_os = EmulationOS::VARIANTS;
         let os_idx = rand::random::<u64>() as usize % emulation_os.len();

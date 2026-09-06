@@ -326,7 +326,11 @@ mod tests {
         // Timeout wrapper built through the shared constructor must also
         // deliver a fast stream without false triggers.
         let inner = ImmediateBody { remaining: 3 };
-        let mut body = Box::pin(TimeoutBody::new(None, Some(Duration::from_millis(50)), inner));
+        let mut body = Box::pin(TimeoutBody::new(
+            None,
+            Some(Duration::from_millis(50)),
+            inner,
+        ));
 
         for _ in 0..3 {
             let frame = futures_util::future::poll_fn(|cx| body.as_mut().poll_frame(cx)).await;

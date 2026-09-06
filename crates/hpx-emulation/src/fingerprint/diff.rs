@@ -10,44 +10,86 @@ use super::{BrowserFingerprint, CipherSuite, Curve, SignatureAlgorithm};
 pub enum FingerprintDiff {
     /// Browser name differs.
     NameChanged {
+        /// Name of the old fingerprint.
         old: &'static str,
+        /// Name of the new fingerprint.
         new: &'static str,
     },
     /// Browser version differs.
     VersionChanged {
+        /// Version of the old fingerprint.
         old: &'static str,
+        /// Version of the new fingerprint.
         new: &'static str,
     },
     /// TLS curves list differs.
-    CurvesChanged { old: Vec<Curve>, new: Vec<Curve> },
+    CurvesChanged {
+        /// Curves of the old fingerprint.
+        old: Vec<Curve>,
+        /// Curves of the new fingerprint.
+        new: Vec<Curve>,
+    },
     /// TLS cipher suites differ.
     CipherSuitesChanged {
+        /// Cipher suites of the old fingerprint.
         old: Vec<CipherSuite>,
+        /// Cipher suites of the new fingerprint.
         new: Vec<CipherSuite>,
     },
     /// TLS signature algorithms differ.
     SignatureAlgorithmsChanged {
+        /// Signature algorithms of the old fingerprint.
         old: Vec<SignatureAlgorithm>,
+        /// Signature algorithms of the new fingerprint.
         new: Vec<SignatureAlgorithm>,
     },
     /// Extension permutation setting changed.
-    PermuteExtensionsChanged { old: bool, new: bool },
+    PermuteExtensionsChanged {
+        /// Permutation flag of the old fingerprint.
+        old: bool,
+        /// Permutation flag of the new fingerprint.
+        new: bool,
+    },
     /// ECH mode changed.
     EchModeChanged {
+        /// ECH mode of the old fingerprint.
         old: super::EchMode,
+        /// ECH mode of the new fingerprint.
         new: super::EchMode,
     },
     /// PSK setting changed.
-    PreSharedKeyChanged { old: bool, new: bool },
+    PreSharedKeyChanged {
+        /// PSK flag of the old fingerprint.
+        old: bool,
+        /// PSK flag of the new fingerprint.
+        new: bool,
+    },
     /// ALPS new codepoint setting changed.
-    AlpsNewCodepointChanged { old: bool, new: bool },
+    AlpsNewCodepointChanged {
+        /// ALPS codepoint flag of the old fingerprint.
+        old: bool,
+        /// ALPS codepoint flag of the new fingerprint.
+        new: bool,
+    },
     /// HTTP/2 initial window size changed.
-    H2InitialWindowSizeChanged { old: u32, new: u32 },
+    H2InitialWindowSizeChanged {
+        /// Window size of the old fingerprint.
+        old: u32,
+        /// Window size of the new fingerprint.
+        new: u32,
+    },
     /// HTTP/2 max concurrent streams changed.
-    H2MaxConcurrentStreamsChanged { old: Option<u32>, new: Option<u32> },
+    H2MaxConcurrentStreamsChanged {
+        /// Stream limit of the old fingerprint.
+        old: Option<u32>,
+        /// Stream limit of the new fingerprint.
+        new: Option<u32>,
+    },
     /// HTTP/2 enable_push changed.
     H2EnablePushChanged {
+        /// Push flag of the old fingerprint.
         old: Option<bool>,
+        /// Push flag of the new fingerprint.
         new: Option<bool>,
     },
     /// HTTP headers differ.
@@ -57,13 +99,13 @@ pub enum FingerprintDiff {
 impl std::fmt::Display for FingerprintDiff {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FingerprintDiff::NameChanged { old, new } => {
+            Self::NameChanged { old, new } => {
                 write!(f, "Name: {old} -> {new}")
             }
-            FingerprintDiff::VersionChanged { old, new } => {
+            Self::VersionChanged { old, new } => {
                 write!(f, "Version: {old} -> {new}")
             }
-            FingerprintDiff::CurvesChanged { old, new } => {
+            Self::CurvesChanged { old, new } => {
                 write!(
                     f,
                     "Curves: {} -> {}",
@@ -71,7 +113,7 @@ impl std::fmt::Display for FingerprintDiff {
                     format_curves(new)
                 )
             }
-            FingerprintDiff::CipherSuitesChanged { old, new } => {
+            Self::CipherSuitesChanged { old, new } => {
                 write!(
                     f,
                     "Cipher suites: {} suites -> {} suites",
@@ -79,31 +121,31 @@ impl std::fmt::Display for FingerprintDiff {
                     new.len()
                 )
             }
-            FingerprintDiff::SignatureAlgorithmsChanged { old, new } => {
+            Self::SignatureAlgorithmsChanged { old, new } => {
                 write!(f, "Signature algorithms: {} -> {}", old.len(), new.len())
             }
-            FingerprintDiff::PermuteExtensionsChanged { old, new } => {
+            Self::PermuteExtensionsChanged { old, new } => {
                 write!(f, "Permute extensions: {old} -> {new}")
             }
-            FingerprintDiff::EchModeChanged { old: _, new: _ } => {
+            Self::EchModeChanged { old: _, new: _ } => {
                 write!(f, "ECH mode changed")
             }
-            FingerprintDiff::PreSharedKeyChanged { old, new } => {
+            Self::PreSharedKeyChanged { old, new } => {
                 write!(f, "PSK: {old} -> {new}")
             }
-            FingerprintDiff::AlpsNewCodepointChanged { old, new } => {
+            Self::AlpsNewCodepointChanged { old, new } => {
                 write!(f, "ALPS new codepoint: {old} -> {new}")
             }
-            FingerprintDiff::H2InitialWindowSizeChanged { old, new } => {
+            Self::H2InitialWindowSizeChanged { old, new } => {
                 write!(f, "H2 initial window size: {old} -> {new}")
             }
-            FingerprintDiff::H2MaxConcurrentStreamsChanged { old, new } => {
+            Self::H2MaxConcurrentStreamsChanged { old, new } => {
                 write!(f, "H2 max concurrent streams: {old:?} -> {new:?}")
             }
-            FingerprintDiff::H2EnablePushChanged { old, new } => {
+            Self::H2EnablePushChanged { old, new } => {
                 write!(f, "H2 enable push: {old:?} -> {new:?}")
             }
-            FingerprintDiff::HeadersChanged => {
+            Self::HeadersChanged => {
                 write!(f, "HTTP headers differ")
             }
         }

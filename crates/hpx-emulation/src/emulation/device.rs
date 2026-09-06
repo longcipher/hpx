@@ -2,17 +2,17 @@
 
 #[macro_use]
 mod macros;
-pub mod chrome;
-pub mod firefox;
-pub mod okhttp;
-pub mod opera;
-pub mod safari;
+pub(crate) mod chrome;
+pub(crate) mod firefox;
+pub(crate) mod okhttp;
+pub(crate) mod opera;
+pub(crate) mod safari;
 
-pub use bon::Builder;
-pub use chrome::tls::tls_fingerprint_from_preset;
+pub(crate) use bon::Builder;
+pub(crate) use chrome::tls::tls_fingerprint_from_preset;
 #[cfg(feature = "emulation-compression")]
-pub use hpx::header::ACCEPT_ENCODING;
-pub use hpx::{
+pub(crate) use hpx::header::ACCEPT_ENCODING;
+pub(crate) use hpx::{
     Emulation,
     header::{ACCEPT, ACCEPT_LANGUAGE, HeaderMap, HeaderName, HeaderValue, USER_AGENT},
     http2::{
@@ -25,4 +25,4 @@ pub use hpx::{
     },
 };
 
-pub use crate::emulation::{EmulationOS, EmulationOption};
+pub(crate) use crate::emulation::{EmulationOS, EmulationOption};

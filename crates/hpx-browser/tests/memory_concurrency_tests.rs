@@ -1,3 +1,5 @@
+//! hpx-browser test/example crate.
+
 #![allow(missing_docs)]
 use hpx_browser::{page::Page, resource_loader::ResourceType};
 

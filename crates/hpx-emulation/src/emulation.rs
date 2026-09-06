@@ -25,6 +25,7 @@ macro_rules! define_enum {
         #[cfg_attr(feature = "emulation-serde", derive(Deserialize, Serialize))]
         pub enum $name {
             $(
+                #[doc = $rename]
                 #[cfg_attr(feature = "emulation-serde", serde(rename = $rename))]
                 $variant,
             )*
@@ -70,6 +71,7 @@ macro_rules! define_enum {
         #[cfg_attr(feature = "emulation-serde", derive(Deserialize, Serialize))]
         pub enum $name {
             $(
+                #[doc = $rename]
                 #[cfg_attr(feature = "emulation-serde", serde(rename = $rename))]
                 $variant,
             )*

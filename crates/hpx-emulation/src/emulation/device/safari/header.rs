@@ -1,7 +1,7 @@
 use super::*;
 
 #[inline]
-pub fn header_initializer_for_14(ua: &'static str) -> HeaderMap {
+pub(crate) fn header_initializer_for_14(ua: &'static str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, HeaderValue::from_static(ua));
     headers.insert(
@@ -18,7 +18,7 @@ pub fn header_initializer_for_14(ua: &'static str) -> HeaderMap {
 }
 
 #[inline]
-pub fn header_initializer_for_15(ua: &'static str) -> HeaderMap {
+pub(crate) fn header_initializer_for_15(ua: &'static str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, HeaderValue::from_static(ua));
     headers.insert(
@@ -35,7 +35,7 @@ pub fn header_initializer_for_15(ua: &'static str) -> HeaderMap {
 }
 
 #[inline]
-pub fn header_initializer_for_16_17(ua: &'static str) -> HeaderMap {
+pub(crate) fn header_initializer_for_16_17(ua: &'static str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(
         ACCEPT,
@@ -55,7 +55,7 @@ pub fn header_initializer_for_16_17(ua: &'static str) -> HeaderMap {
 }
 
 #[inline]
-pub fn header_initializer_for_18(ua: &'static str) -> HeaderMap {
+pub(crate) fn header_initializer_for_18(ua: &'static str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert("sec-fetch-dest", HeaderValue::from_static("document"));
     headers.insert(USER_AGENT, HeaderValue::from_static(ua));

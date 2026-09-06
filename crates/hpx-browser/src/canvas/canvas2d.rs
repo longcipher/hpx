@@ -3,9 +3,9 @@
 #[allow(deprecated)]
 use skia_safe::gradient_shader;
 use skia_safe::{
-    AlphaType, BlendMode, Canvas as SkCanvas, Color4f, ColorFilter, ColorType, Font, FontHinting,
-    FontMgr, ImageInfo, Matrix, Paint, PaintStyle, Point, Rect as SkRect, TileMode, image_filters,
-    surfaces,
+    AlphaType, BlendMode, Canvas as SkCanvas, Color4f, ColorFilter, ColorType, Data, Font,
+    FontHinting, FontMgr, ImageInfo, Matrix, Paint, PaintStyle, Point, Rect as SkRect, TileMode,
+    image_filters, surfaces,
 };
 
 use crate::canvas::{
@@ -862,7 +862,8 @@ impl Canvas2D {
             return;
         };
         let size_px = self.state.font.size_px;
-        let Some(typeface) = FontMgr::new().new_from_data(data, Some(idx as usize)) else {
+        let Some(typeface) = FontMgr::new().new_from_data(Data::new_copy(data), Some(idx as u32))
+        else {
             // Fallback: legacy swash raster.
             let color = self.state.fill_style.color();
             let glyphs = text::rasterize_text(

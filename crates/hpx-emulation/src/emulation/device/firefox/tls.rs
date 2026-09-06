@@ -59,10 +59,10 @@ macro_rules! tls_options {
     };
 }
 
-pub const CURVES_1: &str = join!(":", "X25519", "P-256", "P-384", "P-521");
-pub const CURVES_2: &str = join!(":", "X25519MLKEM768", "X25519", "P-256", "P-384", "P-521");
+pub(crate) const CURVES_1: &str = join!(":", "X25519", "P-256", "P-384", "P-521");
+pub(crate) const CURVES_2: &str = join!(":", "X25519MLKEM768", "X25519", "P-256", "P-384", "P-521");
 
-pub const CIPHER_LIST_1: &str = join!(
+pub(crate) const CIPHER_LIST_1: &str = join!(
     ":",
     "TLS_AES_128_GCM_SHA256",
     "TLS_CHACHA20_POLY1305_SHA256",
@@ -82,7 +82,7 @@ pub const CIPHER_LIST_1: &str = join!(
     "TLS_RSA_WITH_AES_128_CBC_SHA",
     "TLS_RSA_WITH_AES_256_CBC_SHA"
 );
-pub const CIPHER_LIST_2: &str = join!(
+pub(crate) const CIPHER_LIST_2: &str = join!(
     ":",
     "TLS_AES_128_GCM_SHA256",
     "TLS_CHACHA20_POLY1305_SHA256",
@@ -101,7 +101,7 @@ pub const CIPHER_LIST_2: &str = join!(
     "TLS_RSA_WITH_AES_256_CBC_SHA"
 );
 
-pub const SIGALGS_LIST: &str = join!(
+pub(crate) const SIGALGS_LIST: &str = join!(
     ":",
     "ecdsa_secp256r1_sha256",
     "ecdsa_secp384r1_sha384",
@@ -116,13 +116,13 @@ pub const SIGALGS_LIST: &str = join!(
     "rsa_pkcs1_sha1"
 );
 
-pub const CERT_COMPRESSION_ALGORITHM: &[CertificateCompressionAlgorithm] = &[
+pub(crate) const CERT_COMPRESSION_ALGORITHM: &[CertificateCompressionAlgorithm] = &[
     CertificateCompressionAlgorithm::ZLIB,
     CertificateCompressionAlgorithm::BROTLI,
     // CertificateCompressionAlgorithm::ZSTD,
 ];
 
-pub const DELEGATED_CREDENTIALS: &str = join!(
+pub(crate) const DELEGATED_CREDENTIALS: &str = join!(
     ":",
     "ecdsa_secp256r1_sha256",
     "ecdsa_secp384r1_sha384",
@@ -130,9 +130,9 @@ pub const DELEGATED_CREDENTIALS: &str = join!(
     "ecdsa_sha1"
 );
 
-pub const RECORD_SIZE_LIMIT: u16 = 0x4001;
+pub(crate) const RECORD_SIZE_LIMIT: u16 = 0x4001;
 
-pub const EXTENSION_PERMUTATION_INDICES: &[ExtensionType] = &[
+pub(crate) const EXTENSION_PERMUTATION_INDICES: &[ExtensionType] = &[
     ExtensionType::SERVER_NAME,
     ExtensionType::EXTENDED_MASTER_SECRET,
     ExtensionType::RENEGOTIATE,
@@ -153,7 +153,7 @@ pub const EXTENSION_PERMUTATION_INDICES: &[ExtensionType] = &[
 ];
 
 #[derive(Builder)]
-pub struct FirefoxTlsConfig {
+pub(crate) struct FirefoxTlsConfig {
     #[builder(default = SIGALGS_LIST)]
     sigalgs_list: &'static str,
 
@@ -199,7 +199,7 @@ pub struct FirefoxTlsConfig {
 
 impl From<FirefoxTlsConfig> for TlsOptions {
     fn from(val: FirefoxTlsConfig) -> Self {
-        let mut builder = TlsOptions::builder()
+        let mut builder = Self::builder()
             .curves_list(val.curves_list)
             .sigalgs_list(val.sigalgs_list)
             .cipher_list(val.cipher_list)
@@ -222,7 +222,7 @@ impl From<FirefoxTlsConfig> for TlsOptions {
             .random_aes_hw_override(true);
 
         if let Some(cert_compression_algorithms) = val.certificate_compression_algorithms {
-            builder = builder.certificate_compression_algorithms(cert_compression_algorithms)
+            builder = builder.certificate_compression_algorithms(cert_compression_algorithms);
         }
 
         builder.build()

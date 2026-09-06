@@ -8,7 +8,7 @@ use crate::client::conn::socks;
 use crate::{
     client::{
         conn::{Connected, tunnel},
-        core::{self},
+        core,
     },
     error::{BoxError, ProxyConnect},
 };

@@ -169,11 +169,12 @@ struct CachedConnectorKey {
     store_is_default: bool,
 }
 
-static CONNECTOR_CACHE: OnceLock<parking_lot::Mutex<HashMap<CachedConnectorKey, Arc<RustlsConnector>>>> =
-    OnceLock::new();
+static CONNECTOR_CACHE: OnceLock<
+    parking_lot::Mutex<HashMap<CachedConnectorKey, Arc<RustlsConnector>>>,
+> = OnceLock::new();
 
-fn connector_cache(
-) -> &'static parking_lot::Mutex<HashMap<CachedConnectorKey, Arc<RustlsConnector>>> {
+fn connector_cache()
+-> &'static parking_lot::Mutex<HashMap<CachedConnectorKey, Arc<RustlsConnector>>> {
     CONNECTOR_CACHE.get_or_init(|| parking_lot::Mutex::new(HashMap::new()))
 }
 
@@ -284,8 +285,7 @@ impl TlsConnectorBuilder {
         // Fast path: all four ALPN variants already cached — return cloned
         // Arcs without touching root stores or `ClientConfig` construction.
         if cacheable {
-            let h2: Option<Vec<Vec<u8>>> =
-                Some(vec![AlpnProtocol::HTTP2.as_wire_bytes().to_vec()]);
+            let h2: Option<Vec<Vec<u8>>> = Some(vec![AlpnProtocol::HTTP2.as_wire_bytes().to_vec()]);
             let http1: Option<Vec<Vec<u8>>> =
                 Some(vec![AlpnProtocol::HTTP1.as_wire_bytes().to_vec()]);
             let no_alpn: Option<Vec<Vec<u8>>> = None;
@@ -992,10 +992,7 @@ mod tests {
             &second.connector_no_alpn
         ));
         assert!(Arc::ptr_eq(&first.connector_h2, &second.connector_h2));
-        assert!(Arc::ptr_eq(
-            &first.connector_http1,
-            &second.connector_http1
-        ));
+        assert!(Arc::ptr_eq(&first.connector_http1, &second.connector_http1));
     }
 
     #[test]

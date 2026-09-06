@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![allow(unreachable_pub)]
 pub mod delay_layer;
 pub mod delay_server;
 pub mod server;

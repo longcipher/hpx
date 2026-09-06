@@ -4,7 +4,7 @@ macro_rules! mod_generator {
     ($mod_name:ident, $cipher:expr, $ua:expr) => {
         pub(crate) mod $mod_name {
             use super::*;
-            pub fn emulation(option: EmulationOption) -> Emulation {
+            pub(crate) fn emulation(option: EmulationOption) -> Emulation {
                 build_emulation(option, $cipher, $ua)
             }
         }
@@ -59,7 +59,7 @@ struct OkHttpTlsConfig {
 
 impl From<OkHttpTlsConfig> for TlsOptions {
     fn from(val: OkHttpTlsConfig) -> Self {
-        TlsOptions::builder()
+        Self::builder()
             .enable_ocsp_stapling(true)
             .curves_list(val.curves)
             .sigalgs_list(val.sigalgs_list)
@@ -164,10 +164,10 @@ fn build_emulation(
             .build();
 
         let http2_opts = Http2Options::builder()
-            .initial_window_size(6291456)
-            .initial_connection_window_size(15728640)
+            .initial_window_size(6_291_456)
+            .initial_connection_window_size(15_728_640)
             .max_concurrent_streams(1000)
-            .max_header_list_size(262144)
+            .max_header_list_size(262_144)
             .header_table_size(65536)
             .headers_stream_dependency(StreamDependency::new(StreamId::zero(), 255, true))
             .headers_pseudo_order(

@@ -20,7 +20,8 @@ canvas = [
 ]
 cdp = ["dep:hpx-yawc", "dep:hyper", "dep:hyper-util", "hpx-yawc/axum"]
 cdp-client = ["dep:which"]
-proptest = ["dep:proptest"]
+# Gates the in-tree property tests. `proptest` itself is a dev-dependency.
+proptest = []
 v8 = ["dep:deno_core"]
 workers = ["v8"]
 hotpath = ["dep:hotpath"]
@@ -49,7 +50,6 @@ jiff = { workspace = true }
 parking_lot.workspace = true
 parley = { workspace = true }
 png = { workspace = true, optional = true }
-proptest = { workspace = true, optional = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 rand_distr = { workspace = true }

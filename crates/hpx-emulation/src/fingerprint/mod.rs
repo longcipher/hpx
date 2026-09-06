@@ -75,11 +75,17 @@ pub enum TlsPreset {
 /// Elliptic curves supported for TLS key exchange.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Curve {
+    /// X25519 (Curve25519) key exchange.
     X25519,
+    /// Hybrid X25519 + Kyber768 draft-00 post-quantum key exchange.
     X25519Kyber768Draft00,
+    /// Hybrid X25519 + ML-KEM-768 post-quantum key exchange.
     X25519MLKEM768,
+    /// NIST P-256 (secp256r1) curve.
     Secp256r1,
+    /// NIST P-384 (secp384r1) curve.
     Secp384r1,
+    /// NIST P-521 (secp521r1) curve.
     Secp521r1,
 }
 
@@ -87,12 +93,12 @@ impl Curve {
     /// Returns the OpenSSL/BoringSSL name for this curve.
     pub const fn openssl_name(&self) -> &'static str {
         match self {
-            Curve::X25519 => "X25519",
-            Curve::X25519Kyber768Draft00 => "X25519Kyber768Draft00",
-            Curve::X25519MLKEM768 => "X25519MLKEM768",
-            Curve::Secp256r1 => "P-256",
-            Curve::Secp384r1 => "P-384",
-            Curve::Secp521r1 => "P-521",
+            Self::X25519 => "X25519",
+            Self::X25519Kyber768Draft00 => "X25519Kyber768Draft00",
+            Self::X25519MLKEM768 => "X25519MLKEM768",
+            Self::Secp256r1 => "P-256",
+            Self::Secp384r1 => "P-384",
+            Self::Secp521r1 => "P-521",
         }
     }
 }
@@ -241,26 +247,39 @@ mod tests {
 /// TLS cipher suites.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CipherSuite {
-    // TLS 1.3
+    /// TLS 1.3 `TLS_AES_128_GCM_SHA256`.
     Tls13Aes128GcmSha256,
+    /// TLS 1.3 `TLS_AES_256_GCM_SHA384`.
     Tls13Aes256GcmSha384,
+    /// TLS 1.3 `TLS_CHACHA20_POLY1305_SHA256`.
     Tls13ChaCha20Poly1305Sha256,
-    // TLS 1.2 ECDHE + ECDSA
+    /// TLS 1.2 `ECDHE_ECDSA_WITH_AES_128_GCM_SHA256`.
     EcdheEcdsaWithAes128GcmSha256,
+    /// TLS 1.2 `ECDHE_ECDSA_WITH_AES_256_GCM_SHA384`.
     EcdheEcdsaWithAes256GcmSha384,
+    /// TLS 1.2 `ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256`.
     EcdheEcdsaWithChaCha20Poly1305Sha256,
+    /// TLS 1.2 `ECDHE_ECDSA_WITH_AES_128_CBC_SHA`.
     EcdheEcdsaWithAes128CbcSha,
+    /// TLS 1.2 `ECDHE_ECDSA_WITH_AES_256_CBC_SHA`.
     EcdheEcdsaWithAes256CbcSha,
-    // TLS 1.2 ECDHE + RSA
+    /// TLS 1.2 `ECDHE_RSA_WITH_AES_128_GCM_SHA256`.
     EcdheRsaWithAes128GcmSha256,
+    /// TLS 1.2 `ECDHE_RSA_WITH_AES_256_GCM_SHA384`.
     EcdheRsaWithAes256GcmSha384,
+    /// TLS 1.2 `ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256`.
     EcdheRsaWithChaCha20Poly1305Sha256,
+    /// TLS 1.2 `ECDHE_RSA_WITH_AES_128_CBC_SHA`.
     EcdheRsaWithAes128CbcSha,
+    /// TLS 1.2 `ECDHE_RSA_WITH_AES_256_CBC_SHA`.
     EcdheRsaWithAes256CbcSha,
-    // TLS 1.2 RSA
+    /// TLS 1.2 `RSA_WITH_AES_128_GCM_SHA256`.
     RsaWithAes128GcmSha256,
+    /// TLS 1.2 `RSA_WITH_AES_256_GCM_SHA384`.
     RsaWithAes256GcmSha384,
+    /// TLS 1.2 `RSA_WITH_AES_128_CBC_SHA`.
     RsaWithAes128CbcSha,
+    /// TLS 1.2 `RSA_WITH_AES_256_CBC_SHA`.
     RsaWithAes256CbcSha,
 }
 
@@ -268,27 +287,27 @@ impl CipherSuite {
     /// Returns the OpenSSL/BoringSSL name for this cipher suite.
     pub const fn openssl_name(&self) -> &'static str {
         match self {
-            CipherSuite::Tls13Aes128GcmSha256 => "TLS_AES_128_GCM_SHA256",
-            CipherSuite::Tls13Aes256GcmSha384 => "TLS_AES_256_GCM_SHA384",
-            CipherSuite::Tls13ChaCha20Poly1305Sha256 => "TLS_CHACHA20_POLY1305_SHA256",
-            CipherSuite::EcdheEcdsaWithAes128GcmSha256 => "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
-            CipherSuite::EcdheEcdsaWithAes256GcmSha384 => "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
-            CipherSuite::EcdheEcdsaWithChaCha20Poly1305Sha256 => {
+            Self::Tls13Aes128GcmSha256 => "TLS_AES_128_GCM_SHA256",
+            Self::Tls13Aes256GcmSha384 => "TLS_AES_256_GCM_SHA384",
+            Self::Tls13ChaCha20Poly1305Sha256 => "TLS_CHACHA20_POLY1305_SHA256",
+            Self::EcdheEcdsaWithAes128GcmSha256 => "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+            Self::EcdheEcdsaWithAes256GcmSha384 => "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+            Self::EcdheEcdsaWithChaCha20Poly1305Sha256 => {
                 "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256"
             }
-            CipherSuite::EcdheEcdsaWithAes128CbcSha => "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA",
-            CipherSuite::EcdheEcdsaWithAes256CbcSha => "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA",
-            CipherSuite::EcdheRsaWithAes128GcmSha256 => "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
-            CipherSuite::EcdheRsaWithAes256GcmSha384 => "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
-            CipherSuite::EcdheRsaWithChaCha20Poly1305Sha256 => {
+            Self::EcdheEcdsaWithAes128CbcSha => "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA",
+            Self::EcdheEcdsaWithAes256CbcSha => "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA",
+            Self::EcdheRsaWithAes128GcmSha256 => "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+            Self::EcdheRsaWithAes256GcmSha384 => "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+            Self::EcdheRsaWithChaCha20Poly1305Sha256 => {
                 "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256"
             }
-            CipherSuite::EcdheRsaWithAes128CbcSha => "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
-            CipherSuite::EcdheRsaWithAes256CbcSha => "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
-            CipherSuite::RsaWithAes128GcmSha256 => "TLS_RSA_WITH_AES_128_GCM_SHA256",
-            CipherSuite::RsaWithAes256GcmSha384 => "TLS_RSA_WITH_AES_256_GCM_SHA384",
-            CipherSuite::RsaWithAes128CbcSha => "TLS_RSA_WITH_AES_128_CBC_SHA",
-            CipherSuite::RsaWithAes256CbcSha => "TLS_RSA_WITH_AES_256_CBC_SHA",
+            Self::EcdheRsaWithAes128CbcSha => "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
+            Self::EcdheRsaWithAes256CbcSha => "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
+            Self::RsaWithAes128GcmSha256 => "TLS_RSA_WITH_AES_128_GCM_SHA256",
+            Self::RsaWithAes256GcmSha384 => "TLS_RSA_WITH_AES_256_GCM_SHA384",
+            Self::RsaWithAes128CbcSha => "TLS_RSA_WITH_AES_128_CBC_SHA",
+            Self::RsaWithAes256CbcSha => "TLS_RSA_WITH_AES_256_CBC_SHA",
         }
     }
 }
@@ -296,13 +315,21 @@ impl CipherSuite {
 /// Signature algorithms for TLS.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SignatureAlgorithm {
+    /// `ecdsa_secp256r1_sha256`.
     EcdsaSecp256r1Sha256,
+    /// `rsa_pss_rsae_sha256`.
     RsaPssRsaeSha256,
+    /// `rsa_pkcs1_sha256`.
     RsaPkcs1Sha256,
+    /// `ecdsa_secp384r1_sha384`.
     EcdsaSecp384r1Sha384,
+    /// `rsa_pss_rsae_sha384`.
     RsaPssRsaeSha384,
+    /// `rsa_pkcs1_sha384`.
     RsaPkcs1Sha384,
+    /// `rsa_pss_rsae_sha512`.
     RsaPssRsaeSha512,
+    /// `rsa_pkcs1_sha512`.
     RsaPkcs1Sha512,
 }
 
@@ -310,14 +337,14 @@ impl SignatureAlgorithm {
     /// Returns the OpenSSL/BoringSSL name for this algorithm.
     pub const fn openssl_name(&self) -> &'static str {
         match self {
-            SignatureAlgorithm::EcdsaSecp256r1Sha256 => "ecdsa_secp256r1_sha256",
-            SignatureAlgorithm::RsaPssRsaeSha256 => "rsa_pss_rsae_sha256",
-            SignatureAlgorithm::RsaPkcs1Sha256 => "rsa_pkcs1_sha256",
-            SignatureAlgorithm::EcdsaSecp384r1Sha384 => "ecdsa_secp384r1_sha384",
-            SignatureAlgorithm::RsaPssRsaeSha384 => "rsa_pss_rsae_sha384",
-            SignatureAlgorithm::RsaPkcs1Sha384 => "rsa_pkcs1_sha384",
-            SignatureAlgorithm::RsaPssRsaeSha512 => "rsa_pss_rsae_sha512",
-            SignatureAlgorithm::RsaPkcs1Sha512 => "rsa_pkcs1_sha512",
+            Self::EcdsaSecp256r1Sha256 => "ecdsa_secp256r1_sha256",
+            Self::RsaPssRsaeSha256 => "rsa_pss_rsae_sha256",
+            Self::RsaPkcs1Sha256 => "rsa_pkcs1_sha256",
+            Self::EcdsaSecp384r1Sha384 => "ecdsa_secp384r1_sha384",
+            Self::RsaPssRsaeSha384 => "rsa_pss_rsae_sha384",
+            Self::RsaPkcs1Sha384 => "rsa_pkcs1_sha384",
+            Self::RsaPssRsaeSha512 => "rsa_pss_rsae_sha512",
+            Self::RsaPkcs1Sha512 => "rsa_pkcs1_sha512",
         }
     }
 }
@@ -325,15 +352,20 @@ impl SignatureAlgorithm {
 /// Certificate compression algorithm.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CertCompression {
+    /// Brotli certificate compression.
     Brotli,
+    /// Zlib certificate compression.
     Zlib,
+    /// Zstandard certificate compression.
     Zstd,
 }
 
 /// ECH (Encrypted Client Hello) mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EchMode {
+    /// ECH is not offered.
     Disabled,
+    /// ECH is offered with a GREASE placeholder only.
     Grease,
 }
 
@@ -459,10 +491,10 @@ pub enum PseudoHeaderOrder {
 impl Default for Http2Fingerprint {
     fn default() -> Self {
         Self {
-            initial_window_size: 6291456,
-            initial_connection_window_size: 15728640,
+            initial_window_size: 6_291_456,
+            initial_connection_window_size: 15_728_640,
             max_concurrent_streams: Some(1000),
-            max_header_list_size: 262144,
+            max_header_list_size: 262_144,
             header_table_size: 65536,
             enable_push: None,
             pseudo_header_order: PseudoHeaderOrder::MethodAuthoritySchemePath,

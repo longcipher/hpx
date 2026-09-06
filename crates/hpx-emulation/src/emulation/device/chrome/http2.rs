@@ -7,9 +7,9 @@ macro_rules! headers_stream_dependency {
 macro_rules! http2_options {
     (@base $builder:expr) => {
         $builder
-            .initial_window_size(6291456)
-            .initial_connection_window_size(15728640)
-            .max_header_list_size(262144)
+            .initial_window_size(6_291_456)
+            .initial_connection_window_size(15_728_640)
+            .max_header_list_size(262_144)
             .header_table_size(65536)
             .headers_stream_dependency(headers_stream_dependency!())
             .headers_pseudo_order(pseudo_order!())

@@ -446,7 +446,6 @@ mod tests {
                             loop {
                                 match stream.read(&mut buf).await {
                                     Ok(0) | Err(_) => {
-                                        got_request = !head.is_empty();
                                         break;
                                     }
                                     Ok(n) => {

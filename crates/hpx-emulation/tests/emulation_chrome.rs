@@ -1,3 +1,5 @@
+//! hpx-emulation test/example crate.
+
 #[macro_use]
 mod support;
 

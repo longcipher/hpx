@@ -27,11 +27,11 @@ macro_rules! tls_options {
     };
 }
 
-pub const CURVES_1: &str = join!(":", "X25519", "P-256", "P-384", "P-521");
+pub(crate) const CURVES_1: &str = join!(":", "X25519", "P-256", "P-384", "P-521");
 
-pub const CURVES_2: &str = join!(":", "X25519MLKEM768", "X25519", "P-256", "P-384", "P-521");
+pub(crate) const CURVES_2: &str = join!(":", "X25519MLKEM768", "X25519", "P-256", "P-384", "P-521");
 
-pub const CIPHER_LIST_1: &str = join!(
+pub(crate) const CIPHER_LIST_1: &str = join!(
     ":",
     "TLS_AES_128_GCM_SHA256",
     "TLS_AES_256_GCM_SHA384",
@@ -60,7 +60,7 @@ pub const CIPHER_LIST_1: &str = join!(
     "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA",
     "TLS_RSA_WITH_3DES_EDE_CBC_SHA"
 );
-pub const CIPHER_LIST_2: &str = join!(
+pub(crate) const CIPHER_LIST_2: &str = join!(
     ":",
     "TLS_AES_128_GCM_SHA256",
     "TLS_AES_256_GCM_SHA384",
@@ -83,7 +83,7 @@ pub const CIPHER_LIST_2: &str = join!(
     "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA",
     "TLS_RSA_WITH_3DES_EDE_CBC_SHA"
 );
-pub const CIPHER_LIST_3: &str = join!(
+pub(crate) const CIPHER_LIST_3: &str = join!(
     ":",
     "TLS_AES_256_GCM_SHA384",
     "TLS_CHACHA20_POLY1305_SHA256",
@@ -107,7 +107,7 @@ pub const CIPHER_LIST_3: &str = join!(
     "TLS_RSA_WITH_3DES_EDE_CBC_SHA"
 );
 
-pub const SIGALGS_LIST_1: &str = join!(
+pub(crate) const SIGALGS_LIST_1: &str = join!(
     ":",
     "ecdsa_secp256r1_sha256",
     "rsa_pss_rsae_sha256",
@@ -121,7 +121,7 @@ pub const SIGALGS_LIST_1: &str = join!(
     "rsa_pkcs1_sha1"
 );
 
-pub const SIGALGS_LIST_2: &str = join!(
+pub(crate) const SIGALGS_LIST_2: &str = join!(
     ":",
     "ecdsa_secp256r1_sha256",
     "rsa_pss_rsae_sha256",
@@ -134,11 +134,11 @@ pub const SIGALGS_LIST_2: &str = join!(
     "rsa_pkcs1_sha1"
 );
 
-pub const CERT_COMPRESSION_ALGORITHM: &[CertificateCompressionAlgorithm] =
+pub(crate) const CERT_COMPRESSION_ALGORITHM: &[CertificateCompressionAlgorithm] =
     &[CertificateCompressionAlgorithm::ZLIB];
 
 #[derive(Builder)]
-pub struct SafariTlsConfig {
+pub(crate) struct SafariTlsConfig {
     #[builder(default = TlsVersion::TLS_1_0)]
     min_tls_version: TlsVersion,
 
@@ -158,7 +158,7 @@ pub struct SafariTlsConfig {
 
 impl From<SafariTlsConfig> for TlsOptions {
     fn from(val: SafariTlsConfig) -> Self {
-        TlsOptions::builder()
+        Self::builder()
             .session_ticket(false)
             .grease_enabled(true)
             .enable_ocsp_stapling(true)

@@ -18,6 +18,7 @@ use hpx as _;
 #[cfg(feature = "emulation-serde")]
 use serde as _;
 
+/// Browser emulation profiles (TLS fingerprinting, HTTP/2 settings).
 #[cfg(feature = "emulation")]
 pub mod emulation;
 

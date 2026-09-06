@@ -1,3 +1,5 @@
+//! hpx-browser test/example crate.
+
 use tokio::io::AsyncWriteExt;
 
 #[tokio::main]

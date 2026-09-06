@@ -15,28 +15,28 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-arrow = ["dep:arrow"]
-csv = ["dep:csv", "dep:serde"]
+arrow = ["dep:arrow", "dep:bytes", "dep:tokio-util"]
+csv = ["dep:csv", "dep:serde", "dep:tokio-util"]
 default = []
 hotpath = ["dep:hotpath"]
-json = ["dep:serde", "dep:serde_json", "hpx/json"]
-protobuf = ["dep:prost"]
+json = ["dep:serde", "dep:serde_json", "dep:hpx", "hpx/json", "dep:tokio-util"]
+protobuf = ["dep:prost", "dep:bytes", "dep:tokio-util"]
 # Enable SIMD-accelerated JSON parsing (requires json feature).
 simd-json = ["json", "dep:simd-json"]
 
 [dependencies]
 arrow = { workspace = true, optional = true, features = ["ipc", "arrow-ipc"] }
-bytes = { workspace = true }
+bytes = { workspace = true, optional = true }
 csv = { workspace = true, optional = true }
 futures = { workspace = true }
 hotpath = { workspace = true, optional = true }
-hpx = { workspace = true, features = ["stream"] }
+hpx = { workspace = true, optional = true, features = ["stream"] }
 prost = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
 simd-json = { workspace = true, optional = true }
 thiserror = { workspace = true }
-tokio-util = { workspace = true, features = ["io", "codec"] }
+tokio-util = { workspace = true, optional = true, features = ["io", "codec"] }
 
 [dev-dependencies]
 proptest = { workspace = true }

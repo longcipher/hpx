@@ -99,3 +99,6 @@ required-features = ["emulation", "emulation-rand"]
 name = "emulation_option"
 path = "examples/emulation_option.rs"
 required-features = ["emulation"]
+
+[lints]
+workspace = true
