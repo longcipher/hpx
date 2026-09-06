@@ -4,11 +4,11 @@ use std::cell::RefCell;
 
 use rand::{RngExt, SeedableRng, rngs::SmallRng};
 
-/// Thread-local fast RNG for per-frame masking keys.
-///
-/// Seeded once per thread from the OS CSPRNG (`rand::random`), so per-frame
-/// masks cost a few PRNG steps instead of a `getrandom` syscall plus global
-/// lock on every frame.
+// Thread-local fast RNG for per-frame masking keys.
+//
+// Seeded once per thread from the OS CSPRNG (`rand::random`), so per-frame
+// masks cost a few PRNG steps instead of a `getrandom` syscall plus global
+// lock on every frame.
 thread_local! {
     static FAST_RNG: RefCell<Option<SmallRng>> = RefCell::new(None);
 }
