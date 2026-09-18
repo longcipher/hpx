@@ -3,8 +3,10 @@
 pub(crate) mod gai;
 #[cfg(feature = "hickory-dns")]
 pub(crate) mod hickory;
+pub mod pinned;
 pub(crate) mod resolve;
 
+pub use pinned::PinnedDns;
 pub use resolve::{Addrs, IntoResolve, Name, Resolve, Resolving};
 
 pub(crate) use self::{
