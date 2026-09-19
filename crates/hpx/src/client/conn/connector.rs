@@ -52,9 +52,7 @@ fn redact_proxy_uri(uri: &Uri) -> String {
         if let Some(at_pos) = auth_str.find('@') {
             // Has credentials — mask everything before @
             let host_part = &auth_str[at_pos + 1..];
-            let scheme = uri
-                .scheme_str()
-                .map_or_default(|s| format!("{s}://"));
+            let scheme = uri.scheme_str().map_or_default(|s| format!("{s}://"));
             return format!("{scheme}***@{host_part}");
         }
     }
