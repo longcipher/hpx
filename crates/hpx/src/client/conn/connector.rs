@@ -54,8 +54,7 @@ fn redact_proxy_uri(uri: &Uri) -> String {
             let host_part = &auth_str[at_pos + 1..];
             let scheme = uri
                 .scheme_str()
-                .map(|s| format!("{s}://"))
-                .unwrap_or_default();
+                .map_or_default(|s| format!("{s}://"));
             return format!("{scheme}***@{host_part}");
         }
     }

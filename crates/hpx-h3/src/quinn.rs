@@ -484,7 +484,7 @@ impl quic::RecvStream for RecvStream {
         // only taken out during `poll_data` and put back). Guard against `None`
         // instead of `unwrap()`-ing, and fall back to a zero id if the
         // conversion fails instead of `expect`-ing.
-        let num: u64 = self.stream.as_ref().map(|s| s.id().into()).unwrap_or(0);
+        let num: u64 = self.stream.as_ref().map_or(0, |s| s.id().into());
 
         num.try_into().unwrap_or_else(|_| {
             #[cfg(feature = "tracing")]

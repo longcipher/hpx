@@ -93,7 +93,7 @@ fn get_options_for_case_id(case_id: &str) -> Options {
 }
 
 async fn connect(path: &str, case_id: Option<&str>) -> Result<TcpWebSocket> {
-    let options = case_id.map(get_options_for_case_id).unwrap_or_default();
+    let options = case_id.map_or_default(get_options_for_case_id);
 
     let client = WebSocket::connect(format!("ws://localhost:9001/{path}").parse().unwrap())
         .with_options(options)

@@ -725,7 +725,7 @@ mod tests {
     }
 
     fn decode_io(e: io::Error) -> Error {
-        if e.get_ref().map(|r| r.is::<Error>()).unwrap_or(false) {
+        if e.get_ref().map_or(false, |r| r.is::<Error>()) {
             *e.into_inner()
                 .expect("io::Error::get_ref was Some(_)")
                 .downcast::<Error>()
