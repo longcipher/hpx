@@ -181,7 +181,7 @@ where
                 .map_err(SseStreamError::PayloadTooLarge)?
             {
                 return Poll::Ready(Some(Ok(event)));
-            };
+            }
 
             *slf.buf = ready!(inner.as_mut().try_poll_next(cx)?);
             if slf.buf.is_none() {

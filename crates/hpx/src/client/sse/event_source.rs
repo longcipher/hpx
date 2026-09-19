@@ -216,10 +216,8 @@ impl EventSourceBuilder {
     #[inline]
     #[must_use]
     pub fn initial_reconnection_time(mut self, reconnection_time: Duration) -> Self {
-        self.reconnection_time_ms = reconnection_time
-            .as_millis()
-            .try_into()
-            .expect("reconnection time too long");
+        self.reconnection_time_ms =
+            u32::try_from(reconnection_time.as_millis()).unwrap_or(u32::MAX);
         self
     }
 

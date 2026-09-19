@@ -862,8 +862,7 @@ impl Canvas2D {
             return;
         };
         let size_px = self.state.font.size_px;
-        let Some(typeface) = FontMgr::new().new_from_data(Data::new_copy(data), Some(idx as u32))
-        else {
+        let Some(typeface) = FontMgr::new().new_from_data(Data::new_copy(data), Some(idx)) else {
             // Fallback: legacy swash raster.
             let color = self.state.fill_style.color();
             let glyphs = text::rasterize_text(
@@ -871,9 +870,7 @@ impl Canvas2D {
                 x,
                 y,
                 &self.state.font,
-                color.r,
-                color.g,
-                color.b,
+                (color.r, color.g, color.b),
                 self.state.global_alpha * color.alpha(),
                 &self.os_name,
             );
@@ -949,29 +946,31 @@ impl Canvas2D {
 
     // --- Encoding ---
 
-    pub fn to_data_url(&self) -> String {
-        let png_bytes = self.to_png_bytes();
+    pub fn to_data_url(&self) -> Result<String, crate::canvas::CanvasError> {
+        let png_bytes = self.to_png_bytes()?;
         let b64 = base64_simd::STANDARD.encode_to_string(&png_bytes);
-        format!("data:image/png;base64,{b64}")
+        Ok(format!("data:image/png;base64,{b64}"))
     }
 
-    pub fn to_png_bytes(&self) -> Vec<u8> {
+    pub fn to_png_bytes(&self) -> Result<Vec<u8>, crate::canvas::CanvasError> {
         let mut buf = Vec::new();
         {
             let mut encoder = png::Encoder::new(&mut buf, self.width, self.height);
             encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Eight);
-            let mut writer = encoder.write_header().expect("PNG header write failed");
+            let mut writer = encoder
+                .write_header()
+                .map_err(|e| crate::canvas::CanvasError::Encoding(e.to_string()))?;
             let unpremultiplied = self.get_image_data(0, 0, self.width, self.height);
             writer
                 .write_image_data(&unpremultiplied)
-                .expect("PNG data write failed");
+                .map_err(|e| crate::canvas::CanvasError::Encoding(e.to_string()))?;
         }
-        buf
+        Ok(buf)
     }
 
     pub fn encode_png(&self) -> Result<Vec<u8>, crate::canvas::CanvasError> {
-        Ok(self.to_png_bytes())
+        self.to_png_bytes()
     }
 
     pub fn has_content(&self) -> bool {
@@ -1221,7 +1220,7 @@ mod tests {
         let mut c = Canvas2D::new(10, 10, "Linux".to_string(), 0).expect("canvas");
         c.set_fill_color(0, 0, 255, 1.0);
         c.fill_rect(0.0, 0.0, 10.0, 10.0);
-        let bytes = c.to_png_bytes();
+        let bytes = c.to_png_bytes().unwrap();
         assert_eq!(&bytes[0..4], &[0x89, 0x50, 0x4e, 0x47]);
     }
 
@@ -1230,7 +1229,7 @@ mod tests {
         let mut c = Canvas2D::new(10, 10, "Linux".to_string(), 0).expect("canvas");
         c.set_fill_color(255, 0, 0, 1.0);
         c.fill_rect(0.0, 0.0, 10.0, 10.0);
-        let url = c.to_data_url();
+        let url = c.to_data_url().unwrap();
         assert!(url.starts_with("data:image/png;base64,"));
     }
 

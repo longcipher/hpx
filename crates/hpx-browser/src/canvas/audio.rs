@@ -34,6 +34,22 @@ pub struct AudioParams {
     pub release: f64,
 }
 
+/// Parameters for a single `DynamicsCompressorKernel::process` call.
+struct DynamicsProcessParams {
+    db_threshold: f32,
+    db_knee: f32,
+    ratio: f32,
+    attack_time: f32,
+    release_time: f32,
+    pre_delay_time: f32,
+    db_post_gain: f32,
+    effect_blend: f32,
+    release_zone1: f32,
+    release_zone2: f32,
+    release_zone3: f32,
+    release_zone4: f32,
+}
+
 impl Default for AudioParams {
     fn default() -> Self {
         Self {
@@ -96,23 +112,21 @@ impl AudioFingerprint {
 
         let mut kernel = DynamicsCompressorKernel::new(sample_rate as f32, 1);
         let mut output = vec![0.0f32; padded_len];
-        kernel.process(
-            &[&input],
-            &mut [&mut output],
-            padded_len,
-            params.threshold as f32,
-            params.knee as f32,
-            params.ratio as f32,
-            params.attack as f32,
-            params.release as f32,
-            0.006,
-            0.0,
-            1.0,
-            0.09,
-            0.16,
-            0.42,
-            0.98,
-        );
+        let process_params = DynamicsProcessParams {
+            db_threshold: params.threshold as f32,
+            db_knee: params.knee as f32,
+            ratio: params.ratio as f32,
+            attack_time: params.attack as f32,
+            release_time: params.release as f32,
+            pre_delay_time: 0.006,
+            db_post_gain: 0.0,
+            effect_blend: 1.0,
+            release_zone1: 0.09,
+            release_zone2: 0.16,
+            release_zone3: 0.42,
+            release_zone4: 0.98,
+        };
+        kernel.process(&[&input], &mut [&mut output], padded_len, &process_params);
         output.truncate(length);
 
         Self {
@@ -315,19 +329,22 @@ impl DynamicsCompressorKernel {
         source_channels: &[&[f32]],
         destination_channels: &mut [&mut [f32]],
         frames_to_process: usize,
-        db_threshold: f32,
-        db_knee: f32,
-        ratio: f32,
-        attack_time: f32,
-        release_time: f32,
-        pre_delay_time: f32,
-        db_post_gain: f32,
-        effect_blend: f32,
-        release_zone1: f32,
-        release_zone2: f32,
-        release_zone3: f32,
-        release_zone4: f32,
+        params: &DynamicsProcessParams,
     ) {
+        let DynamicsProcessParams {
+            db_threshold,
+            db_knee,
+            ratio,
+            attack_time,
+            release_time,
+            pre_delay_time,
+            db_post_gain,
+            effect_blend,
+            release_zone1,
+            release_zone2,
+            release_zone3,
+            release_zone4,
+        } = *params;
         let sample_rate = self.sample_rate;
 
         let dry_mix = 1.0 - effect_blend;

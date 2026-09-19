@@ -118,9 +118,7 @@ pub fn rasterize_text(
     x: f32,
     y: f32,
     font: &ParsedFont,
-    r: u8,
-    g: u8,
-    b: u8,
+    rgb: (u8, u8, u8),
     alpha: f32,
     os_name: &str,
 ) -> Vec<PlacedGlyph> {
@@ -144,9 +142,9 @@ pub fn rasterize_text(
                 width: bitmap.width,
                 height: bitmap.height,
                 coverage: bitmap.pixels,
-                r,
-                g,
-                b,
+                r: rgb.0,
+                g: rgb.1,
+                b: rgb.2,
                 alpha,
             });
         }

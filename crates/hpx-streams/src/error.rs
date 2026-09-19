@@ -16,7 +16,7 @@ pub enum StreamBodyKind {
     MaxLenReachedError,
 }
 
-/// The error that may occur when attempting to stream an [`hpx::Response`].
+/// The error that may occur when attempting to stream an `hpx::Response`.
 #[derive(Debug)]
 pub struct StreamBodyError {
     kind: StreamBodyKind,

@@ -68,28 +68,32 @@ impl SseRetryConfig {
         debug_assert!(self.min_sleep_ms <= self.max_backoff_ms);
 
         let reconnect_time_ms = reconnect_time_ms.max(self.min_sleep_ms) as f32;
-        let mut sleep_ms =
-            match self.backoff_multiplier.is_finite() && 1.0 <= self.backoff_multiplier {
-                true => {
-                    reconnect_time_ms
-                        * self
-                            .backoff_multiplier
-                            .powi(attempt.min(i32::MAX as _) as _)
-                }
-                false => reconnect_time_ms,
-            };
+        let mut sleep_ms = if self.backoff_multiplier.is_finite() && 1.0 <= self.backoff_multiplier
+        {
+            reconnect_time_ms
+                * self
+                    .backoff_multiplier
+                    .powi(attempt.min(i32::MAX as _) as _)
+        } else {
+            reconnect_time_ms
+        };
 
         if !sleep_ms.is_finite() || (self.max_backoff_ms as f32) <= sleep_ms {
             sleep_ms = self.max_backoff_ms as _;
         }
 
         if self.jitter && reconnect_time_ms < sleep_ms {
-            let jitter_factor =
-                match jitter_factor.is_finite() && (0.0..=1.0).contains(&jitter_factor) {
-                    true => jitter_factor,
-                    false => 1.0,
-                };
-            sleep_ms = reconnect_time_ms + jitter_factor * (sleep_ms - reconnect_time_ms);
+            let jitter_factor = if jitter_factor.is_finite() && (0.0..=1.0).contains(&jitter_factor)
+            {
+                jitter_factor
+            } else {
+                1.0
+            };
+            sleep_ms = f32::mul_add(
+                jitter_factor,
+                sleep_ms - reconnect_time_ms,
+                reconnect_time_ms,
+            );
         }
 
         Some(Duration::from_millis(sleep_ms as _))

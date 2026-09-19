@@ -158,7 +158,11 @@ impl SseDecoder {
     #[inline]
     #[must_use]
     pub fn new() -> Self {
-        Self::with_limit(NonZeroUsize::new(512 * 1024).unwrap())
+        let max_payload = match NonZeroUsize::new(512 * 1024) {
+            Some(max) => max,
+            None => unreachable!("512 KiB is non-zero by construction"),
+        };
+        Self::with_limit(max_payload)
     }
 
     /// Creates a new decoder with a custom maximum payload size limit.
@@ -221,10 +225,7 @@ impl SseDecoder {
     }
 
     fn dispatch(&mut self, cr: bool) -> Option<SseEvent> {
-        self.mode = match cr {
-            true => Mode::PostCr,
-            false => Mode::Field(None),
-        };
+        self.mode = if cr { Mode::PostCr } else { Mode::Field(None) };
 
         if self.corrupted {
             self.corrupted = false;
@@ -310,7 +311,7 @@ impl SseDecoder {
                             continue;
                         }
                     };
-                    self.mode = Mode::Field(Some((mode, NonZeroU8::new(1).unwrap())));
+                    self.mode = Mode::Field(Some((mode, NonZeroU8::MIN)));
                 }
                 &mut Mode::Field(Some((mode, ref mut len))) => {
                     let cmp = &mode.field_name().as_bytes()[len.get() as usize..];
@@ -319,7 +320,7 @@ impl SseDecoder {
                         continue;
                     }
                     let Some(&b_post) = chunk.get(cmp.len()) else {
-                        *len = NonZeroU8::new(len.get() + chunk.len() as u8).unwrap();
+                        *len = len.saturating_add(chunk.len() as u8);
                         buf.advance(chunk.len());
                         continue;
                     };
@@ -359,7 +360,7 @@ impl SseDecoder {
                         advanced += 1;
                         match b {
                             b'0'..=b'9' => {
-                                let digit = (b & 0xf) as _;
+                                let digit: u32 = u32::from(b & 0xf);
 
                                 let retry_buf = self.retry_buf.unwrap_or(0);
                                 let Some(retry_buf) = retry_buf.checked_mul(10) else {
@@ -445,8 +446,9 @@ impl SseDecoder {
                     }
                 }
                 Mode::Ignore => {
-                    consume_until_newline(&mut self.mode, None, self.max_payload_size, buf)
-                        .expect("there should be no payload to grow too large");
+                    // In `Ignore` mode there is no output buffer, so the payload
+                    // size limit can never be exceeded here.
+                    let _ = consume_until_newline(&mut self.mode, None, self.max_payload_size, buf);
                 }
                 Mode::PostCr => {
                     if chunk[0] == b'\n' {
@@ -486,6 +488,7 @@ impl fmt::Debug for SseDecoder {
             .field("last_event_id_buf", &ShowBigBuf(&self.last_event_id_buf))
             .field("event_buf", &ShowBigBuf(&self.event_buf))
             .field("data_buf", &ShowBigBuf(&self.data_buf))
+            .field("corrupted", &self.corrupted)
             .field("retry_buf", &self.retry_buf)
             .field("max_payload_size", &self.max_payload_size)
             .finish()
@@ -502,7 +505,7 @@ fn consume_until_newline(
         let chunk = buf.chunk();
         if chunk.is_empty() {
             return Ok(false);
-        };
+        }
 
         let Some(i) = memchr2(b'\r', b'\n', chunk) else {
             if let Some(out) = out.as_deref_mut() {

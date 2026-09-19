@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-//! Streaming response support for [`hpx`] for different formats:
+//! Streaming response support for [hpx](https://docs.rs/hpx/latest/hpx/) for different formats:
 //! - JSON array stream format
 //! - JSON Lines (NL/NewLines) format
 //! - CSV stream format
@@ -89,8 +89,8 @@ use futures::StreamExt as _;
 
 /// Normalize any format-specific stream into the common boxed shape.
 ///
-/// All four streaming families ([`JsonStreamResponse`], [`CsvStreamResponse`],
-/// [`ProtobufStreamResponse`], [`ArrowIpcStreamResponse`]) produce streams
+/// All four streaming families (`JsonStreamResponse`, `CsvStreamResponse`,
+/// `ProtobufStreamResponse`, `ArrowIpcStreamResponse`) produce streams
 /// with the identical item type [`StreamBodyResult`]`<T>`; this helper erases
 /// the concrete stream type so generic consumers can mix formats behind a
 /// single return type without depending on which codec produced it.
