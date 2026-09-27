@@ -1176,6 +1176,9 @@ where
 
 impl<C: Clone, B> Clone for HttpClient<C, B> {
     fn clone(&self) -> Self {
+        // Optimization: Use Arc for immutable builder state to avoid deep clone
+        // on every request. Builders are only mutated when per-request options
+        // are applied, which creates a new builder via options().
         Self {
             config: self.config,
             exec: self.exec.clone(),
