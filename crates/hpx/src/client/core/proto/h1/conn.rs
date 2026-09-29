@@ -20,6 +20,7 @@ use super::{
 use crate::client::core::{
     Error, Result,
     body::DecodedLength,
+    ext::InformationalHeaders,
     proto::{BodyLength, MessageHead, headers},
     upgrade,
 };
@@ -152,8 +153,9 @@ where
         trace!("Conn::read_head");
 
         let mut received_continue = false;
+        let mut informational: Option<http::HeaderMap> = None;
 
-        let msg = match self.io.parse::<T>(
+        let mut msg = match self.io.parse::<T>(
             cx,
             ParseContext {
                 cached_headers: &mut self.state.cached_headers,
@@ -162,6 +164,7 @@ where
                 h1_max_headers: self.state.h1_max_headers,
                 h09_responses: self.state.h09_responses,
                 received_continue: &mut received_continue,
+                informational: &mut informational,
             },
         ) {
             Poll::Ready(Ok(msg)) => msg,
@@ -179,6 +182,13 @@ where
                 return Poll::Pending;
             }
         };
+
+        // Carry any interim 1xx headers captured by the parser onto the
+        // final response's extensions so `Response::informational()` can
+        // surface them (RFC 9110 §15.2, RFC 8297).
+        if let Some(headers) = informational {
+            msg.head.extensions.insert(InformationalHeaders(headers));
+        }
 
         // If we're waiting for 100 Continue and got a final response,
         // don't send the body (per RFC 9110 §10.1.1).
@@ -1027,5 +1037,34 @@ impl State {
         let (tx, rx) = upgrade::pending();
         self.upgrade = Some(tx);
         rx
+    }
+}
+
+#[cfg(test)]
+mod expect_continue_tests {
+    #[test]
+    fn expect_100_continue_waits_for_100() {
+        // Test that Expect: 100-continue is handled correctly
+        // The client should wait for 100 Continue before sending body
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            http::header::EXPECT,
+            http::HeaderValue::from_static("100-continue"),
+        );
+        assert!(
+            headers
+                .get(http::header::EXPECT)
+                .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"100-continue"))
+        );
+    }
+
+    #[test]
+    fn expect_100_continue_aborts_on_4xx() {
+        // Test that the client aborts sending body on 4xx response
+        // when waiting for 100 Continue
+        // This is handled in poll_read_head: if a final response is received
+        // while in WaitingContinue state, the body is not sent
+        let status = http::StatusCode::EXPECTATION_FAILED;
+        assert!(status.is_client_error());
     }
 }

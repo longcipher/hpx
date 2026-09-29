@@ -79,6 +79,11 @@ pub(crate) struct ParseContext<'a> {
     /// Used by the Expect: 100-continue flow to signal that the client should
     /// proceed with sending the request body.
     pub(crate) received_continue: &'a mut bool,
+    /// Stash for the last-seen interim 1xx header block. `role::Client::parse`
+    /// fills this each time it consumes a 1xx head; `Conn::poll_read_head`
+    /// moves it onto the final response's extensions as
+    /// [`crate::client::core::ext::InformationalHeaders`].
+    pub(crate) informational: &'a mut Option<HeaderMap>,
 }
 
 /// Passed to Http1Transaction::encode

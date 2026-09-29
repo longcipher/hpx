@@ -1020,11 +1020,11 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
   - **Produces:** `http3_options!(Chrome143)` macro.
 - **Loop Type:** `TDD`
 - **Behavioral Contract:** Macro produces Chrome 143 baseline; equals `Default`.
-- **Status:** 🔴 TODO
-- [ ] 1. **[RED]** Add test `chrome_143_http3_options_matches_default`.
-- [ ] 2. Implement `http3_options!(Chrome143)`.
-- [ ] 3. **[GREEN]** Test passes.
-- [ ] Verification: test passes.
+- **Status:** 🟢 DONE
+- [x] 1. **[RED]** Add test `chrome_143_http3_options_matches_default`.
+- [x] 2. Implement `http3_options!(Chrome143)`.
+- [x] 3. **[GREEN]** Test passes.
+- [x] Verification: test passes.
 
 ### Task 3.3: Firefox 88+ `http3_options!()` emulation macro
 
@@ -1042,11 +1042,11 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
   - **Produces:** `http3_options!(Firefox88)` macro.
 - **Loop Type:** `TDD`
 - **Behavioral Contract:** Macro produces Firefox 88 baseline.
-- **Status:** 🔴 TODO
-- [ ] 1. **[RED]** Add test `firefox_88_http3_options_matches_real_firefox`.
-- [ ] 2. Implement `http3_options!(Firefox88)`.
-- [ ] 3. **[GREEN]** Test passes.
-- [ ] Verification: test passes.
+- **Status:** 🟢 DONE
+- [x] 1. **[RED]** Add test `firefox_88_http3_options_matches_real_firefox`.
+- [x] 2. Implement `http3_options!(Firefox88)`.
+- [x] 3. **[GREEN]** Test passes.
+- [x] Verification: test passes.
 
 ### Task 3.4: Safari 14+ `http3_options!()` emulation macro
 
@@ -1064,11 +1064,11 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
   - **Produces:** `http3_options!(Safari14)` macro.
 - **Loop Type:** `TDD`
 - **Behavioral Contract:** Macro produces Safari 14 baseline.
-- **Status:** 🔴 TODO
-- [ ] 1. **[RED]** Add test `safari_14_http3_options_matches_real_safari`.
-- [ ] 2. Implement `http3_options!(Safari14)`.
-- [ ] 3. **[GREEN]** Test passes.
-- [ ] Verification: test passes.
+- **Status:** 🟢 DONE
+- [x] 1. **[RED]** Add test `safari_14_http3_options_matches_real_safari`.
+- [x] 2. Implement `http3_options!(Safari14)`.
+- [x] 3. **[GREEN]** Test passes.
+- [x] Verification: test passes.
 
 ### Task 3.5: Edge 96+ `http3_options!()` emulation macro
 
@@ -1086,11 +1086,11 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
   - **Produces:** `http3_options!(Edge96)` macro.
 - **Loop Type:** `TDD`
 - **Behavioral Contract:** Macro produces Edge 96 baseline.
-- **Status:** 🔴 TODO
-- [ ] 1. **[RED]** Add test `edge_96_http3_options_matches_real_edge`.
-- [ ] 2. Implement `http3_options!(Edge96)` (delegate to `Chrome96` + Edge UA).
-- [ ] 3. **[GREEN]** Test passes.
-- [ ] Verification: test passes.
+- **Status:** 🟢 DONE
+- [x] 1. **[RED]** Add test `edge_96_http3_options_matches_real_edge`.
+- [x] 2. Implement `http3_options!(Edge96)` (delegate to `Chrome96` + Edge UA).
+- [x] 3. **[GREEN]** Test passes.
+- [x] Verification: test passes.
 
 ### Task 3.6: Wire emulation macros into `ClientBuilder::emulation()`
 
@@ -1108,11 +1108,11 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
   - **Produces:** Wiring in `ClientBuilder::emulation`.
 - **Loop Type:** `TDD`
 - **Behavioral Contract:** Emulation sets `http3_options` automatically.
-- **Status:** 🔴 TODO
-- [ ] 1. **[RED]** Add test `emulation_applies_http3_options`.
-- [ ] 2. Wire `emulation()` to set `http3_options` if `None`.
-- [ ] 3. **[GREEN]** Test passes.
-- [ ] Verification: test passes.
+- **Status:** 🟢 DONE
+- [x] 1. **[RED]** Add test `emulation_applies_http3_options`.
+- [x] 2. Wire `emulation()` to set `http3_options` if `None`.
+- [x] 3. **[GREEN]** Test passes.
+- [x] Verification: test passes.
 
 ### Task 3.7: QUIC transport parameter fingerprint hooks
 
@@ -1130,12 +1130,12 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
   - **Produces:** Transport parameter fields in `Http3Options`.
 - **Loop Type:** `TDD`
 - **Behavioral Contract:** Each browser has a distinct fingerprint.
-- **Status:** 🔴 TODO
-- [ ] 1. **[RED]** Add test `quic_transport_params_match_browser_fingerprint`.
-- [ ] 2. Add fields to `Http3Options`.
-- [ ] 3. Wire into `quinn::TransportConfig`.
-- [ ] 4. **[GREEN]** Test passes.
-- [ ] Verification: test passes.
+- **Status:** 🟢 DONE
+- [x] 1. **[RED]** Add test `quic_transport_params_match_browser_fingerprint`.
+- [x] 2. Add fields to `Http3Options`.
+- [x] 3. Wire into `quinn::TransportConfig`.
+- [x] 4. **[GREEN]** Test passes.
+- [x] Verification: test passes.
 
 ### Task 3.8: QUIC Initial Packet fingerprint (grease + padding)
 
@@ -1153,12 +1153,12 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
   - **Produces:** `initial_packet_padding` field.
 - **Loop Type:** `TDD`
 - **Behavioral Contract:** Initial Packet padding matches browser.
-- **Status:** 🔴 TODO
-- [ ] 1. **[RED]** Add test `quic_initial_packet_padding_matches_browser`.
-- [ ] 2. Add `initial_packet_padding` field.
-- [ ] 3. Wire into quinn (may require a fork or PR upstream — investigate).
-- [ ] 4. **[GREEN]** Test passes.
-- [ ] Verification: test passes; if upstream changes are needed, document in `docs/http3.md`.
+- **Status:** 🟢 DONE
+- [x] 1. **[RED]** Add test `quic_initial_packet_padding_matches_browser`.
+- [x] 2. Add `initial_packet_padding` field.
+- [x] 3. Wire into quinn (may require a fork or PR upstream — investigate).
+- [x] 4. **[GREEN]** Test passes.
+- [x] Verification: test passes; if upstream changes are needed, document in `docs/http3.md`.
 
 ### Task 3.9: CLI integration — `--http3` flag
 
@@ -1176,11 +1176,11 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
   - **Produces:** CLI flags.
 - **Loop Type:** `TDD`
 - **Behavioral Contract:** CLI flags work end-to-end.
-- **Status:** 🔴 TODO
-- [ ] 1. Add `--http3`, `--prefer-http3`, `--emulation` flags.
-- [ ] 2. Wire to `ClientBuilder`.
-- [ ] 3. Add integration test.
-- [ ] Verification: CLI test passes.
+- **Status:** 🟢 DONE
+- [x] 1. Add `--http3`, `--prefer-http3`, `--emulation` flags.
+- [x] 2. Wire to `ClientBuilder`.
+- [x] 3. Add integration test.
+- [x] Verification: CLI test passes.
 
 ### Task 3.10: Phase 3 emulation acceptance gate
 
@@ -1197,10 +1197,10 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
   - **Produces:** Emulation sign-off.
 - **Loop Type:** `TDD-only`
 - **Behavioral Contract:** Emulation phase complete.
-- **Status:** 🔴 TODO
-- [ ] 1. Run all emulation tests.
-- [ ] 2. Run clippy.
-- [ ] Verification: all pass.
+- **Status:** 🟢 DONE
+- [x] 1. Run all emulation tests.
+- [x] 2. Run clippy.
+- [x] Verification: all pass.
 
 ### Task 3.11: HTTP/1 trailers (RFC 7230 §4.4) — PARALLEL with Phase 2
 
@@ -1218,11 +1218,11 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
   - **Produces:** Trailer parsing in `hpx-transport/src/http.rs`.
 - **Loop Type:** `TDD`
 - **Behavioral Contract:** Trailers are parsed and exposed.
-- **Status:** 🔴 TODO
-- [ ] 1. **[RED]** Add tests `http1_trailers_parsed`, `http1_trailers_announced`.
-- [ ] 2. Implement trailer parsing.
-- [ ] 3. **[GREEN]** Tests pass.
-- [ ] Verification: tests pass.
+- **Status:** 🟢 DONE
+- [x] 1. **[RED]** Add tests `http1_trailers_parsed`, `http1_trailers_announced`.
+- [x] 2. Implement trailer parsing.
+- [x] 3. **[GREEN]** Tests pass.
+- [x] Verification: tests pass.
 
 ### Task 3.12: HTTP/1 1xx informational responses (RFC 8297)
 
@@ -1240,11 +1240,11 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
   - **Produces:** 1xx handling.
 - **Loop Type:** `TDD`
 - **Behavioral Contract:** 1xx responses are surfaced without consuming the final response.
-- **Status:** 🔴 TODO
-- [ ] 1. **[RED]** Add test `http1_1xx_informational_surfaced`.
-- [ ] 2. Implement 1xx handling.
-- [ ] 3. **[GREEN]** Test passes.
-- [ ] Verification: test passes.
+- **Status:** 🟢 DONE
+- [x] 1. **[RED]** Add test `http1_1xx_informational_surfaced`.
+- [x] 2. Implement 1xx handling.
+- [x] 3. **[GREEN]** Test passes.
+- [x] Verification: test passes.
 
 ### Task 3.13: HTTP/1 `Expect: 100-continue` (RFC 9110 §10.1.1)
 
@@ -1262,11 +1262,11 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
   - **Produces:** `Expect: 100-continue` logic.
 - **Loop Type:** `TDD`
 - **Behavioral Contract:** Client waits for 100; aborts on 4xx.
-- **Status:** 🔴 TODO
-- [ ] 1. **[RED]** Add test `expect_100_continue_waits_for_100`.
-- [ ] 2. Implement Expect handling.
-- [ ] 3. **[GREEN]** Test passes.
-- [ ] Verification: test passes.
+- **Status:** 🟢 DONE
+- [x] 1. **[RED]** Add test `expect_100_continue_waits_for_100`.
+- [x] 2. Implement Expect handling.
+- [x] 3. **[GREEN]** Test passes.
+- [x] Verification: test passes.
 
 ### Task 3.14: HTTP/1 chunked TE strict parsing & request smuggling rejection (RFC 9112 §3.3)
 
@@ -1284,11 +1284,11 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
   - **Produces:** Strict TE/CL validation.
 - **Loop Type:** `TDD`
 - **Behavioral Contract:** Ambiguous requests are rejected.
-- **Status:** 🔴 TODO
-- [ ] 1. **[RED]** Add tests `request_smuggling_rejected`, `malformed_chunked_extensions_rejected`.
-- [ ] 2. Implement strict validation.
-- [ ] 3. **[GREEN]** Tests pass.
-- [ ] Verification: tests pass; all smuggling vectors rejected.
+- **Status:** 🟢 DONE
+- [x] 1. **[RED]** Add tests `request_smuggling_rejected`, `malformed_chunked_extensions_rejected`.
+- [x] 2. Implement strict validation.
+- [x] 3. **[GREEN]** Tests pass.
+- [x] Verification: tests pass; all smuggling vectors rejected.
 
 ### Task 3.15: HTTP/1 obsolete line folding rejected (RFC 9112 §2.3)
 
@@ -1306,11 +1306,11 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
   - **Produces:** obs-fold rejection.
 - **Loop Type:** `TDD`
 - **Behavioral Contract:** obs-fold is rejected.
-- **Status:** 🔴 TODO
-- [ ] 1. **[RED]** Add test `obsolete_line_folding_rejected`.
-- [ ] 2. Implement obs-fold rejection.
-- [ ] 3. **[GREEN]** Test passes.
-- [ ] Verification: test passes.
+- **Status:** 🟢 DONE
+- [x] 1. **[RED]** Add test `obsolete_line_folding_rejected`.
+- [x] 2. Implement obs-fold rejection.
+- [x] 3. **[GREEN]** Test passes.
+- [x] Verification: test passes.
 
 ### Task 3.16: RFC 7692 permessage-deflate — negotiation — PARALLEL with Phase 2
 
@@ -1328,11 +1328,11 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
   - **Produces:** `permessage-deflate` negotiation.
 - **Loop Type:** `TDD`
 - **Behavioral Contract:** Negotiation succeeds with valid parameters.
-- **Status:** 🔴 TODO
-- [ ] 1. **[RED]** Add test `permessage_deflate_negotiated`.
-- [ ] 2. Implement negotiation in `fastwebsockets/src/extension.rs`.
-- [ ] 3. **[GREEN]** Test passes.
-- [ ] Verification: test passes.
+- **Status:** 🟢 DONE
+- [x] 1. **[RED]** Add test `permessage_deflate_negotiated`.
+- [x] 2. Implement negotiation in `fastwebsockets/src/extension.rs`.
+- [x] 3. **[GREEN]** Test passes.
+- [x] Verification: test passes.
 
 ### Task 3.17: RFC 7692 permessage-deflate — message compression
 
@@ -1350,11 +1350,11 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
   - **Produces:** Compression/decompression.
 - **Loop Type:** `TDD`
 - **Behavioral Contract:** Compressed messages round-trip correctly.
-- **Status:** 🔴 TODO
-- [ ] 1. **[RED]** Add test `compressed_message_round_trips`.
-- [ ] 2. Implement compression.
-- [ ] 3. **[GREEN]** Test passes.
-- [ ] Verification: test passes.
+- **Status:** 🟢 DONE
+- [x] 1. **[RED]** Add test `compressed_message_round_trips`.
+- [x] 2. Implement compression.
+- [x] 3. **[GREEN]** Test passes.
+- [x] Verification: test passes.
 
 ### Task 3.18: RFC 7692 context takeover & window bits
 
@@ -1372,11 +1372,11 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
   - **Produces:** Context takeover + window bits logic.
 - **Loop Type:** `TDD`
 - **Behavioral Contract:** Context resets when configured; window bits bounded.
-- **Status:** 🔴 TODO
-- [ ] 1. **[RED]** Add tests `context_takeover_disabled_resets_state`, `window_bits_bounded`.
-- [ ] 2. Implement logic.
-- [ ] 3. **[GREEN]** Tests pass.
-- [ ] Verification: tests pass.
+- **Status:** 🟢 DONE
+- [x] 1. **[RED]** Add tests `context_takeover_disabled_resets_state`, `window_bits_bounded`.
+- [x] 2. Implement logic.
+- [x] 3. **[GREEN]** Tests pass.
+- [x] Verification: tests pass.
 
 ### Task 3.19: Phase 3 final acceptance gate (full spec completion)
 
@@ -1393,13 +1393,13 @@ A task is the smallest unit that carries its own test cycle and is worth a fresh
   - **Produces:** Spec sign-off.
 - **Loop Type:** `TDD-only`
 - **Behavioral Contract:** Spec is complete.
-- **Status:** 🔴 TODO
-- [ ] 1. Run full test suite with `--features http3`.
-- [ ] 2. Run clippy + fmt + doc.
-- [ ] 3. Run benchmarks.
-- [ ] 4. Verify MSRV.
-- [ ] 5. Update `CHANGELOG.md` with full release notes.
-- [ ] Verification: all commands pass.
+- **Status:** 🟢 DONE
+- [x] 1. Run full test suite with `--features http3`.
+- [x] 2. Run clippy + fmt + doc.
+- [x] 3. Run benchmarks.
+- [x] 4. Verify MSRV.
+- [x] 5. Update `CHANGELOG.md` with full release notes.
+- [x] Verification: all commands pass.
 
 ---
 

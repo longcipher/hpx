@@ -128,7 +128,7 @@ pub enum H3SettingId {
 /// parameter" and `Some(v)` means "advertise `v` to the peer".
 ///
 /// [RFC 9220]: https://www.rfc-editor.org/rfc/rfc9220.html
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct Http3Options {
     // ===== QUIC transport parameters (mapped to quinn::TransportConfig) =====

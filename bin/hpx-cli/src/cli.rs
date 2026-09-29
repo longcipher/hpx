@@ -375,6 +375,18 @@ pub(crate) struct Cli {
     /// Override timezone for the process.
     #[arg(long, global = true, env = "HPX_TIMEZONE")]
     pub timezone: Option<String>,
+
+    /// Force HTTP/3 (QUIC) for the request.
+    #[arg(long, env = "HPX_HTTP3")]
+    pub http3: bool,
+
+    /// Prefer HTTP/3 with fallback to HTTP/2 or HTTP/1.1.
+    #[arg(long, env = "HPX_PREFER_HTTP3")]
+    pub prefer_http3: bool,
+
+    /// Browser emulation profile (e.g., "chrome143", "firefox88", "safari14").
+    #[arg(long, value_name = "BROWSER", env = "HPX_EMULATION")]
+    pub emulation: Option<String>,
 }
 
 fn parse_pairs(items: &[String], sep: char) -> Vec<(String, String)> {

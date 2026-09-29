@@ -3238,6 +3238,7 @@ dependencies = [
  "hpx",
  "hpx-browser",
  "hpx-dl",
+ "hpx-emulation",
  "hpx-yawc",
  "http",
  "proptest",

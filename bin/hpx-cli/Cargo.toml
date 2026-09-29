@@ -19,6 +19,7 @@ futures = { workspace = true }
 hpx = { workspace = true, features = [
     "http1",
     "http2",
+    "http3",
     "ws",
     "json",
     "stream",
@@ -30,6 +31,7 @@ hpx = { workspace = true, features = [
 ] }
 hpx-browser = { workspace = true, features = ["cdp"] }
 hpx-dl = { workspace = true }
+hpx-emulation = { workspace = true, features = ["http3"] }
 hpx-yawc = { workspace = true, features = ["proxy"] }
 http = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

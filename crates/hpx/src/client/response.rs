@@ -20,7 +20,10 @@ use serde::de::DeserializeOwned;
 use super::{
     ClientResponseBody,
     conn::{HttpInfo, PoisonPillHandle},
-    core::{ext::ReasonPhrase, upgrade},
+    core::{
+        ext::{InformationalHeaders, ReasonPhrase},
+        upgrade,
+    },
 };
 #[cfg(feature = "cookies")]
 use crate::cookie;
@@ -173,6 +176,47 @@ impl Response {
             .extensions()
             .get::<HttpInfo>()
             .map(HttpInfo::remote_addr)
+    }
+
+    /// Get the informational (1xx) headers captured while reading this
+    /// [`Response`]'s head.
+    ///
+    /// When the server sends interim 1xx responses (e.g., 100 Continue, 103
+    /// Early Hints per RFC 9110 §15.2 and RFC 8297) before the final
+    /// response, the H1 parser consumes them inline and stashes the
+    /// last-seen 1xx header block here. Returns `None` when no interim
+    /// response was seen.
+    pub fn informational(&self) -> Option<&HeaderMap> {
+        self.res
+            .extensions()
+            .get::<InformationalHeaders>()
+            .map(InformationalHeaders::headers)
+    }
+
+    /// Drain the body and return the trailing headers, if any.
+    ///
+    /// Trailers arrive as the final `Frame::trailers` after the last data
+    /// frame (HTTP/1.1 chunked transfer encoding per RFC 9112 §7.1, or
+    /// HTTP/2 trailing HEADERS). Data frames are discarded; if you need the
+    /// body bytes, consume them first via [`Response::bytes`] or
+    /// [`Response::chunk`] — but note that those drop trailers, so call
+    /// this instead when trailers matter.
+    ///
+    /// Returns `None` when the body ends without trailers.
+    pub async fn trailers(&mut self) -> crate::Result<Option<HeaderMap>> {
+        loop {
+            match self.res.body_mut().frame().await {
+                None => return Ok(None),
+                Some(Ok(frame)) => {
+                    // Data frames are discarded; keep draining until trailers
+                    // or end of stream.
+                    if let Ok(trailers) = frame.into_trailers() {
+                        return Ok(Some(trailers));
+                    }
+                }
+                Some(Err(e)) => return Err(e),
+            }
+        }
     }
 
     // body methods
@@ -436,7 +480,8 @@ impl Response {
         // Fast path: when the whole body arrives as a single data frame (the
         // common case for small responses), return the chunk directly with no
         // allocation or copy. Multi-frame bodies recombine into one buffer.
-        // Trailers are dropped exactly like `Collected::to_bytes` does today.
+        // Trailers are dropped exactly like `Collected::to_bytes` does today;
+        // use `Response::trailers` instead when trailers matter.
         // Errors propagate untouched (`Body::Error` is `hpx::Error`), so the
         // error kind/classification is preserved.
         if let Some(first) = body.frame().await
@@ -782,7 +827,7 @@ impl HttpBody for Response {
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
-    use http::Uri;
+    use http::{HeaderMap, HeaderValue, Uri};
     #[cfg(feature = "form")]
     use serde::Deserialize;
 
@@ -933,5 +978,52 @@ mod tests {
         let response = response_with_body(body);
         let bytes = response.bytes().await.unwrap();
         assert_eq!(&bytes[..], b"one-two-three");
+    }
+
+    #[tokio::test]
+    async fn http1_trailers_parsed() {
+        // A chunked body ending with a trailers frame surfaces via trailers().
+        let mut expected = HeaderMap::new();
+        expected.insert("x-checksum", HeaderValue::from_static("abc123"));
+
+        let stream = futures_util::stream::iter(vec![
+            Ok::<http_body::Frame<Bytes>, std::convert::Infallible>(http_body::Frame::data(
+                Bytes::from_static(b"chunk"),
+            )),
+            Ok::<http_body::Frame<Bytes>, std::convert::Infallible>(http_body::Frame::trailers(
+                expected.clone(),
+            )),
+        ]);
+        let body = Body::wrap(http_body_util::StreamBody::new(stream));
+        let mut response = response_with_body(body);
+        assert_eq!(response.trailers().await.unwrap(), Some(expected));
+    }
+
+    #[tokio::test]
+    async fn http1_trailers_announced() {
+        // A body without trailers yields None (e.g. plain Content-Length body).
+        let mut response = response_with_body(Bytes::from_static(b"hello"));
+        assert_eq!(response.trailers().await.unwrap(), None);
+    }
+
+    #[test]
+    fn http1_1xx_informational_surfaced() {
+        use crate::client::core::ext::InformationalHeaders;
+
+        // No interim response seen → None.
+        let response = response_with_body(Bytes::from_static(b"hello"));
+        assert_eq!(response.informational(), None);
+
+        // Interim 1xx headers stashed by the H1 parser surface here.
+        let mut interim = HeaderMap::new();
+        interim.insert(
+            "link",
+            HeaderValue::from_static("</style.css>; rel=preload"),
+        );
+        let mut res = http::Response::new(Body::empty());
+        res.extensions_mut()
+            .insert(InformationalHeaders(interim.clone()));
+        let response = Response::from_http(Uri::from_static("http://example.com"), res);
+        assert_eq!(response.informational(), Some(&interim));
     }
 }

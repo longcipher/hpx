@@ -2008,3 +2008,50 @@ impl ClientBuilder {
         self
     }
 }
+
+#[cfg(all(test, feature = "http3"))]
+mod emulation_http3_tests {
+    use super::*;
+    use crate::client::emulation::Emulation;
+
+    #[test]
+    fn emulation_applies_http3_options() {
+        let emulation = Emulation::builder()
+            .http3_options(Http3Options::default())
+            .build();
+        let builder = Client::builder().emulation(emulation);
+        let opts = builder
+            .http3_options_ref()
+            .expect("http3_options should be set");
+        let expected = Http3Options::default();
+        assert_eq!(opts, &expected);
+    }
+
+    #[test]
+    fn emulation_applies_custom_http3_options() {
+        let custom_opts = Http3Options::customize(|opts| {
+            opts.max_idle_timeout = Some(std::time::Duration::from_secs(30));
+            opts.max_concurrent_bidi_streams = Some(100);
+            opts.congestion_bbr = false;
+            opts.initial_max_data = Some(2 * 1024 * 1024);
+            opts.qpack_max_table_capacity = Some(65536);
+            opts.qpack_blocked_streams = Some(20);
+            opts.initial_packet_padding = Some(1232);
+        });
+        let emulation = Emulation::builder()
+            .http3_options(custom_opts.clone())
+            .build();
+        let builder = Client::builder().emulation(emulation);
+        let opts = builder
+            .http3_options_ref()
+            .expect("http3_options should be set");
+        assert_eq!(opts, &custom_opts);
+    }
+
+    #[test]
+    fn emulation_without_http3_options_leaves_none() {
+        let emulation = Emulation::builder().build();
+        let builder = Client::builder().emulation(emulation);
+        assert!(builder.http3_options_ref().is_none());
+    }
+}

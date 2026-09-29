@@ -765,6 +765,20 @@ mod tests {
     }
 
     #[test]
+    fn permessage_deflate_negotiated() {
+        use std::str::FromStr;
+        // Test that permessage-deflate extension negotiation succeeds with valid parameters
+        let compression = WebSocketExtensions::from_str(
+            "permessage-deflate; client_max_window_bits; server_max_window_bits=10",
+        )
+        .unwrap();
+        assert_eq!(compression.client_max_window_bits, Some(None));
+        assert_eq!(compression.server_max_window_bits, Some(Some(10)));
+        assert!(!compression.client_no_context_takeover);
+        assert!(!compression.server_no_context_takeover);
+    }
+
+    #[test]
     fn test_parse_extensions_fail() {
         use std::str::FromStr;
         let res = WebSocketExtensions::from_str("foo, bar; baz=1");
@@ -978,6 +992,46 @@ mod tests {
             .expect("Decompression failed");
 
         assert_eq!(&decompressed[..], &large_data[..]);
+    }
+
+    #[test]
+    fn compressed_message_round_trips() {
+        // Test that compressed messages round-trip correctly
+        let data = b"Hello, World! This is a test message for compression.";
+        let mut compressor = Compressor::new(Compression::default());
+        let compressed = compressor.compress(data, true).expect("Compression failed");
+
+        let mut decompressor = Decompressor::new();
+        let decompressed = decompressor
+            .decompress(&compressed, true)
+            .expect("Decompression failed");
+
+        assert_eq!(&decompressed[..], &data[..]);
+    }
+
+    #[test]
+    fn context_takeover_disabled_resets_state() {
+        use std::str::FromStr;
+        // Test that context takeover disabled resets state
+        let compression = WebSocketExtensions::from_str(
+            "permessage-deflate; client_no_context_takeover; server_no_context_takeover",
+        )
+        .unwrap();
+        assert!(compression.client_no_context_takeover);
+        assert!(compression.server_no_context_takeover);
+    }
+
+    #[test]
+    fn window_bits_bounded() {
+        use std::str::FromStr;
+        // Test that window bits are bounded
+        let compression =
+            WebSocketExtensions::from_str("permessage-deflate; server_max_window_bits=15").unwrap();
+        assert_eq!(compression.server_max_window_bits, Some(Some(15)));
+
+        // Window bits of 16 should be rejected (max is 15)
+        let result = WebSocketExtensions::from_str("permessage-deflate; server_max_window_bits=16");
+        assert!(result.is_err());
     }
 
     #[test]

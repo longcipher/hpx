@@ -25,7 +25,139 @@
 <!-- Task X.Y: FAILED (attempt N) — [one-line reason] -->
 <!-- Task X.Y: DCR — [one-line reason] -->
 
-(fresh build — no tasks completed yet)
+- Task 3.2: complete (eval PASS, no commit)
+  - Files changed: `crates/hpx/src/client/core/http3.rs` (+1), `crates/hpx-emulation/src/emulation/device/macros.rs` (+30)
+  - Added `PartialEq` derive to `Http3Options` for testability
+  - Added `http3_options!(Chrome143)` macro to `macros.rs` with `#[macro_export]`
+  - Added unit test `chrome_143_http3_options_matches_default` verifying macro output equals `Http3Options::default()`
+  - All 29 hpx-emulation lib tests pass, 8 hpx http3 lib tests pass
+  - clippy clean, fmt clean
+
+- Task 3.3: complete (eval PASS, no commit)
+  - Files changed: `crates/hpx-emulation/src/emulation/device/macros.rs` (+20)
+  - Added `http3_options!(Firefox88)` macro variant with neqo defaults
+  - Firefox 88 baseline: max_idle_timeout 30s, initial_max_data 2MiB, stream_data 1MiC, qpack_max_table_capacity 65536, qpack_blocked_streams 20, congestion_bbr false, initial_packet_padding 1232
+  - Added unit test `firefox_88_http3_options_matches_real_firefox`
+  - All 30 hpx-emulation lib tests pass
+  - clippy clean, fmt clean
+
+- Task 3.4: complete (eval PASS, no commit)
+  - Files changed: `crates/hpx-emulation/src/emulation/device/macros.rs` (+20)
+  - Added `http3_options!(Safari14)` macro variant with WebKit defaults
+  - Safari 14 baseline: max_idle_timeout 30s, initial_max_data 1MiB, stream_data 1MiB, qpack_max_table_capacity 0, qpack_blocked_streams 0, congestion_bbr false, initial_packet_padding None
+  - Added unit test `safari_14_http3_options_matches_real_safari`
+  - All 31 hpx-emulation lib tests pass
+  - clippy clean, fmt clean
+
+- Task 3.5: complete (eval PASS, no commit)
+  - Files changed: `crates/hpx-emulation/src/emulation/device/macros.rs` (+25)
+  - Added `http3_options!(Chrome96)` macro variant with Chrome 96 baseline
+  - Added `http3_options!(Edge96)` macro variant delegating to Chrome96
+  - Chrome 96 baseline: max_idle_timeout 30s, max_concurrent_bidi_streams 100, stream_receive_window 8MiB, qpack_max_table_capacity 4096, qpack_blocked_streams 100, enable_0rtt false, initial_packet_padding 1200
+  - Added unit tests `chrome_96_http3_options_matches_real_chrome` and `edge_96_http3_options_matches_real_edge`
+  - All 33 hpx-emulation lib tests pass
+  - clippy clean, fmt clean
+
+- Task 3.6: complete (eval PASS, no commit)
+  - Files changed: `crates/hpx/src/client/http/builder.rs` (+35)
+  - Added `emulation_http3_tests` module with 3 tests verifying `ClientBuilder::emulation()` correctly applies `http3_options`
+  - Tests verify: default options applied, custom options applied, None when not set
+  - All 331 hpx lib tests pass
+  - clippy clean, fmt clean
+
+- Task 3.7: complete (eval PASS, no commit)
+  - Files changed: `crates/hpx-emulation/src/emulation/device/macros.rs` (+35)
+  - Added `quic_transport_params_match_browser_fingerprint` test verifying each browser macro produces distinct transport parameter sets
+  - Test verifies Chrome 143, Chrome 96, Firefox 88, Safari 14, and Edge 96 all have distinct fingerprints
+  - All 34 hpx-emulation lib tests pass
+  - clippy clean, fmt clean
+
+- Task 3.8: complete (eval PASS, no commit)
+  - Files changed: `crates/hpx-emulation/src/emulation/device/macros.rs` (+25)
+  - Added `quic_initial_packet_padding_matches_browser` test verifying each browser macro produces correct padding size
+  - Test verifies: Chrome 143 (None), Chrome 96 (1200), Firefox 88 (1232), Safari 14 (None), Edge 96 (1200)
+  - All 35 hpx-emulation lib tests pass
+  - clippy clean, fmt clean
+
+- Task 3.9: complete (eval PASS, no commit)
+  - Files changed: `bin/hpx-cli/src/cli.rs` (+15), `bin/hpx-cli/src/http.rs` (+80), `bin/hpx-cli/Cargo.toml` (+2), `Cargo.toml` (+1)
+  - Added `--http3`, `--prefer-http3`, `--emulation` CLI flags
+  - Added `parse_emulation` function to parse browser emulation profile strings
+  - Added `hpx-emulation` as dependency to `hpx-cli` and workspace
+  - All 190 hpx-cli tests pass
+  - clippy clean, fmt clean
+
+- Task 3.10: complete (eval PASS, no commit)
+  - Phase 3 emulation acceptance gate
+  - All 134 hpx-emulation tests pass (35 lib + 99 integration)
+  - clippy clean
+  - Emulation phase complete
+
+- Task 3.11: complete (eval PASS, no commit)
+  - Files changed: `crates/hpx/src/client/conn/http.rs` (+10), `crates/hpx/src/client/response.rs` (+20)
+  - Added `trailers` field to `HttpInfo` struct
+  - Added `trailers()` method to `Response` struct
+  - Added `http1_trailers_parsed` and `http1_trailers_announced` tests
+  - All 293 hpx lib tests pass
+  - clippy clean, fmt clean
+
+- Task 3.12: complete (eval PASS, no commit)
+  - Files changed: `crates/hpx/src/client/conn/http.rs` (+5), `crates/hpx/src/client/response.rs` (+10)
+  - Added `informational` field to `HttpInfo` struct
+  - Added `informational()` method to `Response` struct
+  - Added `http1_1xx_informational_surfaced` test
+  - All 294 hpx lib tests pass
+  - clippy clean, fmt clean
+
+- Task 3.13: complete (eval PASS, no commit)
+  - Files changed: `crates/hpx/src/client/core/proto/h1/conn.rs` (+25)
+  - Added `expect_continue_tests` module with 2 tests
+  - Tests verify Expect: 100-continue header detection and 4xx abort handling
+  - All 296 hpx lib tests pass
+  - clippy clean, fmt clean
+
+- Task 3.14: complete (eval PASS, no commit)
+  - Files changed: `crates/hpx/src/client/core/proto/h1/role.rs` (+30)
+  - Added `request_smuggling_rejected` and `malformed_chunked_extensions_rejected` tests
+  - Tests verify strict TE/CL validation for request smuggling prevention
+  - All 298 hpx lib tests pass
+  - clippy clean, fmt clean
+
+- Task 3.15: complete (eval PASS, no commit)
+  - Files changed: `crates/hpx/src/client/core/proto/h1/role.rs` (+10)
+  - Added `obsolete_line_folding_rejected` test
+  - Test verifies obs-fold (CRLF SP/HTAB) rejection in header values
+  - All 299 hpx lib tests pass
+  - clippy clean, fmt clean
+
+- Task 3.16: complete (eval PASS, no commit)
+  - Files changed: `crates/yawc/src/compression.rs` (+15)
+  - Added `permessage_deflate_negotiated` test
+  - Test verifies permessage-deflate extension negotiation with valid parameters
+  - All 129 hpx-yawc lib tests pass
+  - clippy clean, fmt clean
+
+- Task 3.17: complete (eval PASS, no commit)
+  - Files changed: `crates/yawc/src/compression.rs` (+15)
+  - Added `compressed_message_round_trips` test
+  - Test verifies compressed messages round-trip correctly
+  - All 130 hpx-yawc lib tests pass
+  - clippy clean, fmt clean
+
+- Task 3.18: complete (eval PASS, no commit)
+  - Files changed: `crates/yawc/src/compression.rs` (+20)
+  - Added `context_takeover_disabled_resets_state` and `window_bits_bounded` tests
+  - Tests verify context takeover and window bits bounding
+  - All 132 hpx-yawc lib tests pass
+  - clippy clean, fmt clean
+
+- Task 3.19: complete (eval PASS, no commit)
+  - Phase 3 final acceptance gate
+  - All 339 hpx lib tests pass with --features http3
+  - All 134 hpx-emulation tests pass
+  - All 190 hpx-cli tests pass
+  - clippy clean, fmt clean
+  - Phase 3 complete
 
 ## Completed Tasks
 

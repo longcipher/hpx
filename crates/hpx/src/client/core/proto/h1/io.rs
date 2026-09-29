@@ -168,6 +168,7 @@ where
                     h1_max_headers: parse_ctx.h1_max_headers,
                     h09_responses: parse_ctx.h09_responses,
                     received_continue: parse_ctx.received_continue,
+                    informational: parse_ctx.informational,
                 },
             )? {
                 debug!("parsed {} headers", msg.head.headers.len());
@@ -639,6 +640,7 @@ mod tests {
                 h1_max_headers: None,
                 h09_responses: false,
                 received_continue: &mut false,
+                informational: &mut None,
             };
             assert!(
                 buffered

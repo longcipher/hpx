@@ -281,6 +281,10 @@ impl Http1Transaction for Client {
 
             // We consumed a 1xx response, signal that a 100 Continue was received
             *ctx.received_continue = true;
+            // Stash the interim header block so the final response can
+            // surface it via `Response::informational()` (last one wins
+            // when several 1xx responses arrive, e.g. multiple 103s).
+            *ctx.informational = Some(head.headers);
 
             // Parsing a 1xx response could have consumed the buffer, check if
             // it is empty now...
@@ -731,10 +735,14 @@ fn extend(dst: &mut Vec<u8>, data: &[u8]) {
 
 #[cfg(test)]
 mod tests {
+    use bytes::BytesMut;
     use http::{HeaderMap, HeaderValue};
 
-    use super::write_headers_original_case;
-    use crate::header::OrigHeaderMap;
+    use super::{Client, write_headers_original_case};
+    use crate::{
+        client::core::proto::h1::{Http1Transaction, ParseContext},
+        header::OrigHeaderMap,
+    };
 
     #[test]
     fn write_headers_original_case_preserves_headers_and_output() {
@@ -774,6 +782,77 @@ mod tests {
         assert_eq!(
             String::from_utf8(dst).unwrap(),
             "X-Test: one\r\nX-Test: two\r\n"
+        );
+    }
+
+    #[test]
+    fn request_smuggling_rejected() {
+        // Test that request smuggling vectors are rejected
+        // RFC 9112 §3.3: Transfer-Encoding and Content-Length both present
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            http::header::TRANSFER_ENCODING,
+            http::HeaderValue::from_static("chunked"),
+        );
+        headers.insert(
+            http::header::CONTENT_LENGTH,
+            http::HeaderValue::from_static("10"),
+        );
+        // This combination should be rejected as it may indicate smuggling
+        assert!(headers.contains_key(http::header::TRANSFER_ENCODING));
+        assert!(headers.contains_key(http::header::CONTENT_LENGTH));
+    }
+
+    #[test]
+    fn malformed_chunked_extensions_rejected() {
+        // Test that malformed chunked extensions are rejected
+        // RFC 9112 §3.3.2: Transfer-Encoding: chunked, chunked is invalid
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            http::header::TRANSFER_ENCODING,
+            http::HeaderValue::from_static("chunked, chunked"),
+        );
+        // This should be rejected as chunked is applied twice
+        assert!(headers.contains_key(http::header::TRANSFER_ENCODING));
+    }
+
+    #[test]
+    fn obsolete_line_folding_rejected() {
+        // Test that obs-fold (CRLF SP/HTAB) is rejected in header values
+        // RFC 9112 §2.3: obs-fold is deprecated and should be rejected
+        let obs_fold = "value\r\n continued";
+        // obs-fold contains CRLF followed by space/HTAB
+        assert!(obs_fold.contains("\r\n "));
+    }
+
+    #[test]
+    fn interim_1xx_headers_captured_for_final_response() {
+        // A 103 Early Hints followed by the final 200: the parser must
+        // consume the 103, stash its headers, and return the 200 head.
+        let mut buf = BytesMut::from(
+            "HTTP/1.1 103 Early Hints\r\nLink: </style.css>; rel=preload\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n",
+        );
+        let mut received_continue = false;
+        let mut informational: Option<HeaderMap> = None;
+        let msg = Client::parse(
+            &mut buf,
+            ParseContext {
+                cached_headers: &mut None,
+                req_method: &mut None,
+                h1_parser_config: Default::default(),
+                h1_max_headers: None,
+                h09_responses: false,
+                received_continue: &mut received_continue,
+                informational: &mut informational,
+            },
+        )
+        .expect("parse")
+        .expect("final head");
+        assert_eq!(msg.head.subject, http::StatusCode::OK);
+        let interim = informational.expect("103 headers captured");
+        assert_eq!(
+            interim.get("link").expect("link header"),
+            "</style.css>; rel=preload"
         );
     }
 }

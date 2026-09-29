@@ -1,6 +1,7 @@
 //! HTTP extensions.
 
 use bytes::Bytes;
+use http::HeaderMap;
 
 /// A reason phrase in an HTTP/1 response.
 ///
@@ -96,6 +97,24 @@ impl From<ReasonPhrase> for Bytes {
 
 impl AsRef<[u8]> for ReasonPhrase {
     fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+/// Captured headers from interim 1xx informational responses (RFC 9110 §15.2,
+/// RFC 8297) seen while parsing the final HTTP/1 response head.
+///
+/// The H1 parser consumes 1xx responses inline and continues reading until the
+/// final (non-1xx) head. The last-seen 1xx header block is stashed here and
+/// carried on the final response's extensions so `Response::informational()`
+/// can surface it without changing the response future's type.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct InformationalHeaders(pub(crate) HeaderMap);
+
+impl InformationalHeaders {
+    /// Get the captured interim headers.
+    #[inline]
+    pub(crate) fn headers(&self) -> &HeaderMap {
         &self.0
     }
 }
