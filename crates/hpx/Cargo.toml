@@ -469,6 +469,11 @@ required-features = ["hotpath", "ws"]
 [[example]]
 name = "hpx_hotpath_load"
 required-features = ["hotpath", "ws"]
+
+[[example]]
+name = "sse_stream"
+path = "examples/sse_stream.rs"
+required-features = ["sse"]
 # Benchmarks
 [[bench]]
 name = "json_parsing"

@@ -154,8 +154,16 @@ pub struct HttpClient {
 impl HttpClient {
     /// Create a new client with an isolated session and the given browser profile.
     pub fn new(browser_profile: hpx::BrowserProfile) -> Result<Self, NetError> {
+        Self::with_proxy(browser_profile, None)
+    }
+
+    /// Create a client that routes traffic through `proxy` when set.
+    pub fn with_proxy(
+        browser_profile: hpx::BrowserProfile,
+        proxy: Option<hpx::Proxy>,
+    ) -> Result<Self, NetError> {
         let session = SharedSession::new();
-        Self::with_session(Arc::new(session), browser_profile)
+        Self::with_session_and_proxy(Arc::new(session), browser_profile, proxy)
     }
 
     /// Build a client that participates in a provided shared session.
@@ -163,7 +171,20 @@ impl HttpClient {
         session: Arc<SharedSession>,
         browser_profile: hpx::BrowserProfile,
     ) -> Result<Self, NetError> {
-        let inner = hpx::Client::builder()
+        Self::with_session_and_proxy(session, browser_profile, None)
+    }
+
+    /// Build a client on a shared session, optionally routed through `proxy`.
+    pub fn with_session_and_proxy(
+        session: Arc<SharedSession>,
+        browser_profile: hpx::BrowserProfile,
+        proxy: Option<hpx::Proxy>,
+    ) -> Result<Self, NetError> {
+        let mut builder = hpx::Client::builder();
+        if let Some(proxy) = proxy {
+            builder = builder.proxy(proxy);
+        }
+        let inner = builder
             .build()
             .map_err(|e| NetError::Http(format!("failed to build hpx client: {e}")))?;
 

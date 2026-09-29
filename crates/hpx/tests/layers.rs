@@ -259,6 +259,7 @@ async fn layer_insert_headers() {
     let url = format!("http://{}", server.addr());
 
     let client = Client::builder()
+        .no_proxy()
         .layer(tower::util::MapRequestLayer::new(
             move |mut req: http::Request<hpx::Body>| {
                 req.headers_mut().insert(

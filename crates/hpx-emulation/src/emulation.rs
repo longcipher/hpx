@@ -554,4 +554,32 @@ mod tests {
         }
         Ok(())
     }
+
+    /// Chrome 147 profile must emit User-Agent and `sec-ch-ua` brand headers.
+    #[test]
+    fn chrome147_sets_user_agent_and_sec_ch_ua() -> Result<(), Box<dyn std::error::Error>> {
+        let emu = EmulationOption::builder()
+            .emulation(Emulation::Chrome147)
+            .build()
+            .emulation();
+        let mut emu = emu;
+        let headers = emu.headers_mut();
+        let ua = headers
+            .get(http::header::USER_AGENT)
+            .ok_or("USER_AGENT header not set for Chrome147")?
+            .to_str()?;
+        assert!(
+            ua.contains("Chrome/147") || ua.contains("Chrome/14"),
+            "expected Chrome 147 UA, got: {ua}"
+        );
+        let ch = headers
+            .get("sec-ch-ua")
+            .ok_or("sec-ch-ua header not set for Chrome147")?
+            .to_str()?;
+        assert!(
+            ch.contains("Chromium") || ch.contains("Chrome") || ch.contains("Not"),
+            "unexpected sec-ch-ua brands: {ch}"
+        );
+        Ok(())
+    }
 }

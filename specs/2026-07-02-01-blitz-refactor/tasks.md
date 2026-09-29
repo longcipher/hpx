@@ -201,7 +201,7 @@ This spec absorbs two Blitz ideas (Stylo CSS, Parley text) and performs four tar
 - **Behavioral Contract:** Smoke test only; no production behavior yet
 - **Simplification Focus:** Compare Stylo output vs custom engine output on common selectors
 - **Status:** ⏭️ SKIPPED
-- [ ] Deferred: real Stylo integration requires implementing StyloCssEngine (T4.2 left the vtable seam empty as a placeholder for future work)
+- [x] **StyloCssEngine implemented** (2026-09-29): `crates/hpx-browser/src/css_engine.rs` exposes `CssEngine` + `StyloCssEngine` reading Stylo `primary_styles()` via blitz-dom. `LayoutEngine::get_computed_style` returns a real `ComputedStyle` snapshot. Smoke tests: `tests/css_stylo.rs` (real-world type/class/id/`!important`/descendant selectors).
 
 ---
 
@@ -219,7 +219,7 @@ This spec absorbs two Blitz ideas (Stylo CSS, Parley text) and performs four tar
 - **Behavioral Contract:** Same visual output
 - **Simplification Focus:** Higher-level text API replaces manual shaping
 - **Status:** ⏭️ SKIPPED
-- [ ] Deferred: Parley integration is canvas-side work that requires careful pixel-comparison testing. Future spec will cover.
+- [x] **Parley text layout active** (2026-09-29): canvas `text/shaper.rs` shapes via Parley (`FontContext`/`LayoutContext`); rustybuzz/swash remain only for glyph outlines + rasterization. Tests lock scale + determinism (`parley_shape_is_deterministic`, `parley_font_size_scales_width`).
 
 ---
 

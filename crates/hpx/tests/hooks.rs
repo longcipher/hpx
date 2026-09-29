@@ -63,7 +63,7 @@ async fn test_before_request_hook_executes() {
 
     let hooks = Hooks::builder().before_request(hook).build();
 
-    let client = Client::builder().hooks(hooks).build().unwrap();
+    let client = Client::builder().no_proxy().hooks(hooks).build().unwrap();
 
     let url = format!("http://{}", server.addr());
     let resp = client.get(&url).send().await.unwrap();
@@ -90,7 +90,7 @@ async fn test_after_response_hook_executes() {
 
     let hooks = Hooks::builder().after_response(hook).build();
 
-    let client = Client::builder().hooks(hooks).build().unwrap();
+    let client = Client::builder().no_proxy().hooks(hooks).build().unwrap();
 
     let url = format!("http://{}", server.addr());
     let resp = client.get(&url).send().await.unwrap();
@@ -116,6 +116,7 @@ async fn test_on_request_closure() {
     });
 
     let client = Client::builder()
+        .no_proxy()
         .on_request(|req| {
             req.headers_mut().insert(
                 http::header::HeaderName::from_static("x-custom-header"),
@@ -142,6 +143,7 @@ async fn test_on_response_closure() {
     let server = server::http(move |_req| async move { http::Response::default() });
 
     let client = Client::builder()
+        .no_proxy()
         .on_response(move |status, _headers| {
             assert!(status.is_success());
             count_clone.fetch_add(1, Ordering::SeqCst);
@@ -168,7 +170,7 @@ async fn test_logging_hook() {
         .after_response(Arc::new(LoggingHook::new().with_headers()))
         .build();
 
-    let client = Client::builder().hooks(hooks).build().unwrap();
+    let client = Client::builder().no_proxy().hooks(hooks).build().unwrap();
 
     let url = format!("http://{}", server.addr());
     let resp = client.get(&url).send().await.unwrap();
@@ -198,7 +200,7 @@ async fn test_multiple_hooks() {
         .after_response(resp_hook)
         .build();
 
-    let client = Client::builder().hooks(hooks).build().unwrap();
+    let client = Client::builder().no_proxy().hooks(hooks).build().unwrap();
 
     let url = format!("http://{}", server.addr());
     let resp = client.get(&url).send().await.unwrap();
@@ -238,7 +240,7 @@ async fn test_header_injection_hook() {
 
     let hooks = Hooks::builder().before_request(hook).build();
 
-    let client = Client::builder().hooks(hooks).build().unwrap();
+    let client = Client::builder().no_proxy().hooks(hooks).build().unwrap();
 
     let url = format!("http://{}", server.addr());
     let resp = client.get(&url).send().await.unwrap();
@@ -268,7 +270,7 @@ async fn test_request_id_hook() {
         .before_request(Arc::new(RequestIdHook::new()))
         .build();
 
-    let client = Client::builder().hooks(hooks).build().unwrap();
+    let client = Client::builder().no_proxy().hooks(hooks).build().unwrap();
 
     let url = format!("http://{}", server.addr());
     let resp = client.get(&url).send().await.unwrap();

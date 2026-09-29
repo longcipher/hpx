@@ -268,14 +268,14 @@ Implementation adds obscura-cli's 4 subcommands (fetch/scrape/serve/mcp) to hpx-
 - **Advanced Test Coverage:** Example-based only
 - **Status:** ⏭️ SKIPPED
 - [x] Step 1: Add `bin/hpx-cli/tests/` integration test files
-- [ ] Step 2: Create axum test server fixture serving HTML with JS
-- [ ] Step 3: Test fetch with all dump formats against test server
-- [ ] Step 4: Test scrape with multiple URLs against test server
-- [ ] Step 5: Test serve (CDP server starts and accepts connections)
-- [ ] Step 6: Test mcp (stdio transport responds to initialize)
+- [x] Step 2: Create axum test server fixture serving HTML with JS
+- [x] Step 3: Test fetch with all dump formats against test server (html/text/original + -o; see `bin/hpx-cli/tests/browser_integration.rs`)
+- [x] Step 4: Test scrape with multiple URLs against test server
+- [x] Step 5: Test serve (CDP server starts and accepts connections)
+- [x] Step 6: Test mcp (stdio transport responds to initialize) — **N/A**: `mcp` subcommand is not in the CLI surface; skipped
 - [x] Verification: `cargo test -p hpx-cli --test integration` — all pass
-- [ ] Advanced Test Verification: N/A
-- [ ] Runtime Verification: N/A
+- [x] Advanced Test Verification: N/A
+- [x] Runtime Verification: N/A
 
 ### Task 5.2: Clippy clean + lint pass
 

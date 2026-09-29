@@ -119,7 +119,9 @@ pub fn build_quinn_endpoint(local_addr: SocketAddr) -> crate::Result<quinn::Endp
 /// `active_connection_id_limit` is managed internally by quinn (not
 /// configurable on `TransportConfig`). `max_udp_payload_size` is set on
 /// [`quinn::EndpointConfig`] via [`build_quinn_endpoint`].
-fn build_transport_config(h3_opts: &Http3Options) -> crate::Result<quinn::TransportConfig> {
+pub(crate) fn build_transport_config(
+    h3_opts: &Http3Options,
+) -> crate::Result<quinn::TransportConfig> {
     let mut transport = quinn::TransportConfig::default();
 
     // Congestion control: BBR is preferred for lower latency under lossy or
@@ -177,4 +179,49 @@ fn build_transport_config(h3_opts: &Http3Options) -> crate::Result<quinn::Transp
     }
 
     Ok(transport)
+}
+
+/// Build a production [`QuicConnector`](crate::http3::QuicConnector) from
+/// HTTP/3 options (and an optional low-level transport override).
+///
+/// This is the non-test construction path used by `Client::build`
+/// whenever the `http3` feature is enabled, so `http3_only()` and
+/// `prefer_http3()` both have a live QUIC connector.
+pub fn default_quic_connector(
+    h3_opts: &Http3Options,
+    transport_override: Option<quinn::TransportConfig>,
+) -> crate::Result<crate::http3::QuicConnector> {
+    use std::sync::Arc;
+
+    let tls_opts = TlsOptions::default();
+    let quic_client = build_quinn_client_config(&tls_opts, h3_opts)?;
+    // QuicConnector wants the raw rustls + transport pieces, not the wrapped
+    // quinn::ClientConfig. Rebuild them from the same options so ALPN/0-RTT
+    // stay in sync with `build_quinn_client_config`.
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut root_store = rustls::RootCertStore::empty();
+    root_store.add_parsable_certificates(webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().cloned());
+    let mut tls_config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(Error::tls)?
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+    tls_config.alpn_protocols = vec![AlpnProtocol::HTTP3.as_wire_bytes().to_vec()];
+    if h3_opts.enable_0rtt {
+        tls_config.enable_early_data = true;
+    }
+    drop(quic_client); // constructed only to validate option mapping
+
+    let transport_config = Arc::new(match transport_override {
+        Some(cfg) => cfg,
+        None => build_transport_config(h3_opts)?,
+    });
+
+    let endpoint = build_quinn_endpoint(std::net::SocketAddr::from(([0, 0, 0, 0], 0)))?;
+    Ok(crate::http3::QuicConnector::new(
+        endpoint,
+        transport_config,
+        Arc::new(tls_config),
+        h3_opts.clone(),
+    ))
 }

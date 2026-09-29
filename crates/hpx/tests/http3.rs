@@ -160,14 +160,14 @@ async fn http3_alpn_negotiated_over_quic() -> TestResult<()> {
 #[test]
 fn http3_options_configures_h3_settings() -> TestResult<()> {
     // 1. `http3_only()` flips the version preference to Http3.
-    let builder = Client::builder().http3_only();
+    let builder = Client::builder().no_proxy().http3_only();
     assert!(
         builder.is_http3_only(),
         "http3_only() must force HttpVersionPref::Http3"
     );
 
     // 2. `http3_prior_knowledge()` is an alias of `http3_only()`.
-    let builder_alias = Client::builder().http3_prior_knowledge();
+    let builder_alias = Client::builder().no_proxy().http3_prior_knowledge();
     assert!(
         builder_alias.is_http3_only(),
         "http3_prior_knowledge() must be equivalent to http3_only()"
@@ -178,7 +178,10 @@ fn http3_options_configures_h3_settings() -> TestResult<()> {
     let mut opts = Http3Options::default();
     opts.max_field_section_size = Some(64 * 1024);
     opts.qpack_max_table_capacity = Some(8192);
-    let builder = Client::builder().http3_only().http3_options(opts.clone());
+    let builder = Client::builder()
+        .no_proxy()
+        .http3_only()
+        .http3_options(opts.clone());
     let stored = builder
         .http3_options_ref()
         .ok_or("http3_options_ref() must return Some after http3_options(_) is set")?;
@@ -196,7 +199,10 @@ fn http3_options_configures_h3_settings() -> TestResult<()> {
     // 4. `quic_config(QuicConfig)` stores the override for later use by
     //    `QuicConnector` (T1.7).
     let quic_cfg = QuicConfig::default();
-    let builder = Client::builder().http3_only().quic_config(quic_cfg);
+    let builder = Client::builder()
+        .no_proxy()
+        .http3_only()
+        .quic_config(quic_cfg);
     assert!(
         builder.quic_config_ref().is_some(),
         "quic_config_ref() must return Some after quic_config(_) is set"
@@ -204,7 +210,7 @@ fn http3_options_configures_h3_settings() -> TestResult<()> {
 
     // 5. Default `ClientBuilder` (no http3_* call) is NOT http3-only and has
     //    no http3_options / quic_config stored.
-    let plain = Client::builder();
+    let plain = Client::builder().no_proxy();
     assert!(
         !plain.is_http3_only(),
         "default ClientBuilder must not be http3-only"
@@ -841,6 +847,7 @@ async fn http3_request_full() -> TestResult<()> {
     //    a connector with a custom root store (trusting the self-signed
     //    cert) instead of the default system root store.
     let client = Client::builder()
+        .no_proxy()
         .http3_only()
         .__test_with_quic_connector(connector)
         .build()?;
@@ -1022,6 +1029,7 @@ async fn http3_post_with_body() -> TestResult<()> {
     // 8. Build the `Client` with `http3_only()` and the injected
     //    `QuicConnector`.
     let client = Client::builder()
+        .no_proxy()
         .http3_only()
         .__test_with_quic_connector(connector)
         .build()?;
@@ -1239,6 +1247,7 @@ async fn http3_streaming_request_body() -> TestResult<()> {
     // 8. Build the `Client` with `http3_only()` and the injected
     //    `QuicConnector`.
     let client = Client::builder()
+        .no_proxy()
         .http3_only()
         .__test_with_quic_connector(connector)
         .build()?;
@@ -1434,6 +1443,7 @@ async fn http3_reconnection_after_server_closes() -> TestResult<()> {
     }
 
     let client = Client::builder()
+        .no_proxy()
         .http3_only()
         .__test_with_quic_connector(connector)
         .build()?;
@@ -1512,6 +1522,7 @@ async fn http3_reconnection_after_server_closes() -> TestResult<()> {
         }
     }
     let client2 = Client::builder()
+        .no_proxy()
         .http3_only()
         .__test_with_quic_connector(connector2)
         .build()?;
@@ -1718,6 +1729,7 @@ async fn http3_stop_sending_no_error_graceful() -> TestResult<()> {
 
     // 7. Build the Client with http3_only() and the injected QuicConnector.
     let client = Client::builder()
+        .no_proxy()
         .http3_only()
         .__test_with_quic_connector(connector)
         .build()?;
@@ -1864,6 +1876,7 @@ async fn http3_stop_sending_internal_error() -> TestResult<()> {
 
     // 7. Build the Client with http3_only() and the injected QuicConnector.
     let client = Client::builder()
+        .no_proxy()
         .http3_only()
         .__test_with_quic_connector(connector)
         .build()?;
@@ -2129,6 +2142,7 @@ async fn http3_request_body_mid_stream_error() -> TestResult<()> {
 
     // 7. Build the Client with http3_only() and the injected QuicConnector.
     let client = Client::builder()
+        .no_proxy()
         .http3_only()
         .__test_with_quic_connector(connector)
         .build()?;
@@ -2243,7 +2257,7 @@ async fn http2_path_unaffected_by_http3_feature() -> TestResult<()> {
     // 2. Build a Client WITHOUT `http3_only()` — default `HttpVersionPref::All`.
     //    This is the key regression scenario: when http3 feature is enabled,
     //    the default client should still be able to negotiate h2.
-    let client = Client::builder().build()?;
+    let client = Client::builder().no_proxy().build()?;
 
     // 3. Send a GET request to the h2-capable server, forcing h2 via
     //    `.version(Version::HTTP_2)`. The client auto-negotiates h2
@@ -2302,7 +2316,7 @@ async fn alt_svc_captured_from_h2_response() -> TestResult<()> {
     });
 
     // 2. Build a default client (no `http3_only()`).
-    let client = Client::builder().build()?;
+    let client = Client::builder().no_proxy().build()?;
 
     // 3. Send a GET request, forcing h2.
     let url = format!("http://{}/", server.addr());

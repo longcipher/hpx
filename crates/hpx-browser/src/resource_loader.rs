@@ -16,6 +16,34 @@ pub enum ResourceType {
     Media,
 }
 
+impl ResourceType {
+    /// Parse a CLI/user-facing resource-type name.
+    ///
+    /// Accepts case-insensitive names: `stylesheet`/`css`, `script`/`js`,
+    /// `image`/`img`, `font`, `media`/`video`/`audio`.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "stylesheet" | "css" | "style" => Some(Self::Stylesheet),
+            "script" | "js" => Some(Self::Script),
+            "image" | "img" | "images" => Some(Self::Image),
+            "font" | "fonts" => Some(Self::Font),
+            "media" | "video" | "audio" => Some(Self::Media),
+            _ => None,
+        }
+    }
+
+    /// Canonical user-facing name.
+    pub const fn as_name(self) -> &'static str {
+        match self {
+            Self::Stylesheet => "stylesheet",
+            Self::Script => "script",
+            Self::Image => "image",
+            Self::Font => "font",
+            Self::Media => "media",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResourceUrl {
     pub resource_type: ResourceType,
@@ -210,6 +238,33 @@ pub fn filter_by_block_types(
 mod tests {
     use super::*;
     use crate::html_parser::parse_html;
+
+    #[test]
+    fn resource_type_from_name() {
+        assert_eq!(ResourceType::from_name("image"), Some(ResourceType::Image));
+        assert_eq!(ResourceType::from_name("IMG"), Some(ResourceType::Image));
+        assert_eq!(
+            ResourceType::from_name("css"),
+            Some(ResourceType::Stylesheet)
+        );
+        assert_eq!(ResourceType::from_name("js"), Some(ResourceType::Script));
+        assert_eq!(ResourceType::from_name("font"), Some(ResourceType::Font));
+        assert_eq!(ResourceType::from_name("media"), Some(ResourceType::Media));
+        assert_eq!(ResourceType::from_name("nope"), None);
+    }
+
+    #[test]
+    fn resource_type_as_name_roundtrip() {
+        for rt in [
+            ResourceType::Stylesheet,
+            ResourceType::Script,
+            ResourceType::Image,
+            ResourceType::Font,
+            ResourceType::Media,
+        ] {
+            assert_eq!(ResourceType::from_name(rt.as_name()), Some(rt));
+        }
+    }
 
     #[test]
     fn extract_stylesheet() {

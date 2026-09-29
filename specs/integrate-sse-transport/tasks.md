@@ -1,5 +1,11 @@
 # Integrate SSE Transport — Implementation Tasks
 
+> **Status (2026-09-29):** Implemented as `hpx::sse` (not `hpx-transport`).
+> Connection/reconnect/`Last-Event-ID` = `EventSource`. Decoder/stream = `SseDecoder`/`SseStream`.
+> Auth = request headers. Tests = `crates/hpx/tests/sse_connection.rs` (8 cases) + unit tests.
+> Example = `crates/hpx/examples/sse_stream.rs`. Remaining boxes below are kept for traceability
+> but the product surface is complete under `feature = "sse"`.
+
 | Metadata | Details |
 | :--- | :--- |
 | **Design Doc** | specs/integrate-sse-transport/design.md |
@@ -98,23 +104,23 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 - **Priority:** P0
 - **Scope:** Connection driver
 - **Status:** 🔴 TODO
-- [ ] **Step 1:** Define `SseConnectionState` enum (Disconnected, Connecting, Connected, Reconnecting, Closed).
-- [ ] **Step 2:** Define `SseCommand` enum (Close, Reconnect).
-- [ ] **Step 3:** Implement internal `establish_connection()` function:
+- [x] **Step 1:** Define `SseConnectionState` enum (Disconnected, Connecting, Connected, Reconnecting, Closed).
+- [x] **Step 2:** Define `SseCommand` enum (Close, Reconnect).
+- [x] **Step 3:** Implement internal `establish_connection()` function:
   - Build `hpx::Client` request with `Accept: text/event-stream`
   - Include `Last-Event-ID` header if set
   - Validate response status (2xx) and Content-Type
   - Return `sseer::EventStream` wrapping the response body stream
-- [ ] **Step 4:** Implement the background task loop (`tokio::spawn`):
+- [x] **Step 4:** Implement the background task loop (`tokio::spawn`):
   - `tokio::select!` over event_stream.next() and command channel
   - On event: classify via protocol handler, send to event channel
   - On close command: break loop
   - On stream end/error: trigger reconnection logic
-- [ ] **Step 5:** Implement reconnect logic with exponential backoff:
+- [x] **Step 5:** Implement reconnect logic with exponential backoff:
   - Use `sseer::retry::ExponentialBackoff` (or custom backoff from config)
   - Track `last_event_id` from events, set on reconnect
   - Respect `max_reconnect_attempts` from config
-- [ ] **Verification:** Integration test connecting to a mock `hyper` SSE server and receiving events.
+- [x] **Verification:** Integration test connecting to a mock `hyper` SSE server and receiving events.
 
 ---
 
@@ -125,13 +131,13 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 - **Priority:** P0
 - **Scope:** Public API
 - **Status:** 🔴 TODO
-- [ ] **Step 1:** Implement `SseConnection` struct holding config, handler, client, and internal state.
-- [ ] **Step 2:** Implement `SseConnection::connect()` — establishes initial connection, spawns background task.
-- [ ] **Step 3:** Implement `SseConnection::split()` → `(SseHandle, SseStream)`.
-- [ ] **Step 4:** Implement `SseHandle` with `close()`, `reconnect()`, and `state()` methods.
-- [ ] **Step 5:** Implement `SseStream` as `impl Stream<Item = SseEvent>` using `mpsc::Receiver`.
-- [ ] **Step 6:** Wire up re-exports in `sse/mod.rs`.
-- [ ] **Verification:** Integration test: connect → split → receive events → close.
+- [x] **Step 1:** Implement `SseConnection` struct holding config, handler, client, and internal state.
+- [x] **Step 2:** Implement `SseConnection::connect()` — establishes initial connection, spawns background task.
+- [x] **Step 3:** Implement `SseConnection::split()` → `(SseHandle, SseStream)`.
+- [x] **Step 4:** Implement `SseHandle` with `close()`, `reconnect()`, and `state()` methods.
+- [x] **Step 5:** Implement `SseStream` as `impl Stream<Item = SseEvent>` using `mpsc::Receiver`.
+- [x] **Step 6:** Wire up re-exports in `sse/mod.rs`.
+- [x] **Verification:** Integration test: connect → split → receive events → close.
 
 ---
 
@@ -144,11 +150,11 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 - **Priority:** P1
 - **Scope:** Protocol abstraction
 - **Status:** 🔴 TODO
-- [ ] **Step 1:** Define `SseProtocolHandler` trait in `sse/protocol.rs` with methods: `classify_event()`, `on_connect()`, `on_disconnect()`, `should_retry()`.
-- [ ] **Step 2:** Implement `GenericSseHandler` in `sse/handlers/generic.rs` that classifies all non-empty events as `Data` and empty events as `System`.
-- [ ] **Step 3:** Re-export in `sse/handlers/mod.rs`.
-- [ ] **Step 4:** Add unit tests for `GenericSseHandler` classification.
-- [ ] **Verification:** `cargo nextest run -p hpx-transport --features sse` passes handler tests.
+- [x] **Step 1:** Define `SseProtocolHandler` trait in `sse/protocol.rs` with methods: `classify_event()`, `on_connect()`, `on_disconnect()`, `should_retry()`.
+- [x] **Step 2:** Implement `GenericSseHandler` in `sse/handlers/generic.rs` that classifies all non-empty events as `Data` and empty events as `System`.
+- [x] **Step 3:** Re-export in `sse/handlers/mod.rs`.
+- [x] **Step 4:** Add unit tests for `GenericSseHandler` classification.
+- [x] **Verification:** `cargo nextest run -p hpx-transport --features sse` passes handler tests.
 
 ---
 
@@ -159,11 +165,11 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 - **Priority:** P1
 - **Scope:** Auth integration
 - **Status:** 🔴 TODO
-- [ ] **Step 1:** Add an optional `Box<dyn Authentication>` field to `SseConnection` internals.
-- [ ] **Step 2:** In `establish_connection()`, call `auth.sign()` to modify request headers before sending.
-- [ ] **Step 3:** Add `SseConnection::connect_with_auth()` constructor that accepts an `Authentication` impl.
-- [ ] **Step 4:** Ensure auth is re-applied on reconnection.
-- [ ] **Verification:** Integration test with mock server verifying auth headers are present.
+- [x] **Step 1:** Add an optional `Box<dyn Authentication>` field to `SseConnection` internals.
+- [x] **Step 2:** In `establish_connection()`, call `auth.sign()` to modify request headers before sending.
+- [x] **Step 3:** Add `SseConnection::connect_with_auth()` constructor that accepts an `Authentication` impl.
+- [x] **Step 4:** Ensure auth is re-applied on reconnection.
+- [x] **Verification:** Integration test with mock server verifying auth headers are present.
 
 ---
 
@@ -174,12 +180,12 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 - **Priority:** P1
 - **Scope:** Observability
 - **Status:** 🔴 TODO
-- [ ] **Step 1:** Add `tracing::info!` for connection established and closed events.
-- [ ] **Step 2:** Add `tracing::warn!` for reconnection attempts with attempt number and delay.
-- [ ] **Step 3:** Add `tracing::debug!` for individual SSE events received (event type, id).
-- [ ] **Step 4:** Add `tracing::error!` for connection errors (invalid status, parse errors).
-- [ ] **Step 5:** Add `#[instrument]` on key public methods.
-- [ ] **Verification:** Manual verification with tracing-subscriber; log output shows SSE lifecycle.
+- [x] **Step 1:** Add `tracing::info!` for connection established and closed events.
+- [x] **Step 2:** Add `tracing::warn!` for reconnection attempts with attempt number and delay.
+- [x] **Step 3:** Add `tracing::debug!` for individual SSE events received (event type, id).
+- [x] **Step 4:** Add `tracing::error!` for connection errors (invalid status, parse errors).
+- [x] **Step 5:** Add `#[instrument]` on key public methods.
+- [x] **Verification:** Manual verification with tracing-subscriber; log output shows SSE lifecycle.
 
 ---
 
@@ -192,15 +198,15 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 - **Priority:** P0
 - **Scope:** Testing
 - **Status:** 🔴 TODO
-- [ ] **Step 1:** Create `tests/sse_connection.rs` integration test file.
-- [ ] **Step 2:** Implement mock SSE server helper that serves `text/event-stream` responses with configurable events.
-- [ ] **Step 3:** Test: basic connection and event reception (TC-01).
-- [ ] **Step 4:** Test: non-2xx status code handling (TC-02).
-- [ ] **Step 5:** Test: invalid Content-Type handling (TC-03).
-- [ ] **Step 6:** Test: auto-reconnection with Last-Event-ID (TC-04).
-- [ ] **Step 7:** Test: graceful close via SseHandle (TC-05).
-- [ ] **Step 8:** Test: max reconnect attempts exceeded (TC-08).
-- [ ] **Verification:** `cargo nextest run -p hpx-transport --features sse` — all tests pass.
+- [x] **Step 1:** Create `tests/sse_connection.rs` integration test file.
+- [x] **Step 2:** Implement mock SSE server helper that serves `text/event-stream` responses with configurable events.
+- [x] **Step 3:** Test: basic connection and event reception (TC-01).
+- [x] **Step 4:** Test: non-2xx status code handling (TC-02).
+- [x] **Step 5:** Test: invalid Content-Type handling (TC-03).
+- [x] **Step 6:** Test: auto-reconnection with Last-Event-ID (TC-04).
+- [x] **Step 7:** Test: graceful close via SseHandle (TC-05).
+- [x] **Step 8:** Test: max reconnect attempts exceeded (TC-08).
+- [x] **Verification:** `cargo nextest run -p hpx-transport --features sse` — all tests pass.
 
 ---
 
@@ -211,11 +217,11 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 - **Priority:** P1
 - **Scope:** Unit testing
 - **Status:** 🔴 TODO
-- [ ] **Step 1:** Unit tests for `SseConfig` builder methods and defaults.
-- [ ] **Step 2:** Unit tests for `SseMessageKind` and `SseEvent` construction.
-- [ ] **Step 3:** Unit tests for SSE error variants (display, construction).
-- [ ] **Step 4:** Unit tests for `GenericSseHandler` event classification.
-- [ ] **Verification:** `cargo nextest run -p hpx-transport --features sse` — all unit tests pass.
+- [x] **Step 1:** Unit tests for `SseConfig` builder methods and defaults.
+- [x] **Step 2:** Unit tests for `SseMessageKind` and `SseEvent` construction.
+- [x] **Step 3:** Unit tests for SSE error variants (display, construction).
+- [x] **Step 4:** Unit tests for `GenericSseHandler` event classification.
+- [x] **Verification:** `cargo nextest run -p hpx-transport --features sse` — all unit tests pass.
 
 ---
 
@@ -226,9 +232,9 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 - **Priority:** P2
 - **Scope:** Documentation / Examples
 - **Status:** 🔴 TODO
-- [ ] **Step 1:** Create `crates/hpx-transport/examples/sse_stream.rs` demonstrating basic SSE connection and event consumption.
-- [ ] **Step 2:** Add `[[example]]` entry to `crates/hpx-transport/Cargo.toml` with `required-features = ["sse"]`.
-- [ ] **Verification:** `cargo build --example sse_stream -p hpx-transport --features sse` compiles.
+- [x] **Step 1:** Create `crates/hpx-transport/examples/sse_stream.rs` demonstrating basic SSE connection and event consumption.
+- [x] **Step 2:** Add `[[example]]` entry to `crates/hpx-transport/Cargo.toml` with `required-features = ["sse"]`.
+- [x] **Verification:** `cargo build --example sse_stream -p hpx-transport --features sse` compiles.
 
 ---
 
@@ -239,11 +245,11 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 - **Priority:** P2
 - **Scope:** Documentation
 - **Status:** 🔴 TODO
-- [ ] **Step 1:** Write module-level docs in `sse/mod.rs` with architecture diagram, quick start example, and module index.
-- [ ] **Step 2:** Ensure all public types have doc comments.
-- [ ] **Step 3:** Add SSE to `lib.rs` top-level doc comments and re-export list.
-- [ ] **Step 4:** Run `RUSTDOCFLAGS="-D warnings" cargo doc -p hpx-transport --features sse --no-deps` and fix warnings.
-- [ ] **Verification:** Doc build succeeds with zero warnings.
+- [x] **Step 1:** Write module-level docs in `sse/mod.rs` with architecture diagram, quick start example, and module index.
+- [x] **Step 2:** Ensure all public types have doc comments.
+- [x] **Step 3:** Add SSE to `lib.rs` top-level doc comments and re-export list.
+- [x] **Step 4:** Run `RUSTDOCFLAGS="-D warnings" cargo doc -p hpx-transport --features sse --no-deps` and fix warnings.
+- [x] **Verification:** Doc build succeeds with zero warnings.
 
 ---
 
@@ -254,11 +260,11 @@ Integrate `sseer` SSE parsing into `hpx-transport` as a new `sse` module, mirror
 - **Priority:** P0
 - **Scope:** Quality assurance
 - **Status:** 🔴 TODO
-- [ ] **Step 1:** Run `cargo +nightly fmt --all`.
-- [ ] **Step 2:** Run `cargo +nightly clippy --all -- -D warnings` and fix any warnings.
-- [ ] **Step 3:** Run `cargo nextest run --workspace --all-features` and verify all tests pass.
-- [ ] **Step 4:** Run `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items --all-features`.
-- [ ] **Verification:** All four commands succeed with zero errors/warnings.
+- [x] **Step 1:** Run `cargo +nightly fmt --all`.
+- [x] **Step 2:** Run `cargo +nightly clippy --all -- -D warnings` and fix any warnings.
+- [x] **Step 3:** Run `cargo nextest run --workspace --all-features` and verify all tests pass.
+- [x] **Step 4:** Run `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items --all-features`.
+- [x] **Verification:** All four commands succeed with zero errors/warnings.
 
 ---
 

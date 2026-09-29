@@ -238,6 +238,18 @@ impl ClientBuilder {
                 }
                 if let Some(quic_connector) = config.test_quic_connector.take() {
                     builder = builder.h3_connector(quic_connector);
+                } else {
+                    // Production construction path: always wire a QuicConnector
+                    // when the `http3` feature is enabled so both `http3_only()`
+                    // and `prefer_http3()` (Alt-Svc upgrade) can open QUIC.
+                    let h3_opts = config.http3_options.clone().unwrap_or_default();
+                    let transport_override = config.quic_config.take();
+                    match crate::tls::quic::default_quic_connector(&h3_opts, transport_override) {
+                        Ok(conn) => builder = builder.h3_connector(conn),
+                        Err(err) => {
+                            tracing::warn!("failed to build QuicConnector: {err}");
+                        }
+                    }
                 }
                 builder = builder.alt_svc_cache(alt_svc_cache.clone());
                 builder = builder.h3_failure_tracker(h3_failure_tracker.clone());

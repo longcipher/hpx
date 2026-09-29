@@ -3,10 +3,17 @@
 | Metadata | Details |
 | :--- | :--- |
 | **Author** | pb-plan agent |
-| **Status** | Draft |
+| **Status** | **Superseded / Implemented in `hpx::sse`** (2026-09-29) |
 | **Created** | 2026-02-13 |
 | **Reviewers** | — |
 | **Related Issues** | N/A |
+
+> **Implementation note:** This spec targeted a fictional `hpx-transport` + `sseer`
+> stack. The shipped solution lives in `crates/hpx/src/client/sse/` (feature `sse`):
+> `EventSource` / `EventSourceBuilder` (reconnect + `Last-Event-ID`), `SseDecoder`,
+> `SseStream`, `SseRetryConfig`. Auth is applied via ordinary request headers on the
+> `RequestBuilder` handed to `into_event_source()`. Integration tests:
+> `crates/hpx/tests/sse_connection.rs`. Example: `crates/hpx/examples/sse_stream.rs`.
 
 ## 1. Executive Summary
 

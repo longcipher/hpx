@@ -214,6 +214,7 @@ async fn test_redirect_policy_can_stop_redirects_without_an_error() {
     let url = format!("http://{}/no-redirect", server.addr());
 
     let res = Client::builder()
+        .no_proxy()
         .redirect(Policy::none())
         .build()
         .unwrap()
@@ -265,7 +266,14 @@ async fn test_invalid_location_stops_redirect_gh484() {
 
     let url = format!("http://{}/yikes", server.addr());
 
-    let res = hpx::get(&url).send().await.unwrap();
+    let res = Client::builder()
+        .no_proxy()
+        .build()
+        .unwrap()
+        .get(&url)
+        .send()
+        .await
+        .unwrap();
 
     assert_eq!(res.uri(), url.as_str());
     assert_eq!(res.status(), hpx::StatusCode::FOUND);
@@ -314,6 +322,7 @@ async fn test_redirect_302_with_set_cookies() {
     let dst = format!("http://{}/{}", server.addr(), "dst");
 
     let client = Client::builder()
+        .no_proxy()
         .cookie_store(true)
         .redirect(Policy::default())
         .build()
@@ -346,6 +355,7 @@ async fn test_redirect_limit_to_1() {
     let url = format!("http://{}/redirect/0", server.addr());
 
     let client = Client::builder()
+        .no_proxy()
         .redirect(Policy::limited(1))
         .build()
         .unwrap();
@@ -370,6 +380,7 @@ async fn test_scheme_only_check_after_policy_return_follow() {
 
     let url = format!("http://{}/yikes", server.addr());
     let res = Client::builder()
+        .no_proxy()
         .redirect(Policy::custom(|attempt| attempt.stop()))
         .build()
         .unwrap()
@@ -381,6 +392,7 @@ async fn test_scheme_only_check_after_policy_return_follow() {
     assert_eq!(res.unwrap().status(), hpx::StatusCode::FOUND);
 
     let res = Client::builder()
+        .no_proxy()
         .redirect(Policy::custom(|attempt| attempt.follow()))
         .build()
         .unwrap()
@@ -477,6 +489,7 @@ async fn test_redirect_history() {
     let dst = format!("http://{}/{}", redirect.addr(), "dst");
 
     let client = Client::builder()
+        .no_proxy()
         .redirect(Policy::default())
         .build()
         .unwrap();
@@ -532,6 +545,7 @@ async fn test_redirect_applies_set_cookie_from_redirect() {
     let dst = format!("http://{}/dst", server.addr());
 
     let client = Client::builder()
+        .no_proxy()
         .cookie_store(true)
         .redirect(Policy::default())
         .build()
@@ -564,6 +578,7 @@ async fn test_redirect_async_pending_follow() {
     let dst = format!("http://{}/dst", server.addr());
 
     let client = Client::builder()
+        .no_proxy()
         .redirect(Policy::custom(|attempt| {
             attempt.pending(|attempt| async move {
                 // Simulate async decision-making
@@ -602,6 +617,7 @@ async fn test_redirect_location_is_encoded() {
     let dst = format!("http://{}/dst%20path", server.addr());
 
     let client = Client::builder()
+        .no_proxy()
         .redirect(Policy::default())
         .build()
         .unwrap();

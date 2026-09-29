@@ -1,12 +1,14 @@
 use system_configuration::{
     core_foundation::{
-        base::CFType,
+        array::CFArray,
+        base::{CFType, TCFType},
         dictionary::CFDictionary,
         number::CFNumber,
         string::{CFString, CFStringRef},
     },
     dynamic_store::SCDynamicStoreBuilder,
     sys::schema_definitions::{
+        kSCPropNetProxiesExceptionsList, kSCPropNetProxiesExcludeSimpleHostnames,
         kSCPropNetProxiesHTTPEnable, kSCPropNetProxiesHTTPPort, kSCPropNetProxiesHTTPProxy,
         kSCPropNetProxiesHTTPSEnable, kSCPropNetProxiesHTTPSPort, kSCPropNetProxiesHTTPSProxy,
     },
@@ -50,6 +52,59 @@ pub(super) fn with_system(builder: &mut super::matcher::Builder) {
         if let Some(https) = https_proxy_config {
             builder.https = https;
         }
+    }
+
+    // Import the system proxy bypass list. Without this, loopback and LAN
+    // destinations listed in System Settings → Exceptions are still proxied.
+    if builder.no.is_empty()
+        && let Some(no_proxy) = parse_exceptions_from_dynamic_store(&proxies_map)
+    {
+        builder.no = no_proxy;
+    }
+}
+
+/// Read `ExceptionsList` (and `ExcludeSimpleHostnames`) into a `NO_PROXY` string.
+#[expect(unsafe_code)]
+fn parse_exceptions_from_dynamic_store(
+    proxies_map: &CFDictionary<CFString, CFType>,
+) -> Option<String> {
+    // SAFETY: `kSCPropNetProxies*` keys are immutable system CFString constants.
+    let exclude_simple = proxies_map
+        .find(unsafe { kSCPropNetProxiesExcludeSimpleHostnames })
+        .and_then(|flag| flag.downcast::<CFNumber>())
+        .and_then(|flag| flag.to_i32())
+        .unwrap_or(0)
+        == 1;
+
+    // SAFETY: same — read-only system dictionary lookups.
+    let mut parts: Vec<String> = proxies_map
+        .find(unsafe { kSCPropNetProxiesExceptionsList })
+        .and_then(|list| list.downcast::<CFArray>())
+        .map_or_default(|arr| {
+            arr.iter()
+                .filter_map(|item| {
+                    // Item is an untyped CF pointer; wrap as CFType then CFString.
+                    let ty = unsafe { CFType::wrap_under_get_rule(*item) };
+                    ty.downcast::<CFString>().map(|s| s.to_string())
+                })
+                .filter(|s| !s.is_empty())
+                .collect()
+        });
+
+    if exclude_simple {
+        // Approximate "exclude simple hostnames": always bypass loopback and
+        // the macOS `<local>` pseudo-entry from the exceptions list.
+        for name in ["localhost", "127.0.0.1", "::1", "<local>"] {
+            if !parts.iter().any(|p| p.eq_ignore_ascii_case(name)) {
+                parts.push(name.to_string());
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(","))
     }
 }
 

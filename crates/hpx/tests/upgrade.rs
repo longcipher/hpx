@@ -33,6 +33,7 @@ async fn http_upgrade() {
     });
 
     let res = Client::builder()
+        .no_proxy()
         .build()
         .unwrap()
         .get(format!("http://{}", server.addr()))
@@ -79,6 +80,7 @@ async fn http2_upgrade() {
     );
 
     let res = Client::builder()
+        .no_proxy()
         .http2_only()
         .build()
         .unwrap()

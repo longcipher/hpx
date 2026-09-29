@@ -86,7 +86,11 @@ async fn cookie_store_simple() {
             .unwrap()
     });
 
-    let client = Client::builder().cookie_store(true).build().unwrap();
+    let client = Client::builder()
+        .no_proxy()
+        .cookie_store(true)
+        .build()
+        .unwrap();
 
     let url = format!("http://{}/", server.addr());
     client.get(&url).send().await.unwrap();
@@ -116,7 +120,11 @@ async fn cookie_store_overwrite_existing() {
         }
     });
 
-    let client = Client::builder().cookie_store(true).build().unwrap();
+    let client = Client::builder()
+        .no_proxy()
+        .cookie_store(true)
+        .build()
+        .unwrap();
 
     let url = format!("http://{}/", server.addr());
     client.get(&url).send().await.unwrap();
@@ -138,7 +146,11 @@ async fn cookie_store_max_age() {
             .unwrap()
     });
 
-    let client = Client::builder().cookie_store(true).build().unwrap();
+    let client = Client::builder()
+        .no_proxy()
+        .cookie_store(true)
+        .build()
+        .unwrap();
     let url = format!("http://{}/", server.addr());
     client.get(&url).send().await.unwrap();
     client.get(&url).send().await.unwrap();
@@ -157,7 +169,11 @@ async fn cookie_store_expires() {
             .unwrap()
     });
 
-    let client = Client::builder().cookie_store(true).build().unwrap();
+    let client = Client::builder()
+        .no_proxy()
+        .cookie_store(true)
+        .build()
+        .unwrap();
 
     let url = format!("http://{}/", server.addr());
     client.get(&url).send().await.unwrap();
@@ -180,7 +196,11 @@ async fn cookie_store_path() {
         }
     });
 
-    let client = Client::builder().cookie_store(true).build().unwrap();
+    let client = Client::builder()
+        .no_proxy()
+        .cookie_store(true)
+        .build()
+        .unwrap();
 
     let url = format!("http://{}/", server.addr());
     client.get(&url).send().await.unwrap();
@@ -207,7 +227,11 @@ async fn cookie_store_stores_response_cookie_with_manual_cookie() {
             .unwrap()
     });
 
-    let client = Client::builder().cookie_store(true).build().unwrap();
+    let client = Client::builder()
+        .no_proxy()
+        .cookie_store(true)
+        .build()
+        .unwrap();
 
     let set_url = format!("http://{}/1", server.addr());
     let _ = client
@@ -271,6 +295,7 @@ async fn cookie_request_level_compression() {
 
     // Create a client with this jar
     let client = Client::builder()
+        .no_proxy()
         .cookie_provider(jar.clone())
         .build()
         .unwrap();

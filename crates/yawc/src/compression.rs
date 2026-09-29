@@ -132,10 +132,10 @@ impl WebSocketExtensions {
                     self.server_no_context_takeover = true;
                 }
                 "server_max_window_bits" => {
-                    self.server_max_window_bits = Some(value.and_then(|v| v.parse().ok()));
+                    self.server_max_window_bits = Some(parse_window_bits(value)?);
                 }
                 "client_max_window_bits" => {
-                    self.client_max_window_bits = Some(value.and_then(|v| v.parse().ok()));
+                    self.client_max_window_bits = Some(parse_window_bits(value)?);
                 }
                 _ => {}
             }
@@ -195,6 +195,24 @@ impl std::str::FromStr for WebSocketExtensions {
         Self::parse(input)
     }
 }
+
+/// Parse a `*_max_window_bits` parameter value.
+///
+/// `None` input (parameter present without a value) yields `Some(None)`.
+/// Numeric values must fit in 0..=15 (RFC 7692 §7.1.2.1 upper bound).
+fn parse_window_bits(value: Option<&str>) -> Result<Option<u8>, String> {
+    match value {
+        None => Ok(None),
+        Some(v) => match v.parse::<u8>() {
+            Ok(bits) if bits <= 15 => Ok(Some(bits)),
+            Ok(bits) => Err(format!(
+                "window bits {bits} out of range (must be 0-15 per RFC 7692)"
+            )),
+            Err(_) => Err(format!("invalid window bits value: {v:?}")),
+        },
+    }
+}
+
 /// A compressor for handling WebSocket payload compression, supporting both contextual and no-context-takeover modes.
 ///
 /// `Compressor` is used to compress WebSocket message payloads, optimizing data transmission.

@@ -1,6 +1,6 @@
 //! WebSocket CDP server — accepts connections and dispatches to CdpSession.
 
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use futures_util::{SinkExt, StreamExt};
 use hpx_yawc::{Frame, frame::OpCode};
@@ -8,6 +8,7 @@ use tokio::net::TcpListener;
 
 use crate::{
     protocol::{session::CdpSession, types::*},
+    resource_loader::ResourceType,
     stealth::StealthProfile,
 };
 
@@ -26,6 +27,15 @@ use crate::{
 /// to swap this single `Arc` for a per-`Page` lock.
 type V8Serialize = Arc<tokio::sync::Mutex<()>>;
 
+/// Per-server network / resource-loading options applied to every page.
+#[derive(Clone, Default)]
+pub struct ServerOptions {
+    /// Outbound proxy for navigations and subresource fetches.
+    pub proxy: Option<hpx::Proxy>,
+    /// Resource types that must not be fetched (images, stylesheets, …).
+    pub block_types: HashSet<ResourceType>,
+}
+
 /// A running CDP server. Stops when dropped.
 pub struct CdpServer {
     port: u16,
@@ -42,6 +52,17 @@ impl CdpServer {
         port: u16,
         stealth: bool,
         profile: Option<StealthProfile>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::start_with_options(html, port, stealth, profile, ServerOptions::default())
+    }
+
+    /// Start a CDP WebSocket server with proxy / resource-block options.
+    pub fn start_with_options(
+        html: &str,
+        port: u16,
+        stealth: bool,
+        profile: Option<StealthProfile>,
+        options: ServerOptions,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let html = html.to_string();
         let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -83,6 +104,7 @@ impl CdpServer {
                     html,
                     stealth,
                     profile,
+                    options,
                     shutdown_clone,
                     v8_serialize_clone,
                 )
@@ -150,6 +172,7 @@ async fn accept_loop(
     html: String,
     stealth: bool,
     profile: Option<StealthProfile>,
+    options: ServerOptions,
     shutdown: Arc<std::sync::atomic::AtomicBool>,
     v8_serialize: V8Serialize,
 ) {
@@ -166,10 +189,12 @@ async fn accept_loop(
             Ok(Ok((stream, addr))) => {
                 let html = html.clone();
                 let profile = profile.clone();
+                let options = options.clone();
                 let v8_serialize = v8_serialize.clone();
                 tokio::task::spawn_local(async move {
                     if let Err(e) =
-                        handle_connection(stream, &html, stealth, profile, v8_serialize).await
+                        handle_connection(stream, &html, stealth, profile, options, v8_serialize)
+                            .await
                     {
                         tracing::warn!("CDP connection from {} error: {}", addr, e);
                     }
@@ -195,6 +220,7 @@ async fn handle_connection(
     html: &str,
     stealth: bool,
     profile: Option<StealthProfile>,
+    options: ServerOptions,
     v8_serialize: V8Serialize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use hyper_util::rt::TokioIo;
@@ -216,6 +242,7 @@ async fn handle_connection(
         hyper::service::service_fn(move |mut req: hyper::Request<hyper::body::Incoming>| {
             let html = html.clone();
             let profile = profile.clone();
+            let options = options.clone();
             // Clone the shared V8 serialize lock per call so the `Fn` service
             // closure stays callable multiple times (each connection gets its own
             // `Arc` handle; the inner `async move` block takes ownership of it).
@@ -251,9 +278,15 @@ async fn handle_connection(
                 tokio::task::spawn_local(async move {
                     match upgrade_fut.await {
                         Ok(ws) => {
-                            if let Err(e) =
-                                handle_ws_connection(ws, &html, stealth, profile, v8_serialize)
-                                    .await
+                            if let Err(e) = handle_ws_connection(
+                                ws,
+                                &html,
+                                stealth,
+                                profile,
+                                options,
+                                v8_serialize,
+                            )
+                            .await
                             {
                                 tracing::warn!("CDP websocket error: {}", e);
                             }
@@ -280,11 +313,14 @@ async fn handle_ws_connection(
     html: &str,
     stealth: bool,
     profile: Option<StealthProfile>,
+    options: ServerOptions,
     v8_serialize: V8Serialize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut page = crate::page::Page::from_html(html, stealth)
         .await
         .map_err(|e| std::io::Error::other(e.to_string()))?;
+    page.set_proxy(options.proxy.clone());
+    page.set_subresource_block_types(options.block_types.clone());
     if let Some(prof) = profile {
         #[cfg(feature = "v8")]
         page.set_profile(prof);

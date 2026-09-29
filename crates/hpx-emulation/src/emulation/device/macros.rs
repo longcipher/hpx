@@ -1,3 +1,10 @@
+//! Internal `macro_rules!` helpers for browser-profile construction.
+//!
+//! These macros expand to shared TLS/HTTP fingerprint fragments (SETTINGS
+//! order, pseudo-header order, UA/`sec-ch-ua`/`sec-fetch-*` header sets) so
+//! each browser profile module stays declarative. They are crate-private
+//! implementation details — not part of the public API.
+
 macro_rules! settings_order {
     () => {
         SettingsOrder::builder()
@@ -267,7 +274,7 @@ macro_rules! mod_generator {
     };
 }
 
-/// Produces [`Http3Options`] for a given browser profile.
+/// Produces [`hpx::http3::Http3Options`] for a given browser profile.
 ///
 /// This macro is used internally by the `mod_generator!` macro to wire
 /// HTTP/3 options into emulation profiles. It is also exported for

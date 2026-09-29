@@ -82,6 +82,7 @@ async fn hotpath_layer_records_normalized_endpoint_stats() {
     });
 
     let client = Client::builder()
+        .no_proxy()
         .layer(HotpathLayer::new())
         .build()
         .unwrap();
@@ -129,6 +130,7 @@ async fn hotpath_layer_label_prefixes_endpoint_keys() {
     });
 
     let client = Client::builder()
+        .no_proxy()
         .layer(HotpathLayer::with_label("bench"))
         .build()
         .unwrap();

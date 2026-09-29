@@ -214,4 +214,33 @@ mod tests {
         let ratio = tall.width / short.width;
         assert!((ratio - 2.0).abs() < 0.05);
     }
+
+    /// Larger font size must scale advances (Parley FontSize property).
+    #[test]
+    fn parley_font_size_scales_width() {
+        let (data, idx) = arial_face();
+        let small = shape("Width", data, idx, 10.0);
+        let large = shape("Width", data, idx, 20.0);
+        assert!(
+            large.width > small.width * 1.5,
+            "20px should be much wider than 10px: {} vs {}",
+            large.width,
+            small.width
+        );
+        assert_eq!(small.glyphs.len(), large.glyphs.len());
+    }
+
+    /// Determinism: same inputs → same shaped run (canvas fingerprint stability).
+    #[test]
+    fn parley_shape_is_deterministic() {
+        let (data, idx) = arial_face();
+        let a = shape("Fingerprint", data, idx, 14.0);
+        let b = shape("Fingerprint", data, idx, 14.0);
+        assert_eq!(a.glyphs.len(), b.glyphs.len());
+        assert_eq!(a.width, b.width);
+        for (ga, gb) in a.glyphs.iter().zip(b.glyphs.iter()) {
+            assert_eq!(ga.glyph_id, gb.glyph_id);
+            assert_eq!(ga.x_advance, gb.x_advance);
+        }
+    }
 }

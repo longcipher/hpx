@@ -56,18 +56,32 @@ pub(crate) struct Cli {
 
 impl Cli {
     /// Parse `--proxy` into a [`hpx::Proxy`].
-    ///
-    /// Held as a non-test API so the surface stays consistent between builds;
-    /// production code does not yet wire it into `CdpServer::start`.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "production code does not call this yet; tests do")
-    )]
     pub(crate) fn proxy_config(&self) -> eyre::Result<Option<hpx::Proxy>> {
         match &self.proxy {
             Some(url) => Ok(Some(hpx::Proxy::all(url.as_str())?)),
             None => Ok(None),
         }
+    }
+
+    /// Parse `--block` entries into [`hpx_browser::resource_loader::ResourceType`]s.
+    pub(crate) fn block_types(
+        &self,
+    ) -> eyre::Result<std::collections::HashSet<hpx_browser::resource_loader::ResourceType>> {
+        use hpx_browser::resource_loader::ResourceType;
+        let mut set = std::collections::HashSet::new();
+        for name in &self.block {
+            match ResourceType::from_name(name) {
+                Some(rt) => {
+                    set.insert(rt);
+                }
+                None => {
+                    return Err(eyre::eyre!(
+                        "unknown resource type '{name}' (expected one of: stylesheet, script, image, font, media)"
+                    ));
+                }
+            }
+        }
+        Ok(set)
     }
 
     pub(crate) fn stealth_profile(&self) -> Option<StealthProfile> {
@@ -149,5 +163,34 @@ mod tests {
         let cli = Cli::parse_from(["hpxless", "--stealth", "--profile", "firefox"]);
         let profile = cli.stealth_profile().expect("should have profile");
         assert_eq!(profile.browser_name, "Firefox");
+    }
+
+    #[test]
+    fn block_parses_resource_types() {
+        let cli = Cli::parse_from(["hpxless", "--block", "image,script"]);
+        let types = cli.block_types().unwrap();
+        assert_eq!(types.len(), 2);
+        assert!(types.contains(&hpx_browser::resource_loader::ResourceType::Image));
+        assert!(types.contains(&hpx_browser::resource_loader::ResourceType::Script));
+    }
+
+    #[test]
+    fn block_rejects_unknown_type() {
+        let cli = Cli::parse_from(["hpxless", "--block", "nope"]);
+        assert!(cli.block_types().is_err());
+    }
+
+    #[test]
+    fn block_empty_is_empty_set() {
+        let cli = Cli::parse_from(["hpxless"]);
+        assert!(cli.block_types().unwrap().is_empty());
+    }
+
+    #[test]
+    fn block_aliases_css_and_img() {
+        let cli = Cli::parse_from(["hpxless", "--block", "css", "--block", "img"]);
+        let types = cli.block_types().unwrap();
+        assert!(types.contains(&hpx_browser::resource_loader::ResourceType::Stylesheet));
+        assert!(types.contains(&hpx_browser::resource_loader::ResourceType::Image));
     }
 }

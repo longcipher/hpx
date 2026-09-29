@@ -8,6 +8,6 @@ pub mod server;
 pub mod session;
 pub mod types;
 
-pub use server::CdpServer;
+pub use server::{CdpServer, ServerOptions};
 pub use session::CdpSession;
 pub use types::*;

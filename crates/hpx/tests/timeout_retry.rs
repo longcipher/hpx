@@ -39,6 +39,7 @@ async fn timeout_retries_for_idempotent_get() {
 
     let url = format!("http://{addr}/");
     let err = Client::builder()
+        .no_proxy()
         .timeout(Duration::from_millis(500))
         .build()
         .unwrap()

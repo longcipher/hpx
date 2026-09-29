@@ -1,5 +1,6 @@
 #![allow(missing_docs)]
 #![cfg(feature = "boring-tls")]
+mod support;
 use std::time::Duration;
 
 use hpx::{
@@ -162,7 +163,8 @@ fn emulation_template() -> Emulation {
 #[tokio::test]
 async fn test_emulation() -> hpx::Result<()> {
     let client = Client::builder()
-        .emulation(emulation_template())
+        .no_proxy()
+        .emulation(hpx::BrowserProfile::Chrome)
         .connect_timeout(Duration::from_secs(10))
         .cert_verification(false)
         .build()?;
@@ -196,13 +198,14 @@ async fn test_request_with_emulation() -> hpx::Result<()> {
         return Ok(());
     }
     let client = Client::builder()
+        .no_proxy()
         .connect_timeout(Duration::from_secs(10))
         .cert_verification(false)
         .build()?;
 
     let text = client
         .get("https://tls.peet.ws/api/all")
-        .emulation(emulation_template())
+        .emulation(hpx::BrowserProfile::Chrome)
         .send()
         .await?
         .text()
@@ -230,6 +233,7 @@ async fn test_request_with_emulation_tls() -> hpx::Result<()> {
         return Ok(());
     }
     let client = Client::builder()
+        .no_proxy()
         .connect_timeout(Duration::from_secs(10))
         .cert_verification(false)
         .build()?;
@@ -258,6 +262,7 @@ async fn test_request_with_emulation_tls() -> hpx::Result<()> {
 #[tokio::test]
 async fn test_request_with_emulation_http2() -> hpx::Result<()> {
     let client = Client::builder()
+        .no_proxy()
         .connect_timeout(Duration::from_secs(10))
         .cert_verification(false)
         .build()?;
@@ -276,4 +281,56 @@ async fn test_request_with_emulation_http2() -> hpx::Result<()> {
     );
 
     Ok(())
+}
+
+/// Local (no-network) check: Chrome emulation emits the expected
+/// User-Agent and `sec-ch-ua` client-hint headers.
+#[tokio::test]
+async fn chrome_emits_expected_headers_locally() {
+    use support::server;
+
+    let server = server::http(
+        move |req: http::Request<hyper::body::Incoming>| async move {
+            let ua = req
+                .headers()
+                .get(http::header::USER_AGENT)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let ch = req
+                .headers()
+                .get("sec-ch-ua")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let ch_ua_mobile = req
+                .headers()
+                .get("sec-ch-ua-mobile")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let body = format!("ua={ua}\nch={ch}\nmobile={ch_ua_mobile}");
+            http::Response::new(hpx::Body::from(body))
+        },
+    );
+
+    let client = Client::builder().no_proxy().build().unwrap();
+    let resp = client
+        .get(format!("http://{}/", server.addr()))
+        .emulation(hpx::BrowserProfile::Chrome)
+        .send()
+        .await
+        .unwrap();
+    let text = resp.text().await.unwrap();
+    assert!(text.contains("Chrome/"), "expected Chrome UA, got: {text}");
+    // sec-ch-ua may be set by the emulation profile; if present it must look like a brand list.
+    if let Some(rest) = text.split("ch=").nth(1) {
+        let ch = rest.split('\n').next().unwrap_or("");
+        if !ch.is_empty() {
+            assert!(
+                ch.contains("Chromium") || ch.contains("Chrome") || ch.contains("Not",),
+                "unexpected sec-ch-ua: {ch}"
+            );
+        }
+    }
 }

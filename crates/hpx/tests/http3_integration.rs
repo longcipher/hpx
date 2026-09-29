@@ -22,7 +22,7 @@ type TestResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 #[tokio::test]
 #[ignore]
 async fn http3_get_cloudflare_trace() -> TestResult<()> {
-    let client = Client::builder().http3_only().build()?;
+    let client = Client::builder().no_proxy().http3_only().build()?;
 
     let response = client
         .get("https://cloudflare.com/cdn-cgi/trace")

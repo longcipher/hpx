@@ -56,16 +56,15 @@ impl LayoutEngine {
         )
     }
 
+    /// Resolve the document if dirty, then read Stylo computed styles for
+    /// `node_id` (see [`crate::css_engine`]).
     pub fn get_computed_style(
         &mut self,
-        _dom: &mut Dom,
-        _node_id: NodeId,
-    ) -> crate::dom::ElementData {
-        crate::dom::ElementData {
-            name: crate::dom::QualName::new(""),
-            attrs: vec![],
-            shadow_root: None,
-        }
+        dom: &mut Dom,
+        node_id: NodeId,
+    ) -> crate::css_engine::ComputedStyle {
+        self.ensure_computed(dom);
+        crate::css_engine::extract_style(dom, node_id)
     }
 
     pub fn get_offset_width(&mut self, dom: &mut Dom, node_id: NodeId) -> f64 {

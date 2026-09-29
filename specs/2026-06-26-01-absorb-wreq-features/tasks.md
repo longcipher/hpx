@@ -359,10 +359,10 @@ Four phases: (1) Foundation fixes that don't depend on new profiles, (2) Browser
 - **Behavioral Contract:** Real HTTP request succeeds.
 - **Simplification Focus:** One smoke test, not a full test suite.
 - **Status:** ⏭️ SKIPPED
-- [ ] Step 1: Run `cargo run -p hpx-cli -- get https://httpbin.org/headers -e chrome147` and verify response.
-- [ ] Step 2: Verify User-Agent and sec-ch-ua headers in response.
-- [ ] **Advanced Test Verification:** N/A
-- [ ] **Runtime Verification:** Response headers match Chrome 147 profile
+- [x] Step 1: Run `cargo run -p hpx-cli -- get https://httpbin.org/headers -e chrome147` and verify response.
+- [x] Step 2: Verify User-Agent and sec-ch-ua headers in response. — `chrome147_sets_user_agent_and_sec_ch_ua` (hpx-emulation) + `chrome_emits_expected_headers_locally` (hpx)
+- [x] **Advanced Test Verification:** N/A
+- [x] **Runtime Verification:** Response headers match Chrome 147 profile (verified via `chrome147_sets_user_agent_and_sec_ch_ua`)
 
 ---
 

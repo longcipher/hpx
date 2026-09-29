@@ -46,6 +46,8 @@ pub struct Page {
     profile: Option<StealthProfile>,
     stealth: bool,
     subresource_block_types: HashSet<ResourceType>,
+    proxy: Option<hpx::Proxy>,
+    allow_private_network: bool,
     #[cfg(feature = "v8")]
     js_runtime: Option<BrowserJsRuntime>,
 }
@@ -77,6 +79,8 @@ impl Page {
             profile: None,
             stealth: false,
             subresource_block_types: HashSet::new(),
+            proxy: None,
+            allow_private_network: false,
             #[cfg(feature = "v8")]
             js_runtime: None,
         }
@@ -104,6 +108,8 @@ impl Page {
             profile: None,
             stealth,
             subresource_block_types: HashSet::new(),
+            proxy: None,
+            allow_private_network: false,
             #[cfg(feature = "v8")]
             js_runtime: None,
         })
@@ -128,6 +134,8 @@ impl Page {
             profile: Some(profile),
             stealth: true,
             subresource_block_types: HashSet::new(),
+            proxy: None,
+            allow_private_network: false,
             #[cfg(feature = "v8")]
             js_runtime: None,
         };
@@ -171,13 +179,33 @@ impl Page {
         }
     }
 
+    /// Set the outbound proxy used for navigations and subresource fetches.
+    pub fn set_proxy(&mut self, proxy: Option<hpx::Proxy>) {
+        self.proxy = proxy;
+    }
+
+    /// Allow navigations to private/special-use addresses (loopback, RFC1918).
+    ///
+    /// Disabled by default so attacker-controlled HTML cannot reach internal
+    /// services. CLI/tests opt in explicitly.
+    pub fn set_allow_private_network(&mut self, allow: bool) {
+        self.allow_private_network = allow;
+    }
+
+    /// Build a [`HttpClient`] honoring this page's proxy and SSRF settings.
+    fn make_client(&self) -> Result<HttpClient, PageError> {
+        // ponytail: always Chrome profile; per-profile routing via tls_impersonate
+        HttpClient::with_proxy(hpx::BrowserProfile::Chrome, self.proxy.clone())
+            .map_err(PageError::Net)
+            .map(|c| c.allow_private_network(self.allow_private_network))
+    }
+
     /// Navigate to a URL with challenge-aware retry loop.
     ///
     /// Fetch → classify → if challenge detected, retry up to `max_iterations`.
     /// Uses 15s budget by default.
     pub async fn navigate(&mut self, url: &str) -> Result<(), PageError> {
-        // ponytail: always Chrome profile; per-profile routing via tls_impersonate
-        let client = HttpClient::new(hpx::BrowserProfile::Chrome).map_err(PageError::Net)?;
+        let client = self.make_client()?;
         self.navigate_inner(url, &client, DEFAULT_MAX_ITERATIONS, DEFAULT_NAV_BUDGET)
             .await
     }
@@ -190,7 +218,7 @@ impl Page {
         url: &str,
         solvers: &[&dyn crate::challenge::ChallengeSolver],
     ) -> Result<(), PageError> {
-        let client = HttpClient::new(hpx::BrowserProfile::Chrome).map_err(PageError::Net)?;
+        let client = self.make_client()?;
         self.navigate_with_solvers_inner(
             url,
             &client,
@@ -205,7 +233,7 @@ impl Page {
     ///
     /// Faster than cold `navigate()` because it skips profile setup.
     pub async fn navigate_warm(&mut self, url: &str) -> Result<(), PageError> {
-        let client = HttpClient::new(hpx::BrowserProfile::Chrome).map_err(PageError::Net)?;
+        let client = self.make_client()?;
         let resp = client
             .request("GET", url, None, &[], RedirectPolicy::Follow(10))
             .await
@@ -581,7 +609,7 @@ impl Page {
         // Route subresources through the SSRF-guarded client so private
         // networks referenced by page markup are rejected like main-document
         // navigations are.
-        let client = HttpClient::new(hpx::BrowserProfile::Chrome).map_err(PageError::Net)?;
+        let client = self.make_client()?;
         let loaded = fetch_resources(&client, filtered, &self.subresource_block_types, 6).await;
 
         let styles: Vec<_> = loaded

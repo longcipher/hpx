@@ -36,17 +36,13 @@ fn main() -> eyre::Result<()> {
         None => "",
     };
 
-    // --proxy/--block are parsed but not yet wired into CdpServer::start.
-    if cli.proxy.is_some() {
-        eprintln!("warning: --proxy is not yet implemented, ignoring");
-    }
-    if !cli.block.is_empty() {
-        eprintln!("warning: --block is not yet implemented, ignoring");
-    }
+    let proxy = cli.proxy_config()?;
+    let block_types = cli.block_types()?;
+    let options = hpx_browser::protocol::ServerOptions { proxy, block_types };
 
     let profile = cli.stealth_profile();
-    let server =
-        CdpServer::start(html, cli.port, cli.stealth, profile).map_err(|e| eyre::eyre!("{e}"))?;
+    let server = CdpServer::start_with_options(html, cli.port, cli.stealth, profile, options)
+        .map_err(|e| eyre::eyre!("{e}"))?;
 
     println!("hpxless {}", env!("CARGO_PKG_VERSION"));
     println!("  port:    {}", server.port());

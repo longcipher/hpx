@@ -164,18 +164,41 @@ async fn test_timeout() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_connection_refused() {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    drop(listener);
+    // Bind and immediately release so the port is almost certainly closed.
+    // Re-check with a direct connect so a parallel test that races for the
+    // same ephemeral port cannot make this assertion flaky.
+    let port = loop {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        match std::net::TcpStream::connect(("127.0.0.1", port)) {
+            Err(_) => break port,
+            Ok(_) => continue, // stolen by another test; retry
+        }
+    };
 
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_hpx"))
-        .args([&format!("http://127.0.0.1:{port}/")])
+    // Use std::process (not tokio) so env_clear cannot race with concurrent
+    // `env::set_var` in other tests. A system/http proxy would answer 502 and
+    // exit 0, which would mask the connection-refused signal.
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_hpx"))
+        .arg(format!("http://127.0.0.1:{port}/"))
+        .env_clear()
+        .env("PATH", std::env::var("PATH").unwrap_or_default())
+        .env("HOME", std::env::var("HOME").unwrap_or_default())
         .output()
-        .await
         .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         !output.status.success(),
-        "expected connection error, but command succeeded"
+        "expected connection error for closed port {port}, but command succeeded:\nstdout={stdout}\nstderr={stderr}"
+    );
+    let combined = format!("{stdout}{stderr}");
+    assert!(
+        combined.contains("Connection refused")
+            || combined.contains("error sending request")
+            || combined.contains("Connect"),
+        "expected a connect error, got:\nstdout={stdout}\nstderr={stderr}"
     );
 }
 

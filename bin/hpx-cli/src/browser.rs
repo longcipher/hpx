@@ -114,6 +114,7 @@ pub(crate) async fn handle_fetch(config: FetchConfig) -> eyre::Result<()> {
 
         let result = rt.block_on(async move {
             let mut page = Page::new();
+            page.set_allow_private_network(allow_private_network);
             page.navigate(&url_clone)
                 .await
                 .wrap_err("navigation failed")?;
@@ -262,7 +263,8 @@ pub(crate) async fn handle_scrape(config: ScrapeConfig) -> eyre::Result<()> {
         let eval = eval.clone();
 
         handles.push(tokio::spawn(async move {
-            let result = scrape_single_url(&url, eval.as_deref(), timeout).await;
+            let result =
+                scrape_single_url(&url, eval.as_deref(), timeout, allow_private_network).await;
             drop(permit);
             result
         }));
@@ -299,7 +301,12 @@ pub(crate) async fn handle_scrape(config: ScrapeConfig) -> eyre::Result<()> {
 
 /// Scrape a single URL in-process. Page is !Send, so it runs on a dedicated
 /// std::thread with its own single-threaded tokio runtime.
-async fn scrape_single_url(url: &str, eval: Option<&str>, _timeout: u64) -> ScrapeResult {
+async fn scrape_single_url(
+    url: &str,
+    eval: Option<&str>,
+    _timeout: u64,
+    allow_private_network: bool,
+) -> ScrapeResult {
     let t0 = Instant::now();
     let url_owned = url.to_string();
     let eval_owned = eval.map(|e| e.to_string());
@@ -321,6 +328,7 @@ async fn scrape_single_url(url: &str, eval: Option<&str>, _timeout: u64) -> Scra
 
         let result = rt.block_on(async move {
             let mut page = Page::new();
+            page.set_allow_private_network(allow_private_network);
             page.navigate(&url_owned)
                 .await
                 .wrap_err("navigation failed")?;

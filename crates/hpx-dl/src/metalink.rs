@@ -614,3 +614,45 @@ mod tests {
         assert!(req.checksum.is_some());
     }
 }
+
+/// Fuzz-style stress: 10,000 structured/mutated inputs must never panic.
+/// Mirrors the `cargo fuzz` metalink target when libFuzzer is unavailable.
+#[test]
+fn metalink_parser_10k_iterations_no_panic() {
+    use std::hash::{Hash, Hasher};
+    let corpus: [&[u8]; 8] = [
+            b"",
+            b"<",
+            b"<?xml version=\"1.0\"?>",
+            b"<metalink xmlns=\"urn:ietf:params:xml:ns:metalink\"><file name=\"a\"><size>1</size></file></metalink>",
+            b"<file name=\"x\"><url priority=\"1\">http://e</url><hash type=\"sha-256\">aa</hash></file>",
+            b"<metalink><file><url></url><hash></hash><size>999999999999</size></file></metalink>",
+            b"not xml at all \x00\xff",
+            b"<metalink><file name=\"\"><url priority=\"9999999999\">x</url></file></metalink>",
+        ];
+    let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+    for i in 0..10_000u64 {
+        // xorshift64*
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        let base = corpus[(state as usize) % corpus.len()];
+        let mut input = base.to_vec();
+        // Mutate a few bytes.
+        for _ in 0..(state % 5) as usize {
+            let pos = (state as usize) % input.len().max(1);
+            if pos < input.len() {
+                input[pos] = (state % 256) as u8;
+            } else {
+                input.push((state % 256) as u8);
+            }
+        }
+        if i % 7 == 0 {
+            input.push(b'<');
+        }
+        let _ = parse_metalink(&input);
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        input.hash(&mut h);
+        let _ = h.finish();
+    }
+}

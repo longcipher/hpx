@@ -15,6 +15,7 @@
 #![deny(unsafe_code)]
 
 pub mod challenge;
+pub mod css_engine;
 pub mod dom;
 pub mod extract;
 pub mod html_parser;

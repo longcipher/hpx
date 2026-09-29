@@ -365,6 +365,7 @@ async fn user_agent() {
 
     let url = format!("http://{}/ua", server.addr());
     let res = Client::builder()
+        .no_proxy()
         .user_agent("hpx-test-agent")
         .build()
         .expect("client builder")
@@ -657,6 +658,7 @@ async fn close_connection_after_idle_timeout() {
     let mut server = server::http(move |_| async move { http::Response::default() });
 
     let client = Client::builder()
+        .no_proxy()
         .pool_idle_timeout(std::time::Duration::from_secs(1))
         .build()
         .unwrap();
@@ -726,6 +728,7 @@ async fn http1_only() {
     let server = server::http(move |_| async move { http::Response::default() });
 
     let resp = Client::builder()
+        .no_proxy()
         .http1_only()
         .build()
         .unwrap()
@@ -737,6 +740,7 @@ async fn http1_only() {
     assert_eq!(resp.version(), hpx::Version::HTTP_11);
 
     let resp = Client::builder()
+        .no_proxy()
         .build()
         .unwrap()
         .get(format!("http://{}", server.addr()))
@@ -753,6 +757,7 @@ async fn http2_only() {
     let server = server::http(move |_| async move { http::Response::default() });
 
     let resp = Client::builder()
+        .no_proxy()
         .http2_only()
         .build()
         .unwrap()
@@ -764,6 +769,7 @@ async fn http2_only() {
     assert_eq!(resp.version(), hpx::Version::HTTP_2);
 
     let resp = Client::builder()
+        .no_proxy()
         .build()
         .unwrap()
         .get(format!("http://{}", server.addr()))
@@ -963,6 +969,7 @@ async fn skip_default_headers() {
     });
 
     let client = Client::builder()
+        .no_proxy()
         .default_headers({
             let mut headers = hpx::header::HeaderMap::new();
             headers.insert(USER_AGENT, "test-agent".parse().unwrap());
@@ -1065,6 +1072,7 @@ async fn test_client_default_accept_encoding() {
     });
 
     let client = Client::builder()
+        .no_proxy()
         .default_headers({
             let mut headers = HeaderMap::new();
             headers.insert(header::ACCEPT_ENCODING, HeaderValue::from_static("zstd"));
@@ -1112,7 +1120,11 @@ async fn response_trailers() {
         resp
     });
 
-    let mut res = hpx::get(format!("http://{}/trailers", server.addr()))
+    let mut res = Client::builder()
+        .no_proxy()
+        .build()
+        .unwrap()
+        .get(format!("http://{}/trailers", server.addr()))
         .header(header::TE, "trailers")
         .send()
         .await

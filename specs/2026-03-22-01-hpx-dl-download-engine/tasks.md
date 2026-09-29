@@ -344,13 +344,13 @@
 
 ## Definition of Done
 
-- [ ] All tasks completed with status 🟢 DONE
-- [ ] `cargo nextest run --workspace --all-features` passes
-- [ ] `cargo +nightly clippy --all -- -D warnings` passes
-- [ ] All scenarios pass
-- [ ] `just format` applied
-- [ ] `just lint` passes
-- [ ] `just test` passes
-- [ ] `just build-docs` passes
-- [ ] All property tests pass with default proptest config
-- [ ] Fuzz target (Metalink parser) runs for 10,000 iterations without panic
+- [x] All tasks completed with status 🟢 DONE
+- [x] `cargo nextest run --workspace --all-features` passes
+- [x] `cargo +nightly clippy --all -- -D warnings` passes
+- [x] All scenarios pass
+- [x] `just format` applied
+- [x] `just lint` passes
+- [x] `just test` passes
+- [x] `just build-docs` passes
+- [x] All property tests pass with default proptest config
+- [x] Fuzz target (Metalink parser) runs for 10,000 iterations without panic — `metalink_parser_10k_iterations_no_panic` + `crates/hpx-dl/fuzz/fuzz_targets/metalink.rs`

@@ -71,6 +71,7 @@ async fn test_3des_support() -> hpx::Result<()> {
 
     // Create a client with the TLS options
     let client = Client::builder()
+        .no_proxy()
         .emulation(tls_options)
         .cert_verification(false)
         .connect_timeout(Duration::from_secs(360))
@@ -106,6 +107,7 @@ async fn test_firefox_7x_100_cipher() -> hpx::Result<()> {
 
     // Create a client with the TLS options
     let client = Client::builder()
+        .no_proxy()
         .emulation(tls_options)
         .cert_verification(false)
         .connect_timeout(Duration::from_secs(360))
@@ -135,6 +137,7 @@ async fn test_alps_new_endpoint() -> hpx::Result<()> {
         .build();
 
     let client = Client::builder()
+        .no_proxy()
         .emulation(tls_options)
         .connect_timeout(Duration::from_secs(360))
         .build()?;
@@ -180,6 +183,7 @@ async fn test_aes_hw_override() -> hpx::Result<()> {
 
     // Create a client with the TLS options
     let client = Client::builder()
+        .no_proxy()
         .emulation(tls_options)
         .connect_timeout(Duration::from_secs(360))
         .build()?;
@@ -195,6 +199,7 @@ async fn test_aes_hw_override() -> hpx::Result<()> {
 #[cfg(not(feature = "rustls-tls"))]
 async fn test_tls_self_signed_cert() {
     let client = Client::builder()
+        .no_proxy()
         .cert_verification(false)
         .connect_timeout(Duration::from_secs(360))
         .tls_info(true)
@@ -219,6 +224,7 @@ async fn test_tls_self_signed_cert() {
         .unwrap();
 
     let client = Client::builder()
+        .no_proxy()
         .cert_store(self_signed_cert_store)
         .build()
         .unwrap();

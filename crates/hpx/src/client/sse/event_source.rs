@@ -531,3 +531,49 @@ impl RequestBuilderSseExt for RequestBuilder {
         EventSourceBuilder::new(self)
     }
 }
+
+#[cfg(test)]
+mod builder_tests {
+    use super::*;
+
+    fn dummy_request() -> RequestBuilder {
+        crate::Client::builder()
+            .build()
+            .unwrap()
+            .get("http://127.0.0.1:0/events")
+    }
+
+    #[test]
+    fn builder_defaults() {
+        let source = EventSource::builder(dummy_request()).build();
+        assert_eq!(source.ready_state(), ReadyState::Connecting);
+        assert!(source.last_event_id().is_none());
+    }
+
+    #[test]
+    fn builder_sets_last_event_id() {
+        let source = EventSource::builder(dummy_request())
+            .last_event_id("42")
+            .build();
+        assert_eq!(source.last_event_id().map(|s| &**s), Some("42"));
+    }
+
+    #[test]
+    fn builder_close_is_terminal() {
+        let mut source = EventSource::builder(dummy_request()).build();
+        source.close();
+        assert_eq!(source.ready_state(), ReadyState::Closed);
+    }
+
+    #[test]
+    fn message_event_helpers() {
+        let msg = MessageEvent {
+            event: "tick".into(),
+            data: "1".into(),
+            last_event_id: Some(Arc::from("9")),
+        };
+        let ev = SseEvent::Message(msg);
+        assert_eq!(ev.as_message().unwrap().event, "tick");
+        assert!(ev.into_message().is_some());
+    }
+}

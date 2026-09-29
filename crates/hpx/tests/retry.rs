@@ -42,6 +42,7 @@ async fn retries_apply_in_scope() {
 
     let url = format!("http://{}", server.addr());
     let resp = Client::builder()
+        .no_proxy()
         .retry(policy)
         .build()
         .unwrap()
@@ -88,6 +89,7 @@ async fn status_recovery_retries_payment_required_once() {
     });
 
     let client = Client::builder()
+        .no_proxy()
         .on_status(http::StatusCode::PAYMENT_REQUIRED, |ctx| async move {
             assert_eq!(ctx.status(), http::StatusCode::PAYMENT_REQUIRED);
             assert_eq!(ctx.body().as_ref(), b"payment-required");
@@ -129,6 +131,7 @@ async fn status_recovery_skips_non_replayable_bodies() {
     });
 
     let client = Client::builder()
+        .no_proxy()
         .on_status(http::StatusCode::PAYMENT_REQUIRED, |ctx| async move {
             assert!(ctx.into_original_request().is_none());
             Ok(None)
@@ -171,6 +174,7 @@ async fn status_recovery_skips_oversized_bodies() {
     });
 
     let client = Client::builder()
+        .no_proxy()
         .on_status(http::StatusCode::PAYMENT_REQUIRED, |_ctx| async move {
             panic!("oversized bodies should bypass recovery buffering")
         })
@@ -198,7 +202,7 @@ async fn default_retries_have_a_limit() {
         |_| {},
     );
 
-    let client = Client::builder().http2_only().build().unwrap();
+    let client = Client::builder().no_proxy().http2_only().build().unwrap();
 
     let url = format!("http://{}", server.addr());
 

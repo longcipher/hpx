@@ -130,6 +130,7 @@ async fn h2_prior_knowledge_large_body() {
     });
 
     let res = hpx::Client::builder()
+        .no_proxy()
         .http2_only()
         .build()
         .expect("client")
@@ -250,6 +251,7 @@ async fn many_response_headers_over_default_limit() {
 
     // An explicitly pinned cap still works and stays respected.
     let client = hpx::Client::builder()
+        .no_proxy()
         .http1_options(
             hpx::http1::Http1Options::builder()
                 .max_headers(cookie_count * 2)
