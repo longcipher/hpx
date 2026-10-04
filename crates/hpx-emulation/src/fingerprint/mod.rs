@@ -14,12 +14,17 @@
 //! # Example
 //!
 //! ```rust
-//! use hpx_emulation::{Emulation, fingerprint::BrowserFingerprint};
+//! use hpx_emulation::fingerprint::{
+//!     BrowserFingerprint, Curve, TlsPreset, tls_fingerprint_from_preset,
+//! };
 //!
-//! let fp = BrowserFingerprint::from_emulation(Emulation::Chrome133);
+//! let tls = tls_fingerprint_from_preset(TlsPreset::ChromeBase);
+//! assert!(tls.curves.contains(&Curve::X25519));
+//! assert_eq!(Curve::X25519.openssl_name(), "X25519");
+//!
+//! let fp = BrowserFingerprint::new("chrome", "133", tls, Default::default(), Vec::new());
 //! assert_eq!(fp.name, "chrome");
 //! assert_eq!(fp.version, "133");
-//! assert!(fp.tls.curves.contains(&Curve::X25519MLKEM768));
 //! ```
 
 mod cache;

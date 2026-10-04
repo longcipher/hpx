@@ -47,10 +47,10 @@ pub type HttpRequestBuilder = hyper::http::request::Builder;
 ///
 /// # Example
 /// ```no_run
+/// use hpx_yawc::{Options, WebSocket};
 /// use tokio_rustls::TlsConnector;
-/// use yawc::{Options, WebSocket};
 ///
-/// async fn connect_example() -> yawc::Result<()> {
+/// async fn connect_example() -> hpx_yawc::Result<()> {
 ///     let ws = WebSocket::connect("wss://example.com/socket".parse()?)
 ///         .with_options(Options::default().with_utf8())
 ///         .with_connector(create_tls_connector())
@@ -177,11 +177,13 @@ impl WebSocketBuilder {
     ///
     /// # Example
     /// ```no_run
-    /// use yawc::WebSocket;
+    /// use hpx_yawc::WebSocket;
     ///
-    /// async fn connect() -> yawc::Result<()> {
+    /// async fn connect() -> hpx_yawc::Result<()> {
     ///     let ws = WebSocket::connect("wss://example.com/socket".parse()?)
-    ///         .with_request(yawc::HttpRequestBuilder::new().header("Host", "custom-host.example.com"))
+    ///         .with_request(
+    ///             hpx_yawc::HttpRequestBuilder::new().header("Host", "custom-host.example.com"),
+    ///         )
     ///         .await?;
     ///
     ///     // Use WebSocket...

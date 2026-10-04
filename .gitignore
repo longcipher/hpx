@@ -14,3 +14,13 @@ mutants.out.old/
 *.DS_Store
 Clippy.toml
 .codegraph/
+
+# cargo-fuzz state. Instrumented builds under `fuzz/target/` are already covered
+# by the `target/` rule above; these are the generated corpus, the crash
+# artifacts, and the per-fuzz-crate lockfile.
+crates/*/fuzz/target/
+crates/*/fuzz/corpus/
+crates/*/fuzz/artifacts/
+crates/*/fuzz/Cargo.lock
+
+*.profraw

@@ -39,7 +39,20 @@ thiserror = { workspace = true }
 tokio-util = { workspace = true, optional = true, features = ["io", "codec"] }
 
 [dev-dependencies]
+# The integration suite drives the real `hpx::Client` against a loopback server
+# so the codecs are exercised end to end, including the incremental paths that
+# only appear when a body arrives in several TCP segments.
+arrow = { workspace = true, features = ["ipc", "arrow-ipc"] }
+bytes = { workspace = true }
+csv = { workspace = true }
+futures = { workspace = true }
+hpx = { workspace = true, features = ["stream"] }
 proptest = { workspace = true }
+prost = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "time"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 [lints]
 workspace = true

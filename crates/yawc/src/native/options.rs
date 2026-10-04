@@ -42,7 +42,7 @@ pub type CompressionLevel = flate2::Compression;
 ///
 /// ## Basic Configuration
 /// ```rust
-/// use yawc::Options;
+/// use hpx_yawc::Options;
 ///
 /// let options = Options::default()
 ///     .with_max_payload_read(1024 * 1024) // 1 MiB max incoming
@@ -51,7 +51,7 @@ pub type CompressionLevel = flate2::Compression;
 ///
 /// ## CPU and Memory-Constrained Environment
 /// ```rust
-/// use yawc::Options;
+/// use hpx_yawc::Options;
 ///
 /// let options = Options::default()
 ///     .with_limits(128 * 1024, 256 * 1024) // Small payload/buffer limits
@@ -161,7 +161,7 @@ impl Default for Options {
 /// ```
 /// use std::time::Duration;
 ///
-/// use yawc::Options;
+/// use hpx_yawc::Options;
 ///
 /// let options = Options::default()
 ///     .with_fragment_timeout(Duration::from_secs(30))
@@ -209,7 +209,7 @@ impl Options {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::Options;
+    /// use hpx_yawc::Options;
     ///
     /// let options = Options::default()
     ///     .with_limits(2 * 1024 * 1024, 4 * 1024 * 1024); // 2MB payload, 4MB buffer
@@ -229,7 +229,7 @@ impl Options {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::Options;
+    /// use hpx_yawc::Options;
     ///
     /// let options = Options::default().with_low_latency_compression();
     /// ```
@@ -247,7 +247,7 @@ impl Options {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::Options;
+    /// use hpx_yawc::Options;
     ///
     /// let options = Options::default().with_high_compression();
     /// ```
@@ -265,7 +265,7 @@ impl Options {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::Options;
+    /// use hpx_yawc::Options;
     ///
     /// let options = Options::default().with_balanced_compression();
     /// ```
@@ -304,7 +304,7 @@ impl Options {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::{CompressionLevel, Options};
+    /// use hpx_yawc::{CompressionLevel, Options};
     ///
     /// let options = Options::default()
     ///     .with_compression_level(CompressionLevel::new(6)) // Balanced compression
@@ -418,7 +418,7 @@ impl Options {
     /// ```rust
     /// use std::time::Duration;
     ///
-    /// use yawc::Options;
+    /// use hpx_yawc::Options;
     ///
     /// let options = Options::default().with_fragment_timeout(Duration::from_secs(30));
     /// ```
@@ -445,7 +445,7 @@ impl Options {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::Options;
+    /// use hpx_yawc::Options;
     ///
     /// let options = Options::default().with_max_fragment_size(64 * 1024); // 64 KiB max per fragment
     /// ```
@@ -472,7 +472,7 @@ impl Options {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::Options;
+    /// use hpx_yawc::Options;
     ///
     /// let options = Options::default().with_backpressure_boundary(128 * 1024); // 128 KiB boundary
     /// ```
@@ -608,7 +608,7 @@ impl Options {
 ///
 /// # Example
 /// ```
-/// use yawc::{CompressionLevel, DeflateOptions};
+/// use hpx_yawc::{CompressionLevel, DeflateOptions};
 ///
 /// let opts = DeflateOptions {
 ///     level: CompressionLevel::default(),

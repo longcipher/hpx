@@ -139,7 +139,7 @@ impl JitterDelayLayer {
     pub const fn new(base: Duration, pct: f64) -> Self {
         Self {
             base,
-            pct: pct.clamp(0.0, 1.0),
+            pct: sanitize_pct(pct),
         }
     }
 
@@ -183,7 +183,7 @@ impl<P> JitterDelayLayerWith<P> {
     pub const fn new(base: Duration, pct: f64, predicate: P) -> Self {
         Self {
             base,
-            pct: pct.clamp(0.0, 1.0),
+            pct: sanitize_pct(pct),
             predicate,
         }
     }
@@ -198,5 +198,22 @@ where
     #[inline]
     fn layer(&self, inner: S) -> Self::Service {
         JitterDelayWith::new(inner, self.base, self.pct, self.predicate.clone())
+    }
+}
+
+/// Clamp a jitter percentage into `[0, 1]`, mapping non-finite input to `0.0`.
+///
+/// `f64::clamp` propagates `NaN` instead of rejecting it, and a `NaN` percentage
+/// flows into `Duration::saturating_sub`, which panics with "cannot convert
+/// float seconds to Duration". A non-finite percentage is reachable from
+/// ordinary code (`1.0 / 0.0`, a NaN read out of a config file), so it must be
+/// treated as "no jitter" rather than crashing the process on the first
+/// request.
+#[inline]
+pub(crate) const fn sanitize_pct(pct: f64) -> f64 {
+    if pct.is_finite() {
+        pct.clamp(0.0, 1.0)
+    } else {
+        0.0
     }
 }

@@ -58,7 +58,7 @@
 //!
 //! ```rust
 //! use bytes::Bytes;
-//! use yawc::{close::CloseCode, frame::Frame};
+//! use hpx_yawc::{close::CloseCode, frame::Frame};
 //!
 //! // Text frame with UTF-8 payload
 //! let text_frame = Frame::text("Hello, WebSocket!");
@@ -228,7 +228,7 @@ where
 ///
 /// While frames can be constructed directly, it's recommended to use the provided factory methods:
 /// ```rust
-/// use yawc::{close::CloseCode, frame::Frame};
+/// use hpx_yawc::{close::CloseCode, frame::Frame};
 ///
 /// let text_frame = Frame::text("Hello");
 /// let binary_frame = Frame::binary(vec![1, 2, 3]);
@@ -262,7 +262,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::frame::Frame;
+    /// use hpx_yawc::frame::Frame;
     ///
     /// let frame = Frame::text("Hello, WebSocket!");
     /// ```
@@ -280,7 +280,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::frame::Frame;
+    /// use hpx_yawc::frame::Frame;
     ///
     /// let frame = Frame::binary(vec![1, 2, 3, 4]);
     /// ```
@@ -298,7 +298,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::frame::Frame;
+    /// use hpx_yawc::frame::Frame;
     ///
     /// let frame = Frame::ping("optional payload");
     /// ```
@@ -316,7 +316,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::frame::Frame;
+    /// use hpx_yawc::frame::Frame;
     ///
     /// let frame = Frame::pong("");
     /// ```
@@ -338,7 +338,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::frame::Frame;
+    /// use hpx_yawc::frame::Frame;
     ///
     /// // First fragment (non-final text frame)
     /// let first = Frame::text("Hello, ").with_fin(false);
@@ -366,7 +366,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::frame::Frame;
+    /// use hpx_yawc::frame::Frame;
     ///
     /// let fragment = Frame::text("partial data").with_fin(false);
     /// assert!(!fragment.is_fin());
@@ -380,7 +380,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::{close::CloseCode, frame::Frame};
+    /// use hpx_yawc::{close::CloseCode, frame::Frame};
     ///
     /// let frame = Frame::close(CloseCode::Normal, b"Goodbye");
     /// ```
@@ -486,7 +486,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::frame::{Frame, OpCode};
+    /// use hpx_yawc::frame::{Frame, OpCode};
     ///
     /// let frame = Frame::text("Hello");
     /// assert_eq!(frame.opcode(), OpCode::Text);
@@ -500,7 +500,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::frame::Frame;
+    /// use hpx_yawc::frame::Frame;
     ///
     /// let frame = Frame::binary(vec![1, 2, 3]);
     /// assert_eq!(frame.payload().as_ref(), &[1, 2, 3]);
@@ -515,7 +515,7 @@ impl Frame {
     /// # Example
     /// ```rust
     /// use bytes::BufMut;
-    /// use yawc::frame::Frame;
+    /// use hpx_yawc::frame::Frame;
     ///
     /// let mut frame = Frame::binary(vec![1, 2]);
     /// // Modify payload if needed
@@ -529,7 +529,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::frame::Frame;
+    /// use hpx_yawc::frame::Frame;
     ///
     /// let frame = Frame::text("Hello");
     /// let payload = frame.into_payload();
@@ -543,7 +543,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::frame::{Frame, OpCode};
+    /// use hpx_yawc::frame::{Frame, OpCode};
     ///
     /// let frame = Frame::text("Hello");
     /// let (opcode, is_fin, payload) = frame.into_parts();
@@ -561,7 +561,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::frame::{Frame, OpCode};
+    /// use hpx_yawc::frame::{Frame, OpCode};
     ///
     /// let frame = Frame::text("Hello");
     /// let (opcode, text) = frame.into_parts_str().unwrap();
@@ -578,7 +578,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::frame::Frame;
+    /// use hpx_yawc::frame::Frame;
     ///
     /// let frame = Frame::text("Complete message");
     /// assert!(frame.is_fin());
@@ -594,7 +594,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::frame::Frame;
+    /// use hpx_yawc::frame::Frame;
     ///
     /// let mut frame = Frame::text("Fragment");
     /// frame.set_fin(false); // Mark as non-final for fragmentation
@@ -615,7 +615,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::frame::Frame;
+    /// use hpx_yawc::frame::Frame;
     ///
     /// let mut frame = Frame::text("Hello");
     /// frame.set_mask(Some([0x12, 0x34, 0x56, 0x78]));
@@ -631,7 +631,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::frame::Frame;
+    /// use hpx_yawc::frame::Frame;
     ///
     /// let frame = Frame::text("Hello").with_mask([0x12, 0x34, 0x56, 0x78]);
     /// ```
@@ -648,7 +648,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::frame::Frame;
+    /// use hpx_yawc::frame::Frame;
     ///
     /// let mut frame = Frame::text("Hello");
     /// frame.set_random_mask();
@@ -664,7 +664,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::frame::Frame;
+    /// use hpx_yawc::frame::Frame;
     ///
     /// let frame = Frame::text("Hello").with_random_mask();
     /// ```
@@ -682,7 +682,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::frame::Frame;
+    /// use hpx_yawc::frame::Frame;
     ///
     /// let frame = Frame::text("Hello");
     /// assert_eq!(frame.as_str().unwrap(), "Hello");
@@ -700,7 +700,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::{close::CloseCode, frame::Frame};
+    /// use hpx_yawc::{close::CloseCode, frame::Frame};
     ///
     /// let frame = Frame::close(CloseCode::Normal, b"Goodbye");
     /// assert_eq!(frame.close_code(), Some(CloseCode::Normal));
@@ -719,7 +719,7 @@ impl Frame {
     ///
     /// # Example
     /// ```rust
-    /// use yawc::{close::CloseCode, frame::Frame};
+    /// use hpx_yawc::{close::CloseCode, frame::Frame};
     ///
     /// let frame = Frame::close(CloseCode::Normal, b"Goodbye");
     /// assert_eq!(frame.close_reason().unwrap(), Some("Goodbye"));
@@ -787,7 +787,7 @@ impl Frame {
     }
 }
 
-/// Unit tests for the `yawc::frame` module.
+/// Unit tests for the `hpx_yawc::frame` module.
 #[cfg(test)]
 mod tests {
     use bytes::{Bytes, BytesMut};

@@ -3350,7 +3350,9 @@ dependencies = [
  "serde_json",
  "simd-json",
  "thiserror 2.0.21",
+ "tokio",
  "tokio-util",
+ "tracing-subscriber",
 ]
 
 [[package]]

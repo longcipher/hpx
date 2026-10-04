@@ -1,7 +1,10 @@
 type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 
 /// The kind of error that occurred during streaming.
-#[derive(Clone, Copy, Debug, thiserror::Error)]
+///
+/// `PartialEq`/`Eq` are derived so callers — including the integration suite —
+/// can assert on the failure *category* without matching on `Display` strings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum StreamBodyKind {
     /// An error occurred while decoding a frame or format.
     #[error("Frame/codec error")]

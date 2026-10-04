@@ -51,14 +51,13 @@ where
             if buf.is_empty() {
                 return Ok(None);
             }
-            let buf_len = buf.len();
             let bytes = buf.chunk();
             let byte = bytes[0];
             if byte < 0x80 {
                 buf.advance(1);
-                self.cursor.current_obj_len = u64::from(byte) as usize;
+                self.cursor.current_obj_len = usize::from(byte);
                 self.cursor.have_len = true;
-            } else if buf_len > 10 || bytes[buf_len - 1] < 0x80 {
+            } else if varint_is_complete(bytes) {
                 let (value, advance) = decode_varint_slice(bytes)?;
                 buf.advance(advance);
                 self.cursor.current_obj_len = usize::try_from(value).map_err(|_| {
@@ -99,23 +98,58 @@ where
     }
 
     fn decode_eof(&mut self, buf: &mut BytesMut) -> Result<Option<T>, StreamBodyError> {
-        if buf.is_empty() {
-            return Ok(None);
-        }
-        match self.decode(buf) {
-            Ok(Some(item)) => Ok(Some(item)),
-            Ok(None) => {
-                // Buffer has data but decode returned None, meaning the varint length
-                // prefix or the message body is incomplete at EOF.
-                Err(StreamBodyError::new(
-                    StreamBodyKind::CodecError,
-                    None,
-                    Some("incomplete varint length prefix at EOF".into()),
-                ))
+        // `decode` consumes a length prefix and then reports "need more data",
+        // so the first `decode` at EOF has usually made progress without
+        // yielding a message. Driving `decode` in a loop is what lets a final
+        // frame whose prefix and body arrived together still be emitted;
+        // calling `decode` exactly once reported a spurious "incomplete varint
+        // length prefix" error and truncated the stream after one message.
+        loop {
+            let before = buf.len();
+            match self.decode(buf)? {
+                Some(item) => return Ok(Some(item)),
+                None => {
+                    if buf.is_empty() && !self.cursor.have_len {
+                        // Clean end of stream: no bytes left and no length
+                        // waiting for a body.
+                        return Ok(None);
+                    }
+                    if buf.len() == before {
+                        // No bytes were consumed, so the remaining input can
+                        // never complete: either a truncated varint prefix or a
+                        // body shorter than its own length prefix claims.
+                        return Err(StreamBodyError::new(
+                            StreamBodyKind::CodecError,
+                            None,
+                            Some("truncated length-prefixed message at EOF".into()),
+                        ));
+                    }
+                }
             }
-            Err(e) => Err(e),
         }
     }
+}
+
+/// Maximum number of bytes a LEB128 varint can occupy.
+const MAX_VARINT_BYTES: usize = 10;
+
+/// Whether `bytes` starts with a complete LEB128 varint.
+///
+/// Completeness is decided by scanning for the first byte without the
+/// continuation bit, never by inspecting only the last byte of the buffer.
+/// Inspecting the last byte looks equivalent but is not: the message body that
+/// follows a multi-byte prefix can itself begin with a byte that has the high
+/// bit set, which would make an already-complete prefix look unfinished and
+/// stall the stream until EOF.
+#[inline]
+fn varint_is_complete(bytes: &[u8]) -> bool {
+    if bytes.len() > MAX_VARINT_BYTES {
+        // A varint cannot legally be this long, so let `decode_varint_slice`
+        // report the malformed input rather than waiting for bytes that will
+        // never arrive.
+        return true;
+    }
+    bytes.iter().any(|b| *b < 0x80)
 }
 
 /// Decodes a LEB128-encoded variable length integer from the slice, returning the value and the
@@ -135,10 +169,13 @@ fn decode_varint_slice(bytes: &[u8]) -> Result<(u64, usize), StreamBodyError> {
             Some("varint slice is empty".into()),
         ));
     }
-    // The varint is incomplete when the slice is short (<= 10 bytes) AND the final byte still
-    // has the continuation bit set. A slice longer than 10 bytes is fine — only the first 10
-    // bytes are consumed.
-    if bytes.len() <= 10 && bytes[bytes.len() - 1] >= 0x80 {
+    // The varint is incomplete when every one of the first 10 bytes still has
+    // the continuation bit set. A slice longer than 10 bytes is fine — only
+    // the first 10 are consumed. Note this scans the varint bytes rather than
+    // looking at the final byte of the slice: the caller's buffer usually also
+    // holds the message body, whose bytes say nothing about varint
+    // completeness.
+    if bytes.len() <= MAX_VARINT_BYTES && !varint_is_complete(bytes) {
         return Err(StreamBodyError::new(
             StreamBodyKind::CodecError,
             None,
@@ -219,7 +256,6 @@ fn decode_varint_slice(bytes: &[u8]) -> Result<(u64, usize), StreamBodyError> {
 
 #[cfg(test)]
 mod tests {
-    use prost::Message as _;
     use tokio_util::codec::Decoder;
 
     use super::*;
@@ -232,17 +268,28 @@ mod tests {
         value: u32,
     }
 
-    fn encode_len_prefixed(msg: &TestMsg) -> Vec<u8> {
+    /// Message whose highest-numbered field is a string, so the encoded body
+    /// ends with arbitrary UTF-8 bytes rather than a varint terminator (which
+    /// always has the high bit clear).
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct TrailingLabelMsg {
+        #[prost(uint32, tag = "1")]
+        count: u32,
+        #[prost(string, tag = "2")]
+        label: String,
+    }
+
+    fn encode_len_prefixed<M: prost::Message>(msg: &M) -> Vec<u8> {
         let mut buf = Vec::new();
         let mut encoded = Vec::new();
         msg.encode(&mut encoded).unwrap();
         // write varint length
         let mut len = encoded.len();
         while len >= 0x80 {
-            buf.push((len as u8) | 0x80);
+            buf.push(u8::try_from(len & 0x7F).unwrap() | 0x80);
             len >>= 7;
         }
-        buf.push(len as u8);
+        buf.push(u8::try_from(len).unwrap());
         buf.extend_from_slice(&encoded);
         buf
     }
@@ -561,6 +608,330 @@ mod tests {
         let mut buf = BytesMut::from(&[0x80u8][..]);
         assert!(matches!(codec.decode(&mut buf), Ok(None)));
         assert!(codec.decode_eof(&mut buf).is_err());
+    }
+
+    #[test]
+    fn decode_eof_drains_a_fully_buffered_stream() {
+        // Regression: `decode_eof` used to call `decode` exactly once. Because
+        // `decode` consumes the length prefix and then reports "need more
+        // data", that single call yielded no message and `decode_eof` declared
+        // the stream truncated. `FramedRead` therefore returned exactly one
+        // message followed by an error for any multi-message response.
+        let expected: Vec<TestMsg> = (0..5)
+            .map(|i| TestMsg {
+                name: format!("m{i}"),
+                value: i,
+            })
+            .collect();
+        let mut data = Vec::new();
+        for msg in &expected {
+            data.extend_from_slice(&encode_len_prefixed(msg));
+        }
+
+        let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(65536);
+        let mut buf = BytesMut::from(&data[..]);
+
+        let mut decoded = Vec::new();
+        // Mirror how `FramedRead` drives the codec: decode until it needs more
+        // bytes, then decode_eof until it reports a clean end.
+        loop {
+            match codec.decode(&mut buf) {
+                Ok(Some(msg)) => decoded.push(msg),
+                Ok(None) => break,
+                Err(e) => panic!("unexpected decode error: {e}"),
+            }
+        }
+        loop {
+            match codec.decode_eof(&mut buf) {
+                Ok(Some(msg)) => decoded.push(msg),
+                Ok(None) => break,
+                Err(e) => panic!("unexpected decode_eof error: {e}"),
+            }
+        }
+
+        assert_eq!(decoded, expected, "decode_eof dropped messages");
+    }
+
+    #[test]
+    fn decode_eof_emits_a_single_fully_buffered_message() {
+        // One message, delivered with its prefix and body in the same segment:
+        // the very first `decode_eof` must already produce it.
+        let msg = TestMsg {
+            name: "solo".into(),
+            value: 3,
+        };
+        let data = encode_len_prefixed(&msg);
+        let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(1024);
+        let mut buf = BytesMut::from(&data[..]);
+
+        assert_eq!(codec.decode_eof(&mut buf).unwrap(), Some(msg));
+        assert!(codec.decode_eof(&mut buf).unwrap().is_none());
+    }
+
+    #[test]
+    fn multi_byte_prefix_completed_before_a_high_bit_body_byte_does_not_stall() {
+        // Regression: prefix completeness was decided by looking at the *last*
+        // byte of the buffer rather than by scanning the varint. When a TCP
+        // segment ends just after a two-byte length prefix, the buffer still
+        // holds the first few body bytes, and one of them carrying the high bit
+        // made an already-complete prefix look unfinished. The codec then waited
+        // for bytes that could never complete its (wrong) view of the prefix and
+        // the stream stalled until EOF, where it surfaced as a truncation error.
+        let msg = TrailingLabelMsg {
+            count: 1,
+            // Starts with "abÿ": the third byte is 0xC3, i.e. high bit set.
+            label: format!("ab\u{00FF}{}", "x".repeat(200)),
+        };
+        let data = encode_len_prefixed(&msg);
+        assert!(
+            data.len() > 10 && data[0] >= 0x80,
+            "fixture needs a multi-byte length prefix and a buffer longer than 10 bytes"
+        );
+
+        // Exactly the pathological prefix: 10 bytes, the 10th with the high bit
+        // set, and the varint already terminated on byte 2.
+        let mut codec = ProtobufLenPrefixCodec::<TrailingLabelMsg>::new_with_max_length(4096);
+        let mut buf = BytesMut::from(&data[..10]);
+        assert!(
+            buf[9] >= 0x80,
+            "fixture must place a high-bit byte at the buffer tail"
+        );
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+
+        // The prefix must have been consumed, leaving only the pending body.
+        assert_eq!(buf.len(), 8, "the two-byte prefix must be consumed");
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+
+        // Supplying the rest yields the message intact.
+        buf.extend_from_slice(&data[10..]);
+        assert_eq!(codec.decode(&mut buf).unwrap(), Some(msg));
+        assert!(codec.decode_eof(&mut buf).unwrap().is_none());
+    }
+
+    #[test]
+    fn varint_is_complete_scans_varint_bytes_not_the_buffer_tail() {
+        // A terminated varint is complete even when the following bytes all have
+        // the high bit set.
+        assert!(varint_is_complete(&[0x82, 0x02, 0x8A, 0xFF]));
+        assert!(varint_is_complete(&[0x01]));
+        // No terminator within the 10-byte window: still incomplete.
+        assert!(!varint_is_complete(&[0x80; 10]));
+        assert!(!varint_is_complete(&[0x80, 0x80]));
+        // Beyond 10 bytes the input is malformed; report it rather than wait.
+        assert!(varint_is_complete(&[0x80; 11]));
+        assert!(!varint_is_complete(&[]));
+    }
+
+    #[test]
+    fn decode_varint_slice_ignores_body_bytes_when_checking_completeness() {
+        // The completeness guard must not consult the buffer tail. Before the
+        // fix this rejected a valid 2-byte varint that happened to be followed
+        // by a high-bit body byte.
+        let (value, advance) = decode_varint_slice(&[0xD1, 0x01, 0xC3, 0xFF]).unwrap();
+        assert_eq!((value, advance), (209, 2));
+    }
+
+    /// Property tests for the length-prefix framing.
+    mod properties {
+        use bytes::BytesMut;
+        use proptest::prelude::*;
+        use prost::Message as _;
+        use tokio_util::codec::Decoder;
+
+        use super::{ProtobufLenPrefixCodec, TestMsg, decode_varint_slice, varint_is_complete};
+
+        /// Absolute step bound for the chunk-feeding helper. Kept low so a
+        /// non-terminating mutant fails fast instead of timing out.
+        const MAX_HELPER_STEPS: usize = 4_096;
+
+        /// Encode a varint exactly as the wire format requires.
+        fn encode_varint(value: u64) -> Vec<u8> {
+            let mut out = Vec::new();
+            let mut rest = value;
+            while rest >= 0x80 {
+                out.push(u8::try_from(rest & 0x7F).expect("7 bits fit a byte") | 0x80);
+                rest >>= 7;
+            }
+            out.push(u8::try_from(rest).expect("7 bits fit a byte"));
+            out
+        }
+
+        /// Drive the codec the way `FramedRead` does: decode until it needs more
+        /// bytes, then `decode_eof` until it reports a clean end. Returns
+        /// `None` if any step reported an error.
+        fn decode_framed<M>(data: &[u8], chunk: usize, max_length: usize) -> Option<Vec<M>>
+        where
+            M: prost::Message + Default + std::fmt::Debug,
+        {
+            let mut codec = ProtobufLenPrefixCodec::<M>::new_with_max_length(max_length);
+            let mut buf = BytesMut::new();
+            let mut out = Vec::new();
+            let mut fed = 0usize;
+
+            for _ in 0..MAX_HELPER_STEPS {
+                if fed < data.len() {
+                    let take = chunk.min(data.len() - fed);
+                    buf.extend_from_slice(&data[fed..fed + take]);
+                    fed += take;
+                }
+                match codec.decode(&mut buf) {
+                    Ok(Some(message)) => {
+                        out.push(message);
+                        continue;
+                    }
+                    Ok(None) => {}
+                    Err(_) => return None,
+                }
+                if fed == data.len() {
+                    // Keep draining at EOF: `decode_eof` yields at most one
+                    // frame per call, so a fully-buffered stream needs several
+                    // calls before it reports a clean end.
+                    match codec.decode_eof(&mut buf) {
+                        Ok(Some(message)) => {
+                            out.push(message);
+                            continue;
+                        }
+                        Ok(None) => return Some(out),
+                        Err(_) => return None,
+                    }
+                }
+            }
+            panic!(
+                "decoder did not terminate for a {}-byte payload",
+                data.len()
+            );
+        }
+
+        fn message() -> impl Strategy<Value = TestMsg> {
+            (
+                proptest::collection::vec(any::<char>(), 0..40),
+                any::<u32>(),
+            )
+                .prop_map(|(chars, value)| TestMsg {
+                    name: chars.into_iter().collect(),
+                    value,
+                })
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            /// A stream of generated messages decodes back to exactly those
+            /// messages, in order, at every chunk size.
+            #[test]
+            fn message_stream_round_trips(
+                messages in proptest::collection::vec(message(), 1..8),
+                chunk in 1usize..40,
+            ) {
+                let mut data = Vec::new();
+                for m in &messages {
+                    let mut body = Vec::new();
+                    m.encode(&mut body).expect("prost encodes into a Vec");
+                    data.extend_from_slice(&encode_varint(body.len() as u64));
+                    data.extend_from_slice(&body);
+                }
+                prop_assert_eq!(
+                    decode_framed::<TestMsg>(&data, chunk, 1 << 20),
+                    Some(messages),
+                    "failed for a {}-byte payload at chunk size {}",
+                    data.len(),
+                    chunk
+                );
+            }
+
+            /// An empty message is delivered, and the stream stays aligned, no
+            /// matter where the empty messages sit.
+            #[test]
+            fn zero_length_messages_do_not_desync(
+                empties in prop::collection::vec(any::<bool>(), 1..10),
+            ) {
+                let expected: Vec<TestMsg> = empties
+                    .iter()
+                    .enumerate()
+                    .map(|(i, empty)| {
+                        if *empty {
+                            TestMsg::default()
+                        } else {
+                            TestMsg {
+                                name: format!("m{i}"),
+                                value: i as u32,
+                            }
+                        }
+                    })
+                    .collect();
+                let mut data = Vec::new();
+                for m in &expected {
+                    let mut body = Vec::new();
+                    m.encode(&mut body).expect("prost encodes into a Vec");
+                    data.extend_from_slice(&encode_varint(body.len() as u64));
+                    data.extend_from_slice(&body);
+                }
+                prop_assert_eq!(decode_framed::<TestMsg>(&data, 3, 1 << 20), Some(expected));
+            }
+
+            /// `decode_varint_slice` agrees with the encoder for every value the
+            /// length-prefixed format can carry.
+            #[test]
+            fn varint_round_trips(value in 0u64..(1 << 24)) {
+                let encoded = encode_varint(value);
+                let (decoded, advance) = decode_varint_slice(&encoded)
+                    .expect("an encoder-produced varint always decodes");
+                prop_assert_eq!(advance, encoded.len());
+                prop_assert_eq!(decoded, value);
+            }
+
+            /// Prefix completeness is decided by scanning the varint, so a body
+            /// byte with the high bit set right after a terminated prefix cannot
+            /// stall the decoder.
+            #[test]
+            fn varint_completeness_ignores_the_buffer_tail(
+                value in 128u64..(1 << 24),
+                tail in proptest::collection::vec(128u8..=255, 1..8),
+            ) {
+                let encoded = encode_varint(value);
+                let mut buffer = encoded.clone();
+                buffer.extend_from_slice(&tail);
+                prop_assert!(varint_is_complete(&buffer));
+                let (decoded, advance) = decode_varint_slice(&buffer)
+                    .expect("a terminated varint decodes regardless of the tail");
+                prop_assert_eq!(advance, encoded.len());
+                prop_assert_eq!(decoded, value);
+            }
+
+            /// A varint whose bytes all carry the continuation bit is never
+            /// mistaken for complete, so the decoder waits for more input
+            /// instead of mis-framing the stream.
+            #[test]
+            fn truncated_varint_is_never_complete(len in 1usize..10) {
+                prop_assert!(!varint_is_complete(&vec![0x80u8; len]));
+            }
+
+            /// A message larger than `max_length` is rejected rather than
+            /// buffered.
+            #[test]
+            fn oversized_messages_are_rejected(name_len in 1usize..200) {
+                let m = TestMsg {
+                    name: "x".repeat(name_len),
+                    value: 1,
+                };
+                let mut body = Vec::new();
+                m.encode(&mut body).expect("prost encodes into a Vec");
+                let mut data = encode_varint(body.len() as u64);
+                data.extend_from_slice(&body);
+
+                let decoded = decode_framed::<TestMsg>(&data, 64, 4);
+                prop_assert!(decoded.is_none(), "an oversized message must be rejected");
+            }
+
+            /// Arbitrary bytes never panic, whatever the chunk size.
+            #[test]
+            fn arbitrary_bytes_never_panic(
+                data in proptest::collection::vec(any::<u8>(), 0..256),
+                chunk in 1usize..16,
+            ) {
+                let _ = decode_framed::<TestMsg>(&data, chunk, 1 << 16);
+            }
+        }
     }
 
     #[test]

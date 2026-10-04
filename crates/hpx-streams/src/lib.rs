@@ -33,7 +33,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = hpx::Client::new()?;
+//!     let client = hpx::Client::new();
 //!     let _stream = client
 //!         .get("http://localhost:8080/json-array")
 //!         .send()

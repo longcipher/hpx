@@ -680,9 +680,9 @@ impl FragmentLayer {
 ///
 /// ```no_run
 /// use futures::SinkExt;
-/// use yawc::{Frame, Options, WebSocket};
+/// use hpx_yawc::{Frame, Options, WebSocket};
 ///
-/// # async fn example() -> yawc::Result<()> {
+/// # async fn example() -> hpx_yawc::Result<()> {
 /// let options = Options::default().with_max_fragment_size(64 * 1024); // 64 KiB per frame
 ///
 /// let mut ws = WebSocket::connect("wss://example.com/ws".parse()?)
@@ -708,9 +708,9 @@ impl FragmentLayer {
 ///
 /// ```no_run
 /// use futures::SinkExt;
-/// use yawc::{Frame, WebSocket};
+/// use hpx_yawc::{Frame, WebSocket};
 ///
-/// # async fn example() -> yawc::Result<()> {
+/// # async fn example() -> hpx_yawc::Result<()> {
 /// let ws = WebSocket::connect("wss://example.com/ws".parse()?).await?;
 ///
 /// // Convert to Streaming for manual fragment control
@@ -738,11 +738,11 @@ impl FragmentLayer {
 /// To establish a WebSocket connection as a client:
 /// ```no_run
 /// use futures::StreamExt;
+/// use hpx_yawc::{WebSocket, frame::OpCode};
 /// use tokio::net::TcpStream;
-/// use yawc::{WebSocket, frame::OpCode};
 ///
 /// #[tokio::main]
-/// async fn main() -> anyhow::Result<()> {
+/// async fn main() -> eyre::Result<()> {
 ///     let ws = WebSocket::connect("wss://echo.websocket.org".parse()?).await?;
 ///     // Use `ws` for WebSocket communication
 ///     Ok(())
@@ -771,10 +771,10 @@ impl WebSocket<MaybeTlsStream<TcpStream>> {
     ///
     /// # Examples
     /// ```no_run
-    /// use yawc::WebSocket;
+    /// use hpx_yawc::WebSocket;
     ///
     /// #[tokio::main]
-    /// async fn main() -> yawc::Result<()> {
+    /// async fn main() -> hpx_yawc::Result<()> {
     ///     let ws = WebSocket::connect("wss://echo.websocket.org".parse()?).await?;
     ///     Ok(())
     /// }
@@ -878,11 +878,11 @@ where
     /// # Example
     ///
     /// ```no_run
+    /// use hpx_yawc::{Options, WebSocket};
     /// use tokio::net::TcpStream;
-    /// use yawc::{Options, WebSocket};
     ///
     /// #[tokio::main]
-    /// async fn main() -> yawc::Result<()> {
+    /// async fn main() -> hpx_yawc::Result<()> {
     ///     // Establish your own TCP connection
     ///     let stream = TcpStream::connect("example.com:80").await?;
     ///
@@ -929,11 +929,11 @@ where
     /// # Example
     ///
     /// ```no_run
+    /// use hpx_yawc::{HttpRequest, Options, WebSocket};
     /// use tokio::net::TcpStream;
-    /// use yawc::{HttpRequest, Options, WebSocket};
     ///
     /// #[tokio::main]
-    /// async fn main() -> yawc::Result<()> {
+    /// async fn main() -> hpx_yawc::Result<()> {
     ///     // Establish your own TCP connection
     ///     let stream = TcpStream::connect("example.com:80").await?;
     ///
@@ -1182,9 +1182,9 @@ where
     ///
     /// ```rust,no_run
     /// use futures::SinkExt;
-    /// use yawc::{Frame, WebSocket};
+    /// use hpx_yawc::{Frame, WebSocket};
     ///
-    /// # async fn example() -> yawc::Result<()> {
+    /// # async fn example() -> hpx_yawc::Result<()> {
     /// let ws = WebSocket::connect("wss://example.com/ws".parse()?).await?;
     /// let mut streaming = ws.into_streaming();
     ///

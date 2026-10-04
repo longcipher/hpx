@@ -68,9 +68,9 @@
 //!
 //! ```no_run
 //! use futures::{SinkExt, StreamExt};
-//! use yawc::{Frame, WebSocket};
+//! use hpx_yawc::{Frame, WebSocket};
 //!
-//! # async fn example() -> yawc::Result<()> {
+//! # async fn example() -> hpx_yawc::Result<()> {
 //! let ws = WebSocket::connect("wss://example.com".parse()?).await?;
 //!
 //! // Split into read and write halves
@@ -110,8 +110,8 @@
 //! handlers, use the `split_stream()` method:
 //!
 //! ```no_run
-//! # use yawc::WebSocket;
-//! # async fn example() -> yawc::Result<()> {
+//! # use hpx_yawc::WebSocket;
+//! # async fn example() -> hpx_yawc::Result<()> {
 //! let ws = WebSocket::connect("wss://example.com".parse()?).await?;
 //!
 //! let (mut stream, mut read_half, mut write_half) = ws.split_stream();
@@ -168,13 +168,13 @@ use crate::{
 /// use std::{pin::Pin, task::Context};
 ///
 /// use futures::StreamExt;
+/// use hpx_yawc::{WebSocket, frame::OpCode};
 /// use tokio::net::TcpStream;
 /// use tokio_rustls::TlsConnector;
 /// use url::Url;
-/// use yawc::{WebSocket, frame::OpCode};
 ///
 /// #[tokio::main]
-/// async fn main() -> yawc::Result<()> {
+/// async fn main() -> hpx_yawc::Result<()> {
 ///     let url = "wss://api.example.com/ws".parse()?;
 ///     let ws = WebSocket::connect(url).await?;
 ///
@@ -301,8 +301,8 @@ impl ReadHalf {
     /// # Example
     ///
     /// ```no_run
-    /// # use yawc::WebSocket;
-    /// # async fn example() -> yawc::Result<()> {
+    /// # use hpx_yawc::WebSocket;
+    /// # async fn example() -> hpx_yawc::Result<()> {
     /// let ws = WebSocket::connect("wss://example.com".parse()?).await?;
     /// let (mut stream, mut read_half, _write_half) = ws.split_stream();
     ///
@@ -528,8 +528,8 @@ impl WriteHalf {
     /// # Example
     ///
     /// ```no_run
-    /// # use yawc::{WebSocket, Frame};
-    /// # async fn example() -> yawc::Result<()> {
+    /// # use hpx_yawc::{WebSocket, Frame};
+    /// # async fn example() -> hpx_yawc::Result<()> {
     /// let ws = WebSocket::connect("wss://example.com".parse()?).await?;
     /// let (mut stream, _read_half, mut write_half) = ws.split_stream();
     ///
@@ -563,8 +563,8 @@ impl WriteHalf {
     /// # Example
     ///
     /// ```no_run
-    /// # use yawc::WebSocket;
-    /// # async fn example() -> yawc::Result<()> {
+    /// # use hpx_yawc::WebSocket;
+    /// # async fn example() -> hpx_yawc::Result<()> {
     /// let ws = WebSocket::connect("wss://example.com".parse()?).await?;
     /// let (mut stream, _read_half, mut write_half) = ws.split_stream();
     ///

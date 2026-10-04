@@ -32,13 +32,16 @@ exclude_globs = [
 
 # Skip tests that are extremely slow (many seconds to minutes each) when
 # running mutation tests. A mutation run executes the test suite hundreds of
-# times, so skipping these keeps each mutant's test phase fast. The filters
-# are `cargo nextest` substring filters; tests that do not match are still run.
+# times, so skipping these keeps each mutant's test phase fast.
+#
+# These are `cargo nextest` *filter expressions* (`-E`). The older `--skip <name>`
+# spelling was removed from nextest, and passing it here made every mutation run
+# abort with "unexpected argument '--skip' found" before a single mutant was
+# tested. The `test(~/regex/)` form is a substring/regex match, so partial test
+# names still select as intended.
 additional_cargo_test_args = [
-    # hpx-browser memory/concurrency benchmarks take 50-110s each.
-    "--skip", "memory_benchmark",
-    "--skip", "reload_html_100_times_no_leak",
-    "--skip", "create_and_drop_100_pages_no_leak",
+    "-E",
+    "not (test(~/memory_benchmark/) or test(~/reload_html_100_times_no_leak/) or test(~/create_and_drop_100_pages_no_leak/))",
 ]
 
 # Note: by default each mutant is validated by the tests of its own package

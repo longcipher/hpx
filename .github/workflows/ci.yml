@@ -42,3 +42,71 @@ jobs:
       - name: Check features
         run: just check-feature
 
+  fuzz:
+    name: Fuzz Targets (smoke)
+    runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: ""
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-fuzz
+
+      # `llvm-symbolizer` is what libFuzzer uses to render stack traces. Without
+      # these libraries it cannot start, and the target dies with SIGPIPE before
+      # fuzzing a single input — which looks like a crash but is not one.
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfreetype-dev libfontconfig1-dev libxml2
+
+      - name: Build fuzz targets
+        run: just fuzz-build
+
+      # A crash writes its input to `crates/<crate>/fuzz/artifacts/<target>/`, so
+      # the job fails with the reproducer attached.
+      - name: Smoke-run fuzz targets
+        run: just fuzz-smoke 30
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-crashes
+          path: crates/*/fuzz/artifacts/
+          if-no-files-found: ignore
+
+  coverage:
+    name: Coverage & Doctests
+    runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: ""
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-nextest,cargo-llvm-cov
+
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y libfreetype-dev libfontconfig1-dev
+
+      # Doctests are part of the contract, but `just test` uses nextest, which
+      # skips them. Several were silently broken before this job existed.
+      - name: Run doctests
+        run: cargo test --workspace --all-features --doc
+
+      - name: Collect coverage
+        run: |
+          cargo llvm-cov nextest --workspace --all-features --summary-only
+          cargo llvm-cov report --summary-only | tee coverage-summary.txt
+

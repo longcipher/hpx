@@ -92,6 +92,135 @@ check-feature:
     else
         cargo check --workspace --all-features
     fi
+# ---------------------------------------------------------------------------
+# Fuzzing
+# ---------------------------------------------------------------------------
+# Fuzz crates live in `crates/<crate>/fuzz` and are excluded from the main
+# workspace (see `exclude` in Cargo.toml), so each one needs an explicit recipe.
+
+# ---------------------------------------------------------------------------
+# Fuzzing
+# ---------------------------------------------------------------------------
+# Fuzz crates live in `crates/<crate>/fuzz` and are excluded from the main
+# workspace (see `exclude` in Cargo.toml), so each one needs an explicit recipe.
+#
+# `cargo fuzz run` is used for building and listing, but the smoke recipe invokes
+# the compiled binary directly: cargo-fuzz does not always reap the target
+# process promptly, so a `-max_total_time` run would sit there after libFuzzer
+# has already exited.
+
+# Build every fuzz target without running it.
+fuzz-build:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for dir in crates/*/fuzz; do
+        [ -d "$dir" ] || continue
+        # cargo-fuzz refuses to run when the corpus or artifact directory is
+        # missing, so create them up front.
+        for target in $(cargo fuzz list --fuzz-dir "$dir"); do
+            mkdir -p "$dir/corpus/$target" "$dir/artifacts/$target"
+        done
+        echo "==> building $dir"
+        cargo fuzz build --fuzz-dir "$dir"
+    done
+
+# List every fuzz target across the workspace.
+fuzz-list:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for dir in crates/*/fuzz; do
+        [ -d "$dir" ] || continue
+        crate=$(basename "$(dirname "$dir")")
+        echo "==> $crate"
+        cargo fuzz list --fuzz-dir "$dir"
+    done
+
+# Smoke-run every target for `fuzz-time` seconds (default 20).
+#
+# This is the CI gate: long enough to catch a trivially reachable panic without
+# pretending to be a real campaign. A non-zero exit is a finding, not a flake --
+# libFuzzer exits non-zero on a crash and writes the input to the artifact dir.
+#
+# The compiled binary is invoked directly rather than through `cargo fuzz run`:
+# cargo-fuzz does not reliably reap the target process, so a `-max_total_time`
+# run would hang after libFuzzer has already exited.
+fuzz-smoke fuzz-time="20":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    triple=$(rustc -vV | sed -n 's/^host: //p')
+    failures=0
+    for dir in crates/*/fuzz; do
+        [ -d "$dir" ] || continue
+        crate=$(basename "$(dirname "$dir")")
+        for target in $(cargo fuzz list --fuzz-dir "$dir" 2>/dev/null); do
+            binary=""
+            for candidate in \
+                "$dir/target/$triple/release/$target" \
+                "$dir/target/release/$target"
+            do
+                if [ -x "$candidate" ]; then
+                    binary="$candidate"
+                    break
+                fi
+            done
+            if [ -z "$binary" ]; then
+                echo "==> $crate/$target: SKIP (not built; run 'just fuzz-build')"
+                continue
+            fi
+            echo "==> $crate/$target for {{fuzz-time}}s"
+            if "$binary" \
+                -artifact_prefix="$dir/artifacts/$target/" \
+                -max_total_time="{{fuzz-time}}" \
+                -timeout=25 \
+                -rss_limit_mb=4096 \
+                "$dir/corpus/$target" >/dev/null 2>&1
+            then
+                echo "    ok"
+            else
+                echo "    FAIL: crash input written to $dir/artifacts/$target"
+                failures=$((failures + 1))
+            fi
+        done
+    done
+    if [ "$failures" -ne 0 ]; then
+        echo "FAIL: $failures fuzz target(s) crashed"
+        exit 1
+    fi
+    echo "OK: all fuzz targets survived the smoke run"
+
+# Run a single target: just fuzz-one <crate> <target> [seconds]
+fuzz-one crate target seconds="60":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo fuzz build --fuzz-dir "crates/{{crate}}/fuzz"
+    triple=$(rustc -vV | sed -n 's/^host: //p')
+    binary=""
+    for candidate in \
+        "crates/{{crate}}/fuzz/target/$triple/release/{{target}}" \
+        "crates/{{crate}}/fuzz/target/release/{{target}}"
+    do
+        if [ -x "$candidate" ]; then
+            binary="$candidate"
+            break
+        fi
+    done
+    if [ -z "$binary" ]; then
+        echo "no built binary for {{target}}" >&2
+        exit 1
+    fi
+    exec "$binary" \
+        -artifact_prefix="crates/{{crate}}/fuzz/artifacts/{{target}}/" \
+        -max_total_time="{{seconds}}" \
+        -timeout=25 \
+        -rss_limit_mb=4096 \
+        "crates/{{crate}}/fuzz/corpus/{{target}}"
+
+# Longer local campaign: build, then smoke every target.
+fuzz fuzz-time="300":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just fuzz-build
+    just fuzz-smoke "{{fuzz-time}}"
 check-cn:
     rg --line-number --column "\p{Han}"
 # Full CI check

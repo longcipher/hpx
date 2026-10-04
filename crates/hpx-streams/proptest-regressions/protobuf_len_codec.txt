@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f585c79073a0a5991b1627c9d23e9374514913cac397f3280bff5ad2ce52446a # shrinks to empties = [true, true]
+cc 01e0d7115cf9bca635b6437b263d6a589c905c2ba753a0787dab7eef664066c0 # shrinks to messages = [TestMsg { name: "a 𐀀𐀀𐀀\0\0¡\u{80}𐀀  𐀀A0 𐀀a \0a𓹶G\t&\r.Ⱥ\u{a735e}÷&`¥<\u{5c833}&", value: 4290162756 }, TestMsg { name: "0\u{be38b}\u{feff}'\u{1b}%", value: 146368025 }, TestMsg { name: "\u{feff}{\u{7c51e}乣h\u{69feb}\u{5210c}:\u{202e}\u{46226}\u{9a74d}Æ𐮎", value: 1576756504 }], chunk = 38

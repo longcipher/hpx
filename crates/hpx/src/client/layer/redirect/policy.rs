@@ -61,3 +61,25 @@ impl fmt::Debug for Action {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Action;
+
+    #[test]
+    fn action_debug_names_the_variant() {
+        // `Debug` is hand-written so the boxed error and the boxed future can be
+        // rendered without requiring them to be `Debug`.
+        assert_eq!(format!("{:?}", Action::Follow), "Follow");
+        assert_eq!(format!("{:?}", Action::Stop), "Stop");
+    }
+
+    #[test]
+    fn action_debug_for_pending_and_error() {
+        let pending = Action::Pending(Box::pin(async { Action::Stop }));
+        assert_eq!(format!("{pending:?}"), "Pending");
+
+        let error = Action::Error(Box::new(std::io::Error::other("boom")));
+        assert_eq!(format!("{error:?}"), "Error");
+    }
+}

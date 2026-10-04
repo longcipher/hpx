@@ -63,6 +63,15 @@ where
     type Item = T;
     type Error = StreamBodyError;
 
+    /// Decode the next array element.
+    ///
+    /// Every emission site must return `result.map(Some)` rather than
+    /// `result` directly. `Ok(None)` is the `Decoder` contract's "buffer is
+    /// incomplete, call me again" signal, so returning a bare parse result lets
+    /// inference widen the parse target to `Option<T>`. A JSON `null` element
+    /// then deserializes to `None` and is silently dropped from the stream
+    /// instead of being yielded. Wrapping in `Some` keeps the two meanings
+    /// distinct for item types that are themselves optional.
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<T>, StreamBodyError> {
         if buf.is_empty() {
@@ -118,7 +127,7 @@ where
                             buf.advance(abs_pos + 1);
                             self.json_cursor.current_offset = 0;
                             self.json_cursor.delimiter_expected = false;
-                            return result;
+                            return result.map(Some);
                         }
                     }
                 }
@@ -145,7 +154,7 @@ where
                         self.json_cursor.current_obj_pos = 0;
                         buf.advance(abs_pos + 1);
                         self.json_cursor.current_offset = 0;
-                        return result;
+                        return result.map(Some);
                     }
                 }
                 b'"' if !self.json_cursor.escaped && self.json_cursor.opened_brackets == 0 => {
@@ -166,7 +175,7 @@ where
                             }
                             buf.advance(abs_pos + 1);
                             self.json_cursor.current_offset = 0;
-                            return result;
+                            return result.map(Some);
                         }
                     } else {
                         // Opening quote of a top-level string item
@@ -193,6 +202,20 @@ where
                     self.json_cursor.escaped = false;
                 }
                 b'}' if !self.json_cursor.quote_opened && !self.json_cursor.nested_quote_opened => {
+                    // A `}` with nothing open is malformed input. Subtracting
+                    // from a zero depth panics in debug builds and wraps to
+                    // `usize::MAX` in release builds, which would leave the
+                    // decoder permanently unable to close a bracket and pin the
+                    // whole rest of the response in the buffer. Reject the input
+                    // instead: it cannot be parsed as a JSON array element
+                    // anyway.
+                    if self.json_cursor.opened_brackets == 0 {
+                        return Err(StreamBodyError::new(
+                            StreamBodyKind::CodecError,
+                            None,
+                            Some("unbalanced closing brace in JSON array".into()),
+                        ));
+                    }
                     self.json_cursor.opened_brackets -= 1;
                     self.json_cursor.escaped = false;
                     if self.json_cursor.opened_brackets == 0 {
@@ -213,7 +236,7 @@ where
                         self.json_cursor.current_obj_pos = 0;
                         buf.advance(abs_pos + 1);
                         self.json_cursor.current_offset = 0;
-                        return result;
+                        return result.map(Some);
                     }
                 }
                 b',' if !self.json_cursor.quote_opened && self.json_cursor.opened_brackets == 0 => {
@@ -232,7 +255,7 @@ where
                             buf.advance(abs_pos + 1);
                             self.json_cursor.current_offset = 0;
                             self.json_cursor.delimiter_expected = false;
-                            return result;
+                            return result.map(Some);
                         }
                     } else if !self.json_cursor.delimiter_expected {
                         return Err(StreamBodyError::new(
@@ -580,11 +603,145 @@ mod tests {
 
     #[test]
     fn array_of_nullables() {
-        // Note: The codec's primitive parser handles null values.
-        // Using format that doesn't require primitive null handling at top level.
         let data = b"[1, 2, 3]";
         let items: Vec<Option<i64>> = decode_all(data);
         assert_eq!(items, vec![Some(1), Some(2), Some(3)]);
+    }
+
+    #[test]
+    fn null_elements_are_yielded_not_dropped() {
+        // `Ok(None)` means "need more data" in the `Decoder` contract, so a
+        // bare `null` element must still be wrapped in `Some`. Returning the
+        // parse result unwrapped used to make inference target `Option<T>`,
+        // which turned every `null` into a "need more data" signal and dropped
+        // the element on the floor.
+        let items: Vec<Option<i64>> = decode_all(b"[null,1,null,2]");
+        assert_eq!(items, vec![None, Some(1), None, Some(2)]);
+    }
+
+    #[test]
+    fn leading_and_trailing_nulls_are_yielded() {
+        let items: Vec<Option<bool>> = decode_all(b"[null,true,false,null]");
+        assert_eq!(items, vec![None, Some(true), Some(false), None]);
+    }
+
+    #[test]
+    fn null_only_array_yields_every_element() {
+        let items: Vec<Option<i64>> = decode_all(b"[null,null,null]");
+        assert_eq!(items, vec![None, None, None]);
+    }
+
+    #[test]
+    fn null_inside_nested_object_is_preserved() {
+        #[derive(Debug, serde::Deserialize, PartialEq)]
+        struct Maybe {
+            v: Option<i64>,
+        }
+        let items: Vec<Maybe> = decode_all(br#"[{"v":null},{"v":5}]"#);
+        assert_eq!(items, vec![Maybe { v: None }, Maybe { v: Some(5) }]);
+    }
+
+    #[test]
+    fn null_element_split_across_chunks() {
+        // The `null` token straddles two TCP segments, so the primitive start
+        // offset has to survive between calls.
+        let mut codec = JsonArrayCodec::<Option<i64>>::new_with_max_length(1024);
+        let mut buf = BytesMut::from(&b"[nu"[..]);
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+        buf.extend_from_slice(&b"ll,1]"[..]);
+        assert_eq!(codec.decode(&mut buf).unwrap(), Some(None));
+        assert_eq!(codec.decode(&mut buf).unwrap(), Some(Some(1)));
+    }
+
+    #[test]
+    fn unbalanced_closing_brace_is_rejected_not_underflowed() {
+        // `opened_brackets` was decremented unconditionally, so a stray `}`
+        // underflowed: a panic in debug builds, and `usize::MAX` in release
+        // builds, which leaves the decoder permanently unable to close a
+        // bracket and pins the rest of the response in its buffer.
+        for payload in [&b"}"[..], b"[}]", b"[1}]", b"[,}]"] {
+            let mut codec = JsonArrayCodec::<serde_json::Value>::new_with_max_length(1024);
+            let mut buf = BytesMut::from(payload);
+            assert!(
+                codec.decode(&mut buf).is_err(),
+                "unbalanced `}}` in {payload:?} must be rejected, not underflowed"
+            );
+        }
+    }
+
+    #[test]
+    fn balanced_braces_still_decode() {
+        // The unbalanced-brace guard must not reject well-formed nesting.
+        let items: Vec<serde_json::Value> = decode_all(br#"[{"a":{"b":1}},{"c":2}]"#);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0]["a"]["b"], 1);
+        assert_eq!(items[1]["c"], 2);
+    }
+
+    #[test]
+    fn deep_nesting_does_not_overflow() {
+        // Each `{` increments the depth; make sure a long run of openers is
+        // handled without wrapping.
+        let depth = 512;
+        let mut payload = String::from("[");
+        for _ in 0..depth {
+            payload.push('{');
+        }
+        let mut codec = JsonArrayCodec::<serde_json::Value>::new_with_max_length(1024 * 1024);
+        let mut buf = BytesMut::from(payload.as_bytes());
+        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+    }
+
+    #[test]
+    fn unterminated_top_level_string_yields_nothing() {
+        // A `]` seen while a top-level string is still open is data, not a
+        // delimiter. If the guard let it through, the pending value would be
+        // emitted mid-string and the consumer would receive a corrupt item
+        // instead of waiting for the string to close.
+        let mut codec = JsonArrayCodec::<String>::new_with_max_length(1024);
+        let mut buf = BytesMut::from(&b"[\"abc]"[..]);
+        assert!(
+            matches!(codec.decode(&mut buf), Ok(None)),
+            "an unterminated string must not be emitted"
+        );
+    }
+
+    #[test]
+    fn backslash_outside_a_string_is_rejected_not_treated_as_a_value_prefix() {
+        // The backslash arm must only apply while a string is open. A `\` at
+        // top level is not JSON, and it must be framed as part of the value so
+        // the element is rejected. Treating it as an escape outside a string
+        // would silently drop it, and `1` would then decode as a bare value
+        // even though the element it belongs to is malformed.
+        //
+        // Bytes: `[`, `\`, `1`, `]`.
+        let mut codec = JsonArrayCodec::<i64>::new_with_max_length(1024);
+        let mut buf = BytesMut::from(&b"[\\1]"[..]);
+        assert!(
+            codec.decode(&mut buf).is_err(),
+            "a backslash outside a string must not be skipped"
+        );
+    }
+
+    #[test]
+    fn escaped_quote_inside_nested_string_is_handled() {
+        // `\\"` inside a nested value must not close the nested string, so the
+        // `}` that follows it is the real object terminator.
+        #[derive(Debug, serde::Deserialize, PartialEq)]
+        struct Note {
+            note: String,
+        }
+        let data = br#"[{"note":"a\"b"},{"note":"c"}]"#;
+        let items: Vec<Note> = decode_all(data);
+        assert_eq!(
+            items,
+            vec![
+                Note {
+                    note: "a\"b".into()
+                },
+                Note { note: "c".into() },
+            ]
+        );
     }
 
     #[test]
@@ -592,6 +749,327 @@ mod tests {
         let mut codec = JsonArrayCodec::<Item>::new_with_max_length(1024);
         let mut buf = BytesMut::from(&b"[123]"[..]);
         assert!(codec.decode(&mut buf).is_err());
+    }
+
+    /// Property tests for the invariants that must hold for every input.
+    ///
+    /// The codec is a hand-written incremental state machine, so example-based
+    /// tests cannot enumerate the input space. These properties let `proptest`
+    /// shrink a failure to a minimal reproducer, and they run as part of the
+    /// ordinary `cargo test` loop.
+    mod properties {
+        use bytes::BytesMut;
+        use proptest::prelude::*;
+        use tokio_util::codec::Decoder;
+
+        use super::JsonArrayCodec;
+
+        /// Absolute step bound for the chunk-feeding helpers.
+        ///
+        /// Kept low on purpose: mutation testing injects regressions that stop
+        /// making progress, and a bound in the hundreds of thousands turns
+        /// every such mutant into a 25s timeout instead of a fast failure.
+        /// A few thousand steps is still far more than any realistic payload
+        /// needs, since each step either delivers a chunk or emits an item.
+        const MAX_HELPER_STEPS: usize = 4_096;
+
+        /// Strings built from JSON metacharacters, which is what the
+        /// bracket/quote/escape tracking in the codec exists to handle.
+        fn nasty_string() -> impl Strategy<Value = String> {
+            let pieces = prop::sample::select(vec![
+                "a",
+                "b",
+                "0",
+                "1",
+                " ",
+                "\t",
+                "\n",
+                "[",
+                "]",
+                "{",
+                "}",
+                "\"",
+                "\\",
+                "/",
+                "\u{e9}",
+                "\u{1F600}",
+            ]);
+            prop::collection::vec(pieces, 0..12).prop_map(|parts| parts.concat())
+        }
+
+        fn string_array() -> impl Strategy<Value = Vec<String>> {
+            prop::collection::vec(nasty_string(), 0..10)
+        }
+
+        /// Decode `data` to exhaustion, feeding `chunk` bytes per `decode` call.
+        ///
+        /// Returns `None` as soon as the decoder reports an error, so callers
+        /// can distinguish "decoded cleanly" from "rejected". An unterminated
+        /// trailing value is dropped, matching the codec's documented
+        /// behaviour.
+        fn decode_chunked<T>(data: &[u8], chunk: usize) -> Option<Vec<T>>
+        where
+            T: for<'de> serde::Deserialize<'de> + std::fmt::Debug,
+        {
+            let mut codec = JsonArrayCodec::<T>::new_with_max_length(1024 * 1024);
+            let mut buf = BytesMut::new();
+            let mut out = Vec::new();
+            let mut fed = 0usize;
+
+            // Absolute bound so a regression that stops making progress fails
+            // loudly instead of hanging the suite.
+            for _ in 0..MAX_HELPER_STEPS {
+                if fed < data.len() {
+                    let take = chunk.min(data.len() - fed);
+                    buf.extend_from_slice(&data[fed..fed + take]);
+                    fed += take;
+                }
+                match codec.decode(&mut buf) {
+                    Ok(Some(item)) => {
+                        out.push(item);
+                        continue;
+                    }
+                    Ok(None) => {}
+                    Err(_) => return None,
+                }
+                if fed == data.len() {
+                    // All input delivered: flush what the EOF handler yields.
+                    // `decode_eof` returns one item per call, so keep going
+                    // until it reports a clean end. A trailing partial value is
+                    // intentionally discarded.
+                    match codec.decode_eof(&mut buf) {
+                        Ok(Some(item)) => {
+                            out.push(item);
+                            continue;
+                        }
+                        Ok(None) => return Some(out),
+                        Err(_) => return None,
+                    }
+                }
+            }
+            panic!(
+                "decoder did not terminate for a {}-byte payload",
+                data.len()
+            );
+        }
+
+        /// Render a JSON array literal from generated values, with structural
+        /// whitespace inserted at the top level only.
+        ///
+        /// `pad` controls the whitespace emitted between structural tokens;
+        /// string *contents* are escaped by `serde_json` and never touched, so
+        /// generated values containing `[`, `]`, `,`, quotes, or newlines
+        /// cannot corrupt the payload.
+        fn encode_string_array(values: &[String], pad: &str) -> Vec<u8> {
+            let mut out = Vec::from(&b"["[..]);
+            out.extend_from_slice(pad.as_bytes());
+            for (i, value) in values.iter().enumerate() {
+                if i > 0 {
+                    out.extend_from_slice(pad.as_bytes());
+                    out.push(b',');
+                    out.extend_from_slice(pad.as_bytes());
+                }
+                out.extend_from_slice(
+                    serde_json::to_vec(value)
+                        .expect("serializing a String cannot fail")
+                        .as_slice(),
+                );
+            }
+            out.extend_from_slice(pad.as_bytes());
+            out.push(b']');
+            out
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            /// A JSON array of generated strings decodes back to exactly those
+            /// strings, in order, no matter how the bytes are chunked.
+            #[test]
+            fn string_array_round_trips(values in string_array(), chunk in 1usize..32) {
+                let payload = encode_string_array(&values, "");
+                let decoded = decode_chunked::<String>(&payload, chunk);
+                prop_assert_eq!(
+                    decoded.as_deref(),
+                    Some(values.as_slice()),
+                    "failed for payload {:?} at chunk size {}",
+                    String::from_utf8_lossy(&payload),
+                    chunk
+                );
+            }
+
+            /// Decoding is independent of the chunk size, for arrays of nested
+            /// objects carrying escaped strings.
+            #[test]
+            fn nested_object_array_is_chunk_independent(
+                labels in prop::collection::vec(nasty_string(), 1..6),
+                chunk in 1usize..40,
+            ) {
+                // Build the payload with `serde_json` so the nesting and the
+                // escaping are guaranteed well-formed.
+                let doc: Vec<serde_json::Value> = labels
+                    .iter()
+                    .enumerate()
+                    .map(|(i, label)| {
+                        serde_json::json!({ "label": label, "n": i, "nested": [1, 2, 3] })
+                    })
+                    .collect();
+                let payload = serde_json::to_vec(&doc).expect("json value serializes");
+
+                let decoded = decode_chunked::<serde_json::Value>(&payload, chunk)
+                    .expect("a well-formed array decodes at every chunk size");
+                prop_assert_eq!(decoded.len(), labels.len());
+                for (i, value) in decoded.iter().enumerate() {
+                    prop_assert_eq!(&value["label"], labels[i].as_str());
+                    prop_assert_eq!(value["n"].as_u64(), Some(i as u64));
+                    prop_assert_eq!(value["nested"].as_array().map(Vec::len), Some(3));
+                }
+            }
+
+            /// Concatenating two arrays decodes to the concatenation. Both sides
+            /// are non-empty, because an empty side would make the combined
+            /// literal a leading/trailing delimiter rather than a value list.
+            #[test]
+            fn decoding_is_additive(
+                left in prop::collection::vec(nasty_string(), 1..6),
+                right in prop::collection::vec(nasty_string(), 1..6),
+            ) {
+                let mut payload = encode_string_array(&left, "");
+                payload.pop(); // drop the closing bracket
+                payload.push(b',');
+                payload.extend_from_slice(&encode_string_array(&right, "")[1..]);
+
+                let mut expected = left;
+                expected.extend(right);
+                prop_assert_eq!(
+                    decode_chunked::<String>(&payload, 7),
+                    Some(expected),
+                    "failed for payload {:?}",
+                    String::from_utf8_lossy(&payload)
+                );
+            }
+
+            /// Structural whitespace must not change the decoded sequence.
+            /// Whitespace is only inserted between structural tokens, so values
+            /// that themselves contain whitespace are unaffected.
+            #[test]
+            fn structural_whitespace_does_not_change_result(values in string_array()) {
+                let compact = encode_string_array(&values, "");
+                for pad in [" ", "\n", " \t\n  ", "\r\n"] {
+                    let spaced = encode_string_array(&values, pad);
+                    prop_assert_eq!(
+                        decode_chunked::<String>(&compact, 5),
+                        decode_chunked::<String>(&spaced, 5),
+                        "whitespace {:?} changed the decoded sequence",
+                        pad
+                    );
+                }
+            }
+
+            /// Structural whitespace survives an arbitrary chunk split.
+            #[test]
+            fn structural_whitespace_survives_chunking(
+                values in prop::collection::vec(nasty_string(), 1..6),
+                chunk in 1usize..24,
+            ) {
+                let payload = encode_string_array(&values, " \n\t");
+                prop_assert_eq!(decode_chunked::<String>(&payload, chunk), Some(values));
+            }
+
+            /// Surrounding whitespace is trimmed, never absorbed into the value.
+            #[test]
+            fn surrounding_whitespace_is_trimmed(value in nasty_string()) {
+                let mut payload = Vec::from(&b"[   \n\t"[..]);
+                payload.extend_from_slice(
+                    serde_json::to_vec(&value)
+                        .expect("string serializes")
+                        .as_slice(),
+                );
+                payload.extend_from_slice(b"   ,  \"tail\"  ]");
+
+                let decoded = decode_chunked::<String>(&payload, 3)
+                    .expect("a valid array decodes");
+                prop_assert_eq!(decoded.as_slice(), [value.as_str(), "tail"]);
+            }
+
+            /// Every `null` element is yielded as an item and never dropped,
+            /// whatever the count.
+            #[test]
+            fn null_elements_are_never_dropped(count in 1usize..12) {
+                let mut payload = Vec::from(&b"["[..]);
+                for i in 0..count {
+                    if i > 0 {
+                        payload.push(b',');
+                    }
+                    payload.extend_from_slice(b"null");
+                }
+                payload.push(b']');
+
+                let decoded = decode_chunked::<Option<i64>>(&payload, 4)
+                    .expect("a valid array decodes");
+                prop_assert_eq!(decoded.len(), count);
+                prop_assert!(decoded.iter().all(Option::is_none));
+            }
+
+            /// Optional elements keep their shape: a mix of values and `null`
+            /// preserves both the values and the holes.
+            #[test]
+            fn optional_elements_keep_their_positions(
+                values in prop::collection::vec(prop::option::of(0i64..1000), 1..10),
+            ) {
+                let mut payload = Vec::from(&b"["[..]);
+                for (i, value) in values.iter().enumerate() {
+                    if i > 0 {
+                        payload.push(b',');
+                    }
+                    match value {
+                        Some(v) => payload.extend_from_slice(v.to_string().as_bytes()),
+                        None => payload.extend_from_slice(b"null"),
+                    }
+                }
+                payload.push(b']');
+                prop_assert_eq!(decode_chunked::<Option<i64>>(&payload, 3), Some(values));
+            }
+
+            /// Arbitrary bytes never panic, and never yield more items than the
+            /// payload could possibly contain.
+            #[test]
+            fn arbitrary_bytes_never_panic(
+                data in prop::collection::vec(any::<u8>(), 0..256),
+                chunk in 1usize..16,
+            ) {
+                let bound = data.len() + 1;
+                let decoded = decode_chunked::<serde_json::Value>(&data, chunk);
+                if let Some(items) = decoded {
+                    prop_assert!(items.len() <= bound);
+                }
+            }
+
+            /// Arbitrary bytes never panic when the item type is itself
+            /// optional, which is the case that previously lost `null` elements.
+            #[test]
+            fn arbitrary_bytes_never_panic_for_optional_items(
+                data in prop::collection::vec(any::<u8>(), 0..256),
+                chunk in 1usize..16,
+            ) {
+                let bound = data.len() + 1;
+                let decoded = decode_chunked::<Option<serde_json::Value>>(&data, chunk);
+                if let Some(items) = decoded {
+                    prop_assert!(items.len() <= bound);
+                }
+            }
+
+            /// A payload whose object exceeds `max_length` is rejected rather
+            /// than buffered without bound.
+            #[test]
+            fn oversized_objects_are_rejected(name in nasty_string()) {
+                let doc = serde_json::json!([{ "name": name, "value": 1 }]);
+                let payload = serde_json::to_vec(&doc).expect("json value serializes");
+                let mut codec = JsonArrayCodec::<serde_json::Value>::new_with_max_length(4);
+                let mut buf = BytesMut::from(payload.as_slice());
+                prop_assert!(codec.decode(&mut buf).is_err());
+            }
+        }
     }
 }
 

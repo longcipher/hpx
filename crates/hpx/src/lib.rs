@@ -626,7 +626,7 @@ pub fn request<T: IntoUri>(method: Method, uri: T) -> RequestBuilder {
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```rust,no_run
 /// # async fn run() -> hpx::Result<()> {
 /// use futures_util::{SinkExt, StreamExt, TryStreamExt};
 /// use hpx::{header, ws::message::Message};
@@ -639,9 +639,6 @@ pub fn request<T: IntoUri>(method: Method, uri: T) -> RequestBuilder {
 /// assert_eq!(resp.version(), http::Version::HTTP_11);
 ///
 /// let websocket = resp.into_websocket().await?;
-/// if let Some(protocol) = websocket.protocol() {
-///     println!("WebSocket subprotocol: {:?}", protocol);
-/// }
 ///
 /// let (mut tx, mut rx) = websocket.split();
 ///

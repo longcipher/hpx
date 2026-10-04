@@ -1,0 +1,34 @@
+[package]
+name = "hpx-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+tokio = { version = "1.53.1", features = ["macros", "net", "rt", "rt-multi-thread", "time"] }
+
+[dependencies.hpx]
+path = ".."
+# Exercise the HTTP/1 response parser, which needs `httparse` plus the body
+# length/chunked machinery. Compression decoders are deliberately left off so
+# a finding in this target is unambiguously an HTTP/1 framing bug.
+default-features = false
+features = ["http1", "stream", "gzip", "brotli", "deflate", "zstd", "cookies"]
+
+[[bin]]
+name = "h1_response"
+path = "fuzz_targets/h1_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cookie_jar"
+path = "fuzz_targets/cookie_jar.rs"
+test = false
+doc = false
+bench = false

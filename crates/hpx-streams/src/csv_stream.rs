@@ -108,7 +108,7 @@ pub trait CsvStreamResponse {
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     const MAX_OBJ_LEN: usize = 64 * 1024;
     ///
-    ///     let client = hpx::Client::new()?;
+    ///     let client = hpx::Client::new();
     ///     let _stream = client
     ///         .get("http://localhost:8080/csv")
     ///         .send()
@@ -494,5 +494,265 @@ mod tests {
         assert_eq!(r.name, "Alice");
         assert_eq!(r.age, 30);
         assert_eq!(r.city, "NYC");
+    }
+
+    /// Deterministic boundary coverage for the record-length limit.
+    ///
+    /// These are spelled out rather than generated: an off-by-one in the limit
+    /// check is the whole point, and a generated range can fail to sample the
+    /// exact boundary, which lets an off-by-one mutant survive.
+    mod length_limits {
+        use bytes::BytesMut;
+        use tokio_util::codec::Decoder;
+
+        use super::CsvRecordCodec;
+
+        /// Decode a payload and collect the records it produces.
+        fn records(data: &[u8], chunk: usize, max_obj_len: usize) -> Vec<String> {
+            let mut codec = CsvRecordCodec::new(max_obj_len);
+            let mut buf = BytesMut::new();
+            let mut out = Vec::new();
+            let mut fed = 0usize;
+            loop {
+                if fed < data.len() {
+                    let take = chunk.min(data.len() - fed);
+                    buf.extend_from_slice(&data[fed..fed + take]);
+                    fed += take;
+                }
+                while let Ok(Some(record)) = codec.decode(&mut buf) {
+                    out.push(record);
+                }
+                if fed == data.len() {
+                    while let Ok(Some(record)) = codec.decode_eof(&mut buf) {
+                        out.push(record);
+                    }
+                    return out;
+                }
+            }
+        }
+
+        #[test]
+        fn record_one_byte_below_the_limit_is_accepted() {
+            let body = "a".repeat(7);
+            let payload = format!("{body}\n");
+            assert_eq!(records(payload.as_bytes(), 4, 8), vec![body]);
+        }
+
+        #[test]
+        fn record_exactly_at_the_limit_is_accepted() {
+            // The limit is inclusive: the check is `buf.len() > max`, so a
+            // record of exactly `max` bytes must still be delivered.
+            let body = "a".repeat(8);
+            let payload = format!("{body}\n");
+            assert_eq!(records(payload.as_bytes(), 4, 8), vec![body]);
+        }
+
+        #[test]
+        fn record_one_byte_over_the_limit_is_rejected() {
+            let payload = format!("{}\n", "a".repeat(9));
+            assert!(
+                records(payload.as_bytes(), 4, 8).is_empty(),
+                "a record one byte over the limit must be rejected"
+            );
+        }
+
+        #[test]
+        fn limit_is_measured_across_chunk_boundaries() {
+            // `self.buf` accumulates across `decode` calls, so the limit has to
+            // be enforced against the running total rather than per chunk.
+            // Delivering the record one byte at a time must reach the same
+            // verdict as delivering it whole.
+            let body = "a".repeat(9);
+            let payload = format!("{body}\n");
+            for chunk in 1..=payload.len() {
+                assert!(
+                    records(payload.as_bytes(), chunk, 8).is_empty(),
+                    "chunk size {chunk} let an oversized record through"
+                );
+            }
+        }
+
+        #[test]
+        fn limit_of_zero_rejects_any_content() {
+            assert!(records(b"a\n", 1, 0).is_empty());
+        }
+
+        #[test]
+        fn empty_record_is_accepted() {
+            assert_eq!(records(b"\n", 1, 8), vec![String::new()]);
+        }
+    }
+
+    /// Property tests for RFC 4180 record framing.
+    ///
+    /// The interesting behaviour of the record splitter is not "does it handle
+    /// a comma" but "does it keep a record intact when the record contains the
+    /// delimiters, quotes, and newlines it is supposed to treat as data".
+    mod properties {
+        use bytes::BytesMut;
+        use proptest::prelude::*;
+        use tokio_util::codec::Decoder;
+
+        use super::CsvRecordCodec;
+
+        /// Absolute step bound for the chunk-feeding helper. Kept low so a
+        /// non-terminating mutant fails fast instead of timing out.
+        const MAX_HELPER_STEPS: usize = 4_096;
+
+        /// RFC 4180 quoting: wrap in quotes, doubling any embedded quote.
+        fn quote_field(value: &str) -> String {
+            format!("\"{}\"", value.replace('"', "\"\""))
+        }
+
+        /// Field content that stresses the splitter: delimiters, quotes, line
+        /// breaks, carriage returns, and non-ASCII text.
+        fn nasty_field() -> impl Strategy<Value = String> {
+            let pieces = prop::sample::select(vec![
+                "a", "b", "1", ",", "\"", "\r\n", "\n", "\r", " ", "ÿ", "😀", "",
+            ]);
+            prop::collection::vec(pieces, 0..10).prop_map(|parts| parts.concat())
+        }
+
+        /// One CSV record: two or three quoted fields joined by commas.
+        ///
+        /// The codec splits *records* (lines), not fields — field splitting is
+        /// the `csv` crate's job — so the property has to be stated over whole
+        /// records.
+        fn record() -> impl Strategy<Value = String> {
+            prop::collection::vec(nasty_field(), 1..4).prop_map(|fields| {
+                fields
+                    .iter()
+                    .map(|f| quote_field(f))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+        }
+
+        /// A document is a list of records; each becomes one line.
+        fn document() -> impl Strategy<Value = Vec<String>> {
+            prop::collection::vec(record(), 1..6)
+        }
+
+        /// Assemble a document into a payload with the given line terminator.
+        fn payload_of(records: &[String], terminator: &str) -> String {
+            let mut payload = records.join(terminator);
+            payload.push_str(terminator);
+            payload
+        }
+
+        /// Feed `data` to the codec `chunk` bytes at a time, then flush at EOF,
+        /// collecting the records it emits.
+        fn decode_records(data: &[u8], chunk: usize, max_obj_len: usize) -> Vec<String> {
+            let mut codec = CsvRecordCodec::new(max_obj_len);
+            let mut buf = BytesMut::new();
+            let mut out = Vec::new();
+            let mut fed = 0usize;
+
+            for _ in 0..MAX_HELPER_STEPS {
+                if fed < data.len() {
+                    let take = chunk.min(data.len() - fed);
+                    buf.extend_from_slice(&data[fed..fed + take]);
+                    fed += take;
+                }
+                loop {
+                    match codec.decode(&mut buf) {
+                        Ok(Some(record)) => out.push(record),
+                        Ok(None) => break,
+                        Err(_) => return out,
+                    }
+                }
+                if fed == data.len() {
+                    loop {
+                        match codec.decode_eof(&mut buf) {
+                            Ok(Some(record)) => out.push(record),
+                            Ok(None) => return out,
+                            Err(_) => return out,
+                        }
+                    }
+                }
+            }
+            panic!("codec did not terminate for a {}-byte payload", data.len());
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            /// A generated CSV document round-trips: every record the splitter
+            /// emits matches an original record exactly, at every chunk size.
+            /// This is the property a naive `split(b'\n')` breaks, because
+            /// quoted fields may legally contain newlines.
+            #[test]
+            fn records_round_trip(records in document(), chunk in 1usize..40) {
+                let payload = payload_of(&records, "\n");
+                prop_assert_eq!(
+                    decode_records(payload.as_bytes(), chunk, 1 << 20),
+                    records,
+                    "failed for payload {:?} at chunk size {}",
+                    payload,
+                    chunk
+                );
+            }
+
+            /// CRLF line endings do not leak a stray carriage return into the
+            /// final field of a record.
+            #[test]
+            fn crlf_is_stripped(records in document()) {
+                let payload = payload_of(&records, "\r\n");
+                let decoded = decode_records(payload.as_bytes(), 8, 1 << 20);
+                prop_assert!(
+                    decoded.iter().all(|record| !record.ends_with('\r')),
+                    "a trailing carriage return survived in {decoded:?}"
+                );
+                prop_assert_eq!(decoded, records);
+            }
+
+            /// A record with no trailing line terminator is still delivered when
+            /// the stream ends.
+            #[test]
+            fn final_record_without_newline_is_flushed(records in document()) {
+                let payload = records.join("\n");
+                prop_assert_eq!(decode_records(payload.as_bytes(), 3, 1 << 20), records);
+            }
+
+            /// Decoding does not depend on where the payload is split.
+            #[test]
+            fn decoding_is_chunk_independent(records in document(), chunk in 1usize..32) {
+                let payload = payload_of(&records, "\n");
+                prop_assert_eq!(
+                    decode_records(payload.as_bytes(), 1, 1 << 20),
+                    decode_records(payload.as_bytes(), chunk, 1 << 20),
+                    "chunk size {} changed the records",
+                    chunk
+                );
+            }
+
+            /// A record longer than `max_obj_len` is rejected rather than
+            /// buffered without bound, which would let a hostile newline-free
+            /// stream exhaust memory.
+            #[test]
+            fn oversized_records_are_rejected(len in 9usize..200) {
+                // The limit is exclusive (`buf.len() > max_obj_len`), so the
+                // record has to be strictly longer than the limit.
+                let payload = format!("{}\n", "a".repeat(len));
+                prop_assert!(decode_records(payload.as_bytes(), 4, 8).is_empty());
+            }
+
+            /// A record exactly at the limit is accepted, so the limit is a
+            /// ceiling rather than an off-by-one rejection.
+            #[test]
+            fn record_at_exactly_the_limit_is_accepted(len in 1usize..8) {
+                let payload = format!("{}\n", "a".repeat(len));
+                prop_assert_eq!(decode_records(payload.as_bytes(), 4, 8), vec!["a".repeat(len)]);
+            }
+
+            /// Arbitrary bytes never panic.
+            #[test]
+            fn arbitrary_bytes_never_panic(
+                data in prop::collection::vec(any::<u8>(), 0..256),
+                chunk in 1usize..16,
+            ) {
+                let _ = decode_records(&data, chunk, 1 << 16);
+            }
+        }
     }
 }

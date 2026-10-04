@@ -25,9 +25,9 @@
 //!
 //! ```rust,no_run
 //! use futures::SinkExt;
-//! use yawc::{Frame, OpCode, WebSocket};
+//! use hpx_yawc::{Frame, OpCode, WebSocket};
 //!
-//! # async fn example() -> yawc::Result<()> {
+//! # async fn example() -> hpx_yawc::Result<()> {
 //! // Convert WebSocket to Streaming for manual fragment control
 //! let ws = WebSocket::connect("ws://example.com".parse()?).await?;
 //! let mut streaming = ws.into_streaming();
@@ -85,8 +85,8 @@ use crate::{
 /// You can convert a [`WebSocket`](super::WebSocket) into a [`Streaming`] connection:
 ///
 /// ```rust,no_run
-/// # use yawc::WebSocket;
-/// # async fn example() -> yawc::Result<()> {
+/// # use hpx_yawc::WebSocket;
+/// # async fn example() -> hpx_yawc::Result<()> {
 /// let ws = WebSocket::connect("ws://example.com".parse()?).await?;
 /// let streaming = ws.into_streaming();
 /// # Ok(())
@@ -106,9 +106,9 @@ use crate::{
 /// use std::io::Read;
 ///
 /// use futures::SinkExt;
-/// use yawc::{Frame, OpCode, WebSocket};
+/// use hpx_yawc::{Frame, OpCode, WebSocket};
 ///
-/// # async fn upload_file() -> yawc::Result<()> {
+/// # async fn upload_file() -> hpx_yawc::Result<()> {
 /// let ws = WebSocket::connect("ws://example.com/upload".parse()?).await?;
 /// let mut streaming = ws.into_streaming();
 ///

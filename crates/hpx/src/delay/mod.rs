@@ -67,11 +67,12 @@ pub use self::{
 };
 
 /// Compute a randomized duration in `[base * (1 - pct), base * (1 + pct)]`.
-#[expect(
-    clippy::unwrap_used,
-    reason = "checked_sub is Some because early return guarantees low < high"
-)]
 fn jittered_duration(base: Duration, pct: f64) -> Duration {
+    // Defence in depth: the layer constructors already sanitise `pct`, but this
+    // function must not panic on a non-finite value either, since a
+    // non-finite `jitter` turns the `saturating_*` calls below into a
+    // "cannot convert float seconds to Duration" panic.
+    let pct = crate::delay::layer::sanitize_pct(pct);
     let jitter = base.mul_f64(pct);
     let low = base.saturating_sub(jitter);
     let high = base.saturating_add(jitter);
@@ -86,6 +87,8 @@ fn jittered_duration(base: Duration, pct: f64) -> Duration {
     // Convert to fraction in [0, 1)
     let frac = (rand as f64) / (u64::MAX as f64);
 
-    let span = high.checked_sub(low).unwrap().as_secs_f64();
+    let span = high
+        .checked_sub(low)
+        .map_or(0.0, |range| range.as_secs_f64());
     low + Duration::from_secs_f64(span * frac)
 }

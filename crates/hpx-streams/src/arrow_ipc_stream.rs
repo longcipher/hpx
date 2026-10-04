@@ -24,7 +24,7 @@ pub trait ArrowIpcStreamResponse {
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     const MAX_OBJ_LEN: usize = 64 * 1024;
     ///
-    ///     let client = hpx::Client::new()?;
+    ///     let client = hpx::Client::new();
     ///     let stream = client
     ///         .get("http://localhost:8080/arrow")
     ///         .send()

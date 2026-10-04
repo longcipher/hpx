@@ -27,7 +27,7 @@ use super::{HttpStream, Negotiation, Role, WebSocket};
 /// # Example
 /// ```rust
 /// use axum::{response::IntoResponse, routing::get};
-/// use yawc::{CompressionLevel, IncomingUpgrade, Options};
+/// use hpx_yawc::{CompressionLevel, IncomingUpgrade, Options};
 ///
 /// struct AppState;
 ///
@@ -91,7 +91,7 @@ impl IncomingUpgrade {
     /// # Examples
     /// ```rust
     /// use axum::{extract::State, response::IntoResponse};
-    /// use yawc::{IncomingUpgrade, Options};
+    /// use hpx_yawc::{IncomingUpgrade, Options};
     ///
     /// async fn handler(ws: IncomingUpgrade, State(state): State<()>) -> impl IntoResponse {
     ///     let options = Options::default();
@@ -183,9 +183,9 @@ impl IncomingUpgrade {
 /// # Example
 /// ```rust
 /// use axum::{response::IntoResponse, routing::get};
-/// use yawc::IncomingUpgrade;
+/// use hpx_yawc::IncomingUpgrade;
 ///
-/// async fn ws_upgrade(ws: yawc::IncomingUpgrade) -> impl IntoResponse {
+/// async fn ws_upgrade(ws: hpx_yawc::IncomingUpgrade) -> impl IntoResponse {
 ///     // handle
 /// }
 ///
@@ -278,15 +278,15 @@ pin_project_lite::pin_project! {
     ///     server::conn::http1,
     ///     service::service_fn,
     /// };
-    /// use yawc::{Options, Result, UpgradeFut, WebSocket};
+    /// use hpx_yawc::{Options, Result, UpgradeFut, WebSocket};
     ///
-    /// async fn handle_client(fut: UpgradeFut) -> yawc::Result<()> {
+    /// async fn handle_client(fut: UpgradeFut) -> hpx_yawc::Result<()> {
     ///     let ws = fut.await?;
     ///     // use `ws`
     ///     Ok(())
     /// }
     ///
-    /// async fn server_upgrade(mut req: Request<Incoming>) -> yawc::Result<Response<Empty<Bytes>>> {
+    /// async fn server_upgrade(mut req: Request<Incoming>) -> hpx_yawc::Result<Response<Empty<Bytes>>> {
     ///     let (response, fut) = WebSocket::upgrade_with_options(&mut req, Options::default())?;
     ///
     ///     tokio::task::spawn(async move {

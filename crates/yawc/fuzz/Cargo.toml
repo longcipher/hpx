@@ -1,0 +1,38 @@
+[package]
+name = "hpx-yawc-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+arbitrary = { version = "1.4", features = ["derive"] }
+bytes = "1.12.1"
+libfuzzer-sys = "0.4"
+tokio-util = { version = "0.7.19", features = ["codec"] }
+
+[dependencies.hpx-yawc]
+path = ".."
+
+[[bin]]
+name = "ws_frame"
+path = "fuzz_targets/ws_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ws_frame_roundtrip"
+path = "fuzz_targets/ws_frame_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ws_mask"
+path = "fuzz_targets/ws_mask.rs"
+test = false
+doc = false
+bench = false
