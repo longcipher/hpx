@@ -31,6 +31,13 @@ jobs:
         with:
           tool: just
 
+      # Run the JS-based release actions (git-cliff, gh-release) on the latest
+      # Node 24 runtime instead of the runner's bundled default.
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - name: Get version from tag
         id: tag_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV

@@ -21,6 +21,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt, clippy
@@ -49,6 +54,11 @@ jobs:
       RUSTC_WRAPPER: ""
     steps:
       - uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
 
       - uses: dtolnay/rust-toolchain@nightly
         with:
@@ -88,6 +98,11 @@ jobs:
       RUSTC_WRAPPER: ""
     steps:
       - uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
 
       - uses: dtolnay/rust-toolchain@nightly
         with:
