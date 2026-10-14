@@ -114,11 +114,13 @@ fuzz-build:
     #!/usr/bin/env bash
     set -euo pipefail
     # ASAN is incompatible with statically-linked musl libc, so never build
-    # fuzz targets for a `-musl` target even if CARGO_BUILD_TARGET points at
-    # one (some CI runners default to musl). Force the dynamically-linked
-    # glibc target instead.
+    # fuzz targets for a `-musl` target even if the toolchain host defaults to
+    # one (some CI runners do). `cargo fuzz` hard-codes the host target and
+    # ignores CARGO_BUILD_TARGET, so we pass `--target` explicitly; the glibc
+    # target keeps ASAN working.
     triple="$(rustc -vV | sed -n 's/^host: //p')"
     triple="${triple/%musl/gnu}"
+    rustup target add "$triple" 2>/dev/null || true
     export CARGO_BUILD_TARGET="$triple"
     for dir in crates/*/fuzz; do
         [ -d "$dir" ] || continue
@@ -128,7 +130,7 @@ fuzz-build:
             mkdir -p "$dir/corpus/$target" "$dir/artifacts/$target"
         done
         echo "==> building $dir"
-        cargo fuzz build --fuzz-dir "$dir"
+        cargo fuzz build --target "$triple" --fuzz-dir "$dir"
     done
 
 # List every fuzz target across the workspace.
