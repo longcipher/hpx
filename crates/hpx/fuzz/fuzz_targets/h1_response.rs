@@ -27,11 +27,6 @@ use libfuzzer_sys::fuzz_target;
 /// non-deterministic false-positive crash.
 static ITER_GUARD: Mutex<()> = Mutex::new(());
 
-struct Loopback {
-    addr: SocketAddr,
-    payload: Arc<Mutex<Vec<u8>>>,
-}
-
 struct Session {
     addr: SocketAddr,
     payload: Arc<Mutex<Vec<u8>>>,

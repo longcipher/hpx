@@ -113,6 +113,13 @@ check-feature:
 fuzz-build:
     #!/usr/bin/env bash
     set -euo pipefail
+    # ASAN is incompatible with statically-linked musl libc, so never build
+    # fuzz targets for a `-musl` target even if CARGO_BUILD_TARGET points at
+    # one (some CI runners default to musl). Force the dynamically-linked
+    # glibc target instead.
+    triple="$(rustc -vV | sed -n 's/^host: //p')"
+    triple="${triple/%musl/gnu}"
+    export CARGO_BUILD_TARGET="$triple"
     for dir in crates/*/fuzz; do
         [ -d "$dir" ] || continue
         # cargo-fuzz refuses to run when the corpus or artifact directory is
@@ -148,6 +155,10 @@ fuzz-smoke fuzz-time="20":
     #!/usr/bin/env bash
     set -uo pipefail
     triple=$(rustc -vV | sed -n 's/^host: //p')
+    # ASAN is incompatible with statically-linked musl libc; mirror the
+    # fuzz-build override so the prebuilt binaries are found at the right path.
+    triple="${triple/%musl/gnu}"
+    export CARGO_BUILD_TARGET="$triple"
     failures=0
     for dir in crates/*/fuzz; do
         [ -d "$dir" ] || continue
