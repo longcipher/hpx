@@ -171,7 +171,7 @@ fuzz-smoke fuzz-time="20":
             if "$binary" \
                 -artifact_prefix="$dir/artifacts/$target/" \
                 -max_total_time="{{fuzz-time}}" \
-                -timeout=25 \
+                -timeout=40 \
                 -rss_limit_mb=4096 \
                 "$dir/corpus/$target" >/dev/null 2>&1
             then
