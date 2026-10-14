@@ -22,7 +22,9 @@ cdp = ["dep:hpx-yawc", "dep:hyper", "dep:hyper-util", "hpx-yawc/axum"]
 cdp-client = ["dep:which"]
 # Gates the in-tree property tests. `proptest` itself is a dev-dependency.
 proptest = []
-v8 = ["dep:deno_core"]
+# SOCKS4/4a/5/5h proxy support (forwards to `hpx/socks`).
+socks = ["hpx/socks"]
+v8 = ["dep:deno_core", "dep:deno_error"]
 workers = ["v8"]
 hotpath = ["dep:hotpath"]
 
@@ -35,6 +37,7 @@ blitz-dom = { workspace = true, features = ["floats"] }
 blitz-html = { workspace = true }
 blitz-traits = { workspace = true }
 deno_core = { workspace = true, optional = true }
+deno_error = { workspace = true, optional = true }
 fontdb = { workspace = true, optional = true }
 futures-util = { workspace = true }
 hotpath = { workspace = true, optional = true }

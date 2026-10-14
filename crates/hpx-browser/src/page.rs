@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashSet,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -10,7 +11,7 @@ use crate::js_runtime::runtime::BrowserJsRuntime;
 use crate::{
     challenge::{ChallengeVerdict, EngineClass, engine_classify, engine_classify_lower},
     dom::{Dom, NodeId},
-    net::{HttpClient, RedirectPolicy},
+    net::{HttpClient, NetConfig, RedirectPolicy, SharedNetConfig},
     resource_loader::{
         ResourceType, extract_resource_urls, fetch_resources, filter_by_block_types,
     },
@@ -46,8 +47,11 @@ pub struct Page {
     profile: Option<StealthProfile>,
     stealth: bool,
     subresource_block_types: HashSet<ResourceType>,
-    proxy: Option<hpx::Proxy>,
-    allow_private_network: bool,
+    /// Shared network policy (proxy + SSRF opt-out) for every request this
+    /// page makes. Swappable at runtime via [`Page::set_proxy`].
+    net_config: SharedNetConfig,
+    /// Whether a proxy was set explicitly (wins over `StealthProfile::proxy`).
+    explicit_proxy: bool,
     #[cfg(feature = "v8")]
     js_runtime: Option<BrowserJsRuntime>,
 }
@@ -79,8 +83,8 @@ impl Page {
             profile: None,
             stealth: false,
             subresource_block_types: HashSet::new(),
-            proxy: None,
-            allow_private_network: false,
+            net_config: NetConfig::shared(),
+            explicit_proxy: false,
             #[cfg(feature = "v8")]
             js_runtime: None,
         }
@@ -108,8 +112,8 @@ impl Page {
             profile: None,
             stealth,
             subresource_block_types: HashSet::new(),
-            proxy: None,
-            allow_private_network: false,
+            net_config: NetConfig::shared(),
+            explicit_proxy: false,
             #[cfg(feature = "v8")]
             js_runtime: None,
         })
@@ -124,27 +128,28 @@ impl Page {
         let dom = crate::html_parser::parse_html(html);
         let title = extract_title(html);
         let challenge_class = engine_classify(html);
-        #[allow(unused_mut)] // mut needed for v8 feature path below
         let mut page = Self {
             dom,
             url: url.to_string(),
             title,
             html: html.to_string(),
             challenge_class,
-            profile: Some(profile),
+            profile: None,
             stealth: true,
             subresource_block_types: HashSet::new(),
-            proxy: None,
-            allow_private_network: false,
+            net_config: NetConfig::shared(),
+            explicit_proxy: false,
             #[cfg(feature = "v8")]
             js_runtime: None,
         };
-        // Apply profile to V8 runtime when the feature is enabled.
+        // Apply the profile's proxy to the page network policy (always),
+        // and its V8 runtime globals when the feature is enabled.
+        page.apply_profile_network(&profile);
         #[cfg(feature = "v8")]
+        page.set_profile(profile);
+        #[cfg(not(feature = "v8"))]
         {
-            if let Some(ref profile) = page.profile.clone() {
-                page.set_profile(profile.clone());
-            }
+            page.profile = Some(profile);
         }
         Ok(page)
     }
@@ -171,7 +176,8 @@ impl Page {
                 }
             } else {
                 let rt_dom = crate::html_parser::parse_html(html);
-                match BrowserJsRuntime::new(rt_dom) {
+                match BrowserJsRuntime::with_net_config(rt_dom, None, Arc::clone(&self.net_config))
+                {
                     Ok(rt) => self.js_runtime = Some(rt),
                     Err(e) => tracing::error!("BrowserJsRuntime init failed in reload_html: {e}"),
                 }
@@ -179,9 +185,17 @@ impl Page {
         }
     }
 
-    /// Set the outbound proxy used for navigations and subresource fetches.
+    /// Set the outbound proxy used for navigations, subresource fetches, and
+    /// JS `fetch()`.
+    ///
+    /// Takes effect for requests issued after this call; the swap is atomic.
+    /// An explicit proxy (this method) wins over `StealthProfile::proxy`.
     pub fn set_proxy(&mut self, proxy: Option<hpx::Proxy>) {
-        self.proxy = proxy;
+        self.explicit_proxy = proxy.is_some();
+        self.net_config.store(Arc::new(NetConfig {
+            proxy,
+            allow_private_network: self.net_config.load().allow_private_network,
+        }));
     }
 
     /// Allow navigations to private/special-use addresses (loopback, RFC1918).
@@ -189,15 +203,24 @@ impl Page {
     /// Disabled by default so attacker-controlled HTML cannot reach internal
     /// services. CLI/tests opt in explicitly.
     pub fn set_allow_private_network(&mut self, allow: bool) {
-        self.allow_private_network = allow;
+        self.net_config.store(Arc::new(NetConfig {
+            proxy: self.net_config.load().proxy.clone(),
+            allow_private_network: allow,
+        }));
+    }
+
+    /// Shared network policy handle for this page.
+    ///
+    /// Pass this to the JS runtime ([`crate::js_runtime::BrowserJsRuntime::
+    /// with_net_config`]) so JS `fetch()` obeys the same proxy as navigations.
+    pub fn net_config(&self) -> &SharedNetConfig {
+        &self.net_config
     }
 
     /// Build a [`HttpClient`] honoring this page's proxy and SSRF settings.
     fn make_client(&self) -> Result<HttpClient, PageError> {
         // ponytail: always Chrome profile; per-profile routing via tls_impersonate
-        HttpClient::with_proxy(hpx::BrowserProfile::Chrome, self.proxy.clone())
-            .map_err(PageError::Net)
-            .map(|c| c.allow_private_network(self.allow_private_network))
+        HttpClient::from_net_config(&self.net_config.load()).map_err(PageError::Net)
     }
 
     /// Navigate to a URL with challenge-aware retry loop.
@@ -390,7 +413,7 @@ impl Page {
             return;
         }
         let rt_dom = crate::html_parser::parse_html(&self.html);
-        match BrowserJsRuntime::new(rt_dom) {
+        match BrowserJsRuntime::with_net_config(rt_dom, None, Arc::clone(&self.net_config)) {
             Ok(rt) => self.js_runtime = Some(rt),
             Err(e) => tracing::error!("BrowserJsRuntime init failed in ensure_js_runtime: {e}"),
         }
@@ -512,6 +535,7 @@ impl Page {
     /// JavaScript environment.
     #[cfg(feature = "v8")]
     pub fn set_profile(&mut self, profile: StealthProfile) {
+        self.apply_profile_network(&profile);
         self.ensure_js_runtime();
         if let Some(ref mut rt) = self.js_runtime {
             rt.set_user_agent(&profile.user_agent);
@@ -520,6 +544,34 @@ impl Page {
             rt.run_page_init();
         }
         self.profile = Some(profile);
+    }
+
+    /// Apply the profile's `proxy` field to this page.
+    ///
+    /// An explicit [`Page::set_proxy`] wins; the profile proxy is only a
+    /// default for profile-driven configuration (JSON config files, CDP
+    /// `Emulation.setUserAgentOverride`-style flows). A malformed proxy URL is
+    /// logged and ignored — the rest of the profile still applies.
+    fn apply_profile_network(&mut self, profile: &StealthProfile) {
+        if self.explicit_proxy {
+            return;
+        }
+        let Some(proxy_url) = profile.proxy.as_deref() else {
+            return;
+        };
+        match hpx::Proxy::all(proxy_url) {
+            Ok(proxy) => {
+                self.net_config.store(Arc::new(NetConfig {
+                    proxy: Some(proxy),
+                    allow_private_network: self.net_config.load().allow_private_network,
+                }));
+            }
+            Err(e) => tracing::warn!(
+                proxy = proxy_url,
+                error = %e,
+                "stealth profile has an invalid proxy URL; ignoring"
+            ),
+        }
     }
 
     /// Page HTML content.

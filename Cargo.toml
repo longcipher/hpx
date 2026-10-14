@@ -15,7 +15,7 @@ exclude = [
 resolver = "3"
 
 [workspace.package]
-version = "2.5.29"
+version = "2.5.30"
 edition = "2024"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license = "Apache-2.0"
@@ -203,13 +203,19 @@ unused_must_use = "deny"
 all = "warn"
 
 [workspace.dependencies]
-# local crates
-hpx = { path = "crates/hpx", version = "2.5.29" }
-hpx-browser = { path = "crates/hpx-browser", version = "2.5.29" }
-hpx-dl = { path = "crates/hpx-dl", version = "2.5.26" }
-hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.29" }
-hpx-h3 = { path = "crates/hpx-h3", version = "2.5.29" }
-hpx-yawc = { path = "crates/yawc", version = "2.5.29" }
+# local crates — Cargo requires a literal `version` here and does not support
+# inheriting [workspace.package].version from this table, so the literals are
+# kept together in one place. On a version bump, update [workspace.package]
+# below and these eight lines (single find/replace). Each crate's own version
+# still uses `version.workspace = true` in its manifest.
+hpx = { path = "crates/hpx", version = "2.5.30" }
+hpx-browser = { path = "crates/hpx-browser", version = "2.5.30" }
+hpx-dl = { path = "crates/hpx-dl", version = "2.5.30" }
+hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.30" }
+hpx-h3 = { path = "crates/hpx-h3", version = "2.5.30" }
+hpx-yawc = { path = "crates/yawc", version = "2.5.30" }
+hpx-cli = { path = "bin/hpx-cli", version = "2.5.30" }
+hpxless = { path = "bin/hpxless", version = "2.5.30" }
 
 # external crates
 ahash = "0.8.12"
@@ -235,6 +241,10 @@ criterion = "0.8.2"
 crossbeam-channel = "0.5.17"
 csv = "1.4.0"
 deno_core = "0.412.0"
+# Must stay pinned to the exact version deno_core 0.412 depends on
+# (`=0.7.1`); a caret requirement here would conflict with deno_core's own
+# pin once both land in one dependency graph.
+deno_error = "=0.7.1"
 der = "0.8.2"
 digest = "0.11.3"
 encoding_rs = "0.8.42"

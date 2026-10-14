@@ -10,8 +10,9 @@ use crate::{
             fetch_ext::fetch_extension,
             timer_ext::{TimerState, timer_extension},
         },
-        state::DomState,
+        state::{DomState, FetchState},
     },
+    net::{HttpClient, NetConfig, SharedNetConfig},
 };
 
 pub struct BrowserJsRuntime {
@@ -24,6 +25,17 @@ impl BrowserJsRuntime {
     }
 
     pub fn with_base_url(dom: Dom, base_url: Option<url::Url>) -> Result<Self, JsRuntimeError> {
+        Self::with_net_config(dom, base_url, NetConfig::shared())
+    }
+
+    /// Create a runtime whose JS `fetch()` honors `net_config` (proxy + SSRF
+    /// policy). Share the page's [`SharedNetConfig`] so runtime swaps of the
+    /// proxy (`Page::set_proxy`) also affect JS-initiated requests.
+    pub fn with_net_config(
+        dom: Dom,
+        base_url: Option<url::Url>,
+        net_config: SharedNetConfig,
+    ) -> Result<Self, JsRuntimeError> {
         let mut state = DomState::new(dom);
         if let Some(url) = base_url {
             state = state.with_base_url(url);
@@ -54,6 +66,15 @@ impl BrowserJsRuntime {
 
         runtime.op_state().borrow_mut().put(state);
         runtime.op_state().borrow_mut().put(TimerState::new());
+
+        let initial_config = net_config.load();
+        let initial_client = HttpClient::from_net_config(&initial_config).map_err(|e| {
+            JsRuntimeError::bootstrap("fetch", format!("failed to build fetch client: {e}"))
+        })?;
+        runtime
+            .op_state()
+            .borrow_mut()
+            .put(FetchState::new(net_config, initial_client));
 
         runtime
             .execute_script(

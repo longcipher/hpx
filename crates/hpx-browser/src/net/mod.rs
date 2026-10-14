@@ -14,6 +14,7 @@ pub mod ssrf;
 
 use std::{collections::HashMap, sync::Arc};
 
+use arc_swap::ArcSwap;
 pub use cookies::CookieJar;
 use tokio::sync::Mutex;
 use url::Url;
@@ -138,6 +139,38 @@ impl Default for SharedSession {
 }
 
 // ---------------------------------------------------------------------------
+// NetConfig — shared, swappable page network policy (proxy + SSRF opt-out)
+// ---------------------------------------------------------------------------
+
+/// Network policy shared by every request a page makes: navigations,
+/// subresource loads, and JS `fetch()`.
+///
+/// Held behind an [`ArcSwap`] so the page can retarget its proxy at runtime
+/// (`Page::set_proxy`, `StealthProfile::proxy`) without rebuilding the page or
+/// leaking in-flight requests to the old policy.
+#[derive(Debug, Clone, Default)]
+pub struct NetConfig {
+    /// Outbound proxy for every request. `None` means direct connection.
+    pub proxy: Option<hpx::Proxy>,
+    /// Allow requests to private/special-use addresses (loopback, RFC1918).
+    /// Disabled by default so attacker-controlled HTML cannot reach internal
+    /// services.
+    pub allow_private_network: bool,
+}
+
+/// Handle to a [`NetConfig`] that can be swapped atomically at runtime.
+pub type SharedNetConfig = Arc<ArcSwap<NetConfig>>;
+
+impl NetConfig {
+    /// Create a shared handle initialized with the default (direct, guarded)
+    /// policy.
+    #[must_use]
+    pub fn shared() -> SharedNetConfig {
+        Arc::new(ArcSwap::from_pointee(Self::default()))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // HttpClient
 // ---------------------------------------------------------------------------
 
@@ -164,6 +197,17 @@ impl HttpClient {
     ) -> Result<Self, NetError> {
         let session = SharedSession::new();
         Self::with_session_and_proxy(Arc::new(session), browser_profile, proxy)
+    }
+
+    /// Create a client from a shared [`NetConfig`].
+    ///
+    /// Always uses the Chrome browser profile (per-profile routing happens via
+    /// `tls_impersonate`); the proxy and SSRF opt-out come from `config`. The
+    /// config is snapshotted at call time — rebuild the client to pick up a
+    /// later swap.
+    pub fn from_net_config(config: &NetConfig) -> Result<Self, NetError> {
+        Self::with_proxy(hpx::BrowserProfile::Chrome, config.proxy.clone())
+            .map(|c| c.allow_private_network(config.allow_private_network))
     }
 
     /// Build a client that participates in a provided shared session.

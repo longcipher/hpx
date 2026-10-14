@@ -3138,7 +3138,7 @@ dependencies = [
 
 [[package]]
 name = "hpx"
-version = "2.5.29"
+version = "2.5.30"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -3221,7 +3221,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-browser"
-version = "2.5.29"
+version = "2.5.30"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -3233,6 +3233,7 @@ dependencies = [
  "blitz-traits",
  "criterion",
  "deno_core",
+ "deno_error",
  "fontdb",
  "futures-util",
  "hotpath",
@@ -3271,7 +3272,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-cli"
-version = "2.5.29"
+version = "2.5.30"
 dependencies = [
  "axum",
  "clap",
@@ -3296,7 +3297,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-dl"
-version = "2.5.29"
+version = "2.5.30"
 dependencies = [
  "ahash",
  "arrayvec",
@@ -3330,7 +3331,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-emulation"
-version = "2.5.29"
+version = "2.5.30"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -3356,7 +3357,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-h3"
-version = "2.5.29"
+version = "2.5.30"
 dependencies = [
  "assert_matches",
  "bytes",
@@ -3374,7 +3375,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-streams"
-version = "2.5.29"
+version = "2.5.30"
 dependencies = [
  "arrow",
  "bytes",
@@ -3395,7 +3396,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-yawc"
-version = "2.5.29"
+version = "2.5.30"
 dependencies = [
  "axum",
  "axum-core",
@@ -3438,7 +3439,7 @@ dependencies = [
 
 [[package]]
 name = "hpxless"
-version = "2.5.29"
+version = "2.5.30"
 dependencies = [
  "clap",
  "eyre",

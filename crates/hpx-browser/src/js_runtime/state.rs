@@ -1,6 +1,9 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
-use crate::dom::Dom;
+use crate::{
+    dom::Dom,
+    net::{HttpClient, NetConfig, SharedNetConfig},
+};
 
 /// Shared state stored in deno_core's OpState, accessible by all ops.
 pub struct DomState {
@@ -9,6 +12,35 @@ pub struct DomState {
     pub console_output: Vec<ConsoleMessage>,
     /// localStorage ("local") / sessionStorage ("session")
     pub storage: HashMap<String, HashMap<String, String>>,
+}
+
+/// Network state for JS-initiated requests (`fetch`).
+///
+/// Holds the page's shared [`SharedNetConfig`] so `op_fetch` routes through
+/// the same proxy (and SSRF policy) as navigations and subresource loads. The
+/// handle is cloned out of OpState before any `.await`, so no borrow is held
+/// across yield points.
+///
+/// The [`HttpClient`] is cached so cookies, Accept-CH, and H1-only host memory
+/// persist across multiple `fetch()` calls within the same page. It is
+/// rebuilt only when the shared [`NetConfig`] is swapped (proxy change).
+pub struct FetchState {
+    pub net_config: SharedNetConfig,
+    pub client: HttpClient,
+    pub(crate) last_config: Arc<NetConfig>,
+}
+
+impl FetchState {
+    /// Create a new [`FetchState`] with an initial client built from the
+    /// current config.
+    pub fn new(net_config: SharedNetConfig, client: HttpClient) -> Self {
+        let last_config = (&*net_config.load()).clone();
+        Self {
+            net_config,
+            client,
+            last_config,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

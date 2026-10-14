@@ -4,7 +4,21 @@
 
   globalThis.fetch = async (input, init = {}) => {
     const url = typeof input === "string" ? input : input.url || String(input);
-    const result = core.ops.op_fetch(url);
+    const method = (init.method || "GET").toUpperCase();
+
+    const headers = [];
+    if (init.headers) {
+      const h = init.headers instanceof Headers ? init.headers : new Headers(init.headers);
+      for (const [k, v] of h.entries()) headers.push([k, v]);
+    }
+
+    let body = "";
+    if (init.body != null) {
+      body = typeof init.body === "string" ? init.body : JSON.stringify(init.body);
+    }
+
+    // Async op: resolves to the JSON payload produced by `op_fetch`.
+    const result = await core.ops.op_fetch(url, method, JSON.stringify(headers), body);
 
     let parsed;
     try {
@@ -15,13 +29,16 @@
 
     return {
       status: parsed.status,
-      statusText: parsed.status === 200 ? "OK" : "",
+      statusText: parsed.statusText || "",
       url: parsed.url,
       headers: new Headers(parsed.headers || []),
       ok: parsed.status >= 200 && parsed.status < 300,
       text: async () => parsed.body || "",
       json: async () => JSON.parse(parsed.body || "null"),
-      arrayBuffer: async () => new TextEncoder().encode(parsed.body || ""),
+      // ponytail: returns Uint8Array (not ArrayBuffer) and body is text — binary
+    // responses (images, PDFs) are lost. Switch to an op that returns bytes and
+    // use Uint8Array.buffer when binary fetch lands.
+    arrayBuffer: async () => new TextEncoder().encode(parsed.body || ""),
     };
   };
 

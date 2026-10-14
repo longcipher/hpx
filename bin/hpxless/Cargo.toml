@@ -26,7 +26,7 @@ hpx = { workspace = true, features = [
     "stealth",
     "socks",
 ] }
-hpx-browser = { workspace = true, features = ["v8", "cdp"] }
+hpx-browser = { workspace = true, features = ["v8", "cdp", "socks"] }
 tokio = { workspace = true, features = [
     "rt-multi-thread",
     "macros",
