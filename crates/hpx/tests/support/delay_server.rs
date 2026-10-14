@@ -1,4 +1,11 @@
-#![allow(unused)]
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    unused
+)]
 use std::{convert::Infallible, future::Future, net, time::Duration};
 
 use futures_util::FutureExt;
@@ -19,7 +26,7 @@ use tokio::{net::TcpListener, select, sync::oneshot};
 pub(crate) struct Server {
     addr: net::SocketAddr,
     shutdown_tx: Option<oneshot::Sender<()>>,
-    server_terminated_rx: oneshot::Receiver<()>,
+    terminated_rx: oneshot::Receiver<()>,
 }
 
 type Builder = hyper_util::server::conn::auto::Builder<hyper_util::rt::TokioExecutor>;
@@ -32,7 +39,7 @@ impl Server {
         F2: FnOnce(&mut Builder) -> Bu + Send + 'static,
     {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        let (server_terminated_tx, server_terminated_rx) = oneshot::channel();
+        let (terminated_tx, terminated_rx) = oneshot::channel();
 
         let tcp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = tcp_listener.local_addr().unwrap();
@@ -92,14 +99,14 @@ impl Server {
                 }
 
                 futures_util::future::join_all(handles).await;
-                server_terminated_tx.send(()).unwrap();
+                terminated_tx.send(()).unwrap();
             });
         });
 
         Self {
             addr,
             shutdown_tx: Some(shutdown_tx),
-            server_terminated_rx,
+            terminated_rx,
         }
     }
 
@@ -108,7 +115,7 @@ impl Server {
             let _ = tx.send(());
         }
 
-        self.server_terminated_rx.await.unwrap();
+        self.terminated_rx.await.unwrap();
     }
 
     pub(crate) fn addr(&self) -> net::SocketAddr {

@@ -3,6 +3,14 @@
 //! In contrast to the arbitrary JSON example, this brings up the full power of
 //! Rust compile-time type system guaranties though it requires a little bit
 //! more code.
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used
+)]
 
 // These require the `serde` dependency.
 use serde::{Deserialize, Serialize};

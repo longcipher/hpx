@@ -72,7 +72,6 @@ winnow = { workspace = true }
 [dev-dependencies]
 axum = { workspace = true }
 criterion = { workspace = true, features = ["html_reports"] }
-hpx = { workspace = true }
 libc = { workspace = true }
 proptest = { workspace = true }
 sha1 = { workspace = true }
@@ -93,6 +92,7 @@ harness = false
 [[bench]]
 name = "cdp_bench"
 harness = false
+required-features = ["cdp-client"]
 
 [[bench]]
 name = "memory"

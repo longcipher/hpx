@@ -115,11 +115,17 @@ pub fn shape(text: &str, face_data: &[u8], _face_index: u32, size_px: f32) -> Sh
 
     for line in layout.lines() {
         let line_metrics = line.metrics();
-        if line_metrics.ascent > ascent {
-            ascent = line_metrics.ascent;
+        // Parley 0.12 replaced the `ascent`/`descent` fields with baseline
+        // plus content-block bounds. For horizontal text the ascent is the
+        // distance from the baseline up to the content top, and the descent
+        // is the distance from the baseline down to the content bottom.
+        let line_ascent = line_metrics.baseline - line_metrics.content_block_min_coord;
+        let line_descent = line_metrics.content_block_max_coord - line_metrics.baseline;
+        if line_ascent > ascent {
+            ascent = line_ascent;
         }
-        if line_metrics.descent > descent {
-            descent = line_metrics.descent;
+        if line_descent > descent {
+            descent = line_descent;
         }
 
         for item in line.items() {

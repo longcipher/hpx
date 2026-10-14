@@ -196,7 +196,7 @@ mod tests {
     const NEWLINE_PHRASE: &[u8] = b"hyp\ner";
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "invalid byte in static reason phrase")]
     fn newline_invalid_panic() {
         ReasonPhrase::from_static(NEWLINE_PHRASE);
     }
@@ -209,7 +209,7 @@ mod tests {
     const CR_PHRASE: &[u8] = b"hyp\rer";
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "invalid byte in static reason phrase")]
     fn cr_invalid_panic() {
         ReasonPhrase::from_static(CR_PHRASE);
     }

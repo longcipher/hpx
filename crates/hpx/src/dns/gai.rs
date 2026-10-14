@@ -193,8 +193,8 @@ mod tests {
 
     #[test]
     fn test_ip_addrs_split_by_preference() {
-        let ip_v4 = Ipv4Addr::new(127, 0, 0, 1);
-        let ip_v6 = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1);
+        let ip_v4 = Ipv4Addr::LOCALHOST;
+        let ip_v6 = Ipv6Addr::LOCALHOST;
         let v4_addr = (ip_v4, 80).into();
         let v6_addr = (ip_v6, 80).into();
 

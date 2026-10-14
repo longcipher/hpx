@@ -1,4 +1,12 @@
 #![allow(missing_docs, unreachable_pub)]
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used
+)]
 // This example demonstrates how to delegate the connect calls, which contain TLS handshakes,
 // to a secondary tokio runtime of lower OS thread priority using a custom tower layer.
 // This helps to ensure that long-running futures during handshake crypto operations don't block
@@ -121,7 +129,7 @@ mod background_threadpool {
         );
 
         match tx.try_send(Box::pin(future)) {
-            Ok(_) => (),
+            Ok(()) => (),
             Err(TrySendError::Closed(_)) => {
                 panic!("background cpu heavy runtime channel is closed")
             }
@@ -133,7 +141,7 @@ mod background_threadpool {
                 Handle::current().spawn(async move {
                     tx.send(msg)
                         .await
-                        .expect("background cpu heavy runtime channel is closed")
+                        .expect("background cpu heavy runtime channel is closed");
                 });
             }
         }
@@ -172,7 +180,7 @@ mod background_threadpool {
 
     impl<S> BackgroundProcessor<S> {
         pub fn new(inner: S) -> Self {
-            BackgroundProcessor { inner }
+            Self { inner }
         }
     }
 
@@ -206,14 +214,14 @@ mod background_threadpool {
             let (mut tx, rx) = tokio::sync::oneshot::channel();
             let future = async move {
                 select!(
-                    _ = tx.closed() => {
+                    () = tx.closed() => {
                         // receiver already dropped, don't need to do anything
                     }
                     result = response.map_err(Into::<BoxError>::into) => {
                         // if this fails, the receiver already dropped, so we don't need to do anything
                         let _ = tx.send(result);
                     }
-                )
+                );
             };
             // send the wrapped future to the background
             send_to_background_runtime(future);
@@ -233,7 +241,7 @@ mod background_threadpool {
 
     impl<S> BackgroundResponseFuture<S> {
         pub(crate) fn new(rx: tokio::sync::oneshot::Receiver<Result<S, BoxError>>) -> Self {
-            BackgroundResponseFuture { rx }
+            Self { rx }
         }
     }
 

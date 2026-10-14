@@ -3,6 +3,14 @@
 //! ```not_rust
 //! cargo run --example sse_stream --features sse -- https://example.com/events
 //! ```
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used
+)]
 
 use futures_util::StreamExt;
 use hpx::sse::{RequestBuilderSseExt, SseEvent};

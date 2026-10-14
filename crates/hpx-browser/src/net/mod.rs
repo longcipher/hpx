@@ -909,6 +909,11 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore] // requires network: real request to a public IP is slow
+    // (≈80s) and flaky in CI. The SSRF allow-list for public IPs is
+    // covered deterministically by `ssrf::tests::safe_addresses_pass`,
+    // and the execute_single_request→SSRF wiring by
+    // `ssrf_blocks_loopback_by_default`.
     async fn ssrf_allows_public_ip() {
         let client = HttpClient::new(hpx::BrowserProfile::Chrome).unwrap();
         // 93.184.216.34 is example.com — real public IP; may fail with

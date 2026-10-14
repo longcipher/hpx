@@ -524,7 +524,7 @@ mod tests {
                                 .unwrap_or("/");
                             let response = match routes.get(path) {
                                 Some((ct, body)) => format!(
-                                    "HTTP/1.1 200 OK\r\nContent-Type: {ct}\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\r\n{body}",
+                                    "HTTP/1.1 200 OK\r\nContent-Type: {ct}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                                     body.len()
                                 ),
                                 None => {
@@ -536,10 +536,11 @@ mod tests {
                                 break;
                             }
                             served.fetch_add(1, Ordering::Relaxed);
-                            // Once every route has been served the client has
-                            // everything it needs; close the connection so this
-                            // handler exits without waiting for the idle
-                            // timeout on the client's pooled connection.
+                            // `Connection: close` makes the client close
+                            // the connection after this response, so the
+                            // next `read` returns EOF and this handler
+                            // exits without waiting for the client's
+                            // pooled-connection idle timeout.
                             if served.load(Ordering::Relaxed) >= total {
                                 let _ = stream.shutdown().await;
                                 break;

@@ -1,4 +1,12 @@
-#![allow(clippy::pedantic)]
+#![allow(
+    clippy::allow_attributes,
+    clippy::collection_is_never_read,
+    clippy::expect_used,
+    clippy::pedantic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used
+)]
 
 //! Regression test: a request that hits the request-level timeout must be
 //! retried for idempotent methods (GET). The tower `Retry` layer must wrap the

@@ -969,3 +969,127 @@ impl<'a> std::fmt::Debug for DomElement<'a> {
         write!(f, ">")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn node_id_raw_roundtrip() {
+        // from_raw/to_raw truncate to the low 32-bit slot index.
+        assert_eq!(NodeId::from_raw(42).to_raw(), 42);
+        assert_eq!(NodeId::from_raw(0).to_raw(), 0);
+        assert_eq!(NodeId::from_raw(u32::MAX).to_raw(), u32::MAX);
+    }
+
+    #[test]
+    fn node_id_version_survives_f64_not_raw() {
+        // A versioned id (high 32 bits set) is preserved by to_f64/from_f64
+        // — f64 represents integers exactly up to 2^53 — but to_raw drops
+        // the version, exposing only the slot index.
+        let versioned = NodeId((1u64 << 40) + 7);
+        assert_eq!(NodeId::from_f64(versioned.to_f64()), versioned);
+        assert_eq!(versioned.to_raw(), 7);
+    }
+
+    #[test]
+    fn node_id_blitz_roundtrip() {
+        let id = NodeId::from_raw(7);
+        assert_eq!(NodeId::from_blitz(id.to_blitz()), id);
+    }
+
+    #[test]
+    fn qual_name_default_ns_is_none() {
+        let qn = QualName::new("div");
+        assert_eq!(qn.ns, None);
+        assert_eq!(qn.local, "div");
+    }
+
+    #[test]
+    fn qual_name_with_ns() {
+        let qn = QualName::with_ns("http://www.w3.org/2000/svg", "rect");
+        assert_eq!(qn.ns.as_deref(), Some("http://www.w3.org/2000/svg"));
+        assert_eq!(qn.local, "rect");
+    }
+
+    #[test]
+    fn qual_name_html_ns_roundtrips_to_none() {
+        // The HTML namespace is canonicalized to `None` on both directions.
+        let qn = QualName::new("div");
+        let roundtripped = QualName::from_h5(&qn.to_h5());
+        assert_eq!(roundtripped.ns, None);
+        assert_eq!(roundtripped.local, "div");
+    }
+
+    #[test]
+    fn qual_name_custom_ns_roundtrips() {
+        let qn = QualName::with_ns("http://example.com/ns", "foo");
+        let roundtripped = QualName::from_h5(&qn.to_h5());
+        assert_eq!(roundtripped.ns.as_deref(), Some("http://example.com/ns"));
+        assert_eq!(roundtripped.local, "foo");
+    }
+
+    fn sample_node(data: NodeData, id: u32) -> Node {
+        Node {
+            id: NodeId::from_raw(id),
+            data,
+            parent: None,
+            first_child: None,
+            last_child: None,
+            prev_sibling: None,
+            next_sibling: None,
+        }
+    }
+
+    #[test]
+    fn node_element_accessors() {
+        let elem = sample_node(
+            NodeData::Element(ElementData {
+                name: QualName::new("span"),
+                attrs: vec![],
+                shadow_root: None,
+            }),
+            1,
+        );
+        assert!(elem.is_element());
+        assert!(elem.as_element().is_some());
+        assert!(elem.as_text().is_none());
+        assert!(elem.is_element_with_tag("span"));
+        assert!(elem.is_element_with_tag("SPAN")); // case-insensitive
+        assert!(!elem.is_element_with_tag("div"));
+    }
+
+    #[test]
+    fn node_text_accessor() {
+        let text = sample_node(NodeData::Text("hello".to_string()), 2);
+        assert!(!text.is_element());
+        assert!(text.as_element().is_none());
+        assert_eq!(text.as_text(), Some("hello"));
+    }
+
+    #[test]
+    fn dom_lifecycle() {
+        let mut dom = Dom::new();
+        let doc = dom.document();
+        // A fresh Dom always contains its document root node.
+        assert!(dom.get(doc).is_some());
+
+        let el = dom.create_element(QualName::new("div"), vec![]);
+        let text = dom.create_text("hi".to_string());
+
+        let el_node = dom.get(el).expect("element retrievable");
+        assert!(el_node.is_element());
+        assert!(el_node.is_element_with_tag("div"));
+
+        let text_node = dom.get(text).expect("text retrievable");
+        assert_eq!(text_node.as_text(), Some("hi"));
+
+        // node_ref reads the same data without allocating a Node.
+        let nr = dom.node_ref(text);
+        assert!(nr.is_text());
+        assert_eq!(nr.text(), Some("hi"));
+
+        // A stale/unknown id resolves to None rather than panicking.
+        assert!(dom.get(NodeId::from_raw(u32::MAX)).is_none());
+    }
+}

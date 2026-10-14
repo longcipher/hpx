@@ -1,4 +1,11 @@
-#![allow(missing_docs)]
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    missing_docs
+)]
 mod support;
 
 use std::{
@@ -353,7 +360,7 @@ async fn with_concurrency_limit_layer_success() {
 
     let all_res = join_all(futures).await;
 
-    for res in all_res.into_iter() {
+    for res in all_res {
         assert!(
             res.is_ok(),
             "neither outer long timeout or inner short timeout should be exceeded"

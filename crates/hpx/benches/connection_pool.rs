@@ -2,6 +2,14 @@
 //!
 //! These benchmarks measure the overhead of connection pool operations
 //! including acquire, release, and concurrent access patterns.
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used
+)]
 
 use std::{
     collections::HashMap,
@@ -113,7 +121,7 @@ impl RwLockPool {
 fn bench_pool_acquire_release(c: &mut Criterion) {
     let mut group = c.benchmark_group("pool_acquire_release");
 
-    for pool_size in [10, 100, 1000].iter() {
+    for pool_size in &[10, 100, 1000] {
         let mutex_pool = MutexPool::new("example.com", *pool_size);
         let rwlock_pool = RwLockPool::new("example.com", *pool_size);
 

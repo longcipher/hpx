@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn error_satisfies_send_sync() {
-        assert_send_sync::<Error>()
+        assert_send_sync::<Error>();
     }
 
     #[test]

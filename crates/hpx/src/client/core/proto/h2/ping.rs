@@ -604,6 +604,26 @@ impl KeepAlive {
     }
 }
 
+// ===== impl KeepAliveTimedOut =====
+
+impl KeepAliveTimedOut {
+    pub(super) fn crate_error(self) -> Error {
+        Error::new(crate::client::core::error::Kind::Http2).with(self)
+    }
+}
+
+impl fmt::Display for KeepAliveTimedOut {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("keep-alive timed out")
+    }
+}
+
+impl std::error::Error for KeepAliveTimedOut {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&crate::client::core::error::TimedOut)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
@@ -656,7 +676,7 @@ mod tests {
 
         locked_rx.recv().expect("lock acquired");
 
-        let recorder_clone = recorder.clone();
+        let recorder_clone = recorder;
         let (done_tx, done_rx) = mpsc::channel();
         std::thread::spawn(move || {
             recorder_clone.record_data(1);
@@ -670,25 +690,5 @@ mod tests {
 
         let _ = release_tx.send(());
         let _ = lock_handle.join();
-    }
-}
-
-// ===== impl KeepAliveTimedOut =====
-
-impl KeepAliveTimedOut {
-    pub(super) fn crate_error(self) -> Error {
-        Error::new(crate::client::core::error::Kind::Http2).with(self)
-    }
-}
-
-impl fmt::Display for KeepAliveTimedOut {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("keep-alive timed out")
-    }
-}
-
-impl std::error::Error for KeepAliveTimedOut {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&crate::client::core::error::TimedOut)
     }
 }

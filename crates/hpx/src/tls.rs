@@ -323,14 +323,14 @@ mod tests {
         let v = TlsVersion::TLS_1_3;
         let v2 = v;
         assert_eq!(v, v2);
-        let v3 = v.clone();
+        let v3 = v;
         assert_eq!(v, v3);
     }
 
     #[test]
     fn tls_version_debug() {
         let debug = format!("{:?}", TlsVersion::TLS_1_2);
-        assert!(!debug.is_empty());
+        assert_ne!(debug, "");
     }
 
     #[test]
@@ -348,7 +348,7 @@ mod tests {
         let cert = bytes::Bytes::from_static(&[0x30, 0x82, 0x01, 0x02]);
         let info = TlsInfo {
             peer_certificate: Some(cert.clone()),
-            peer_certificate_chain: Some(vec![cert.clone()]),
+            peer_certificate_chain: Some(vec![cert]),
         };
         assert_eq!(info.peer_certificate(), Some(&[0x30, 0x82, 0x01, 0x02][..]));
         let chain: Vec<&[u8]> = info.peer_certificate_chain().unwrap().collect();

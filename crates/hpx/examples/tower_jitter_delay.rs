@@ -1,4 +1,11 @@
-#![allow(missing_docs)]
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    missing_docs
+)]
 use std::time::{Duration, Instant};
 
 use hpx::{

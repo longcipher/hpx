@@ -818,9 +818,10 @@ mod tests {
                         return;
                     }
                 };
-                if state == ChunkedState::Body || state == ChunkedState::End {
-                    panic!("Was Ok. Expected Err for {s:?}");
-                }
+                assert!(
+                    state != ChunkedState::Body && state != ChunkedState::End,
+                    "Was Ok. Expected Err for {s:?}"
+                );
             }
         }
 
@@ -1051,7 +1052,7 @@ mod tests {
         let content_len = content.len();
         for block_at in 0..content_len {
             let actual = read_async(decoder.clone(), content.as_bytes(), block_at).await;
-            assert_eq!(expected, &actual) //, "Failed async. Blocking at {}", block_at);
+            assert_eq!(expected, &actual); //, "Failed async. Blocking at {}", block_at);
         }
     }
 
@@ -1080,7 +1081,7 @@ mod tests {
         buf.extend_from_slice(
             b"Expires: Wed, 21 Oct 2015 07:28:00 GMT\r\nX-Stream-Error: failed to decode\r\n\r\n",
         );
-        let headers = decode_trailers(&mut buf, 2).expect("decode_trailers");
+        let headers = decode_trailers(&buf, 2).expect("decode_trailers");
         assert_eq!(headers.len(), 2);
         assert_eq!(
             headers.get("Expires").unwrap(),

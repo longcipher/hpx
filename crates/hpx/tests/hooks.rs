@@ -1,5 +1,13 @@
 //! Integration tests for the hooks system.
 
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used
+)]
+
 mod support;
 
 use std::sync::{

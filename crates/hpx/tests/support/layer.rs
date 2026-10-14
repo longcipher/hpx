@@ -1,3 +1,10 @@
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used
+)]
 use std::{
     future::Future,
     pin::Pin,
@@ -19,7 +26,7 @@ pub(crate) struct DelayLayer {
 impl DelayLayer {
     #[allow(unused)]
     pub(crate) const fn new(delay: Duration) -> Self {
-        DelayLayer { delay }
+        Self { delay }
     }
 }
 
@@ -46,7 +53,7 @@ pub(crate) struct Delay<S> {
 }
 impl<S> Delay<S> {
     pub(crate) fn new(inner: S, delay: Duration) -> Self {
-        Delay { inner, delay }
+        Self { inner, delay }
     }
 }
 
@@ -94,7 +101,7 @@ pin_project! {
 
 impl<S> ResponseFuture<S> {
     pub(crate) fn new(response: S, sleep: Sleep) -> Self {
-        ResponseFuture { response, sleep }
+        Self { response, sleep }
     }
 }
 
@@ -111,7 +118,7 @@ where
         // First poll the sleep until complete
         match this.sleep.poll(cx) {
             Poll::Pending => return Poll::Pending,
-            Poll::Ready(_) => {}
+            Poll::Ready(()) => {}
         }
 
         // Then poll the inner future

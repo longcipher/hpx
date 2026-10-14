@@ -647,7 +647,7 @@ mod tests {
         let mut raw = BytesMut::new();
         raw.extend_from_slice(&[0x89, 126]); // FIN=1, Ping, extended len marker
         raw.extend_from_slice(&126u16.to_be_bytes());
-        raw.extend_from_slice(&vec![0x00u8; 126]);
+        raw.extend_from_slice(&[0x00u8; 126]);
         let mut decoder = Decoder::new(Role::Server, 1 << 20);
         let result = decoder.decode(&mut raw);
         assert!(matches!(
@@ -687,7 +687,7 @@ mod tests {
         let mut buf = BytesMut::new();
         buf.extend_from_slice(&[0x8A, 126]); // FIN=1, Pong, extended len marker
         buf.extend_from_slice(&126u16.to_be_bytes()); // payload length 126 (> 125 limit)
-        buf.extend_from_slice(&vec![0x00u8; 126]);
+        buf.extend_from_slice(&[0x00u8; 126]);
 
         let mut decoder = Decoder::new(Role::Client, 1 << 20);
         assert!(matches!(
@@ -702,7 +702,7 @@ mod tests {
         let mut buf = BytesMut::new();
         buf.extend_from_slice(&[0x88, 126]); // FIN=1, Close, extended len marker
         buf.extend_from_slice(&126u16.to_be_bytes()); // payload length 126 (> 125 limit)
-        buf.extend_from_slice(&vec![0x00u8; 126]);
+        buf.extend_from_slice(&[0x00u8; 126]);
 
         let mut decoder = Decoder::new(Role::Client, 1 << 20);
         assert!(matches!(

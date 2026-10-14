@@ -411,7 +411,8 @@ mod tests {
     fn intercept(p: &Matcher, s: &Uri) -> matcher::Intercept {
         match p.intercept(s).unwrap() {
             Intercepted::Proxy(proxy) => proxy,
-            _ => {
+            #[cfg(unix)]
+            Intercepted::Unix(_) => {
                 unreachable!("intercepted_port should only be called with a Proxy matcher")
             }
         }
@@ -420,7 +421,8 @@ mod tests {
     fn intercepted_uri(p: &Matcher, s: &str) -> Uri {
         match p.intercept(&s.parse().unwrap()).unwrap() {
             Intercepted::Proxy(proxy) => proxy.uri().clone(),
-            _ => {
+            #[cfg(unix)]
+            Intercepted::Unix(_) => {
                 unreachable!("intercepted_uri should only be called with a Proxy matcher")
             }
         }
@@ -514,7 +516,8 @@ mod tests {
                 let got_headers = proxy.custom_headers().unwrap();
                 assert_eq!(got_headers, &headers, "https forwards");
             }
-            _ => {
+            #[cfg(unix)]
+            Intercepted::Unix(_) => {
                 unreachable!("Expected a Proxy Intercepted");
             }
         }
@@ -529,7 +532,8 @@ mod tests {
                 let got_headers = proxy.custom_headers().unwrap();
                 assert_eq!(got_headers, &headers, "http forwards");
             }
-            _ => {
+            #[cfg(unix)]
+            Intercepted::Unix(_) => {
                 unreachable!("Expected a Proxy Intercepted");
             }
         }
@@ -600,7 +604,7 @@ mod tests {
 
         let m = Proxy::http("http://proxy.local")
             .unwrap()
-            .custom_http_auth(auth_val.clone())
+            .custom_http_auth(auth_val)
             .into_matcher();
 
         let got = intercept(&m, &uri("http://hyper.rs"));

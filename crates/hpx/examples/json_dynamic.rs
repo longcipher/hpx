@@ -3,6 +3,14 @@
 //! This is useful for some ad-hoc experiments and situations when you don't
 //! really care about the structure of the JSON and just need to display it or
 //! process it at runtime.
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used
+)]
 
 // This is using the `tokio` runtime. You'll need the following dependency:
 //

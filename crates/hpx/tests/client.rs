@@ -1,4 +1,11 @@
-#![allow(missing_docs)]
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    missing_docs
+)]
 mod support;
 
 #[cfg(feature = "json")]
@@ -519,7 +526,7 @@ async fn overridden_dns_resolution_with_gai_multiple() {
             overridden_domain,
             [
                 std::net::SocketAddr::new(
-                    std::net::IpAddr::V6(std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)),
+                    std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
                     server.addr().port(),
                 ),
                 server.addr(),
@@ -578,7 +585,7 @@ async fn overridden_dns_resolution_with_hickory_dns_multiple() {
             overridden_domain,
             [
                 std::net::SocketAddr::new(
-                    std::net::IpAddr::V6(std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)),
+                    std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
                     server.addr().port(),
                 ),
                 server.addr(),
@@ -655,7 +662,7 @@ async fn test_tls_info() {
 
 #[tokio::test]
 async fn close_connection_after_idle_timeout() {
-    let mut server = server::http(move |_| async move { http::Response::default() });
+    let server = server::http(move |_| async move { http::Response::default() });
 
     let client = Client::builder()
         .no_proxy()

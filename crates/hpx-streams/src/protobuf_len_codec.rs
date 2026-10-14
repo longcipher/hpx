@@ -106,25 +106,21 @@ where
         // length prefix" error and truncated the stream after one message.
         loop {
             let before = buf.len();
-            match self.decode(buf)? {
-                Some(item) => return Ok(Some(item)),
-                None => {
-                    if buf.is_empty() && !self.cursor.have_len {
-                        // Clean end of stream: no bytes left and no length
-                        // waiting for a body.
-                        return Ok(None);
-                    }
-                    if buf.len() == before {
-                        // No bytes were consumed, so the remaining input can
-                        // never complete: either a truncated varint prefix or a
-                        // body shorter than its own length prefix claims.
-                        return Err(StreamBodyError::new(
-                            StreamBodyKind::CodecError,
-                            None,
-                            Some("truncated length-prefixed message at EOF".into()),
-                        ));
-                    }
-                }
+            if let Some(item) = self.decode(buf)? {
+                return Ok(Some(item));
+            } else if buf.is_empty() && !self.cursor.have_len {
+                // Clean end of stream: no bytes left and no length
+                // waiting for a body.
+                return Ok(None);
+            } else if buf.len() == before {
+                // No bytes were consumed, so the remaining input can
+                // never complete: either a truncated varint prefix or a
+                // body shorter than its own length prefix claims.
+                return Err(StreamBodyError::new(
+                    StreamBodyKind::CodecError,
+                    None,
+                    Some("truncated length-prefixed message at EOF".into()),
+                ));
             }
         }
     }

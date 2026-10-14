@@ -4,6 +4,14 @@
 //! A user reported that responses around 120 KB could not be handled by
 //! hpx. These tests pin down the expected behaviour across the transfer
 //! encodings and compression codecs a real client may encounter.
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used
+)]
 
 mod support;
 

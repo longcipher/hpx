@@ -9,6 +9,23 @@
 // Per-module overrides (e.g. `#[allow(dead_code)]` on private internals) are
 // kept directly on those modules below.
 
+// Unit tests are allowed to panic, print, and use loose assertions. Production
+// code stays under the stricter Cargo.toml lint table.
+#![cfg_attr(
+    test,
+    allow(
+        clippy::allow_attributes,
+        clippy::assert_is_empty,
+        clippy::cloned_ref_to_slice_refs,
+        clippy::print_stdout,
+        clippy::should_panic_without_expect,
+        clippy::unimplemented,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic
+    )
+)]
+
 pub mod client;
 
 mod config;

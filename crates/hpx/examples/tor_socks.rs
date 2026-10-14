@@ -1,5 +1,13 @@
 #![deny(warnings)]
 //! Example: connect through a Tor SOCKS5 proxy and verify the exit node.
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used
+)]
 
 // This is using the `tokio` runtime. You'll need the following dependency:
 //

@@ -3,6 +3,7 @@
 #![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(test, deny(warnings))]
+// Unit tests are allowed to panic, unwrap, print, and use loose assertions.
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 //! # hpx
@@ -273,6 +274,54 @@
 //! [Proxy]: ./struct.Proxy.html
 //! [cargo-features]: https://doc.rust-lang.org/stable/cargo/reference/manifest.html#the-features-section
 
+// Unit tests are allowed to panic, unwrap, and print.
+#![cfg_attr(
+    test,
+    allow(
+        clippy::allow_attributes,
+        clippy::assert_is_empty,
+        clippy::borrow_as_ptr,
+        clippy::cast_lossless,
+        clippy::collection_is_never_read,
+        clippy::collapsible_if,
+        clippy::duration_suboptimal_units,
+        clippy::explicit_iter_loop,
+        clippy::expect_fun_call,
+        clippy::expect_used,
+        clippy::ignore_without_reason,
+        clippy::ignored_unit_patterns,
+        clippy::items_after_test_module,
+        clippy::iter_kv_map,
+        clippy::iter_with_drain,
+        clippy::let_underscore_future,
+        clippy::manual_div_ceil,
+        clippy::manual_string_new,
+        clippy::map_unwrap_or,
+        clippy::needless_borrows_for_generic_args,
+        clippy::needless_continue,
+        clippy::needless_pass_by_ref_mut,
+        clippy::needless_raw_string_hashes,
+        clippy::nonminimal_bool,
+        clippy::panic,
+        clippy::print_stderr,
+        clippy::print_stdout,
+        clippy::redundant_async_block,
+        clippy::redundant_clone,
+        clippy::redundant_pattern_matching,
+        clippy::struct_field_names,
+        clippy::type_complexity,
+        clippy::unchecked_time_subtraction,
+        clippy::unreadable_literal,
+        clippy::unnecessary_cast,
+        clippy::unnecessary_trailing_comma,
+        clippy::unnested_or_patterns,
+        clippy::useless_borrows_in_formatting,
+        clippy::useless_vec,
+        clippy::use_self,
+        clippy::unwrap_used,
+        unfulfilled_lint_expectations,
+    )
+)]
 #[cfg(feature = "cookies")]
 use arc_swap as _;
 #[cfg(feature = "rustls-tls")]

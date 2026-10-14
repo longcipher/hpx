@@ -476,6 +476,6 @@ mod tests {
     #[cfg(not(feature = "hotpath"))]
     #[test]
     fn snapshot_is_empty_without_feature() {
-        assert!(snapshot().is_empty());
+        assert_eq!(snapshot(), Vec::new());
     }
 }

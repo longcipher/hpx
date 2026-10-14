@@ -1,3 +1,10 @@
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used
+)]
 use std::{
     convert::Infallible, future::Future, io, net, sync::mpsc as std_mpsc, thread, time::Duration,
 };
@@ -23,7 +30,7 @@ impl Server {
     }
 
     #[allow(unused)]
-    pub(crate) fn events(&mut self) -> Vec<Event> {
+    pub(crate) fn events(&self) -> Vec<Event> {
         let mut events = Vec::new();
         while let Ok(event) = self.events_rx.try_recv() {
             events.push(event);
@@ -154,7 +161,7 @@ where
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
         let (panic_tx, panic_rx) = std_mpsc::channel();
         let (events_tx, events_rx) = std_mpsc::channel();
-        let tname = format!("test({test_name})-support-server",);
+        let tname = format!("test({test_name})-support-server");
         thread::Builder::new()
             .name(tname)
             .spawn(move || {

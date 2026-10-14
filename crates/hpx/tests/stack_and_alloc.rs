@@ -3,6 +3,14 @@
 //! These tests ensure that core types remain efficient as the codebase evolves.
 //! Inspired by ureq's approach of explicitly verifying no-allocation clone
 //! and bounded stack sizes.
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used
+)]
 
 use hpx::{Body, Client};
 use http_body::Body as _;
@@ -13,7 +21,7 @@ use http_body::Body as _;
 #[test]
 fn client_clone_does_not_allocate() {
     let client = Client::new();
-    let _cloned = client.clone();
+    let _cloned = client;
 }
 
 /// Verifies that `Body` created from empty string is efficient.

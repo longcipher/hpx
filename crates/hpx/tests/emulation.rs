@@ -1,11 +1,18 @@
 #![allow(missing_docs)]
 #![cfg(feature = "boring-tls")]
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used
+)]
 mod support;
 use std::time::Duration;
 
 use hpx::{
-    Client, Emulation,
-    http1::Http1Options,
+    Client,
     http2::{
         Http2Options, PseudoId, PseudoOrder, SettingId, SettingsOrder, StreamDependency, StreamId,
     },
@@ -134,32 +141,17 @@ fn http2_options_template() -> Http2Options {
     Http2Options::builder()
         .header_table_size(65536)
         .enable_push(false)
-        .initial_window_size(131072)
+        .initial_window_size(131_072)
         .max_frame_size(16384)
-        .initial_connection_window_size(12517377 + 65535)
+        .initial_connection_window_size(12_517_377 + 65535)
         .headers_stream_dependency(StreamDependency::new(StreamId::ZERO, 41, false))
         .headers_pseudo_order(headers_pseudo_order)
         .settings_order(settings_order)
         .build()
 }
 
-fn emulation_template() -> Emulation {
-    //  HTTP/1 options config
-    let http1 = Http1Options::builder()
-        .allow_obsolete_multiline_headers_in_responses(true)
-        .max_headers(100)
-        .build();
-
-    // This provider encapsulates TLS, HTTP/1, HTTP/2, default headers, and original headers
-    Emulation::builder()
-        .tls_options(tls_options_template())
-        .http1_options(http1)
-        .http2_options(http2_options_template())
-        .build()
-}
-
 // This test requires network access to tls.peet.ws and may be flaky
-#[ignore]
+#[ignore = "hits tls.peet.ws; requires network access"]
 #[tokio::test]
 async fn test_emulation() -> hpx::Result<()> {
     let client = Client::builder()
@@ -258,7 +250,7 @@ async fn test_request_with_emulation_tls() -> hpx::Result<()> {
 }
 
 // This test requires network access to tls.peet.ws and may be flaky
-#[ignore]
+#[ignore = "hits tls.peet.ws; requires network access"]
 #[tokio::test]
 async fn test_request_with_emulation_http2() -> hpx::Result<()> {
     let client = Client::builder()

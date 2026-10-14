@@ -74,7 +74,7 @@ impl Incoming {
     /// Useful when wanting to stream chunks from another thread.
     #[inline]
     #[cfg(test)]
-    pub(crate) fn channel() -> (Sender, Incoming) {
+    pub(crate) fn channel() -> (Sender, Self) {
         Self::new_channel(DecodedLength::CHUNKED, /* wanter = */ false)
     }
 

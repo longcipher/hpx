@@ -503,7 +503,7 @@ where
     }
 
     pub(super) fn buffer<BB: Buf + Into<B>>(&mut self, mut buf: BB) {
-        debug_assert!(buf.has_remaining());
+        debug_assert!(buf.has_remaining(), "buffer() called with an empty buffer");
         match self.strategy {
             WriteStrategy::Flatten => {
                 let head = self.headers_mut();
@@ -763,7 +763,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "buffer() called with an empty buffer")]
     #[cfg(debug_assertions)] // needs to trigger a debug_assert
     fn write_buf_requires_non_empty_bufs() {
         let mock = Mock::new().build();

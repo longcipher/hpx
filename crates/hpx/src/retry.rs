@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn classify_fn_sets_custom_classifier() {
         let policy = Policy::never().classify_fn(|req_rep| {
-            if req_rep.method() == &http::Method::POST {
+            if req_rep.method() == http::Method::POST {
                 req_rep.retryable()
             } else {
                 req_rep.success()

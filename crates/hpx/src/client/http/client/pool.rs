@@ -1044,8 +1044,8 @@ mod tests {
 
         match pool.checkout(key).await {
             Ok(pooled) => assert_eq!(*pooled, Uniq(41)),
-            Err(_) => panic!("not ready"),
-        };
+            Err(e) => panic!("not ready: {e:?}"),
+        }
     }
 
     /// Helper to check if the future is ready after polling once.
@@ -1058,7 +1058,7 @@ mod tests {
         type Output = Option<()>;
 
         fn poll(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
-            match Pin::new(&mut self.0).poll(cx) {
+            match Pin::new(&mut *self.0).poll(cx) {
                 Poll::Ready(Ok(_)) => Poll::Ready(Some(())),
                 Poll::Ready(Err(_)) => Poll::Ready(Some(())),
                 Poll::Pending => Poll::Ready(None),
@@ -1186,7 +1186,7 @@ mod tests {
             // this test makes sure that doing so will unpark the checkout
             drop(pooled);
         })
-        .map(|(entry, _)| entry);
+        .map(|(entry, ())| entry);
 
         assert_eq!(*checkout.await.unwrap(), Uniq(41));
     }

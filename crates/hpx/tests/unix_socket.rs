@@ -1,5 +1,13 @@
 #![allow(missing_docs)]
 #![cfg(unix)]
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used
+)]
 
 use std::{hash::BuildHasher, time::Duration};
 

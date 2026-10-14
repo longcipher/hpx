@@ -11,7 +11,7 @@ lint:
     rumdl check .
     cargo sort -w -g -c
     cargo fmt --all -- --check
-    cargo clippy --all -- -D warnings
+    cargo clippy --all --all-targets -- -D warnings
     cargo shear
     cargo +nightly workspace-inheritance-check
     just check-agents-md

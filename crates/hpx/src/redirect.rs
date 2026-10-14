@@ -663,7 +663,7 @@ mod tests {
         let next = Uri::try_from("http://example.com/target").unwrap();
         let previous = Uri::try_from("https://secure.example.com/source").unwrap();
 
-        let referer = make_referer(next.clone(), &previous);
+        let referer = make_referer(next, &previous);
         assert!(
             referer.is_none(),
             "Referer should be dropped when redirecting from HTTPS to HTTP"

@@ -25,7 +25,7 @@ impl DecodedLength {
     #[cfg(test)]
     pub(crate) fn new(len: u64) -> Self {
         debug_assert!(len <= MAX_LEN);
-        DecodedLength(len)
+        Self(len)
     }
 
     /// Takes the length as a content-length without other checks.

@@ -1,17 +1,26 @@
 //! Benchmarks for contention hot paths.
 //!
 //! Measures pool checkout/checkin and H2 ping record_data under concurrency.
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used
+)]
 
 use std::{
     collections::HashMap,
     hash::{Hash, Hasher},
+    hint::black_box,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
 };
 
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use parking_lot::Mutex;
 
 type HostKey = Arc<str>;
@@ -49,11 +58,7 @@ impl PoolOps for SingleLockPool {
     }
 
     fn checkin(&self, host: HostKey, conn: u64) {
-        self.inner
-            .lock()
-            .entry(host)
-            .or_insert_with(Vec::new)
-            .push(conn);
+        self.inner.lock().entry(host).or_default().push(conn);
     }
 }
 
@@ -97,7 +102,7 @@ impl PoolOps for ShardedLockPool {
 
     fn checkin(&self, host: HostKey, conn: u64) {
         let shard = Self::shard_for(&self.shards, &host, self.shards.len());
-        shard.lock().entry(host).or_insert_with(Vec::new).push(conn);
+        shard.lock().entry(host).or_default().push(conn);
     }
 }
 
@@ -146,7 +151,7 @@ fn bench_pool_contention(c: &mut Criterion) {
             &workers,
             |b, &workers| {
                 b.iter(|| {
-                    run_pool_workload(Arc::clone(&sharded_pool), Arc::clone(&hosts), workers)
+                    run_pool_workload(Arc::clone(&sharded_pool), Arc::clone(&hosts), workers);
                 });
             },
         );

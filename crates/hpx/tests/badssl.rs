@@ -1,4 +1,11 @@
-#![allow(missing_docs)]
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    missing_docs
+)]
 use std::time::Duration;
 
 use hpx::Client;
@@ -28,7 +35,7 @@ async fn test_badssl_modern() {
         .await
         .unwrap();
 
-    assert!(!text.is_empty());
+    assert_ne!(text, "");
 }
 
 #[tokio::test]
@@ -47,7 +54,7 @@ async fn test_badssl_self_signed() {
         .await
         .unwrap();
 
-    assert!(!text.is_empty());
+    assert_ne!(text, "");
 }
 #[cfg(any(feature = "boring-tls", feature = "openssl-tls"))]
 #[allow(dead_code)]
@@ -57,7 +64,7 @@ const CURVES_LIST: &str = join!(
 );
 
 #[tokio::test]
-#[ignore]
+#[ignore = "hits badssl.com; requires network access"]
 #[cfg(not(feature = "rustls-tls"))]
 async fn test_3des_support() -> hpx::Result<()> {
     let tls_options = TlsOptions::builder()
@@ -91,7 +98,7 @@ async fn test_3des_support() -> hpx::Result<()> {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "hits badssl.com; requires network access"]
 #[cfg(not(feature = "rustls-tls"))]
 async fn test_firefox_7x_100_cipher() -> hpx::Result<()> {
     let tls_options = TlsOptions::builder()
@@ -148,7 +155,7 @@ async fn test_alps_new_endpoint() -> hpx::Result<()> {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "hits badssl.com; requires network access"]
 #[cfg(not(feature = "rustls-tls"))]
 async fn test_aes_hw_override() -> hpx::Result<()> {
     const CIPHER_LIST: &str = join!(

@@ -1,4 +1,11 @@
-#![allow(missing_docs)]
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    missing_docs
+)]
 #![cfg(feature = "boring-tls")]
 use std::time::Duration;
 
@@ -133,9 +140,9 @@ fn http2_options_template() -> Http2Options {
     Http2Options::builder()
         .header_table_size(65536)
         .enable_push(false)
-        .initial_window_size(131072)
+        .initial_window_size(131_072)
         .max_frame_size(16384)
-        .initial_connection_window_size(12517377 + 65535)
+        .initial_connection_window_size(12_517_377 + 65535)
         .headers_stream_dependency(StreamDependency::new(StreamId::ZERO, 41, false))
         .headers_pseudo_order(headers_pseudo_order)
         .settings_order(settings_order)

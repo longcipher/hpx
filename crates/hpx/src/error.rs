@@ -725,7 +725,7 @@ mod tests {
     }
 
     fn decode_io(e: io::Error) -> Error {
-        if e.get_ref().map_or(false, |r| r.is::<Error>()) {
+        if e.get_ref().is_some_and(|r| r.is::<Error>()) {
             *e.into_inner()
                 .expect("io::Error::get_ref was Some(_)")
                 .downcast::<Error>()
@@ -824,7 +824,7 @@ mod tests {
 
     #[test]
     fn is_dns_nested() {
-        let inner = io::Error::new(io::ErrorKind::Other, "resolve lookup failed for host");
+        let inner = io::Error::other("resolve lookup failed for host");
         let wrapper = io::Error::other(inner);
         let err = Error::request(wrapper);
         assert!(err.is_dns());
