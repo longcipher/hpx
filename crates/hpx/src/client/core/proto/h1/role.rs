@@ -722,7 +722,7 @@ fn write_headers_original_case(
 /// The three HTTP/1 request-target forms are all covered:
 /// - origin-form (path + query) — the common case for non-proxied requests;
 /// - absolute-form (scheme `://` authority + path) — used through a proxy;
-/// - authority-form (host[:port]) — used by `CONNECT`.
+/// - authority-form (host\[:port]) — used by `CONNECT`.
 #[inline]
 fn write_uri(dst: &mut Vec<u8>, uri: &Uri) {
     // Byte-for-byte equivalent of `impl Display for Uri`.
