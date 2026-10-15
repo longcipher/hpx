@@ -145,12 +145,8 @@ where
     }
 
     fn call(&mut self, req: http::Request<Body>) -> Self::Future {
-        let key = normalize_endpoint(&endpoint_key(req.method(), req.uri()));
-        let key = match &self.label {
-            Some(label) => format!("{label}: {key}"),
-            None => key,
-        };
-        let fut = instrument_future(self.inner.call(req), key.clone());
+        let key = endpoint_stat_key(req.method(), req.uri(), self.label.as_deref());
+        let fut = self.inner.call(req);
         Box::pin(async move {
             let start = std::time::Instant::now();
             let result = fut.await;
@@ -165,25 +161,15 @@ where
     }
 }
 
-/// Wraps the inner request future with `hotpath::future!` when profiling is
-/// enabled; identity otherwise.
-#[cfg(feature = "hotpath")]
-fn instrument_future<F, T>(fut: F, label: String) -> impl Future<Output = T> + Send + 'static
-where
-    F: Future<Output = T> + Send + 'static,
-{
-    hotpath::future!(fut, label = label)
-}
-
-/// Feature-off counterpart of [`instrument_future`]: pure passthrough.
-#[cfg(not(feature = "hotpath"))]
-fn instrument_future<F, T>(fut: F, _label: String) -> impl Future<Output = T> + Send + 'static
-where
-    F: Future<Output = T> + Send + 'static,
-{
-    fut
-}
-
+// Why the layer does *not* wrap the request in `hotpath::future!`:
+//
+// `hotpath::future!` would additionally track each request in hotpath's own
+// `futures` section — a global registry plus per-poll hooks — which measured
+// at ~2 µs per request, roughly doubling what this layer costs. Everything the
+// per-endpoint report needs is already captured by `record_endpoint`
+// (count, errors, total time, status breakdown), and the request itself is
+// still visible in hotpath's *function* section via `HttpClient::request`, so
+// the registry is pure duplicate bookkeeping here.
 #[cfg(feature = "hotpath")]
 #[derive(Debug, Default)]
 struct EndpointEntry {
@@ -207,18 +193,38 @@ fn endpoints() -> &'static Mutex<HashMap<String, EndpointEntry>> {
 /// the response status was `>= 400` (same semantics as hotpath's own HTTP
 /// section).
 #[cfg(feature = "hotpath")]
+impl EndpointEntry {
+    fn record(&mut self, nanos: u64, status: Option<u16>, is_error: bool) {
+        self.count += 1;
+        self.total_nanos += nanos;
+        if is_error {
+            self.error_count += 1;
+        }
+        if let Some(status) = status {
+            *self.statuses.entry(status).or_insert(0) += 1;
+        }
+    }
+}
+
+#[cfg(feature = "hotpath")]
 fn record_endpoint(endpoint: &str, duration: Duration, status: Option<u16>, transport_error: bool) {
     let is_error = transport_error || status.is_some_and(|s| s >= 400);
+    let nanos = duration.as_nanos() as u64;
     let mut guard = endpoints().lock();
-    let entry = guard.entry(endpoint.to_string()).or_default();
-    entry.count += 1;
-    entry.total_nanos += duration.as_nanos() as u64;
-    if is_error {
-        entry.error_count += 1;
+
+    // Fast path: the endpoint is already tracked, so recording it needs no key
+    // allocation. This is every request after the first one to a given route —
+    // `HashMap::entry` would otherwise allocate an owned `String` key on each
+    // call just to find the existing entry.
+    if let Some(entry) = guard.get_mut(endpoint) {
+        entry.record(nanos, status, is_error);
+        return;
     }
-    if let Some(status) = status {
-        *entry.statuses.entry(status).or_insert(0) += 1;
-    }
+
+    guard
+        .entry(endpoint.to_string())
+        .or_default()
+        .record(nanos, status, is_error);
 }
 
 /// Feature-off counterpart of [`record_endpoint`]: no-op.
@@ -300,6 +306,10 @@ pub fn record_ws_bytes_recv(bytes: usize) {
 }
 
 /// Builds the raw `METHOD host[:port]/path` pre-key for a request.
+///
+/// Test-only: production code uses [`endpoint_stat_key`], which produces the
+/// same key in one pass instead of `endpoint_key` + `normalize_endpoint`.
+#[cfg(test)]
 fn endpoint_key(method: &Method, uri: &Uri) -> String {
     let host = uri.host().unwrap_or("");
     match uri.port_u16() {
@@ -312,6 +322,10 @@ fn endpoint_key(method: &Method, uri: &Uri) -> String {
 /// identifier-like path segments (all digits, UUIDs, and long hex strings)
 /// into `{id}`, so parameter-varied requests to the same route merge into a
 /// single bucket. Numeric hosts are left untouched.
+///
+/// Test-only: production code uses [`endpoint_stat_key`], which produces the
+/// same key in one pass instead of `endpoint_key` + `normalize_endpoint`.
+#[cfg(test)]
 fn normalize_endpoint(endpoint: &str) -> String {
     let Some(slash) = endpoint.find('/') else {
         return endpoint.to_string();
@@ -356,6 +370,52 @@ fn is_uuid(segment: &str) -> bool {
 
 fn is_long_hex(segment: &str) -> bool {
     segment.len() >= 16 && segment.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Builds the fully-qualified stats key (`[label: ]METHOD host[:port]/path`,
+/// identifier-like path segments collapsed to `{id}`) in a single allocation.
+///
+/// This is the per-request hot path of [`HotpathLayer`], so it deliberately
+/// fuses what used to be three separate passes — `endpoint_key` (`format!`),
+/// `normalize_endpoint` (`Vec` of segments + `join`), and the label prefix
+/// (`format!`) — into one `String` built with a pre-reserved capacity.
+fn endpoint_stat_key(method: &Method, uri: &Uri, label: Option<&str>) -> String {
+    let host = uri.host().unwrap_or("");
+    let mut key = String::with_capacity(
+        label.map_or(0, str::len)
+            + 2
+            + method.as_str().len()
+            + 1
+            + host.len()
+            + 6
+            + uri.path().len()
+            + 16,
+    );
+
+    if let Some(label) = label {
+        key.push_str(label);
+        key.push_str(": ");
+    }
+    key.push_str(method.as_str());
+    key.push(' ');
+    key.push_str(host);
+    if let Some(port) = uri.port_u16() {
+        key.push(':');
+        // `String: fmt::Write` writes the digits straight into `key`.
+        let _ = std::fmt::Write::write_fmt(&mut key, format_args!("{port}"));
+    }
+    for (index, segment) in uri.path().split('/').enumerate() {
+        if index > 0 {
+            key.push('/');
+        }
+        if is_id_segment(segment) {
+            key.push_str("{id}");
+        } else {
+            key.push_str(segment);
+        }
+    }
+
+    key
 }
 
 #[cfg(test)]
@@ -443,6 +503,24 @@ mod tests {
             normalize_endpoint(&endpoint_key(&Method::GET, &uri)),
             "GET api.example.com/users/{id}",
         );
+    }
+
+    #[test]
+    fn stat_key_matches_two_step_normalization() {
+        for raw in [
+            "http://127.0.0.1:8080/users/7?q=1",
+            "https://api.example.com/jobs/550e8400-e29b-41d4-a716-446655440000",
+            "https://api.example.com/",
+            "https://api.example.com/cafe/abc123x",
+        ] {
+            let uri: Uri = raw.parse().unwrap();
+            let expected = normalize_endpoint(&endpoint_key(&Method::GET, &uri));
+            assert_eq!(endpoint_stat_key(&Method::GET, &uri, None), expected);
+            assert_eq!(
+                endpoint_stat_key(&Method::GET, &uri, Some("bench")),
+                format!("bench: {expected}"),
+            );
+        }
     }
 
     #[cfg(feature = "hotpath")]

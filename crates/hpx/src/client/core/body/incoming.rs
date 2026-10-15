@@ -30,6 +30,19 @@ pub struct Incoming {
 
 enum Kind {
     Empty,
+    /// The whole body is already buffered in memory — the response head and its
+    /// body arrived in the same read, so the bytes are handed straight to the
+    /// consumer and no channel is created. This is the shape of the vast
+    /// majority of small responses.
+    ///
+    /// Keeping this variant to a bare `Option<Bytes>` matters: `Incoming` is
+    /// sized by its largest variant and the `test_size_of` guard pins that, so
+    /// the exact length is deliberately *derived* from `bytes` rather than
+    /// stored alongside it.
+    Full {
+        /// `None` once the single data frame has been produced.
+        bytes: Option<Bytes>,
+    },
     Chan {
         content_length: DecodedLength,
         want_tx: watch::Sender,
@@ -111,6 +124,20 @@ impl Incoming {
         Self::new(Kind::Empty)
     }
 
+    /// Builds a body whose entire content is already in memory.
+    ///
+    /// Equivalent to a channel body that has been pre-loaded with `bytes`, but
+    /// without allocating the channel: no `mpsc`, no trailers oneshot, no
+    /// want-`watch`, and no dispatcher round-trip to deliver the frame.
+    ///
+    /// `content_length` must be exact and equal `bytes.len()`; the caller (the
+    /// h1 dispatcher) only takes this path when both hold.
+    pub(crate) fn full(bytes: Bytes, content_length: DecodedLength) -> Self {
+        debug_assert!(content_length.is_exact());
+        debug_assert_eq!(content_length.into_opt(), Some(bytes.len() as u64));
+        Self::new(Kind::Full { bytes: Some(bytes) })
+    }
+
     #[cfg(feature = "http2")]
     pub(crate) fn h2(
         recv: http2::RecvStream,
@@ -142,6 +169,15 @@ impl Body for Incoming {
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
         match self.kind {
             Kind::Empty => Poll::Ready(None),
+            Kind::Full { ref mut bytes, .. } => {
+                // A pre-buffered body yields exactly one data frame and then
+                // ends: with an exact `Content-Length` there can be no
+                // trailers, and the connection is already past this message.
+                match bytes.take() {
+                    Some(chunk) if !chunk.is_empty() => Poll::Ready(Some(Ok(Frame::data(chunk)))),
+                    _ => Poll::Ready(None),
+                }
+            }
             Kind::Chan {
                 content_length: ref mut len,
                 ref mut data_rx,
@@ -211,6 +247,7 @@ impl Body for Incoming {
     fn is_end_stream(&self) -> bool {
         match self.kind {
             Kind::Empty => true,
+            Kind::Full { ref bytes, .. } => bytes.is_none(),
             Kind::Chan { content_length, .. } => content_length == DecodedLength::ZERO,
             #[cfg(feature = "http2")]
             Kind::H2 { recv: ref h2, .. } => h2.is_end_stream(),
@@ -228,6 +265,12 @@ impl Body for Incoming {
 
         match self.kind {
             Kind::Empty => SizeHint::with_exact(0),
+            Kind::Full { ref bytes } => match bytes {
+                // Exact and still accurate after the frame is consumed: a
+                // buffered body's remaining length is whatever is left in it.
+                Some(bytes) => SizeHint::with_exact(bytes.len() as u64),
+                None => SizeHint::with_exact(0),
+            },
             Kind::Chan { content_length, .. } => opt_len(content_length),
             #[cfg(feature = "http2")]
             Kind::H2 { content_length, .. } => opt_len(content_length),
@@ -241,10 +284,13 @@ impl fmt::Debug for Incoming {
         struct Streaming;
         #[derive(Debug)]
         struct Empty;
+        #[derive(Debug)]
+        struct Buffered;
 
         let mut builder = f.debug_tuple("Body");
         match self.kind {
             Kind::Empty => builder.field(&Empty),
+            Kind::Full { .. } => builder.field(&Buffered),
             _ => builder.field(&Streaming),
         };
 

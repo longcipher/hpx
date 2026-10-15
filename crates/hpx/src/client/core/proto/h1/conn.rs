@@ -275,6 +275,36 @@ where
         }
     }
 
+    /// Consumes an exact-length body that is already fully buffered.
+    ///
+    /// Returns `Some(bytes)` when the response head and its entire body arrived
+    /// in the same read: the body bytes are carved out of the read buffer (no
+    /// copy, no channel) and the read state is advanced past the message, exactly
+    /// as the decoder does when it drains the last body frame. Returns `None`
+    /// when the body is not (fully) buffered yet, in which case the caller falls
+    /// back to the normal channel path.
+    ///
+    /// Deliberately refuses the `Reading::Continue` state, so an in-flight
+    /// `100 Continue` handshake is never skipped.
+    pub(super) fn take_buffered_body(&mut self, len: DecodedLength) -> Option<Bytes> {
+        if !matches!(self.state.reading, Reading::Body(_)) {
+            return None;
+        }
+        let n = usize::try_from(len.into_opt()?).ok()?;
+        if n == 0 {
+            return None;
+        }
+        if self.io.read_buf().len() < n {
+            return None;
+        }
+
+        let bytes = self.io.take_read_buf(n);
+        // The decoder sets this when it drains the final body frame; going
+        // straight there is what makes the connection immediately reusable.
+        self.state.reading = Reading::KeepAlive;
+        Some(bytes)
+    }
+
     pub(crate) fn poll_read_body(
         &mut self,
         cx: &mut Context<'_>,

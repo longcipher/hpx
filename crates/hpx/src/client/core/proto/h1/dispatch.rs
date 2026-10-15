@@ -268,6 +268,7 @@ where
         }
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn poll_read_head(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
         // can dispatch receive, or does it still care about other incoming message?
         if let Ok(()) = ready!(self.dispatch.poll_ready(cx)) {
@@ -283,10 +284,20 @@ where
                 let body = match body_len {
                     DecodedLength::ZERO => IncomingBody::empty(),
                     other => {
-                        let (tx, rx) =
-                            IncomingBody::new_channel(other, wants.contains(Wants::EXPECT));
-                        self.body_tx = Some(tx);
-                        rx
+                        // Fast path: the head and its whole body came in the
+                        // same read, so hand the buffered bytes straight to the
+                        // consumer. This skips the channel entirely — no mpsc,
+                        // no trailers oneshot, no want-watch, and no dispatcher
+                        // round-trip for the frame — which is the common shape
+                        // for every small response.
+                        if let Some(bytes) = self.conn.take_buffered_body(other) {
+                            IncomingBody::full(bytes, other)
+                        } else {
+                            let (tx, rx) =
+                                IncomingBody::new_channel(other, wants.contains(Wants::EXPECT));
+                            self.body_tx = Some(tx);
+                            rx
+                        }
                     }
                 };
                 if wants.contains(Wants::UPGRADE) {
@@ -323,6 +334,7 @@ where
         }
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn poll_write(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
         loop {
             if self.is_closing {
@@ -659,6 +671,90 @@ mod tests {
                 _ => panic!("expected Canceled, got {err:?}"),
             }
         });
+    }
+
+    #[tokio::test]
+    async fn fully_buffered_response_body_skips_the_channel() {
+        use http_body_util::BodyExt as _;
+
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+
+        let (io, _handle) = tokio_test::io::Builder::new()
+            .write(b"GET / HTTP/1.1\r\n\r\n")
+            .read(b"HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nhello")
+            .wait(Duration::from_secs(2))
+            .build_with_handle();
+
+        let (mut tx, rx) = dispatch::channel();
+        let dispatcher = Dispatcher::new(
+            Client::new(rx),
+            Conn::<_, bytes::Bytes, ClientTransaction>::new(io),
+        );
+        let _dispatcher = tokio::spawn(dispatcher);
+
+        let res = tx
+            .try_send(http::Request::new(IncomingBody::empty()))
+            .unwrap()
+            .await
+            .expect("response");
+        let mut body = res.expect("response ok").into_body();
+
+        // The body must be the buffered variant, not a channel.
+        assert!(format!("{body:?}").contains("Buffered"), "{body:?}");
+
+        // One data frame, then end — no trailers, no EOF wait.
+        let frame = body.frame().await.expect("data frame").expect("frame ok");
+        assert_eq!(frame.into_data().unwrap().as_ref(), b"hello");
+        assert!(
+            body.frame().await.is_none(),
+            "buffered body must end after its single frame"
+        );
+    }
+
+    #[tokio::test]
+    async fn partially_buffered_response_body_still_uses_the_channel() {
+        use http_body_util::BodyExt as _;
+
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+
+        let (io, _handle) = tokio_test::io::Builder::new()
+            .write(b"GET / HTTP/1.1\r\n\r\n")
+            .read(b"HTTP/1.1 200 OK\r\ncontent-length: 11\r\n\r\nhel")
+            .wait(Duration::from_secs(2))
+            .read(b"lo wor")
+            .wait(Duration::from_secs(2))
+            .read(b"ld")
+            .wait(Duration::from_secs(2))
+            .build_with_handle();
+
+        let (mut tx, rx) = dispatch::channel();
+        let dispatcher = Dispatcher::new(
+            Client::new(rx),
+            Conn::<_, bytes::Bytes, ClientTransaction>::new(io),
+        );
+        let _dispatcher = tokio::spawn(dispatcher);
+
+        let res = tx
+            .try_send(http::Request::new(IncomingBody::empty()))
+            .unwrap()
+            .await
+            .expect("response");
+        let mut body = res.expect("response ok").into_body();
+
+        // Not fully buffered, so the fast path must decline and the channel
+        // must take over.
+        assert!(format!("{body:?}").contains("Streaming"), "{body:?}");
+
+        // The channel delivers one frame per read, then ends once the decoder
+        // has consumed the announced `Content-Length`.
+        for expected in [&b"hel"[..], b"lo wor", b"ld"] {
+            let frame = body.frame().await.expect("data frame").expect("frame ok");
+            assert_eq!(frame.into_data().unwrap().as_ref(), expected);
+        }
+        assert!(
+            body.frame().await.is_none(),
+            "channel body must end after its Content-Length is consumed"
+        );
     }
 
     #[tokio::test]

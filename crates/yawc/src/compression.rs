@@ -288,6 +288,7 @@ impl Compressor {
     ///
     /// # Returns
     /// A `BytesMut` containing the compressed data, or an `io::Error` if compression fails.
+    #[cfg_attr(feature = "hotpath", hotpath::measure(impl_type = "Compression"))]
     pub fn compress(&mut self, input: &[u8], flush: bool) -> io::Result<Bytes> {
         match &mut self.compressor_type {
             CompressorType::Contextual(compressor) => compressor.compress(input, flush),
@@ -574,6 +575,7 @@ impl Decompressor {
     /// * `Ok(Some(BytesMut))` - Successfully decompressed data
     /// * `Ok(None)` - More input needed to complete decompression
     /// * `Err(io::Error)` - Decompression failed due to invalid/corrupt data
+    #[cfg_attr(feature = "hotpath", hotpath::measure(impl_type = "Compression"))]
     pub fn decompress(&mut self, input: &[u8], stream_end: bool) -> io::Result<Bytes> {
         match &mut self.decompressor_type {
             DecompressorType::Contextual(decompressor) => {

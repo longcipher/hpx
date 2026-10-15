@@ -93,7 +93,7 @@ use tokio_util::codec;
 
 use crate::{
     Role, WebSocketError,
-    frame::{self, Frame, MAX_HEAD_SIZE, OpCode},
+    frame::{self, Frame, OpCode},
 };
 
 /// Compact reading state using bit packing (like uWebSockets).
@@ -203,6 +203,7 @@ impl codec::Encoder<Frame> for Codec {
     type Error = <Encoder as codec::Encoder<Frame>>::Error;
 
     #[inline]
+    #[cfg_attr(feature = "hotpath", hotpath::measure(impl_type = "Codec"))]
     fn encode(&mut self, item: Frame, dst: &mut BytesMut) -> Result<(), Self::Error> {
         self.encoder.encode(item, dst)
     }
@@ -426,9 +427,20 @@ impl codec::Encoder<Frame> for Encoder {
             };
         }
 
-        // Calculate exact header size for optimal reservation
+        // Reserve exactly the bytes this frame needs. Over-reserving by
+        // `MAX_HEAD_SIZE` (16) on every frame makes `BytesMut` grow its
+        // allocation up to 12 bytes larger than necessary, which on the
+        // per-message hot path is pure waste.
         let payload_len = frame.payload.len();
-        dst.reserve(MAX_HEAD_SIZE + payload_len);
+        let head_size =
+            2 + if payload_len < 126 {
+                0
+            } else if payload_len < 65536 {
+                2
+            } else {
+                8
+            } + if frame.mask.is_some() { 4 } else { 0 };
+        dst.reserve(head_size + payload_len);
 
         frame.write_head(dst);
 

@@ -173,10 +173,19 @@ pub struct HttpClient<C, B> {
     config: Config,
     connector: C,
     exec: Exec,
+    /// HTTP/1 and HTTP/2 connection builders, shared through an `Arc`.
+    ///
+    /// These two builders are large, and both are cloned on *every* request:
+    /// `HttpClient::request` clones the client, and `connect_to` clones each
+    /// builder into the `Lazy` closure that becomes part of the per-request
+    /// future. Sharing them turns those clones into refcount bumps, which cut
+    /// `HttpClient` from 696 to 184 bytes and the future boxed by each request
+    /// from 8824 to 4728 bytes. They are only detached (`Arc::make_mut`) for
+    /// requests that carry per-request transport overrides.
     #[cfg(feature = "http1")]
-    h1_builder: conn::http1::Builder,
+    h1_builder: Arc<conn::http1::Builder>,
     #[cfg(feature = "http2")]
-    h2_builder: conn::http2::Builder<Exec>,
+    h2_builder: Arc<conn::http2::Builder<Exec>>,
     /// HTTP/3 (QUIC) connector. `Some` when the `http3` Cargo feature is
     /// enabled AND the caller (typically `Client::build` or a test escape
     /// hatch) supplied a `QuicConnector`. When `Some` and the request's
@@ -291,16 +300,17 @@ where
         // needed.
         let options = RequestConfig::<RequestOptions>::remove(req.extensions_mut());
 
-        // Apply HTTP/1 and HTTP/2 options if provided
+        // Apply HTTP/1 and HTTP/2 options if provided. `Arc::make_mut` clones the
+        // builder only for requests that actually carry per-request overrides.
         if let Some(opts) = options.as_ref().map(RequestOptions::transport_opts) {
             #[cfg(feature = "http1")]
             if let Some(opts) = opts.http1_options() {
-                this.h1_builder.options(opts.clone());
+                Arc::make_mut(&mut this.h1_builder).options(opts.clone());
             }
 
             #[cfg(feature = "http2")]
             if let Some(opts) = opts.http2_options() {
-                this.h2_builder.options(opts.clone());
+                Arc::make_mut(&mut this.h2_builder).options(opts.clone());
             }
         }
 
@@ -308,6 +318,13 @@ where
         ResponseFuture::new(this.send_request(req, connect_req))
     }
 
+    // NOTE: deliberately not annotated with `#[hotpath::measure]`.
+    // `hotpath`'s async `measure` re-wraps the body in a nested `async` block,
+    // which duplicates the whole async state machine (measured: 50 KB -> 150 KB
+    // per level). Annotating this chain (`send_request` -> `try_send_request`
+    // -> `connection_for` -> `one_connection_for`) therefore compound: the boxed
+    // `ResponseFuture` grew from ~9 KB to 907 KB and cost ~13% throughput.
+    // Only the leaf (`one_connection_for`) is measured.
     async fn send_request(
         self,
         mut req: Request<B>,
@@ -651,6 +668,7 @@ where
         }
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure(impl_type = "HttpClient"))]
     async fn one_connection_for(
         &self,
         req: ConnectRequest,
@@ -752,10 +770,14 @@ where
         let executor = self.exec.clone();
         let pool = self.pool.clone();
 
+        // Share the `Arc` rather than deep-cloning the builders: the closure
+        // below is built for *every* request but its body only runs when this
+        // request actually has to open a new connection. `handshake` takes the
+        // builder by value, so it gets its own copy at that point.
         #[cfg(feature = "http1")]
-        let h1_builder = self.h1_builder.clone();
+        let h1_builder = Arc::clone(&self.h1_builder);
         #[cfg(feature = "http2")]
-        let h2_builder = self.h2_builder.clone();
+        let h2_builder = Arc::clone(&self.h2_builder);
         let ver = match req.extra().alpn_protocol() {
             Some(AlpnProtocol::HTTP2) => Ver::Http2,
             _ => self.config.ver,
@@ -850,7 +872,8 @@ where
                 let tx = if is_h2 {
                     #[cfg(feature = "http2")]
                     {
-                        let (tx, conn) = h2_builder.handshake(io).await.map_err(Error::tx)?;
+                        let builder = h2_builder.as_ref().clone();
+                        let (tx, conn) = builder.handshake(io).await.map_err(Error::tx)?;
 
                         trace!("http2 handshake complete, spawning background dispatcher task");
                         executor.execute(
@@ -876,7 +899,8 @@ where
                         // Perform the HTTP/1.1 handshake on the provided I/O stream. More actions
                         // Uses the h1_builder to establish a connection, returning a sender (tx) for requests
                         // and a connection task (conn) that manages the connection lifecycle.
-                        let (mut tx, conn) = h1_builder.handshake(io).await.map_err(Error::tx)?;
+                        let builder = h1_builder.as_ref().clone();
+                        let (mut tx, conn) = builder.handshake(io).await.map_err(Error::tx)?;
 
                         // Log that the HTTP/1.1 handshake has completed successfully.
                         // This indicates the connection is established and ready for request processing.
@@ -1176,9 +1200,10 @@ where
 
 impl<C: Clone, B> Clone for HttpClient<C, B> {
     fn clone(&self) -> Self {
-        // Optimization: Use Arc for immutable builder state to avoid deep clone
-        // on every request. Builders are only mutated when per-request options
-        // are applied, which creates a new builder via options().
+        // Optimization: The connection builders are behind an `Arc` (see their
+        // field docs), so cloning them here is a refcount bump rather than the
+        // ~500 byte deep copy it used to be. They are only detached on requests
+        // that apply per-request overrides, via `Arc::make_mut`.
         Self {
             config: self.config,
             exec: self.exec.clone(),
@@ -1866,9 +1891,9 @@ impl Builder {
             exec: exec.clone(),
 
             #[cfg(feature = "http1")]
-            h1_builder: self.h1,
+            h1_builder: Arc::new(self.h1),
             #[cfg(feature = "http2")]
-            h2_builder: self.h2,
+            h2_builder: Arc::new(self.h2),
             #[cfg(feature = "http3")]
             h3_connector: self.h3_connector,
             #[cfg(feature = "http3")]

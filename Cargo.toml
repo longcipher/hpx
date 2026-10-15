@@ -15,7 +15,7 @@ exclude = [
 resolver = "3"
 
 [workspace.package]
-version = "2.5.30"
+version = "2.5.31"
 edition = "2024"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license = "Apache-2.0"
@@ -208,14 +208,12 @@ all = "warn"
 # kept together in one place. On a version bump, update [workspace.package]
 # below and these eight lines (single find/replace). Each crate's own version
 # still uses `version.workspace = true` in its manifest.
-hpx = { path = "crates/hpx", version = "2.5.30" }
-hpx-browser = { path = "crates/hpx-browser", version = "2.5.30" }
-hpx-cli = { path = "bin/hpx-cli", version = "2.5.30" }
-hpx-dl = { path = "crates/hpx-dl", version = "2.5.30" }
-hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.30" }
-hpx-h3 = { path = "crates/hpx-h3", version = "2.5.30" }
-hpx-yawc = { path = "crates/yawc", version = "2.5.30" }
-hpxless = { path = "bin/hpxless", version = "2.5.30" }
+hpx = { path = "crates/hpx", version = "2.5.31" }
+hpx-browser = { path = "crates/hpx-browser", version = "2.5.31" }
+hpx-dl = { path = "crates/hpx-dl", version = "2.5.31" }
+hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.31" }
+hpx-h3 = { path = "crates/hpx-h3", version = "2.5.31" }
+hpx-yawc = { path = "crates/yawc", version = "2.5.31" }
 
 # external crates
 ahash = "0.8.12"
@@ -231,7 +229,7 @@ blitz-dom = "0.3.0-beta.3"
 blitz-html = "0.3.0-beta.3"
 blitz-traits = "0.3.0-beta.3"
 bon = "3.10.2"
-boring = "5.2.0"
+boring = "5.3.0"
 brotli = "9.0.0"
 bytes = "1.12.1"
 clap = "4.6.7"
@@ -278,7 +276,6 @@ md-5 = "0.11.0"
 memchr = "2.8.3"
 mime = "0.3.17"
 mime_guess = "2.0.5"
-moka = "0.12.16"
 openssl = "0.10.81"
 parking_lot = "0.12.5"
 parley = "0.12.0"
@@ -297,7 +294,7 @@ rand_chacha = "0.10.0"
 rand_distr = "0.6.0"
 rcgen = "0.14.10"
 rustfft = "6.4.1"
-rustls = "0.23.45"
+rustls = "0.23.46"
 rustls-native-certs = "0.8.5"
 rustls-pemfile = "2.2.0"
 rustls-pki-types = "1.15.1"
@@ -324,7 +321,7 @@ taffy = { version = "0.15.0", default-features = false }
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 tokio = "1.53.3"
-tokio-boring = "5.2.0"
+tokio-boring = "5.3.0"
 tokio-openssl = "0.6.5"
 tokio-rustls = "0.26.6"
 tokio-socks = "0.5.3"

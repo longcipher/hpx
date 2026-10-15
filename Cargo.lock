@@ -1114,9 +1114,9 @@ dependencies = [
 
 [[package]]
 name = "boring"
-version = "5.2.0"
+version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47bf58283ad1560da95ab8dcbb6c71e18a89df30e6011e3582ddf755abe55c4a"
+checksum = "15483e6dd58f7de5b506198a8f33c2bd1e030beed2c2b5425be057f5e0e4a8ec"
 dependencies = [
  "bitflags 2.13.0",
  "boring-sys",
@@ -1127,9 +1127,9 @@ dependencies = [
 
 [[package]]
 name = "boring-sys"
-version = "5.2.0"
+version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6993efa9d9f0ebf3b0c02c8e868cfe37d0854cd021d51204480a91ce23d6e444"
+checksum = "4ebc865c335508b2eb7bdcfd35e644ce00ddf385a8feda9b5b9031d8b0b49c35"
 dependencies = [
  "bindgen 0.72.1",
  "cmake",
@@ -2342,7 +2342,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3138,7 +3138,7 @@ dependencies = [
 
 [[package]]
 name = "hpx"
-version = "2.5.30"
+version = "2.5.31"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -3175,7 +3175,6 @@ dependencies = [
  "memchr",
  "mime",
  "mime_guess",
- "moka",
  "openssl",
  "parking_lot",
  "percent-encoding",
@@ -3221,7 +3220,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-browser"
-version = "2.5.30"
+version = "2.5.31"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -3272,7 +3271,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-cli"
-version = "2.5.30"
+version = "2.5.31"
 dependencies = [
  "axum",
  "clap",
@@ -3297,7 +3296,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-dl"
-version = "2.5.30"
+version = "2.5.31"
 dependencies = [
  "ahash",
  "arrayvec",
@@ -3331,7 +3330,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-emulation"
-version = "2.5.30"
+version = "2.5.31"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -3357,7 +3356,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-h3"
-version = "2.5.30"
+version = "2.5.31"
 dependencies = [
  "assert_matches",
  "bytes",
@@ -3375,7 +3374,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-streams"
-version = "2.5.30"
+version = "2.5.31"
 dependencies = [
  "arrow",
  "bytes",
@@ -3396,7 +3395,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-yawc"
-version = "2.5.30"
+version = "2.5.31"
 dependencies = [
  "axum",
  "axum-core",
@@ -3439,7 +3438,7 @@ dependencies = [
 
 [[package]]
 name = "hpxless"
-version = "2.5.30"
+version = "2.5.31"
 dependencies = [
  "clap",
  "eyre",
@@ -4494,7 +4493,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5407,7 +5406,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5849,14 +5848,14 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "rustls"
-version = "0.23.45"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "aws-lc-rs",
  "log",
@@ -7108,7 +7107,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7376,9 +7375,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-boring"
-version = "5.2.0"
+version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80b0cb8797d5f375289c1d478929ac08f98c535d6d000dcd01de05ad703782cd"
+checksum = "eed262597ccbc7d443f02ee8d20eb845cea242bbea79e7481ba6218003214970"
 dependencies = [
  "boring",
  "boring-sys",
@@ -8177,7 +8176,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

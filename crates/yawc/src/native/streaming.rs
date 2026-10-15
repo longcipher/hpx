@@ -240,6 +240,7 @@ where
     /// - First fragment: `OpCode::{Text,Binary}` with `FIN=false`
     /// - Middle fragments: `OpCode::Continuation` with `FIN=false`
     /// - Final fragment: `OpCode::Continuation` with `FIN=true`
+    #[cfg_attr(feature = "hotpath", hotpath::measure(impl_type = "Streaming"))]
     pub fn poll_next_frame(&mut self, cx: &mut Context<'_>) -> Poll<Result<Frame>> {
         let wake_proxy = Arc::clone(&self.wake_proxy);
         wake_proxy.set_waker(ContextKind::Read, cx.waker());

@@ -88,6 +88,9 @@ tracing = ["http2/tracing", "dep:tracing"]
 # Enable hotpath profiling instrumentation.
 hotpath = ["dep:hotpath", "hpx-yawc/hotpath"]
 
+# Enable hotpath per-function allocation profiling (implies `hotpath`).
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "hpx-yawc/hotpath-alloc"]
+
 # Enable TLS key logging for debugging (writes session keys to SSLKEYLOGFILE).
 # NOT for production — disabled by default for security.
 keylog = ["dep:scc"]
@@ -232,7 +235,6 @@ ipnet = { workspace = true }
 memchr = { workspace = true, optional = true }
 mime = { workspace = true, optional = true }
 mime_guess = { workspace = true, optional = true }
-moka = { workspace = true, features = ["sync"] }
 openssl = { workspace = true, optional = true }
 parking_lot = { workspace = true }
 percent-encoding = { workspace = true }
@@ -468,7 +470,7 @@ required-features = ["hotpath", "ws"]
 
 [[example]]
 name = "hpx_hotpath_load"
-required-features = ["hotpath", "ws"]
+required-features = ["ws"]
 
 [[example]]
 name = "sse_stream"

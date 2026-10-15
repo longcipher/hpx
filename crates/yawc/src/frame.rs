@@ -255,8 +255,6 @@ pub struct Frame {
     pub(crate) payload: Bytes,
 }
 
-pub(crate) const MAX_HEAD_SIZE: usize = 16;
-
 impl Frame {
     /// Creates a text frame with the given payload.
     ///
@@ -384,6 +382,7 @@ impl Frame {
     ///
     /// let frame = Frame::close(CloseCode::Normal, b"Goodbye");
     /// ```
+    #[cfg_attr(feature = "hotpath", hotpath::measure(impl_type = "Frame"))]
     pub fn close(code: CloseCode, reason: impl AsRef<[u8]>) -> Self {
         let code16 = u16::from(code);
         let reason: &[u8] = reason.as_ref();
@@ -467,6 +466,7 @@ impl Frame {
     ///
     /// # Returns
     /// A new instance of `Frame` with the specified parameters.
+    #[cfg_attr(feature = "hotpath", hotpath::measure(impl_type = "Frame"))]
     pub(super) fn new(
         fin: bool,
         opcode: OpCode,

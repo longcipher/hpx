@@ -13,7 +13,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use moka::{policy::EvictionPolicy, sync::Cache};
 use parking_lot::Mutex;
 use tokio::sync::oneshot;
 
@@ -84,9 +83,24 @@ struct PoolShard<T, K: Key> {
     connecting: HashSet<K>,
     // These are internal Conns sitting in the event loop in the KeepAlive
     // state, waiting to receive a new Request to send on the socket.
-    idle: Cache<K, Arc<Mutex<Vec<Idle<T>>>>>,
-    // Tracks active keys for iteration (moka doesn't support iteration).
+    //
+    // This used to be a `moka::sync::Cache`, which bought LRU eviction at the
+    // cost of its internal sharded-concurrency machinery on every access plus
+    // a `run_pending_tasks()` housekeeping flush on every `put`. Profiling
+    // showed that flush stalling the shard lock for hundreds of microseconds
+    // under load (the pool's p99.9), for an eviction policy that never fires
+    // unless `max_pool_size` is configured. It is now a plain map, with
+    // capacity enforced manually in `evict_over_capacity`.
+    idle: HashMap<K, Arc<Mutex<Vec<Idle<T>>>>>,
+    // Tracks active keys for iteration.
+    //
+    // Ordered least-recently-used first, so capacity eviction can pop from the
+    // front. Only `put` reorders it — the checkout hot path does not touch the
+    // ordering, and the number of distinct hosts is tiny.
     idle_keys: Vec<K>,
+    // Upper bound on the number of distinct hosts tracked (`max_pool_size`).
+    // `usize::MAX` when unset, so `evict_over_capacity` is a single compare.
+    max_capacity: usize,
     max_idle_per_host: usize,
     // These are outstanding Checkouts that are waiting for a socket to be
     // able to send a Request one. This is used when "racing" for a new
@@ -369,16 +383,16 @@ impl<T: Send + 'static, K: Key> PoolShard<T, K> {
         E: Executor<exec::BoxSendFuture> + Send + Sync + Clone + 'static,
         M: Timer + Send + Sync + Clone + 'static,
     {
+        // Capacity counts distinct hosts, matching what moka's `max_capacity`
+        // counted when it owned the map.
         let max_capacity = config
             .max_pool_size
-            .map_or(u64::MAX, |n| u64::from(n.get()));
+            .map_or(usize::MAX, |n| n.get() as usize);
         Self {
             connecting: HashSet::with_hasher(HASHER),
-            idle: Cache::builder()
-                .max_capacity(max_capacity)
-                .eviction_policy(EvictionPolicy::lru())
-                .build(),
+            idle: HashMap::with_hasher(HASHER),
             idle_keys: Vec::new(),
+            max_capacity,
             idle_interval_ref: None,
             max_idle_per_host: config.max_idle_per_host,
             waiters: HashMap::with_hasher(HASHER),
@@ -437,7 +451,7 @@ impl<T: Poolable, K: Key> PoolShard<T, K> {
         if let Some(value) = value {
             // Polonius: borrow from `self.idle.get()` is dead in the else branch,
             // so the explicit scope block is no longer needed.
-            let idle_list = if let Some(list) = self.idle.get(key) {
+            let idle_list = if let Some(list) = self.idle.get(key).cloned() {
                 list
             } else {
                 let new_list = Arc::new(Mutex::new(Vec::new()));
@@ -458,9 +472,8 @@ impl<T: Poolable, K: Key> PoolShard<T, K> {
                 idle_at: Instant::now(),
             });
 
-            // Flush pending moka operations so capacity eviction is visible.
-            self.idle.run_pending_tasks();
-
+            drop(idle_guard);
+            self.evict_over_capacity();
             self.spawn_idle_interval(pool_ref, shard_index);
         } else {
             trace!("put; found waiter for {:?}", key);
@@ -484,8 +497,8 @@ impl<T: Poolable, K: Key> PoolShard<T, K> {
         }
 
         // Even without an idle timeout, periodic sweeps are required to prune
-        // bookkeeping: closed connections and keys evicted from the moka cache
-        // would otherwise accumulate in `idle_keys` forever.
+        // bookkeeping: closed connections and capacity-evicted keys would
+        // otherwise accumulate in `idle_keys` forever.
         const NO_TIMEOUT_SWEEP: Duration = Duration::from_secs(90);
 
         let dur = self.timeout.unwrap_or(NO_TIMEOUT_SWEEP);
@@ -546,6 +559,26 @@ impl<T, K: Key> PoolShard<T, K> {
 }
 
 impl<T: Poolable, K: Key> PoolShard<T, K> {
+    /// Drops the least-recently-used host key while the pool is over capacity.
+    ///
+    /// moka used to enforce `max_pool_size` through its LRU policy; with a plain
+    /// map the bookkeeping is manual. `idle_keys` is ordered LRU-first, so this
+    /// pops from the front. With the default config (`max_pool_size` unset) the
+    /// capacity is `usize::MAX` and this is a single compare.
+    ///
+    /// Dropping a key drops its idle connections — they are only parked sockets,
+    /// so eviction closes them when the `Idle` handles are dropped.
+    fn evict_over_capacity(&mut self) {
+        while self.idle.len() > self.max_capacity {
+            let Some(evict) = self.idle_keys.first().cloned() else {
+                break;
+            };
+            trace!("pool over capacity, evicting host {:?}", evict);
+            self.idle.remove(&evict);
+            self.idle_keys.remove(0);
+        }
+    }
+
     /// This should *only* be called by the IdleTask
     fn clear_expired(&mut self) {
         let now = Instant::now();
@@ -553,7 +586,7 @@ impl<T: Poolable, K: Key> PoolShard<T, K> {
         match self.timeout {
             Some(dur) if dur != Duration::ZERO => {
                 self.idle_keys.retain(|key| {
-                    match self.idle.get(key) {
+                    match self.idle.get(key).cloned() {
                         Some(arc_list) => {
                             let mut list = arc_list.lock();
                             list.retain(|entry| {
@@ -583,37 +616,38 @@ impl<T: Poolable, K: Key> PoolShard<T, K> {
                                 true
                             }
                         }
-                        None => false, // evicted by moka or removed elsewhere
+                        None => false, // evicted or removed elsewhere
                     }
                 });
             }
             _ => {
                 // No idle timeout configured: connections never expire by
                 // age, but bookkeeping must still drop entries whose
-                // connections were closed elsewhere and keys evicted from the
-                // moka cache — otherwise `idle_keys` grows without bound.
-                self.idle_keys.retain(|key| match self.idle.get(key) {
-                    Some(arc_list) => {
-                        let mut list = arc_list.lock();
-                        list.retain(|entry| {
-                            if entry.value.is_open() {
-                                true
-                            } else {
-                                trace!("sweep evicting closed connection for {:?}", key);
-                                false
-                            }
-                        });
+                // connections were closed elsewhere — otherwise `idle_keys`
+                // grows without bound.
+                self.idle_keys
+                    .retain(|key| match self.idle.get(key).cloned() {
+                        Some(arc_list) => {
+                            let mut list = arc_list.lock();
+                            list.retain(|entry| {
+                                if entry.value.is_open() {
+                                    true
+                                } else {
+                                    trace!("sweep evicting closed connection for {:?}", key);
+                                    false
+                                }
+                            });
 
-                        if list.is_empty() {
-                            trace!("sweep removing empty key {:?}", key);
-                            self.idle.remove(key);
-                            false
-                        } else {
-                            true
+                            if list.is_empty() {
+                                trace!("sweep removing empty key {:?}", key);
+                                self.idle.remove(key);
+                                false
+                            } else {
+                                true
+                            }
                         }
-                    }
-                    None => false, // evicted by moka or removed elsewhere
-                });
+                        None => false, // evicted by moka or removed elsewhere
+                    });
             }
         }
     }
@@ -1104,7 +1138,7 @@ mod tests {
         let poll_once = PollOnce(&mut checkout);
         // checkout.await should clean out the expired
         poll_once.await;
-        assert!(pool.locked(&key).idle.get(&key).is_none());
+        assert!(!pool.locked(&key).idle.contains_key(&key));
     }
 
     #[test]
@@ -1167,7 +1201,7 @@ mod tests {
         // Now wait passed the minimum interval more
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        assert!(pool.locked(&key).idle.get(&key).is_none());
+        assert!(!pool.locked(&key).idle.contains_key(&key));
     }
 
     #[tokio::test]
@@ -1249,7 +1283,7 @@ mod tests {
             },
         );
 
-        assert!(pool.locked(&key).idle.get(&key).is_none());
+        assert!(!pool.locked(&key).idle.contains_key(&key));
     }
 
     #[tokio::test]
@@ -1271,9 +1305,9 @@ mod tests {
         pool.pooled(c(key2.clone()), Uniq(5));
         pool.pooled(c(key3.clone()), Uniq(99));
 
-        assert!(pool.locked(&key1).idle.get(&key1).is_none());
-        assert!(pool.locked(&key2).idle.get(&key2).is_some());
-        assert!(pool.locked(&key3).idle.get(&key3).is_some());
+        assert!(!pool.locked(&key1).idle.contains_key(&key1));
+        assert!(pool.locked(&key2).idle.contains_key(&key2));
+        assert!(pool.locked(&key3).idle.contains_key(&key3));
     }
 
     /// Phase 1 Task 1.2: the `Http3` variant exists on `Ver` and is distinct

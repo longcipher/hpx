@@ -9,6 +9,7 @@ use super::error::{Error, ErrorKind};
     clippy::expect_used,
     reason = "parts only contains a cloned path_and_query, which is always a valid Uri"
 )]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(super) fn origin_form(uri: &mut Uri) {
     let path = match uri.path_and_query() {
         Some(path) if path.as_str() != "/" => {
@@ -60,6 +61,7 @@ pub(super) fn authority_form(uri: &mut Uri) {
     clippy::expect_used,
     reason = "scheme+authority+static '/' path always builds a valid base URI"
 )]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(super) fn normalize_uri<B>(req: &mut Request<B>, is_http_connect: bool) -> Result<Uri, Error> {
     // Clone only the already-parsed scheme + authority instead of the full URI
     // (which would also copy path_and_query); the base URI needs nothing else.

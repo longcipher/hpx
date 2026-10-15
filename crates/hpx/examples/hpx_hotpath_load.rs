@@ -16,6 +16,27 @@
 //! ```text
 //! cargo run --release -p hpx --example hpx_hotpath_load --features 'hotpath,hotpath-alloc,ws'
 //! ```
+//!
+//! # Two-process mode
+//!
+//! By default the server and the load generator share one process and one tokio
+//! runtime, so the client's CPU is indistinguishable from the server's and the
+//! measured throughput swings by ±20% run to run — far too noisy to resolve
+//! client-side optimizations. Splitting them into two processes separates the
+//! runtimes and makes client-side changes measurable:
+//!
+//! ```text
+//! # terminal 1
+//! HPX_LOAD_MODE=server HPX_LOAD_PORT=60123 cargo run --release ... &
+//! # terminal 2
+//! HPX_LOAD_MODE=client HPX_LOAD_HTTP_ADDR=127.0.0.1:60123 \
+//!   HPX_LOAD_WS_URL=ws://127.0.0.1:60123/ws cargo run --release ...
+//! ```
+//!
+//! Workload size is also overridable (`HPX_HTTP_TASKS`, `HPX_HTTP_PER_TASK`,
+//! `HPX_WS_ROUND_TRIPS`); the defaults run for only ~0.35 s, which is too short
+//! to average out scheduling noise. Raising `HPX_HTTP_PER_TASK` to ~25k makes
+//! each run several seconds long.
 
 #![expect(
     clippy::print_stdout,
@@ -102,6 +123,13 @@ async fn echo_ws(mut ws: WebSocket) {
     }
 }
 
+fn env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(default)
+}
+
 async fn start_server() -> (String, String) {
     let app = Router::new()
         .route(
@@ -116,7 +144,10 @@ async fn start_server() -> (String, String) {
         )
         .route("/ws", get(ws_handler));
 
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    // Port 0 lets the OS pick; `HPX_LOAD_PORT` pins it so a separate client
+    // process can find the server (see the two-process notes in the module doc).
+    let port = u16::try_from(env_usize("HPX_LOAD_PORT", 0)).expect("port in range");
+    let listener = TcpListener::bind(("127.0.0.1", port)).await.expect("bind");
     let addr = listener.local_addr().expect("local addr");
     tokio::spawn(async move {
         axum::serve(listener, app).await.expect("serve");
@@ -163,10 +194,38 @@ fn print_hpx_report() {
     }
 }
 
+// `#[hotpath::main]` only exists with the `hotpath` feature. Gating it lets the
+// same example run as a *production* benchmark (no per-function timers, no
+// futures tracking) with `--features ws`, which is what you want when comparing
+// builds for performance rather than looking for hotspots. It must stay below
+// `#[tokio::main]`: attribute macros apply bottom-up, so `hotpath::main` has to
+// see the `async fn` before `tokio::main` rewrites it.
 #[tokio::main]
-#[hotpath::main(percentiles = [50.0, 90.0, 99.0, 99.9], limit = 40)]
+#[cfg_attr(
+    feature = "hotpath",
+    hotpath::main(percentiles = [50.0, 90.0, 99.0, 99.9], limit = 40)
+)]
 async fn main() -> Result<(), hpx::Error> {
-    let (http_addr, ws_url) = start_server().await;
+    let (http_addr, ws_url) = match std::env::var("HPX_LOAD_MODE").unwrap_or_default().as_str() {
+        // Serve only, and stay up until the client process is done with us.
+        "server" => {
+            let (http_addr, ws_url) = start_server().await;
+            println!("[mode=server] http_addr={http_addr} ws_url={ws_url}");
+            std::future::pending::<()>().await;
+            return Ok(());
+        }
+        // Drive load only, against a server started with `HPX_LOAD_MODE=server`.
+        "client" => (
+            std::env::var("HPX_LOAD_HTTP_ADDR").expect("HPX_LOAD_HTTP_ADDR"),
+            std::env::var("HPX_LOAD_WS_URL").expect("HPX_LOAD_WS_URL"),
+        ),
+        _ => start_server().await,
+    };
+
+    let http_tasks = env_usize("HPX_HTTP_TASKS", HTTP_TASKS);
+    let http_per_task = env_usize("HPX_HTTP_PER_TASK", HTTP_PER_TASK);
+    let ws_round_trips = env_usize("HPX_WS_ROUND_TRIPS", WS_ROUND_TRIPS);
+
     // Set NO_LAYER=1 to bypass HotpathLayer and measure the plain typed client
     // stack (also avoids forcing boxed dispatch).
     let mut builder = Client::builder();
@@ -179,14 +238,14 @@ async fn main() -> Result<(), hpx::Error> {
     let http_start = Instant::now();
     let samples = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Duration>::new()));
     let mut handles = Vec::new();
-    for task in 0..HTTP_TASKS {
+    for task in 0..http_tasks {
         let client = std::sync::Arc::clone(&client);
         let samples = std::sync::Arc::clone(&samples);
         let base = http_addr.clone();
         handles.push(tokio::spawn(async move {
-            let mut local = Vec::with_capacity(HTTP_PER_TASK);
-            for i in 0..HTTP_PER_TASK {
-                let id = (task * HTTP_PER_TASK + i) % 100;
+            let mut local = Vec::with_capacity(http_per_task);
+            for i in 0..http_per_task {
+                let id = (task * http_per_task + i) % 100;
                 let start = Instant::now();
                 let resp = client
                     .get(format!("http://{base}/users/{id}"))
@@ -209,8 +268,8 @@ async fn main() -> Result<(), hpx::Error> {
         .expect("samples");
     println!(
         "[http] {} requests in {http_total:?} ({:.0} req/s)",
-        HTTP_TASKS * HTTP_PER_TASK,
-        (HTTP_TASKS * HTTP_PER_TASK) as f64 / http_total.as_secs_f64()
+        http_tasks * http_per_task,
+        (http_tasks * http_per_task) as f64 / http_total.as_secs_f64()
     );
     print_percentiles("http", http_samples);
 
@@ -227,8 +286,8 @@ async fn main() -> Result<(), hpx::Error> {
     let (mut tx, mut rx) = ws.split();
 
     let ws_start = Instant::now();
-    let mut ws_samples = Vec::with_capacity(WS_ROUND_TRIPS);
-    for _ in 0..WS_ROUND_TRIPS {
+    let mut ws_samples = Vec::with_capacity(ws_round_trips);
+    for _ in 0..ws_round_trips {
         let start = Instant::now();
         tx.send(Message::text("ping")).await?;
         let echo = rx.next().await.expect("echo").expect("echo ok");
@@ -237,8 +296,8 @@ async fn main() -> Result<(), hpx::Error> {
     }
     let ws_total = ws_start.elapsed();
     println!(
-        "[ws] {WS_ROUND_TRIPS} echo round trips in {ws_total:?} ({:.0} msg/s)",
-        WS_ROUND_TRIPS as f64 / ws_total.as_secs_f64()
+        "[ws] {ws_round_trips} echo round trips in {ws_total:?} ({:.0} msg/s)",
+        ws_round_trips as f64 / ws_total.as_secs_f64()
     );
     print_percentiles("ws", ws_samples);
     tx.close(hpx::ws::message::CloseCode::NORMAL, "done")

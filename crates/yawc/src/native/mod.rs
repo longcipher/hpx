@@ -498,6 +498,7 @@ impl FragmentLayer {
     /// Fragments an outgoing frame if necessary and queues the fragments.
     ///
     /// Returns an error if the user tries to manually fragment while auto-fragmentation is enabled.
+    #[cfg_attr(feature = "hotpath", hotpath::measure(impl_type = "FragmentLayer"))]
     fn fragment_outgoing(&mut self, frame: Frame) -> Result<()> {
         // Check for invalid manual fragmentation with auto-fragmentation enabled
         if !frame.is_fin() && self.fragment_size.is_some() {
@@ -541,6 +542,7 @@ impl FragmentLayer {
     /// - `Ok(Some(frame))` if a complete frame is ready (either non-fragmented or fully reassembled)
     /// - `Ok(None)` if this is a fragment and we're still waiting for more
     /// - `Err` if there's a protocol violation or timeout
+    #[cfg_attr(feature = "hotpath", hotpath::measure(impl_type = "FragmentLayer"))]
     fn assemble_incoming(&mut self, mut frame: Frame) -> Result<Option<Frame>> {
         use bytes::BufMut;
 
@@ -1205,6 +1207,7 @@ where
     }
 
     /// Polls for the next frame in the WebSocket stream.
+    #[cfg_attr(feature = "hotpath", hotpath::measure(impl_type = "WebSocket"))]
     pub fn poll_next_frame(&mut self, cx: &mut Context<'_>) -> Poll<Result<Frame>> {
         loop {
             let frame = match ready!(self.streaming.poll_next_frame(cx)) {
@@ -1261,6 +1264,7 @@ where
         self.negotiated_extensions.is_some()
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure(impl_type = "WebSocket"))]
     fn on_frame(&mut self, frame: Frame) -> Result<Option<Frame>> {
         let frame = match self.fragment_layer.assemble_incoming(frame)? {
             Some(frame) => frame,

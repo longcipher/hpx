@@ -34,7 +34,17 @@ pub(crate) struct ConnectExtra {
 /// HTTP/1. Falls back to the original URI if the scheme/authority cannot be
 /// preserved (e.g. non-http schemes such as Unix sockets).
 #[inline]
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn normalize_pool_key_uri(uri: &Uri) -> Uri {
+    // Fast path: `HttpClient::request` already builds the pool key from a
+    // canonical `scheme://authority/` URI (see `util::normalize_uri`), so the
+    // overwhelmingly common case is already normalized. `Uri::from_parts`
+    // re-validates and re-allocates the serialized `ByteStr`, which is pure
+    // per-request waste — skip it when there is nothing to rewrite.
+    if matches!(uri.path_and_query(), Some(path) if path.as_str() == "/") {
+        return uri.clone();
+    }
+
     // `Uri::from_parts` requires a path when scheme/authority is present, so
     // normalize every origin to a single canonical "/" path — the key then
     // collapses all paths/queries on the same host into one pooled entry.
@@ -49,6 +59,7 @@ fn normalize_pool_key_uri(uri: &Uri) -> Uri {
 impl ConnectExtra {
     /// Create a new [`ConnectExtra`] with the given URI and extra.
     #[inline]
+    #[cfg_attr(feature = "hotpath", hotpath::measure(impl_type = "ConnectExtra"))]
     pub(super) fn new<T>(uri: Uri, extra: T) -> Self
     where
         T: Into<Option<RequestOptions>>,

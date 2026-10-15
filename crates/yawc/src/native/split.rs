@@ -232,6 +232,7 @@ impl ReadHalf {
     ///
     /// On connection closure (receiving Close frame or stream end),
     /// returns `Poll::Ready(Err(WebSocketError::ConnectionClosed))`.
+    #[cfg_attr(feature = "hotpath", hotpath::measure(impl_type = "ReadHalf"))]
     pub fn poll_frame<S>(&mut self, stream: &mut S, cx: &mut Context<'_>) -> Poll<Result<Frame>>
     where
         S: futures::Stream<Item = Result<Frame>> + Unpin,
@@ -409,6 +410,7 @@ impl WriteHalf {
     /// - Non-control frames are compressed if compression is enabled
     /// - Client frames are masked per WebSocket protocol requirement
     /// - Close frames transition the connection to closing state
+    #[cfg_attr(feature = "hotpath", hotpath::measure(impl_type = "WriteHalf"))]
     pub fn start_send<S>(&mut self, stream: &mut S, frame: Frame) -> Result<()>
     where
         S: futures::Sink<Frame, Error = WebSocketError> + Unpin,
@@ -451,6 +453,7 @@ impl WriteHalf {
     /// # Returns
     /// - `Poll::Ready(Ok(()))` if all pending frames have been flushed.
     /// - `Poll::Pending` if there are still frames waiting to be flushed.
+    #[cfg_attr(feature = "hotpath", hotpath::measure(impl_type = "WriteHalf"))]
     pub fn poll_flush<S>(&mut self, stream: &mut S, cx: &mut Context<'_>) -> Poll<Result<()>>
     where
         S: futures::Sink<Frame, Error = WebSocketError> + Unpin,

@@ -105,6 +105,13 @@ where
         self.read_buf.as_ref()
     }
 
+    /// Removes and returns the first `n` bytes of the read buffer.
+    ///
+    /// No copy: the bytes are carved out of the existing `BytesMut` allocation.
+    pub(crate) fn take_read_buf(&mut self, n: usize) -> Bytes {
+        self.read_buf.split_to(n).freeze()
+    }
+
     /// Return the "allocated" available space, not the potential space
     /// that could be allocated in the future.
     fn read_buf_remaining_mut(&self) -> usize {
@@ -149,6 +156,7 @@ where
         }
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub(super) fn parse<S>(
         &mut self,
         cx: &mut Context<'_>,
@@ -235,6 +243,7 @@ where
         self.read_blocked
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub(crate) fn poll_flush(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         if self.flush_pipeline && !self.read_buf.is_empty() {
             Poll::Ready(Ok(()))
@@ -243,6 +252,29 @@ where
         } else {
             if matches!(self.write_buf.strategy, WriteStrategy::Flatten) {
                 return self.poll_flush_flattened(cx);
+            }
+
+            // A single contiguous chunk needs neither the 1 KB `IoSlice`
+            // scratch array nor a vectored write. `Buffered::new` selects the
+            // `Queue` strategy whenever the transport supports vectored writes
+            // (all TCP sockets do), so this is the shape every header-only
+            // request takes — going straight to `poll_write` skips 1024 bytes
+            // of stack setup per request and saves the `writev` indirection.
+            if self.write_buf.chunks_count() == 1 {
+                loop {
+                    let n = {
+                        let buf = self.write_buf.chunk();
+                        ready!(Pin::new(&mut self.io).poll_write(cx, buf))?
+                    };
+                    if n == 0 {
+                        return Poll::Ready(Err(io::ErrorKind::WriteZero.into()));
+                    }
+                    self.write_buf.advance(n);
+                    if self.write_buf.remaining() == 0 {
+                        break;
+                    }
+                }
+                return Pin::new(&mut self.io).poll_flush(cx);
             }
 
             const MAX_WRITEV_BUFS: usize = 64;
@@ -537,6 +569,16 @@ where
                 self.queue.push(buf.into());
             }
         }
+    }
+
+    /// Number of distinct buffers currently pending.
+    ///
+    /// `1` means the pending write is contiguous, so it can be sent with a
+    /// plain `poll_write` instead of going through the `IoSlice` scratch array
+    /// that [`WriteBuf::chunks_vectored`] requires.
+    #[inline]
+    fn chunks_count(&self) -> usize {
+        usize::from(self.headers.has_remaining()) + self.queue.bufs_cnt()
     }
 
     fn can_buffer(&self) -> bool {

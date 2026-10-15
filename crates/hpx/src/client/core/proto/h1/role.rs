@@ -1,11 +1,8 @@
-use std::{
-    fmt::{self, Write as _},
-    mem::MaybeUninit,
-};
+use std::mem::MaybeUninit;
 
 use bytes::{Bytes, BytesMut};
 use http::{
-    Method, StatusCode, Version,
+    Method, StatusCode, Uri, Version,
     header::{self, Entry, HeaderMap, HeaderName, HeaderValue},
 };
 #[cfg(feature = "http1")]
@@ -309,8 +306,8 @@ impl Http1Transaction for Client {
 
         extend(dst, msg.head.subject.0.as_str().as_bytes());
         extend(dst, b" ");
-        // TODO: add API to http::Uri to encode without std::fmt
-        let _ = write!(FastWrite(dst), "{} ", msg.head.subject.1);
+        write_uri(dst, &msg.head.subject.1);
+        extend(dst, b" ");
 
         match msg.head.version {
             Version::HTTP_10 => extend(dst, b"HTTP/1.0"),
@@ -685,6 +682,7 @@ fn record_header_indices(
     Ok(())
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn write_headers(headers: &HeaderMap, dst: &mut Vec<u8>) {
     for (name, value) in headers {
         extend(dst, name.as_ref());
@@ -713,18 +711,32 @@ fn write_headers_original_case(
     });
 }
 
-struct FastWrite<'a>(&'a mut Vec<u8>);
-
-impl fmt::Write for FastWrite<'_> {
-    #[inline]
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        extend(self.0, s.as_bytes());
-        Ok(())
+/// Serializes a request-target into `dst` without going through `std::fmt`.
+///
+/// `Uri`'s `Display` impl routes every byte through the formatting machinery
+/// (`Arguments` -> `Formatter` -> `write_str`), which is measurably slower than
+/// appending the already-validated `str` slices `Uri` stores internally. This
+/// runs once per request on the HTTP/1 hot path, so the difference shows up in
+/// profiles.
+///
+/// The three HTTP/1 request-target forms are all covered:
+/// - origin-form (path + query) — the common case for non-proxied requests;
+/// - absolute-form (scheme `://` authority + path) — used through a proxy;
+/// - authority-form (host[:port]) — used by `CONNECT`.
+#[inline]
+fn write_uri(dst: &mut Vec<u8>, uri: &Uri) {
+    // Byte-for-byte equivalent of `impl Display for Uri`.
+    if let Some(scheme) = uri.scheme() {
+        extend(dst, scheme.as_str().as_bytes());
+        extend(dst, b"://");
     }
-
-    #[inline]
-    fn write_fmt(&mut self, args: fmt::Arguments<'_>) -> fmt::Result {
-        fmt::write(self, args)
+    if let Some(authority) = uri.authority() {
+        extend(dst, authority.as_str().as_bytes());
+    }
+    extend(dst, uri.path().as_bytes());
+    if let Some(query) = uri.query() {
+        extend(dst, b"?");
+        extend(dst, query.as_bytes());
     }
 }
 
@@ -736,13 +748,39 @@ fn extend(dst: &mut Vec<u8>, data: &[u8]) {
 #[cfg(test)]
 mod tests {
     use bytes::BytesMut;
-    use http::{HeaderMap, HeaderValue};
+    use http::{HeaderMap, HeaderValue, Uri};
 
-    use super::{Client, write_headers_original_case};
+    use super::{Client, write_headers_original_case, write_uri};
     use crate::{
         client::core::proto::h1::{Http1Transaction, ParseContext},
         header::OrigHeaderMap,
     };
+
+    #[test]
+    fn write_uri_matches_display_for_every_request_target_form() {
+        // origin-form (the common non-proxied case), absolute-form (proxy) and
+        // authority-form (CONNECT) must all serialize byte-identically to
+        // `Uri`'s `Display`, which is what the request line used before.
+        for raw in [
+            "/",
+            "/users/42?a=1&b=2",
+            "/a/b/c",
+            "http://example.com:8080/path?q=1",
+            "https://example.com/",
+            "example.com:443",
+        ] {
+            let uri: Uri = raw.parse().expect("valid uri");
+            let mut out = Vec::new();
+            write_uri(&mut out, &uri);
+            assert_eq!(String::from_utf8(out).unwrap(), uri.to_string(), "{raw}");
+        }
+
+        // A path-only `Uri` (as produced by `util::origin_form`) has no
+        // scheme/authority, so only the path is written.
+        let mut out = Vec::new();
+        write_uri(&mut out, &Uri::from_static("/users/7"));
+        assert_eq!(out, b"/users/7");
+    }
 
     #[test]
     fn write_headers_original_case_preserves_headers_and_output() {
