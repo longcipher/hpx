@@ -221,29 +221,32 @@ mod tests {
         assert_eq!(lim.bytes_per_second(), 0);
     }
 
-    #[tokio::test]
+    // Paused clock: if `wait_for` ever sleeps, the tokio clock auto-advances
+    // to the deadline and `elapsed` reflects it, so the assertion still catches
+    // regressions while staying immune to wall-clock jitter on loaded runners.
+    #[tokio::test(start_paused = true)]
     async fn test_unlimited_returns_immediately() {
         let lim = SpeedLimiter::unlimited();
-        let start = Instant::now();
+        let start = tokio::time::Instant::now();
         lim.wait_for(1_000_000).await.unwrap();
         let elapsed = start.elapsed();
         assert!(elapsed < Duration::from_millis(50));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_zero_bytes_returns_immediately() {
         let lim = SpeedLimiter::new(100);
-        let start = Instant::now();
+        let start = tokio::time::Instant::now();
         lim.wait_for(0).await.unwrap();
         let elapsed = start.elapsed();
         assert!(elapsed < Duration::from_millis(50));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_burst_within_capacity() {
         let lim = SpeedLimiter::new(1000);
         // 200 bytes < 1000-byte burst capacity → should complete immediately.
-        let start = Instant::now();
+        let start = tokio::time::Instant::now();
         lim.wait_for(200).await.unwrap();
         assert!(start.elapsed() < Duration::from_millis(50));
     }
@@ -426,10 +429,10 @@ mod tests {
         assert!(elapsed <= Duration::from_secs(5), "Too slow: {elapsed:?}");
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_composite_unlimited_skips_both() {
         let comp = CompositeLimiter::unlimited();
-        let start = Instant::now();
+        let start = tokio::time::Instant::now();
         comp.wait_for(1_000_000).await.unwrap();
         let elapsed = start.elapsed();
         assert!(elapsed < Duration::from_millis(50));
