@@ -15,7 +15,7 @@ exclude = [
 resolver = "3"
 
 [workspace.package]
-version = "2.5.31"
+version = "2.5.32"
 edition = "2024"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license = "Apache-2.0"
@@ -181,6 +181,11 @@ zero_sized_map_values = "warn"
 # quite mature enough for use in our codebase and some we don't really want.
 # Explicitly listing should make it easier to fix in the future.
 as_ptr_cast_mut = "allow"
+# Left off deliberately: `just lint` runs clippy with `-D warnings`, and
+# enabling this lint surfaces ~31 pre-existing violations across the protocol
+# parsers (`core/proto/h1/*`), connection state machines, and browser page
+# logic. Turning it on requires refactoring those hot paths as a separate,
+# measured change rather than as a lint flip.
 cognitive_complexity = "allow"
 debug_assert_with_mut_call = "allow"
 fallible_impl_from = "allow"
@@ -208,16 +213,16 @@ all = "warn"
 # kept together in one place. On a version bump, update [workspace.package]
 # below and these eight lines (single find/replace). Each crate's own version
 # still uses `version.workspace = true` in its manifest.
-hpx = { path = "crates/hpx", version = "2.5.31" }
-hpx-browser = { path = "crates/hpx-browser", version = "2.5.31" }
-hpx-dl = { path = "crates/hpx-dl", version = "2.5.31" }
-hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.31" }
-hpx-h3 = { path = "crates/hpx-h3", version = "2.5.31" }
-hpx-yawc = { path = "crates/yawc", version = "2.5.31" }
+hpx = { path = "crates/hpx", version = "2.5.32" }
+hpx-browser = { path = "crates/hpx-browser", version = "2.5.32" }
+hpx-dl = { path = "crates/hpx-dl", version = "2.5.32" }
+hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.32" }
+hpx-h3 = { path = "crates/hpx-h3", version = "2.5.32" }
+hpx-yawc = { path = "crates/yawc", version = "2.5.32" }
 
 # external crates
 ahash = "0.8.12"
-arc-swap = "1.9.2"
+arc-swap = "1.9.3"
 arrayvec = "0.7.8"
 arrow = "60.0.0"
 assert_matches = "1.5.0"
@@ -225,9 +230,9 @@ async-trait = "0.1.92"
 axum = "0.8.9"
 axum-core = "0.5.6"
 base64-simd = "0.8.0"
-blitz-dom = "0.3.0-beta.3"
-blitz-html = "0.3.0-beta.3"
-blitz-traits = "0.3.0-beta.3"
+blitz-dom = "0.3.0-beta.4"
+blitz-html = "0.3.0-beta.4"
+blitz-traits = "0.3.0-beta.4"
 bon = "3.10.2"
 boring = "5.3.0"
 brotli = "9.0.0"
@@ -257,7 +262,7 @@ futures-rustls = "0.26.0"
 futures-util = "0.3.34"
 getrandom = "0.4.3"
 governor = "0.10"
-hickory-resolver = "=0.26.1"
+hickory-resolver = "0.26.3"
 hmac = "0.13.0"
 hotpath = "0.28.6"
 http = "1.5.0"
@@ -267,11 +272,11 @@ http2 = "0.5.20"
 httparse = "1.10.1"
 hyper = "1.12.0"
 hyper-util = "0.1.21"
-image = "=0.25.6"
+image = "0.25.10"
 ipnet = "2.12.2"
 jiff = "0.2.38"
 js-sys = "0.3.106"
-libc = "0.2.190"
+libc = "0.2.191"
 md-5 = "0.11.0"
 memchr = "2.8.3"
 mime = "0.3.17"
@@ -340,7 +345,7 @@ webpki-root-certs = "1.0.9"
 which = "8.0.6"
 windows-registry = "0.100.0"
 winnow = "1.0.4"
-zstd = "0.14.2"
+zstd = "0.14.3"
 
 [profile.dev]
 opt-level = 1
