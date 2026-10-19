@@ -10,8 +10,15 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 
+# The metalink fuzz target only exercises `parse_metalink`, which is pure Rust
+# (quick-xml) and never touches TLS or SQLite. Building with default features
+# pulls in `boring` (OpenSSL) and `libsqlite3-sys`, whose C globals trip
+# AddressSanitizer on Linux and abort the fuzzer before any input is tested.
+# Disable the unused native dependencies so the target links only what it needs.
 [dependencies.hpx-dl]
 path = ".."
+default-features = false
+features = ["metalink"]
 
 [[bin]]
 name = "metalink"
