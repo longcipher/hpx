@@ -72,7 +72,7 @@ fn build_runtime() -> eyre::Result<tokio::runtime::Runtime> {
 fn main() -> eyre::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
 
     // Apply timezone from env/flag
     if let Some(tz) = &cli.timezone {
@@ -80,27 +80,22 @@ fn main() -> eyre::Result<()> {
         unsafe { std::env::set_var("TZ", tz) };
     }
 
-    // Warn about globally-declared flags that are parsed but not yet wired into
+    // Reject globally-declared flags that are parsed but not yet wired into
     // any code path, so users are not silently misled by --help.
     if cli.follow {
-        tracing::warn!("--follow/-L is not yet implemented, ignoring");
+        eyre::bail!("--follow/-L is not yet implemented");
     }
     if cli.redirects.is_some() {
-        tracing::warn!("--redirects is not yet implemented, ignoring");
+        eyre::bail!("--redirects is not yet implemented");
     }
     if cli.obey_robots {
-        tracing::warn!("--obey-robots is not yet implemented, ignoring");
+        eyre::bail!("--obey-robots is not yet implemented");
     }
     if cli.v8_flags.is_some() {
-        tracing::warn!("--v8-flags is not yet implemented, ignoring");
+        eyre::bail!("--v8-flags is not yet implemented");
     }
     if cli.storage_dir.is_some() {
-        tracing::warn!("--storage-dir is not yet implemented, ignoring");
-    }
-
-    if cli.version {
-        println!("hpx {}", env!("CARGO_PKG_VERSION"));
-        return Ok(());
+        eyre::bail!("--storage-dir is not yet implemented");
     }
 
     if cli.help {
@@ -109,9 +104,18 @@ fn main() -> eyre::Result<()> {
         return Ok(());
     }
 
+    // Determine if this is a WebSocket URL before the match (avoids borrow conflict)
+    let is_ws = cli.is_websocket_url();
+
+    // Create a single runtime for all subcommands
+    let runtime = build_runtime()?;
+
+    // Take ownership of the subcommand, leaving `None` behind so the rest of
+    // `cli` remains usable afterwards (avoids partial-move borrow conflicts).
+    let command = cli.command.take();
+
     // Handle dl subcommand
-    if let Some(cli::Commands::Dl(dl_cmd)) = cli.command {
-        let runtime = build_runtime()?;
+    if let Some(cli::Commands::Dl(dl_cmd)) = command {
         return runtime.block_on(handle_dl_command(
             dl_cmd,
             cli.retry,
@@ -120,8 +124,9 @@ fn main() -> eyre::Result<()> {
         ));
     }
 
-    // Handle browser subcommands
-    match cli.command {
+    // Handle browser subcommands. Each arm returns directly: subcommands
+    // never fall through to the bare-URL request path below.
+    match command {
         Some(cli::Commands::Fetch {
             url,
             dump,
@@ -135,9 +140,8 @@ fn main() -> eyre::Result<()> {
             block,
         }) => {
             if !block.is_empty() {
-                tracing::warn!("--block is not yet implemented, ignoring");
+                eyre::bail!("--block is not yet implemented");
             }
-            let runtime = build_runtime()?;
             let config = browser::FetchConfig {
                 url,
                 dump,
@@ -160,7 +164,6 @@ fn main() -> eyre::Result<()> {
             timeout,
             quiet,
         }) => {
-            let runtime = build_runtime()?;
             let config = browser::ScrapeConfig {
                 urls,
                 eval,
@@ -182,12 +185,11 @@ fn main() -> eyre::Result<()> {
             quiet,
         }) => {
             if allow_file_access {
-                tracing::warn!("--allow-file-access is not yet implemented, ignoring");
+                eyre::bail!("--allow-file-access is not yet implemented");
             }
             if storage_dir.is_some() {
-                tracing::warn!("--storage-dir (serve) is not yet implemented, ignoring");
+                eyre::bail!("--storage-dir (serve) is not yet implemented");
             }
-            let runtime = build_runtime()?;
             let config = browser::ServeConfig {
                 port,
                 host,
@@ -204,13 +206,10 @@ fn main() -> eyre::Result<()> {
             eyre::bail!("internal error: Dl command reached unreachable handler");
         }
         Some(cli::Commands::ProxyTest { proxy }) => {
-            let runtime = build_runtime()?;
             return runtime.block_on(proxy_test::run(&proxy));
         }
         None => {}
     }
-
-    let runtime = build_runtime()?;
 
     let Some(url) = cli.url.as_deref() else {
         let mut cmd = Cli::command();
@@ -219,7 +218,7 @@ fn main() -> eyre::Result<()> {
         std::process::exit(1);
     };
 
-    let result = if cli.is_websocket_url() {
+    let result = if is_ws {
         runtime.block_on(ws::execute(&cli, url))
     } else {
         runtime.block_on(http::execute(&cli))

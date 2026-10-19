@@ -17,8 +17,34 @@ use crate::{
 pub(crate) async fn execute(cli: &Cli) -> Result<()> {
     let url = cli.url.as_deref().ok_or_eyre("no URL provided")?;
     let method_str = cli.method.as_str();
-    let method = hpx_method(cli.method);
 
+    let client = configure_client(cli)?;
+    let builder =
+        apply_request_parts(client.request(hpx_method(cli.method), url.to_string()), cli).await?;
+
+    if cli.dry_run {
+        print_dry_run(cli, method_str, url);
+        return Ok(());
+    }
+
+    let verbose = cli.verbose > 0;
+    let color = crate::output::use_color(cli.color, crate::output::is_terminal());
+
+    if verbose {
+        print_request_line(method_str, url, color);
+    }
+
+    let mut waterfall = TimingWaterfall::new();
+
+    let response = builder.send().await?;
+
+    waterfall.mark_request_done();
+
+    handle_response(cli, response, &mut waterfall, verbose, color).await
+}
+
+/// Build the [`Client`] from proxy, cookie, HTTP/3, and emulation flags.
+fn configure_client(cli: &Cli) -> Result<Client> {
     let mut client_builder = Client::builder();
 
     // Proxy
@@ -49,9 +75,14 @@ pub(crate) async fn execute(cli: &Cli) -> Result<()> {
         client_builder = client_builder.emulation(emulation);
     }
 
-    let client = client_builder.build()?;
-    let mut builder = client.request(method, url.to_string());
+    client_builder.build().map_err(Into::into)
+}
 
+/// Apply headers, cookies, body, forms, auth, and timeout to a request builder.
+async fn apply_request_parts(
+    mut builder: hpx::RequestBuilder,
+    cli: &Cli,
+) -> Result<hpx::RequestBuilder> {
     for (name, value) in cli.parsed_headers() {
         builder = builder.header(name, value);
     }
@@ -62,79 +93,10 @@ pub(crate) async fn execute(cli: &Cli) -> Result<()> {
         builder = builder.header("Cookie", &cookie_str);
     }
 
-    // Request body: --data or --json
-    if let Some(ref data) = cli.data {
-        let body = if data == "@-" {
-            let mut buf = Vec::new();
-            io::stdin()
-                .read_to_end(&mut buf)
-                .wrap_err("failed to read body from stdin")?;
-            buf
-        } else if let Some(stripped) = data.strip_prefix('@') {
-            std::fs::read(stripped)
-                .wrap_err_with(|| format!("failed to read body from file {stripped}"))?
-        } else {
-            data.as_bytes().to_vec()
-        };
-        builder = builder.body(body);
-    }
-
-    if let Some(ref json) = cli.json {
-        let body = if json == "@-" {
-            let mut buf = Vec::new();
-            io::stdin()
-                .read_to_end(&mut buf)
-                .wrap_err("failed to read JSON body from stdin")?;
-            buf
-        } else if let Some(stripped) = json.strip_prefix('@') {
-            std::fs::read(stripped)
-                .wrap_err_with(|| format!("failed to read JSON body from file {stripped}"))?
-        } else {
-            json.as_bytes().to_vec()
-        };
-        builder = builder.header("Content-Type", "application/json");
-        builder = builder.body(body);
-    }
-
-    // Form data
-    if !cli.form.is_empty() {
-        if cli.has_form_file_references() {
-            // Use multipart form when any field has file references
-            let mut form = hpx::multipart::Form::new();
-            for (key, value) in cli.parsed_form_fields_with_files() {
-                match value {
-                    FormValue::Text(text) => {
-                        form = form.text(key, text);
-                    }
-                    FormValue::File(path) => {
-                        form = form.file(key, &path).await.wrap_err_with(|| {
-                            format!("failed to read file {path} for form field")
-                        })?;
-                    }
-                }
-            }
-            builder = builder.multipart(form);
-        } else {
-            // Plain urlencoded form data
-            let fields: Vec<(String, String)> = cli.parsed_form_fields();
-            builder = builder.form(&fields);
-        }
-    }
-
-    // Multipart form data
-    if !cli.multipart.is_empty() || !cli.multipart_file.is_empty() {
-        let mut form = hpx::multipart::Form::new();
-        for (key, value) in cli.parsed_multipart_fields() {
-            form = form.text(key, value);
-        }
-        for (key, path) in cli.parsed_multipart_files() {
-            form = form
-                .file(key, &path)
-                .await
-                .wrap_err_with(|| format!("failed to add file {path} to multipart form"))?;
-        }
-        builder = builder.multipart(form);
-    }
+    builder = apply_data_body(builder, cli).await?;
+    builder = apply_json_body(builder, cli).await?;
+    builder = apply_form_body(builder, cli).await?;
+    builder = apply_multipart_body(builder, cli).await?;
 
     if let Some(ref basic) = cli.basic {
         let (user, pass) = basic
@@ -151,40 +113,145 @@ pub(crate) async fn execute(cli: &Cli) -> Result<()> {
         builder = builder.timeout(Duration::from_secs_f64(secs));
     }
 
-    if cli.dry_run {
-        print_request_line(method_str, url, false);
-        for (name, value) in cli.parsed_headers() {
-            print_headers(&[(name, value)], true, false);
-        }
-        if !cli.form.is_empty() {
-            eprintln!("[form data] {} fields", cli.form.len());
-        }
-        if !cli.multipart.is_empty() || !cli.multipart_file.is_empty() {
-            let count = cli.multipart.len() + cli.multipart_file.len();
-            eprintln!("[multipart] {count} fields");
-        }
-        if let Some(ref proxy) = cli.proxy {
-            eprintln!("[proxy] {proxy}");
-        }
-        if cli.retry > 0 {
-            eprintln!("[retry] {} attempts", cli.retry);
-        }
-        return Ok(());
+    Ok(builder)
+}
+
+/// Read a `--data`/`--json` argument: `@-` reads stdin, `@path` reads a file.
+async fn read_body_arg(
+    value: &str,
+    stdin_err: &'static str,
+    file_err: &'static str,
+) -> Result<Vec<u8>> {
+    if value == "@-" {
+        let mut buf = Vec::new();
+        io::stdin().read_to_end(&mut buf).wrap_err(stdin_err)?;
+        Ok(buf)
+    } else if let Some(stripped) = value.strip_prefix('@') {
+        std::fs::read(stripped).wrap_err_with(|| format!("{file_err} {stripped}"))
+    } else {
+        Ok(value.as_bytes().to_vec())
     }
+}
 
-    let verbose = cli.verbose > 0;
-    let color = crate::output::use_color(cli.color, crate::output::is_terminal());
-
-    if verbose {
-        print_request_line(method_str, url, color);
+/// Apply `--data` request body.
+async fn apply_data_body(
+    mut builder: hpx::RequestBuilder,
+    cli: &Cli,
+) -> Result<hpx::RequestBuilder> {
+    if let Some(ref data) = cli.data {
+        let body = read_body_arg(
+            data,
+            "failed to read body from stdin",
+            "failed to read body from file",
+        )
+        .await?;
+        builder = builder.body(body);
     }
+    Ok(builder)
+}
 
-    let mut waterfall = TimingWaterfall::new();
+/// Apply `--json` request body with JSON content type.
+async fn apply_json_body(
+    mut builder: hpx::RequestBuilder,
+    cli: &Cli,
+) -> Result<hpx::RequestBuilder> {
+    if let Some(ref json) = cli.json {
+        let body = read_body_arg(
+            json,
+            "failed to read JSON body from stdin",
+            "failed to read JSON body from file",
+        )
+        .await?;
+        builder = builder.header("Content-Type", "application/json");
+        builder = builder.body(body);
+    }
+    Ok(builder)
+}
 
-    let response = builder.send().await?;
+/// Apply `--form` fields (multipart when files are referenced, else urlencoded).
+async fn apply_form_body(
+    mut builder: hpx::RequestBuilder,
+    cli: &Cli,
+) -> Result<hpx::RequestBuilder> {
+    if cli.form.is_empty() {
+        return Ok(builder);
+    }
+    if cli.has_form_file_references() {
+        // Use multipart form when any field has file references
+        let mut form = hpx::multipart::Form::new();
+        for (key, value) in cli.parsed_form_fields_with_files() {
+            match value {
+                FormValue::Text(text) => {
+                    form = form.text(key, text);
+                }
+                FormValue::File(path) => {
+                    form = form
+                        .file(key, &path)
+                        .await
+                        .wrap_err_with(|| format!("failed to read file {path} for form field"))?;
+                }
+            }
+        }
+        builder = builder.multipart(form);
+    } else {
+        // Plain urlencoded form data
+        let fields: Vec<(String, String)> = cli.parsed_form_fields();
+        builder = builder.form(&fields);
+    }
+    Ok(builder)
+}
 
-    waterfall.mark_request_done();
+/// Apply `--multipart` / `--multipart-file` fields.
+async fn apply_multipart_body(
+    mut builder: hpx::RequestBuilder,
+    cli: &Cli,
+) -> Result<hpx::RequestBuilder> {
+    if cli.multipart.is_empty() && cli.multipart_file.is_empty() {
+        return Ok(builder);
+    }
+    let mut form = hpx::multipart::Form::new();
+    for (key, value) in cli.parsed_multipart_fields() {
+        form = form.text(key, value);
+    }
+    for (key, path) in cli.parsed_multipart_files() {
+        form = form
+            .file(key, &path)
+            .await
+            .wrap_err_with(|| format!("failed to add file {path} to multipart form"))?;
+    }
+    builder = builder.multipart(form);
+    Ok(builder)
+}
 
+/// Print the request that would be sent without sending it (`--dry-run`).
+fn print_dry_run(cli: &Cli, method_str: &str, url: &str) {
+    print_request_line(method_str, url, false);
+    for (name, value) in cli.parsed_headers() {
+        print_headers(&[(name, value)], true, false);
+    }
+    if !cli.form.is_empty() {
+        eprintln!("[form data] {} fields", cli.form.len());
+    }
+    if !cli.multipart.is_empty() || !cli.multipart_file.is_empty() {
+        let count = cli.multipart.len() + cli.multipart_file.len();
+        eprintln!("[multipart] {count} fields");
+    }
+    if let Some(ref proxy) = cli.proxy {
+        eprintln!("[proxy] {proxy}");
+    }
+    if cli.retry > 0 {
+        eprintln!("[retry] {} attempts", cli.retry);
+    }
+}
+
+/// Render the response: status line, headers, body, cookie jar, and timing.
+async fn handle_response(
+    cli: &Cli,
+    response: hpx::Response,
+    waterfall: &mut TimingWaterfall,
+    verbose: bool,
+    color: bool,
+) -> Result<()> {
     let status = response.status();
     let status_code = status.as_u16();
     let version = format!("{:?}", response.version());
@@ -239,23 +306,7 @@ pub(crate) async fn execute(cli: &Cli) -> Result<()> {
 
     let output_path = cli.output.as_deref();
 
-    let body_bytes = match cli.format {
-        OutputFormat::Json => {
-            let pretty = format_json_pretty(&bytes)?;
-            pretty.into_bytes()
-        }
-        OutputFormat::Auto => {
-            if crate::output::looks_like_json_str(std::str::from_utf8(&bytes).unwrap_or("")) {
-                match format_json_pretty(&bytes) {
-                    Ok(pretty) => pretty.into_bytes(),
-                    Err(_) => bytes.to_vec(),
-                }
-            } else {
-                bytes.to_vec()
-            }
-        }
-        OutputFormat::Text | OutputFormat::Raw => bytes.to_vec(),
-    };
+    let body_bytes = render_body(cli, &bytes)?;
 
     if cli.clipboard {
         if let Ok(text) = std::str::from_utf8(&body_bytes) {
@@ -275,6 +326,27 @@ pub(crate) async fn execute(cli: &Cli) -> Result<()> {
     write_body(&body_bytes, output_path)?;
 
     Ok(())
+}
+
+/// Format response bytes according to `--format` (pretty JSON when applicable).
+fn render_body(cli: &Cli, bytes: &[u8]) -> Result<Vec<u8>> {
+    match cli.format {
+        OutputFormat::Json => {
+            let pretty = format_json_pretty(bytes)?;
+            Ok(pretty.into_bytes())
+        }
+        OutputFormat::Auto => {
+            if crate::output::looks_like_json_str(std::str::from_utf8(bytes).unwrap_or("")) {
+                match format_json_pretty(bytes) {
+                    Ok(pretty) => Ok(pretty.into_bytes()),
+                    Err(_) => Ok(bytes.to_vec()),
+                }
+            } else {
+                Ok(bytes.to_vec())
+            }
+        }
+        OutputFormat::Text | OutputFormat::Raw => Ok(bytes.to_vec()),
+    }
 }
 
 const fn hpx_method(method: crate::cli::Method) -> hpx::Method {

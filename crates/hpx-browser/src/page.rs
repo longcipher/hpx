@@ -489,23 +489,7 @@ impl Page {
     /// Collect text content of inline `<script>` elements (no `src` attribute)
     /// in document order.
     pub fn collect_inline_scripts(&self) -> Vec<String> {
-        use crate::dom::DomElement;
-
-        let mut scripts = Vec::new();
-        for script_id in self
-            .dom
-            .get_elements_by_tag_name(self.dom.document(), "script")
-        {
-            if let Some(el) = DomElement::new(&self.dom, script_id) {
-                if el.attr("src").is_none() {
-                    let content = self.dom.text_content(script_id);
-                    if !content.is_empty() {
-                        scripts.push(content);
-                    }
-                }
-            }
-        }
-        scripts
+        self.dom.collect_inline_scripts()
     }
 
     pub async fn title_async(&self) -> Result<String, PageError> {
@@ -614,35 +598,12 @@ impl Page {
     pub fn apply_stylesheets(&mut self, styles: &[crate::resource_loader::LoadedResource]) {
         use crate::resource_loader::ResourceType;
 
-        let html_el = self
-            .dom
-            .child_elements(self.dom.document())
-            .into_iter()
-            .find(|&id| {
-                self.dom
-                    .get(id)
-                    .map(|n| n.is_element_with_tag("html"))
-                    .unwrap_or(false)
-            });
-        let head = html_el.and_then(|html| {
-            self.dom
-                .get_elements_by_tag_name(html, "head")
-                .into_iter()
-                .next()
-        });
-
-        if let Some(head) = head {
-            for style in styles {
-                if style.resource_type == ResourceType::Stylesheet {
-                    let style_el = self
-                        .dom
-                        .create_element(crate::dom::QualName::new("style"), Vec::new());
-                    let text = self.dom.create_text(style.content.clone());
-                    self.dom.append_child(head, style_el);
-                    self.dom.append_child(style_el, text);
-                }
-            }
-        }
+        let css: Vec<String> = styles
+            .iter()
+            .filter(|style| style.resource_type == ResourceType::Stylesheet)
+            .map(|style| style.content.clone())
+            .collect();
+        self.dom.inject_stylesheets(&css);
     }
 
     /// Set which resource types to block during subresource loading.

@@ -221,7 +221,8 @@ pub(crate) enum DlCommands {
     name = "hpx",
     about = "High-performance HTTP client and download engine",
     disable_help_flag = true,
-    after_help = "Examples:\n  hpx httpbin.org/get\n  hpx -X POST httpbin.org/post -d '{\"key\":\"value\"}'\n  hpx -H 'Authorization: Bearer token' https://api.example.com\n  hpx ws://echo.websocket.org"
+    after_help = "Examples:\n  hpx httpbin.org/get\n  hpx -X POST httpbin.org/post -d '{\"key\":\"value\"}'\n  hpx -H 'Authorization: Bearer token' https://api.example.com\n  hpx ws://echo.websocket.org",
+    version = env!("CARGO_PKG_VERSION")
 )]
 pub(crate) struct Cli {
     /// The URL to make a request to (for direct HTTP/WS requests).
@@ -347,10 +348,6 @@ pub(crate) struct Cli {
     /// Copy response body to clipboard.
     #[arg(long)]
     pub clipboard: bool,
-
-    /// Print version.
-    #[arg(short = 'V', long)]
-    pub version: bool,
 
     /// Print help.
     #[arg(short = 'h', long)]

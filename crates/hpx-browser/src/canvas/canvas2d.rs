@@ -801,11 +801,14 @@ impl Canvas2D {
     // --- Pixel ops ---
 
     pub fn get_image_data(&self, x: u32, y: u32, w: u32, h: u32) -> Vec<u8> {
-        let mut out = Vec::with_capacity((w * h * 4) as usize);
-        for row in y..(y + h).min(self.height) {
-            for col in x..(x + w).min(self.width) {
-                let offset = ((row * self.width + col) * 4) as usize;
-                if offset + 3 >= self.pixels.len() {
+        let mut out = Vec::with_capacity((w as usize).saturating_mul(h as usize).saturating_mul(4));
+        for row in y..y.saturating_add(h).min(self.height) {
+            for col in x..x.saturating_add(w).min(self.width) {
+                let offset = ((row as usize)
+                    .saturating_mul(self.width as usize)
+                    .saturating_add(col as usize))
+                .saturating_mul(4);
+                if self.pixels.len().saturating_sub(offset) < 4 {
                     out.extend_from_slice(&[0, 0, 0, 0]);
                     continue;
                 }
@@ -830,9 +833,16 @@ impl Canvas2D {
         let stride = self.width as usize * 4;
         for row in 0..h.min(self.height.saturating_sub(y)) {
             for col in 0..w.min(self.width.saturating_sub(x)) {
-                let src_offset = ((row * w + col) * 4) as usize;
-                let dst_offset = ((y + row) as usize * stride) + ((x + col) as usize * 4);
-                if src_offset + 3 >= data.len() || dst_offset + 3 >= self.pixels.len() {
+                let src_offset = ((row as usize)
+                    .saturating_mul(w as usize)
+                    .saturating_add(col as usize))
+                .saturating_mul(4);
+                let dst_offset = ((y as usize).saturating_add(row as usize))
+                    .saturating_mul(stride)
+                    .saturating_add(((x as usize).saturating_add(col as usize)).saturating_mul(4));
+                if data.len().saturating_sub(src_offset) < 4
+                    || self.pixels.len().saturating_sub(dst_offset) < 4
+                {
                     continue;
                 }
                 let r = data[src_offset];
@@ -974,7 +984,7 @@ impl Canvas2D {
     }
 
     pub fn has_content(&self) -> bool {
-        self.pixels.chunks(4).any(|px| px[3] > 0)
+        self.pixels.chunks_exact(4).any(|px| px[3] > 0)
     }
 
     // --- Internal ---

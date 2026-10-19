@@ -679,38 +679,39 @@ impl<T: Poolable, K: Key> Pooled<T, K> {
         self.pool.0.is_some()
     }
 
-    fn as_ref(&self) -> &T {
-        if let Some(v) = self.value.as_ref() {
-            v
-        } else {
-            // Unreachable by construction: `Pooled` methods borrow the value
-            // only between checkout and Drop, and Drop takes the value out.
-            // Panic (not abort) so a violated invariant surfaces as a normal
-            // failure in the embedding application instead of killing the
-            // whole process.
-            unreachable!("Pooled value borrowed after Drop");
-        }
+    fn as_ref(&self) -> Option<&T> {
+        self.value.as_ref()
     }
 
-    fn as_mut(&mut self) -> &mut T {
-        if let Some(v) = self.value.as_mut() {
-            v
-        } else {
-            unreachable!("Pooled value mutably borrowed after Drop");
-        }
+    fn as_mut(&mut self) -> Option<&mut T> {
+        self.value.as_mut()
     }
 }
 
 impl<T: Poolable, K: Key> Deref for Pooled<T, K> {
     type Target = T;
+    #[expect(
+        clippy::expect_used,
+        reason = "Pooled is only alive between checkout and Drop; a violated invariant is a logic error surfaced as a normal failure instead of UB"
+    )]
     fn deref(&self) -> &T {
-        self.as_ref()
+        // SAFETY: `Pooled` is only alive between checkout and Drop;
+        // `value` is `Some` until Drop takes it. If `None`, the
+        // `Pooled` has already been dropped and is being used after
+        // drop — this is a logic error, but we surface it as a panic
+        // rather than UB.
+        self.as_ref().expect("Pooled value accessed after Drop")
     }
 }
 
 impl<T: Poolable, K: Key> DerefMut for Pooled<T, K> {
+    #[expect(
+        clippy::expect_used,
+        reason = "Pooled is only alive between checkout and Drop; a violated invariant is a logic error surfaced as a normal failure instead of UB"
+    )]
     fn deref_mut(&mut self) -> &mut T {
         self.as_mut()
+            .expect("Pooled value mutably accessed after Drop")
     }
 }
 

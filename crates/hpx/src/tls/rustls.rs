@@ -473,6 +473,19 @@ where
         self.forced_no_alpn = true;
         self
     }
+
+    /// Select the cached connector matching the requested ALPN protocol.
+    #[inline]
+    fn select_connector(&self, alpn: Option<AlpnProtocol>) -> Arc<RustlsConnector> {
+        if self.forced_no_alpn {
+            return self.connector_no_alpn.clone();
+        }
+        match alpn {
+            Some(AlpnProtocol::HTTP2) => self.connector_h2.clone(),
+            Some(AlpnProtocol::HTTP1) => self.connector_http1.clone(),
+            _ => self.connector.clone(),
+        }
+    }
 }
 
 impl<S, T> Service<Uri> for HttpsConnector<S>
@@ -548,19 +561,7 @@ where
 
         let connect = self.http.call(uri.clone());
 
-        let connector = if self.forced_no_alpn {
-            self.connector_no_alpn.clone()
-        } else if let Some(alpn) = req.extra().alpn_protocol() {
-            if alpn == AlpnProtocol::HTTP2 {
-                self.connector_h2.clone()
-            } else if alpn == AlpnProtocol::HTTP1 {
-                self.connector_http1.clone()
-            } else {
-                self.connector.clone()
-            }
-        } else {
-            self.connector.clone()
-        };
+        let connector = self.select_connector(req.extra().alpn_protocol());
 
         Box::pin(async move {
             let conn = connect.await.map_err(Into::into)?;

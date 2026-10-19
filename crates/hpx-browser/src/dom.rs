@@ -515,7 +515,22 @@ impl Dom {
         self.inner.mutate().remove_node(id.to_blitz());
     }
 
+    /// Maximum recursion depth for `remove` to prevent stack overflow on
+    /// malicious or pathological DOM trees.
+    const MAX_REMOVE_DEPTH: usize = 10_000;
+
     pub fn remove(&mut self, id: NodeId) {
+        self.remove_inner(id, 0);
+    }
+
+    fn remove_inner(&mut self, id: NodeId, depth: usize) {
+        if depth > Self::MAX_REMOVE_DEPTH {
+            tracing::warn!(
+                depth = Self::MAX_REMOVE_DEPTH,
+                "Dom::remove reached max depth, stopping recursion"
+            );
+            return;
+        }
         self.detach(id);
         let children: Vec<BlitzNodeId> = self
             .inner
@@ -523,7 +538,7 @@ impl Dom {
             .map(|n| n.children.to_vec())
             .unwrap_or_default();
         for child_id in children {
-            self.remove(NodeId::from_blitz(child_id));
+            self.remove_inner(NodeId::from_blitz(child_id), depth + 1);
         }
     }
 
@@ -585,6 +600,49 @@ impl Dom {
         if !text.is_empty() {
             let text_id = self.create_text(text.to_string());
             self.append_child(id, text_id);
+        }
+    }
+
+    /// Collect text content of inline `<script>` elements (no `src`
+    /// attribute) in document order.
+    pub fn collect_inline_scripts(&self) -> Vec<String> {
+        let mut scripts = Vec::new();
+        for script_id in self.get_elements_by_tag_name(self.document(), "script") {
+            if let Some(el) = DomElement::new(self, script_id) {
+                if el.attr("src").is_none() {
+                    let content = self.text_content(script_id);
+                    if !content.is_empty() {
+                        scripts.push(content);
+                    }
+                }
+            }
+        }
+        scripts
+    }
+
+    /// Inject external stylesheets as `<style>` tags in `<head>`.
+    pub fn inject_stylesheets(&mut self, css_texts: &[String]) {
+        let html_el = self
+            .child_elements(self.document())
+            .into_iter()
+            .find(|&id| {
+                self.get(id)
+                    .map(|n| n.is_element_with_tag("html"))
+                    .unwrap_or(false)
+            });
+        let head = html_el.and_then(|html| {
+            self.get_elements_by_tag_name(html, "head")
+                .into_iter()
+                .next()
+        });
+
+        if let Some(head) = head {
+            for css in css_texts {
+                let style_el = self.create_element(QualName::new("style"), Vec::new());
+                let text = self.create_text(css.clone());
+                self.append_child(head, style_el);
+                self.append_child(style_el, text);
+            }
         }
     }
 
