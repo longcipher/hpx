@@ -1,173 +1,32 @@
-# Rust Workspace Agent Instructions
+# hpx Agent Instructions
+
+## Non-negotiables
+
+- Surgical edits only: every changed line must trace to the request. No drive-by refactors, no reformatting untouched code, no deleting pre-existing dead code (mention it instead).
+- Fix root causes. Never silence a warning, weaken a check, or patch a symptom to make a gate pass.
+- Never report completion while any `just` gate below fails. Report the failure verbatim and stop.
+- Stop and ask when a request is ambiguous, conflicts with existing conventions, or requires credentials, publishing, or destructive operations.
+- When a correction reveals a missing rule, add one specific rule here ("always X for Y", never "be careful with Y"); delete rules that never catch real errors.
 
 ## Scope
 
-- This template targets Rust workspaces only.
-- `bin/` contains CLI binary crates.
-- `crates/` contains reusable library crates.
-- No frontend/web-framework-specific assumptions.
+- `crates/hpx` is the core HTTP client; `crates/hpx-browser` the headless browser engine; `crates/hpx-dl` the segmented download engine; `crates/hpx-emulation` the browser fingerprint profiles; `crates/hpx-h3` a vendored `hyperium/h3` fork; `crates/hpx-streams` the response-stream codecs; `crates/yawc` (package `hpx-yawc`) the WebSocket client/server.
+- `bin/hpx-cli` is the CLI; `bin/hpxless` is the standalone CDP-compatible browser server.
+- `crates/yawc/yawcc` is its own workspace root and is not part of this workspace.
+- The `fuzz` directories under `crates/*/fuzz` are excluded from the workspace on purpose: they pin their own graph, need nightly, and use `libfuzzer-sys`.
+- `specs/` holds feature design specs and `docs/` holds design docs; both are historical context, not runtime configuration.
+- English only in code, comments, docs, and commit messages.
 
-## Cargo Workspace Rules (Critical)
+## Execution
 
-1. Never manually type dependency versions in `Cargo.toml`; use `cargo add`.
-2. Add workspace-level dependencies with:
+- Parallelize aggressively: dispatch subagents for independent research, exploration, and implementation.
+- NEVER run two `cargo` commands concurrently, and never overlap file edits with a running `cargo` command (`target/` file lock): finish edits, wait, then run.
+- NEVER use `git worktree`. Edit the current branch in place.
+- TDD for behavior changes: failing test first, smallest change to pass, then run `just mutate` and fix surviving mutants.
 
-   ```bash
-   cargo add <crate> --workspace
-   ```
+## Verification loop
 
-3. Add sub-crate dependencies with:
-
-   ```bash
-   cargo add <crate> -p <crate-name> --workspace
-   ```
-
-4. Root `[workspace.dependencies]` must not carry features by default.
-5. Sub-crates must use `workspace = true` for `version`, `edition`, and shared dependencies.
-
-## Preferred Dependencies
-
-When introducing new dependencies, prefer these crates and always use the latest stable version (via `cargo add`):
-
-- `clap` — CLI argument parsing
-- `config` — configuration management
-- `eyre` — application-level error handling
-- `serde` — serialization/deserialization
-- `thiserror` — library error types
-- `tokio` — async runtime
-- `tracing` — structured logging
-- `tracing-subscriber` — log subscriber
-- `tracing-opentelemetry` — tracing ↔ OpenTelemetry bridge
-- `opentelemetry` — metrics/traces API
-- `opentelemetry-otlp` — OTLP gRPC exporter
-- `sqlx` — async SQL driver
-- `utoipa` — OpenAPI doc generation
-- `utoipa-swagger-ui` — Swagger UI
-- `arc-swap` — atomic swap for `Arc`
-- `hpx` — HTTP client (this project)
-- `scc` — concurrent map/set
-- `winnow` — parser combinators
-- `shadow-rs` — build info
-- `ecdysis` — graceful restart/reload
-
-## Dependency Priority and Forbidden Choices
-
-- HTTP client preference: `hpx` (with `rustls`) over `reqwest`.
-- Concurrent map/set preference: `scc` over `dashmap` and `RwLock<HashMap<...>>`.
-- Parsing preference: `winnow` or `pest` over ad-hoc manual parsing.
-- Read-heavy shared state: `arc-swap` over `RwLock`.
-- Forbidden by default: `anyhow`, `log`, `reqwest`, `dashmap`.
-
-## Engineering Principles
-
-### Rust Implementation Guidelines
-
-1. Error handling:
-   - Application layer: `eyre`.
-   - Library layer: `thiserror`.
-2. Database (`sqlx`):
-   - Prefer runtime queries (`sqlx::query_as`).
-   - DB structs should derive `sqlx::FromRow`.
-   - Avoid compile-time `sqlx::query!` macros by default.
-3. Concurrency:
-   - Prefer lock-free/container-first approaches (`scc`, `ArcSwap`).
-   - Avoid `Arc<Mutex<T>>` when better alternatives are available.
-4. Observability:
-   - Logging: `tracing` only.
-   - Metrics/traces: OpenTelemetry OTLP gRPC.
-   - Prometheus should not be the default instrumentation path.
-5. API docs:
-   - Generate OpenAPI with `utoipa` when exposing HTTP APIs.
-6. Configuration:
-   - Use the `config` crate and external configuration files (prefer TOML).
-7. Binaries:
-   - Use `ecdysis` for graceful restart/reload flows in daemon/server binaries.
-8. Safety:
-   - Use `unsafe` only when strictly necessary and document the safety invariants.
-
-### Key Design Principles
-
-- Modularity: Design each crate so it can be used as a standalone library with clear boundaries and minimal hidden coupling.
-- Performance: Prefer architectures that support parallelism, memory-mapped I/O for large read-heavy workloads, optimized data structures, and lock-free data types.
-- Extensibility: Use traits and generic types to support multiple implementations without invasive refactors.
-- Type Safety: Maintain strong static typing across interfaces and internals, with minimal use of dynamic dispatch.
-
-### Performance Considerations
-
-- Avoid allocations in hot paths; prefer references and borrowing to reduce allocation and copy overhead.
-- Use `rayon` for CPU-bound parallel processing.
-- Use `tokio` async/await for I/O-bound concurrency.
-
-### Concurrency and Async Execution
-
-- Prefer atomic types (`AtomicUsize`, `AtomicBool`, etc.) with explicit `Ordering` for simple shared state.
-- Use `scc` for highly concurrent maps/sets; avoid `Arc<RwLock<HashMap<...>>>` and `Arc<Mutex<HashMap<...>>>` on hot paths.
-- Use `moka` for concurrent caches instead of custom LRU implementations.
-- Prefer `parking_lot::{Mutex, RwLock}` over `std::sync` locks for synchronous locking.
-- Release `std::sync::Mutex` and `parking_lot::Mutex` guards before hitting any `.await` point.
-- Use `tokio::sync::Mutex` for locks that span across `.await` points.
-- Use `tokio::task::spawn_blocking` for CPU-bound work and blocking I/O.
-- Batch work or use bounded worker patterns instead of spawning massive volumes of tiny Tokio tasks.
-- Channel selection:
-  - Async-to-Async: `tokio::sync::mpsc` / `tokio::sync::broadcast`
-  - Sync/MPMC: `crossbeam-channel` or `flume`
-  - Avoid `std::sync::mpsc`
-
-### Memory and Allocation
-
-- For binary server applications, configure `tikv-jemallocator` or `mimalloc`.
-- For trusted internal hash keys, prefer `ahash` or `rustc-hash` over default SipHash-based maps.
-- Use `compact_str` or `smol_str` for small-string-heavy paths.
-- Prefer `beef::Cow` over `std::borrow::Cow` when minimizing footprint.
-- Use `bytes::Bytes` / `bytes::BytesMut` for network buffers; pass `Bytes` instead of cloning `Vec<u8>`.
-- For critical serialization hot paths, prefer `rkyv` or `zerocopy`; reserve `serde_json` for config and non-critical APIs.
-
-### Type and Layout
-
-- Order struct fields from largest to smallest unless stronger semantic grouping is required.
-- Use `#[repr(C)]` / `#[repr(packed)]` only for FFI or fixed protocol layout requirements.
-- Keep error types compact on hot paths; box large error payloads when needed to reduce `Result<T, E>` size.
-- Prefer typestate-style APIs for compile-time state transitions instead of runtime state checks.
-
-### Tooling and Hot Paths
-
-- Keep code clean under `clippy::pedantic`, `clippy::nursery`, and `clippy::cargo` (allow `missing_errors_doc` for non-public APIs when needed).
-- Use `#[inline]` for tiny methods called in hot loops or on every request, especially across crate boundaries.
-- Mark cold error paths with `#[cold]` and `#[inline(never)]` when it improves hot-path instruction locality.
-
-### Common Pitfalls
-
-- Keep async tasks non-blocking; offload CPU-bound work to `spawn_blocking` or `rayon`.
-- Handle errors explicitly and consistently with the `?` operator and concrete error types.
-
-### What to Avoid
-
-- Incomplete implementations: finish features before submitting.
-- Large, sweeping changes: keep changes focused and reviewable.
-- Mixing unrelated changes: keep one logical change per commit.
-
-## Foundry Rules (If Solidity Exists)
-
-- Use `soldeer` for dependencies; do not use git submodules.
-- Required commands:
-  - `forge soldeer install`
-  - `forge soldeer update`
-  - `forge build`
-  - `forge test`
-
-## Development Workflow
-
-When fixing failures, identify root cause first, then apply idiomatic fixes instead of suppressing warnings or patching symptoms.
-
-Use outside-in development for behavior changes:
-
-- **Git Restrictions:** NEVER use `git worktree`. All code modifications MUST be made directly on the current branch in the existing working directory.
-- start with failing crate-local unit tests and `proptest` properties in the affected crate,
-- keep `proptest` in the normal `cargo test` loop instead of creating a separate property-test command,
-- treat `cargo-fuzz` as conditional planning work rather than baseline template setup,
-- validate test effectiveness with mutation testing (`cargo-mutants`).
-
-After each feature or bug fix, run:
+After each feature or bug fix, in order; any failure means the task is not done:
 
 ```bash
 just format
@@ -177,124 +36,39 @@ just test-all
 just mutate
 ```
 
-If any command fails, report the failure and do not claim completion.
+`just test` runs `cargo nextest`, which skips doctests. Doctests are part of the contract: run `cargo test --workspace --all-features --doc` as well.
 
-## Testing Requirements
+## Workspace rules
 
-- TDD is the primary workflow: unit tests colocated with implementation (`#[cfg(test)]`), integration tests in crate-level `tests/`, and `proptest` properties for invariants.
-- Use mutation testing (`cargo-mutants`, config in `.cargo/mutants.toml`) to validate that the test suite actually detects injected faults; target a high kill rate.
-- Unit tests: colocate with implementation (`#[cfg(test)]`).
-- Prefer example-based unit tests for named business cases and edge cases, and reserve `proptest` for invariants that should hold across many generated inputs.
-- Property tests: colocate `proptest` coverage with the crate logic it exercises so it runs through the ordinary `cargo test` path.
-- Benchmarks: only plan or add Criterion when the scope includes an explicit latency SLA, throughput target, or known hot path in a specific crate.
-- Benchmark workflow: when benchmarking is justified, add Criterion only in the affected crate instead of pre-seeding benchmark scaffolding across the workspace.
-- Fuzz tests: only plan or add `cargo-fuzz` when a crate parses hostile input, implements protocols, decodes binary formats, or contains meaningful `unsafe` code.
-- Fuzz workflow: when fuzzing is justified, generate the standard layout in the affected crate with `cargo fuzz init`, then run targets with `cargo fuzz run <target>` instead of pre-seeding a `fuzz/` directory in every starter.
-- For `/pb-plan` work, mark benchmarking as `conditional` or `N/A` unless the scope explicitly includes a performance requirement or hot path, and mark fuzzing as `conditional` or `N/A` unless the scope explicitly includes parser-like, protocol, binary-decoding, or `unsafe`-heavy code.
-- Integration tests: place in crate-level `tests/`.
-- Add tests for behavioral changes and public API changes.
+- Never hand-type dependency versions. Add per-crate deps with `cargo add <crate> -p <crate>`. Shared deps go into root `[workspace.dependencies]` — numeric versions only, no features — and are referenced with `dep = { workspace = true }`.
+- The local crates in `[workspace.dependencies]` must keep literal `version` fields: Cargo cannot inherit `[workspace.package].version` there. On a version bump, update `[workspace.package]` and those lines together.
+- The toolchain is pinned to nightly in `rust-toolchain.toml`. Use `cargo +nightly fmt` / `cargo +nightly clippy` as the Justfile does.
+- `.cargo/config.toml` sets `rustc-wrapper = "kache"` and `-Zpolonius=next`. Unset the compiler wrapper when invoking clippy manually (`RUSTC_WRAPPER=`), exactly as the Justfile does; CI also clears `RUSTC_WRAPPER` and `CARGO_BUILD_RUSTC_WRAPPER`.
+- On aarch64 macOS the config pins `clang` plus `ld64.lld`; do not switch the linker without re-measuring link times.
+- Workspace lints deny `unwrap_used`, `expect_used`, `panic`, `allow_attributes`, `todo`, `unimplemented`, `dbg_macro`, `print_stdout`, and `print_stderr`. The only escape hatch is `#[expect(lint, reason = "...")]`; the binaries use it for stdout output.
+- `wildcard_imports` is allowed only for the generated browser profile modules; every other module must name its imports.
+- `cognitive_complexity` is off on purpose: turning it on surfaces dozens of pre-existing violations in the protocol parsers and state machines and needs a separate, measured refactor.
+- `cargo shear` is the unused-dependency gate; `getrandom` is declared for wasm builds only and is listed in `[workspace.metadata.cargo-shear]`.
+- Mutation testing is configured in `.cargo/mutants.toml` (nextest as the test tool, vendored `crates/hpx-h3` excluded). A surviving mutant means a missing assertion.
+- Building the browser stack needs the native packages `libfreetype-dev` and `libfontconfig1-dev`.
 
-## Language Requirement
+## Dependency choices
 
-- Documentation, comments, and commit messages must be English only.
+- This workspace *is* the HTTP client: never add `reqwest` or `hyper` as a new direct dependency.
+- TLS backends: BoringSSL is the default, with `rustls-tls` and `openssl-tls` alternatives. Keep the backend behind the existing abstraction.
+- WebSocket: the `hpx-yawc` crate, not `tokio-tungstenite`.
+- Browser fingerprints: `hpx-emulation` supplies the profiles; do not hard-code JA3/JA4 values in call sites.
+- Concurrent map/set: `scc`; read-heavy shared state: `arc-swap`. Never `dashmap`.
+- Rate limiting: `governor`; parsers: `winnow`; network buffers: `bytes`.
+- `hpx-dl` persists its queue in SQLite through `sqlx` runtime queries (`sqlx::query`, never the compile-time `query!` macros).
+- Errors: `thiserror` in `crates/`, `eyre` in `bin/`. Concrete error types through `?`; no string errors.
+- Logging: `tracing` only. Never `log`.
+- Forbidden by default: `anyhow`, `log`, `reqwest`, `dashmap`.
 
-<!-- BEGIN PB-INIT MANAGED BLOCK -->
-## pb-init Snapshot
+## Code conventions
 
-> Auto-generated by pb-init. Last updated: 2026-07-07
-
-### Project Overview
-
-- **Language:** Rust (2024 edition)
-- **Framework:** Tokio async runtime, Tower middleware, Axum (yawc crate)
-- **Build Tool:** Cargo (workspace resolver v3) + Justfile
-- **Test Command:** `cargo nextest run --workspace --all-features`
-- **Version:** 2.5.32
-
-**Workspace Members:**
-
-| Crate | Type | Path |
-|-------|------|------|
-| hpx | library | `crates/hpx` |
-| hpx-browser | library | `crates/hpx-browser` |
-| hpx-dl | library | `crates/hpx-dl` |
-| hpx-emulation | library | `crates/hpx-emulation` |
-| hpx-h3 | library | `crates/hpx-h3` |
-| hpx-streams | library | `crates/hpx-streams` |
-| yawc (hpx-yawc) | library | `crates/yawc` |
-| hpx-cli | binary | `bin/hpx-cli` |
-| hpxless | binary | `bin/hpxless` |
-
-### Project Structure
-
-```text
-├── bin/
-│   ├── hpx-cli/              # CLI binary crate
-│   │   ├── src/              # main.rs, cli.rs, http.rs, ws.rs, browser.rs, output.rs, progress.rs, proxy_test.rs
-│   │   └── tests/            # http_integration.rs, ws_integration.rs
-│   └── hpxless/              # Lightweight CDP server binary (Puppeteer/Playwright-compatible endpoint)
-│       ├── src/              # main.rs, cli.rs
-│       └── tests/            # cdp_integration.rs
-├── crates/
-│   ├── hpx/                  # Core HTTP client (browser emulation, TLS, connection pooling)
-│   ├── hpx-browser/          # Headless browser engine (DOM, JS runtime, CDP, canvas, layout)
-│   ├── hpx-dl/               # Download engine (segmented, resume, queue, SQLite persistence)
-│   ├── hpx-emulation/        # Browser emulation profiles (Chrome, Firefox, Safari, OkHttp)
-│   ├── hpx-h3/               # Fork of hyperium/h3 HTTP/3 protocol (vendored, edition 2024)
-│   ├── hpx-streams/          # HTTP response streaming (JSON/CSV/Protobuf/Arrow)
-│   └── yawc/                 # WebSocket client/server (RFC 6455, compression, proxy)
-├── specs/                    # Feature design specs (pb-plan/pb-build)
-├── docs/                     # Design docs, plans, task breakdowns
-├── .github/workflows/        # ci.yml, release.yml
-├── .cargo/mutants.toml       # cargo-mutants mutation testing config
-├── Cargo.toml                # Workspace root
-├── Justfile                  # Task runner (format, lint, test, mutate)
-└── AGENTS.md                 # This file
-```
-
-### Key Files
-
-- Entry point: `bin/hpx-cli/src/main.rs`
-- Workspace config: `Cargo.toml`
-- Task runner: `Justfile`
-- CI: `.github/workflows/ci.yml`
-- Release: `.github/workflows/release.yml`
-
-### Architecture Decision Snapshot
-
-- **Established Patterns:** Tower middleware stack for request/response processing; feature flag architecture with fine-grained features (`json`, `ws`, `boring`, `stealth`) and presets (`hft`); a single WebSocket backend (yawc), selected at compile time through the `ws-yawc` feature
-- **Dependency Injection Boundaries:** TLS backend abstracted (BoringSSL default, Rustls alternative); WebSocket backend isolated behind `crates/hpx/src/client/ws/` (yawc); browser emulation profiles injected via `hpx-emulation`
-- **Error Handling Conventions:** `thiserror` for library error types, `eyre` for application layer; concrete error types with `?` propagation
-- **State and Workflow Modeling:** Download engine uses state machine for segment lifecycle; CDP client uses async message routing; connection pool manages state transitions
-- **External Dependency Access:** Network calls go through `hpx` client with Tower middleware; filesystem access via `tokio::fs`; SQLite via `sqlx` runtime queries; process management via `std::process::Command` + `tokio::process`
-- **Known Exceptions / TODOs:** `cargo-shear` ignores (`futures-core`, `selectors`, `stylo`, `hpx-cli`); many clippy nursery lints allowed; several specs in progress
-
-### Active Specs
-
-| Spec | Status | Design | Last Modified |
-|------|--------|--------|---------------|
-| `specs/2026-07-07-01-absorb-ferrous-browser-features/` | 🔧 In Progress (183/192 tasks) | Approved | 2026-07-07 |
-| `specs/2026-03-22-01-hpx-dl-download-engine/` | 🔧 In Progress (110/120 tasks) | — | 2026-04-06 |
-| `specs/2026-06-05-01-hpx-cli-enhancement/` | 🔧 In Progress (80/96 tasks) | — | 2026-06-05 |
-| `specs/2026-06-14-01-perf-security-hardening/` | ✅ Complete (174/174 tasks) | — | 2026-06-14 |
-| `specs/2026-06-22-01-hotpath-perf-tuning/` | ✅ Complete (80/80 tasks) | — | 2026-06-22 |
-| `specs/2026-06-24-01-browser-oxide-features/` | 🔧 In Progress (231/238 tasks) | — | 2026-06-24 |
-| `specs/2026-06-24-02-absorb-obscura-features/` | 🔧 In Progress (119/132 tasks) | — | 2026-06-24 |
-| `specs/2026-06-25-01-codebase-quality/` | ✅ Complete (144/144 tasks) | — | 2026-06-25 |
-| `specs/2026-06-26-01-absorb-wreq-features/` | 🔧 In Progress (107/119 tasks) | — | 2026-06-26 |
-| `specs/2026-06-28-01-js-stealth-shim/` | 🔧 In Progress (80/88 tasks) | — | 2026-06-28 |
-| `specs/2026-07-02-01-blitz-refactor/` | 🔧 In Progress (36/38 tasks) | — | 2026-07-02 |
-| `specs/2026-07-05-01-openssl-tls-backend/` | 🔧 In Progress (77/86 tasks) | — | 2026-07-05 |
-| `specs/integrate-sse-transport/` | 🔧 In Progress (27/89 tasks) | — | — |
-
-### Suggested Conventions
-
-- Commit style: conventional commits
-- Branch strategy: feature branches
-- **Agent Harness Rules (Strict):**
-  1. **No Blind Edits:** Always read a file before editing it. Never assume file contents.
-  2. **Verify Imports:** Check `Cargo.toml` before adding third-party deps. Use `cargo add`.
-  3. **Idempotency:** Scripts and tests should be safe to run multiple times.
-  4. **Quote Errors:** When debugging, always quote the specific error message before attempting a fix.
-  5. **Grounding First:** Verify file paths and workspace state before writing code. Use `ls` / `find` / file search.
-<!-- END PB-INIT MANAGED BLOCK -->
+- Every new capability lands behind a `hpx` feature flag; the `hft` and `stealth` presets are the supported bundles, so a new flag must state whether it belongs in either.
+- `--all-features` builds must stay green on macOS: BoringSSL FIPS is intentionally disabled because its `objcopy` step needs GNU `objcopy`.
+- `hpx-h3` is a vendored fork: keep changes minimal and upstream-shaped, and never enable mutation testing on it.
+- Fuzz targets are per crate under `crates/<crate>/fuzz`; build them with `just fuzz-build` and gate them with `just fuzz-smoke`. A crash is a finding, not a flake.
+- Publishing order is dependency order: `hpx-yawc`, `hpx-h3`, `hpx`, `hpx-browser`, `hpx-dl`, `hpx-emulation`, `hpx-streams`, `hpxless`, `hpx-cli`. Use `just publish`.
