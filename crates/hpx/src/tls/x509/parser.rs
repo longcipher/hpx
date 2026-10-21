@@ -123,33 +123,56 @@ where
     feature = "openssl-tls",
     feature = "rustls-tls"
 ))]
-pub(super) fn process_certs<I>(iter: I, store: &mut StoreBuilder) -> Result<()>
+pub(super) fn process_certs<I>(iter: I, store: &mut StoreBuilder) -> Result<Vec<Vec<u8>>>
 where
     I: Iterator<Item = Certificate>,
 {
     let mut valid_count = 0;
     let mut invalid_count = 0;
+    let mut der_roots = Vec::new();
     for cert in iter {
+        // The DER form must be captured before `cert.0` is moved into the
+        // store; `to_der()` failure only means the raw copy is lost.
         #[cfg(feature = "boring-tls")]
-        let res = store.add_cert(cert.0).map_err(Error::tls);
+        let der = cert.0.to_der().ok();
         #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
-        let res = store.add_cert(cert.0).map_err(Error::tls);
+        let der = cert.0.to_der().ok();
         #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
-        let res = store
-            .add(cert.0.clone())
-            .map_err(|e| Error::tls(Box::new(e)));
+        let der = Some(cert.0.as_ref().to_vec());
         #[cfg(not(any(
             feature = "boring-tls",
             feature = "openssl-tls",
             feature = "rustls-tls"
         )))]
-        let res: Result<()> = Err(Error::tls("TLS not supported"));
+        let der: Option<Vec<u8>> = None;
 
-        if let Err(_err) = res {
-            invalid_count += 1;
-            // warn!("tls failed to parse certificate: {:?}", _err);
-        } else {
-            valid_count += 1;
+        #[cfg(feature = "boring-tls")]
+        let res = store.add_cert(cert.0).map_err(Error::tls).map(|()| der);
+        #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
+        let res = store.add_cert(cert.0).map_err(Error::tls).map(|()| der);
+        #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
+        let res = store
+            .add(cert.0.clone())
+            .map_err(|e| Error::tls(Box::new(e)))
+            .map(|()| der);
+        #[cfg(not(any(
+            feature = "boring-tls",
+            feature = "openssl-tls",
+            feature = "rustls-tls"
+        )))]
+        let res: Result<Option<Vec<u8>>> = Err(Error::tls("TLS not supported"));
+
+        match res {
+            Ok(der) => {
+                valid_count += 1;
+                if let Some(der) = der {
+                    der_roots.push(der);
+                }
+            }
+            Err(_err) => {
+                invalid_count += 1;
+                // warn!("tls failed to parse certificate: {:?}", _err);
+            }
         }
     }
 
@@ -157,7 +180,7 @@ where
         return Err(Error::builder("invalid certificate"));
     }
 
-    Ok(())
+    Ok(der_roots)
 }
 
 #[cfg(any(

@@ -129,6 +129,12 @@ impl PersistenceHandle {
             .await
             .map_err(|error| DownloadError::TaskJoin(error.to_string()))?
     }
+
+    pub(crate) async fn delete_async(self: Arc<Self>, id: DownloadId) -> Result<(), DownloadError> {
+        tokio::task::spawn_blocking(move || self.delete(id))
+            .await
+            .map_err(|error| DownloadError::TaskJoin(error.to_string()))?
+    }
 }
 
 impl Drop for PersistenceHandle {

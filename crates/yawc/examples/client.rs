@@ -1,3 +1,13 @@
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    missing_docs
+)]
+
 /// Example WebSocket client that connects to Bybit's public trade stream
 use std::time::Duration;
 

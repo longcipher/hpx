@@ -178,16 +178,20 @@ impl MetalinkFile {
     ///
     /// # Errors
     ///
-    /// This method does not currently return errors, but returns a `Result`
-    /// for forward compatibility.
-    #[must_use]
-    #[expect(clippy::expect_used, reason = "metalink URLs validated during parsing")]
-    pub fn into_download_requests(self, destination: impl Into<PathBuf>) -> Vec<DownloadRequest> {
+    /// Returns [`DownloadError::InvalidConfiguration`] if any URL parsed
+    /// from the document is empty or not a valid URL. Metalink documents
+    /// are untrusted input, and this method is the validation boundary
+    /// that guarantees no panic path from a hand-constructed or malformed
+    /// file entry.
+    pub fn into_download_requests(
+        self,
+        destination: impl Into<PathBuf>,
+    ) -> Result<Vec<DownloadRequest>, DownloadError> {
         let mut requests = Vec::new();
         let dest = destination.into();
 
         if self.urls.is_empty() {
-            return requests;
+            return Ok(requests);
         }
 
         let mirrors: Vec<String> = self.urls[1..].iter().map(|u| u.url.clone()).collect();
@@ -195,11 +199,10 @@ impl MetalinkFile {
         let request = DownloadRequest::builder(&self.urls[0].url, dest)
             .checksum_opt(self.hashes.first().cloned())
             .mirrors(mirrors)
-            .build()
-            .expect("metalink URLs validated during parsing");
+            .build()?;
 
         requests.push(request);
-        requests
+        Ok(requests)
     }
 }
 
@@ -413,7 +416,9 @@ mod tests {
             }],
         };
 
-        let requests = file.into_download_requests("/tmp/example.iso");
+        let requests = file
+            .into_download_requests("/tmp/example.iso")
+            .expect("requests");
         assert_eq!(requests.len(), 1);
 
         let req = &requests[0];
@@ -435,7 +440,9 @@ mod tests {
             hashes: vec![],
         };
 
-        let requests = file.into_download_requests("/tmp/empty.bin");
+        let requests = file
+            .into_download_requests("/tmp/empty.bin")
+            .expect("requests");
         assert!(requests.is_empty());
     }
 
@@ -451,10 +458,78 @@ mod tests {
             hashes: vec![],
         };
 
-        let requests = file.into_download_requests("/tmp/solo.bin");
+        let requests = file
+            .into_download_requests("/tmp/solo.bin")
+            .expect("requests");
         assert_eq!(requests.len(), 1);
         assert!(requests[0].mirrors.is_empty());
         assert!(requests[0].checksum.is_none());
+    }
+
+    #[test]
+    fn into_download_requests_rejects_invalid_primary_url() {
+        // A metalink document is untrusted input; a hand-constructed or
+        // malformed entry with a non-URL "url" must produce an error instead
+        // of panicking inside the builder.
+        let file = MetalinkFile {
+            name: "bad.bin".to_string(),
+            size: None,
+            urls: vec![MetalinkUrl {
+                url: "not a url".to_string(),
+                priority: Some(1),
+            }],
+            hashes: vec![],
+        };
+
+        let err = file
+            .into_download_requests("/tmp/bad.bin")
+            .expect_err("invalid URL must be rejected");
+        assert!(matches!(err, DownloadError::InvalidConfiguration(_)));
+        assert!(err.to_string().contains("invalid download URL"));
+    }
+
+    #[test]
+    fn into_download_requests_rejects_late_mirror_url() {
+        // The primary URL is fine but a mirror is not — the validation must
+        // cover every URL, not just the first one.
+        let file = MetalinkFile {
+            name: "badmirror.bin".to_string(),
+            size: None,
+            urls: vec![
+                MetalinkUrl {
+                    url: "https://example.com/ok.bin".to_string(),
+                    priority: Some(1),
+                },
+                MetalinkUrl {
+                    url: "not a valid url".to_string(),
+                    priority: Some(2),
+                },
+            ],
+            hashes: vec![],
+        };
+
+        let err = file
+            .into_download_requests("/tmp/badmirror.bin")
+            .expect_err("invalid mirror URL must be rejected");
+        assert!(matches!(err, DownloadError::InvalidConfiguration(_)));
+    }
+
+    #[test]
+    fn into_download_requests_rejects_empty_url() {
+        let file = MetalinkFile {
+            name: "emptyurl.bin".to_string(),
+            size: None,
+            urls: vec![MetalinkUrl {
+                url: String::new(),
+                priority: None,
+            }],
+            hashes: vec![],
+        };
+
+        let err = file
+            .into_download_requests("/tmp/emptyurl.bin")
+            .expect_err("empty URL must be rejected");
+        assert!(matches!(err, DownloadError::InvalidConfiguration(_)));
     }
 
     // -- Test 7: Metalink v3 compatibility (different namespace) --
@@ -603,7 +678,10 @@ mod tests {
 </metalink>"#;
 
         let files = parse_metalink(xml.as_bytes()).expect("parse");
-        let requests = files[0].clone().into_download_requests("/tmp/example.iso");
+        let requests = files[0]
+            .clone()
+            .into_download_requests("/tmp/example.iso")
+            .expect("requests");
 
         assert_eq!(requests.len(), 1);
         let req = &requests[0];

@@ -13,6 +13,16 @@
 //! prefer the high-level `futures::StreamExt::split()` which handles protocol details
 //! automatically.
 
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    missing_docs
+)]
+
 use std::{fs::File, io::Write};
 
 use futures::{SinkExt, StreamExt};

@@ -589,6 +589,9 @@ impl SegmentDownloader {
     /// one task per segment. Each task opens its own file handle and downloads
     /// its range with retry logic.
     ///
+    /// Returns the number of bytes downloaded during this call (the sum of
+    /// all segment lengths on a full download).
+    ///
     /// # Errors
     ///
     /// Returns [`DownloadError::NoSegments`] if `self.segments` is empty.
@@ -620,6 +623,11 @@ impl SegmentDownloader {
     /// resumes from the last completed segment, or restarts after content
     /// changed detection.
     ///
+    /// Returns the number of bytes downloaded **during this call**.
+    /// Segments already completed by an earlier session (and skipped here)
+    /// are not counted, so callers must not add the returned value on top of
+    /// previously completed byte counts from a *different* call.
+    ///
     /// # Errors
     ///
     /// Same as [`SegmentDownloader::download`].
@@ -636,8 +644,9 @@ impl SegmentDownloader {
                 let remaining = filter_remaining_segments(&self.segments, &completed_segments);
                 if remaining.is_empty() {
                     debug!("all segments already completed, nothing to download");
-                    let total: u64 = self.segments.iter().map(SegmentRange::len).sum();
-                    return Ok(total);
+                    // Nothing was downloaded by this call, so the caller's
+                    // `bytes_completed + returned` accounting stays correct.
+                    return Ok(0);
                 }
 
                 debug!(

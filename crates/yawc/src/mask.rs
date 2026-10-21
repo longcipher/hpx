@@ -1,29 +1,22 @@
 // Optimized masking implementation.
 
-use std::cell::RefCell;
-
-use rand::{RngExt, SeedableRng, rngs::SmallRng};
-
-// Thread-local fast RNG for per-frame masking keys.
-//
-// Seeded once per thread from the OS CSPRNG (`rand::random`), so per-frame
-// masks cost a few PRNG steps instead of a `getrandom` syscall plus global
-// lock on every frame.
-thread_local! {
-    static FAST_RNG: RefCell<Option<SmallRng>> = const { RefCell::new(None) };
-}
+use rand::RngExt;
 
 /// Returns a fresh random 4-byte WebSocket masking key.
 ///
-/// Uses the thread-local `SmallRng` instead of the global CSPRNG. Mask
-/// semantics are unchanged: every call yields a fresh random 4-byte key.
+/// RFC 6455 §5.3 requires the client to choose the masking key at random,
+/// and §10.3 requires it to be *unpredictable* so that an attacker cannot
+/// poison an intermediary's cache by guessing the key of a masked frame.
+///
+/// The key is therefore drawn from the thread-local CSPRNG (`rand::rng()`,
+/// ChaCha12) rather than from a fast non-cryptographic PRNG: a
+/// `SmallRng`/`xoshiro` state can be recovered from observed outputs, which
+/// would let an attacker predict the following keys. The CSPRNG costs a few
+/// nanoseconds per frame, which is negligible next to the syscall and the
+/// encryption a real connection performs anyway.
 #[inline]
 pub(crate) fn fast_mask_bytes() -> [u8; 4] {
-    FAST_RNG.with(|slot| {
-        let mut guard = slot.borrow_mut();
-        let rng = guard.get_or_insert_with(|| SmallRng::seed_from_u64(rand::random()));
-        rng.random()
-    })
+    rand::rng().random()
 }
 
 /// Mask/unmask a frame with optimal strategy selection.
@@ -82,7 +75,7 @@ pub fn apply_mask_fast32(buf: &mut [u8], mask: [u8; 4]) {
         *word ^= mask_u32;
     }
 
-    apply_mask_fallback(suffix, mask_u32.to_ne_bytes()[..4].try_into().unwrap());
+    apply_mask_fallback(suffix, mask_u32.to_ne_bytes());
 }
 
 /// Even faster version using 64-bit blocks for larger buffers.
@@ -268,7 +261,10 @@ mod tests {
 
         // Create a buffer with extra padding to test different alignments
         let mut buffer = vec![0u8; 20];
-        #[allow(clippy::needless_range_loop)]
+        #[expect(
+            clippy::needless_range_loop,
+            reason = "the index is needed to fill the buffer"
+        )]
         for i in 0..buffer.len() {
             buffer[i] = i as u8;
         }
@@ -369,6 +365,22 @@ mod tests {
             "expected more than 900 distinct masks, got {}",
             seen.len()
         );
+    }
+
+    #[test]
+    fn mask_key_comes_from_a_cryptographic_source() {
+        // The masking key must be unpredictable (RFC 6455 §10.3): a
+        // non-cryptographic PRNG can be state-recovered from observed
+        // frames, which would let an attacker predict the next keys.
+        // A ChaCha12-based CSPRNG produces 32 bytes of state per draw, so
+        // consecutive keys are independent.
+        let mut keys = Vec::with_capacity(64);
+        for _ in 0..64 {
+            keys.push(fast_mask_bytes());
+        }
+        // No key may repeat within the sample.
+        let unique: std::collections::HashSet<_> = keys.iter().collect();
+        assert_eq!(unique.len(), keys.len(), "masking keys must not repeat");
     }
 
     #[cfg(not(target_arch = "wasm32"))]

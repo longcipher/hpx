@@ -1,6 +1,9 @@
 //! CPU-based Canvas 2D rendering context backed by Skia via `skia-safe`.
 
-#[allow(deprecated)]
+#[expect(
+    deprecated,
+    reason = "skia-safe gradient shader API is deprecated but still functional"
+)]
 use skia_safe::gradient_shader;
 use skia_safe::{
     AlphaType, BlendMode, Canvas as SkCanvas, Color4f, ColorFilter, ColorType, Data, Font,
@@ -92,7 +95,10 @@ pub enum Gradient {
 }
 
 impl Gradient {
-    #[allow(deprecated)]
+    #[expect(
+        deprecated,
+        reason = "skia-safe gradient shader API is deprecated but still functional"
+    )]
     fn to_shader(&self) -> Option<skia_safe::Shader> {
         match self {
             Gradient::Linear {
@@ -751,7 +757,10 @@ impl Canvas2D {
         self.path.arc_to(x1, y1, x2, y2, radius);
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors the CanvasRenderingContext2D ellipse signature"
+    )]
     pub fn ellipse(
         &mut self,
         cx: f32,

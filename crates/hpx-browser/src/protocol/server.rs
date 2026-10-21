@@ -93,10 +93,14 @@ impl CdpServer {
                         return;
                     }
                 };
-                let actual_port = listener
-                    .local_addr()
-                    .unwrap_or_else(|e| panic!("failed to get local addr: {e}"))
-                    .port();
+                let actual_port = match listener.local_addr() {
+                    Ok(addr) => addr.port(),
+                    Err(e) => {
+                        tracing::error!("CdpServer: failed to read local addr: {}", e);
+                        port_tx.send(0).ok();
+                        return;
+                    }
+                };
                 port_tx.send(actual_port).ok();
 
                 accept_loop(

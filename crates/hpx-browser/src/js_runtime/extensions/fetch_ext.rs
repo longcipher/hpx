@@ -23,6 +23,8 @@ pub enum FetchError {
     Client(String),
     #[error("fetch failed: {0}")]
     Request(String),
+    #[error("refused by Content-Security-Policy: {0}")]
+    Policy(String),
 }
 
 /// Parse the bootstrap's JSON header array (`[["k","v"], …]`) into pairs.
@@ -71,6 +73,27 @@ async fn fetch_impl(
             None => url::Url::parse(url).map_err(|e| FetchError::Url(format!("{url}: {e}")))?,
         }
     };
+
+    // Enforce the document's Content-Security-Policy (`connect-src`).
+    {
+        let state = op_state.borrow();
+        let fetch_state = state.borrow::<FetchState>();
+        if !fetch_state.csp.is_empty()
+            && let Some(origin) = fetch_state.page_origin.as_ref()
+        {
+            let decision = fetch_state.csp.allows_url(
+                crate::net::csp::Directive::ConnectSrc,
+                &resolved,
+                origin,
+            );
+            if !decision.allowed {
+                return Err(FetchError::Policy(format!(
+                    "connect-src does not allow {}",
+                    resolved
+                )));
+            }
+        }
+    }
 
     // Snapshot a cached HttpClient, rebuilding it only when the shared
     // NetConfig has been swapped since the last fetch (proxy change). This

@@ -329,11 +329,15 @@ impl codec::Decoder for Decoder {
         };
 
         // Parse optional mask
-        let mask = if masked {
-            Some(src.get_u32().to_be_bytes())
-        } else {
-            None
-        };
+        let mask = masked.then(|| src.get_u32().to_be_bytes());
+
+        // RFC 6455 §5.1: the server MUST NOT mask the frames it sends to the
+        // client, so a client that receives a masked frame must fail the
+        // connection. (The mirror case — an unmasked frame arriving at a
+        // server — is rejected below.)
+        if self.role == Role::Client && masked {
+            return Err(WebSocketError::MaskedFrameFromServer);
+        }
 
         // Validate control frame requirements (RFC 6455 Section 5.5).
         // Control frames must not be fragmented and their payload is limited
@@ -462,7 +466,7 @@ mod tests {
 
     use super::{Decoder, Encoder};
     use crate::{
-        Role,
+        Role, WebSocketError,
         close::CloseCode,
         frame::{Frame, OpCode},
     };
@@ -627,6 +631,39 @@ mod tests {
         let mut decoder = Decoder::new(Role::Server, 1 << 20);
         let result = decoder.decode(&mut buf);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn client_rejects_masked_frame() {
+        // RFC 6455 §5.1: the server must not mask the frames it sends, so a
+        // client that receives a masked frame must fail the connection.
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(&[0x81, 0x85]); // FIN=1, MASK=1, len=5
+        buf.extend_from_slice(&[0x01, 0x02, 0x03, 0x04]); // masking key
+        buf.extend_from_slice(b"hello");
+
+        let mut decoder = Decoder::new(Role::Client, 1 << 20);
+        match decoder.decode(&mut buf) {
+            Err(WebSocketError::MaskedFrameFromServer) => {}
+            Err(other) => panic!("unexpected error: {other:?}"),
+            Ok(_) => panic!("a masked frame from the server must be rejected"),
+        }
+    }
+
+    #[test]
+    fn client_accepts_unmasked_frame() {
+        // The mirror case must keep working: servers send unmasked frames.
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(&[0x81, 0x05]); // FIN=1, no mask, len=5
+        buf.extend_from_slice(b"hello");
+
+        let mut decoder = Decoder::new(Role::Client, 1 << 20);
+        let frame = match decoder.decode(&mut buf) {
+            Ok(Some(frame)) => frame,
+            Ok(None) => panic!("the frame must be complete"),
+            Err(err) => panic!("unmasked frame must be accepted: {err:?}"),
+        };
+        assert_eq!(frame.into_payload().as_ref(), b"hello");
     }
 
     #[test]

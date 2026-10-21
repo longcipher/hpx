@@ -1,3 +1,13 @@
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    missing_docs
+)]
+
 /// Example WebSocket client that connects to Bybit's public trade stream
 use std::{sync::Arc, time::Duration};
 
@@ -20,7 +30,7 @@ async fn connect(
         .with_root_certificates(root_store)
         .with_no_client_auth();
     let connector = TlsConnector::from(Arc::new(config));
-    let host = url.host_str().ok_or(eyre::eyre!("no host!!!"))?;
+    let host = url.host_str().ok_or_else(|| eyre::eyre!("no host!!!"))?;
     let stream = TcpStream::connect(format!("{host}:443")).await?;
     let domain = ServerName::try_from(host)?.to_owned();
     let tls_stream = connector.connect(domain, stream).await?;

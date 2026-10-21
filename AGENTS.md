@@ -209,7 +209,7 @@ If any command fails, report the failure and do not claim completion.
 - **Framework:** Tokio async runtime, Tower middleware, Axum (yawc crate)
 - **Build Tool:** Cargo (workspace resolver v3) + Justfile
 - **Test Command:** `cargo nextest run --workspace --all-features`
-- **Version:** 2.5.2
+- **Version:** 2.5.32
 
 **Workspace Members:**
 
@@ -262,8 +262,8 @@ If any command fails, report the failure and do not claim completion.
 
 ### Architecture Decision Snapshot
 
-- **Established Patterns:** Tower middleware stack for request/response processing; feature flag architecture with fine-grained features (`json`, `ws`, `boring`, `stealth`) and presets (`hft`); two WebSocket backends (yawc and fastwebsockets) selectable at compile time
-- **Dependency Injection Boundaries:** TLS backend abstracted (BoringSSL default, Rustls alternative); WebSocket backend abstracted (yawc vs fastwebsockets); browser emulation profiles injected via `hpx-emulation`
+- **Established Patterns:** Tower middleware stack for request/response processing; feature flag architecture with fine-grained features (`json`, `ws`, `boring`, `stealth`) and presets (`hft`); a single WebSocket backend (yawc), selected at compile time through the `ws-yawc` feature
+- **Dependency Injection Boundaries:** TLS backend abstracted (BoringSSL default, Rustls alternative); WebSocket backend isolated behind `crates/hpx/src/client/ws/` (yawc); browser emulation profiles injected via `hpx-emulation`
 - **Error Handling Conventions:** `thiserror` for library error types, `eyre` for application layer; concrete error types with `?` propagation
 - **State and Workflow Modeling:** Download engine uses state machine for segment lifecycle; CDP client uses async message routing; connection pool manages state transitions
 - **External Dependency Access:** Network calls go through `hpx` client with Tower middleware; filesystem access via `tokio::fs`; SQLite via `sqlx` runtime queries; process management via `std::process::Command` + `tokio::process`

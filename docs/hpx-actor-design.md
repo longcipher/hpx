@@ -58,7 +58,7 @@ The reference implementation already uses a single-task connection loop with exp
 
 ### [P1] Critical: Double-Connection Bug
 
-**Files**: `crates/hpx-transport/src/websocket/actor.rs`
+**Files**: `crates/hpx/src/client/ws.rs`
 
 The `run_ready_loop_internal()` method creates a **second** WebSocket connection. The first connection — where `run_connection()` performed authentication and re-subscription — is discarded. Result: all authentication tokens and subscriptions are lost on the active connection.
 
@@ -66,13 +66,13 @@ The `run_ready_loop_internal()` method creates a **second** WebSocket connection
 
 ### [P2] High: Subscription Lifetime Leak
 
-**File**: `crates/hpx-transport/src/websocket/subscription.rs`
+**File**: `crates/hpx/src/client/ws.rs`
 
 Dropping a `broadcast::Receiver` does not decrement the subscription's reference count. Over time, server-side subscriptions accumulate because `unsubscribe` is never sent. This is a resource leak that degrades both client and server.
 
 ### [P2] High: Per-Request Task Spawn
 
-**File**: `crates/hpx-transport/src/websocket/actor.rs` (`handle_request` method)
+**File**: `crates/hpx/src/client/ws.rs` (`handle_request` method)
 
 Every `Request` command spawns a new tokio task to forward the response from `PendingRequestStore` to the caller. At high QPS (thousands of requests/sec), this creates significant scheduler overhead (task allocation, waking, deallocation).
 

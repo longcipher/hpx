@@ -38,6 +38,14 @@ pub struct CertStoreBuilder {
         feature = "rustls-tls"
     )))]
     _marker: std::marker::PhantomData<()>,
+    /// DER bytes of every certificate successfully added through the
+    /// `add_*_cert(s)` APIs.
+    ///
+    /// Retained so backends that cannot be inspected later (e.g. the QUIC
+    /// rustls path cannot read BoringSSL's `X509Store` without touching its
+    /// unsound `objects()` accessors) can still reconstruct the exact trust
+    /// anchors the user configured. Empty for the default/system store.
+    raw_roots: Vec<Vec<u8>>,
 }
 
 impl Debug for CertStoreBuilder {
@@ -111,8 +119,9 @@ impl CertStoreBuilder {
                 let result = Certificate::stack_from_pem(certs.as_ref())
                     .and_then(|certs| process_certs(certs.into_iter(), builder));
 
-                if let Err(err) = result {
-                    self.builder = Err(err);
+                match result {
+                    Ok(der_roots) => self.raw_roots.extend(der_roots),
+                    Err(err) => self.builder = Err(err),
                 }
             }
             #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
@@ -120,8 +129,9 @@ impl CertStoreBuilder {
                 let result = Certificate::stack_from_pem(certs.as_ref())
                     .and_then(|certs| process_certs(certs.into_iter(), builder));
 
-                if let Err(err) = result {
-                    self.builder = Err(err);
+                match result {
+                    Ok(der_roots) => self.raw_roots.extend(der_roots),
+                    Err(err) => self.builder = Err(err),
                 }
             }
             #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
@@ -129,8 +139,9 @@ impl CertStoreBuilder {
                 let result = Certificate::stack_from_pem(certs.as_ref())
                     .and_then(|certs| process_certs(certs.into_iter(), builder));
 
-                if let Err(err) = result {
-                    self.builder = Err(err);
+                match result {
+                    Ok(der_roots) => self.raw_roots.extend(der_roots),
+                    Err(err) => self.builder = Err(err),
                 }
             }
         }
@@ -189,25 +200,35 @@ impl CertStoreBuilder {
         return self
             .builder
             .map(X509StoreBuilder::build)
-            .map(Arc::new)
-            .map(CertStore);
+            .map(|store| CertStore {
+                store: Arc::new(store),
+                der_roots: self.raw_roots,
+            });
 
         #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
         return self
             .builder
             .map(X509StoreBuilder::build)
-            .map(Arc::new)
-            .map(CertStore);
+            .map(|store| CertStore {
+                store: Arc::new(store),
+                der_roots: self.raw_roots,
+            });
 
         #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
-        return self.builder.map(Arc::new).map(CertStore);
+        return self.builder.map(|store| CertStore {
+            store: Arc::new(store),
+            der_roots: self.raw_roots,
+        });
 
         #[cfg(not(any(
             feature = "boring-tls",
             feature = "openssl-tls",
             feature = "rustls-tls"
         )))]
-        return Ok(CertStore(std::marker::PhantomData));
+        return Ok(CertStore {
+            store: std::marker::PhantomData,
+            der_roots: self.raw_roots,
+        });
     }
 
     #[cfg_attr(
@@ -232,8 +253,9 @@ impl CertStoreBuilder {
             let cert = cert.into().with_parser(parser);
             let result = cert.and_then(|cert| process_certs(std::iter::once(cert), builder));
 
-            if let Err(err) = result {
-                self.builder = Err(err);
+            match result {
+                Ok(der_roots) => self.raw_roots.extend(der_roots),
+                Err(err) => self.builder = Err(err),
             }
         }
         self
@@ -265,8 +287,9 @@ impl CertStoreBuilder {
             let certs_iter = filter_map_certs(certs);
             let result = process_certs(certs_iter, builder);
 
-            if let Err(err) = result {
-                self.builder = Err(err);
+            match result {
+                Ok(der_roots) => self.raw_roots.extend(der_roots),
+                Err(err) => self.builder = Err(err),
             }
         }
         self
@@ -288,7 +311,10 @@ impl CertStore {
             feature = "openssl-tls",
             feature = "rustls-tls"
         ))]
-        return CertStoreBuilder { builder };
+        return CertStoreBuilder {
+            builder,
+            raw_roots: Vec::new(),
+        };
 
         #[cfg(not(any(
             feature = "boring-tls",
@@ -297,6 +323,7 @@ impl CertStore {
         )))]
         return CertStoreBuilder {
             _marker: std::marker::PhantomData,
+            raw_roots: Vec::new(),
         };
     }
 
@@ -321,18 +348,42 @@ impl Default for CertStore {
 }
 
 /// A certificate store.
+///
+/// `der_roots` carries the DER bytes of every certificate explicitly added
+/// through the builder's `add_*_cert(s)` APIs (empty for the default/system
+/// store), so non-OpenSSL consumers such as the QUIC rustls path can rebuild
+/// the exact trust anchors without touching backend-specific store internals.
 #[derive(Clone)]
-pub struct CertStore(
-    #[cfg(feature = "boring-tls")] pub(crate) Arc<X509Store>,
-    #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))] pub(crate) Arc<X509Store>,
-    #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))] pub(crate) Arc<RootCertStore>,
+pub struct CertStore {
+    /// The backend-native trust store.
+    #[cfg(feature = "boring-tls")]
+    pub(crate) store: Arc<X509Store>,
+    #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
+    pub(crate) store: Arc<X509Store>,
+    #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
+    pub(crate) store: Arc<RootCertStore>,
     #[cfg(not(any(
         feature = "boring-tls",
         feature = "openssl-tls",
         feature = "rustls-tls"
     )))]
-    pub(crate) std::marker::PhantomData<()>,
-);
+    pub(crate) store: std::marker::PhantomData<()>,
+    /// DER bytes of the certificates explicitly added by the user.
+    ///
+    /// Only the OpenSSL-style backends need this copy: the rustls backend
+    /// keeps a `RootCertStore` that the QUIC path reuses directly.
+    #[cfg_attr(
+        not(all(
+            feature = "http3",
+            any(feature = "boring-tls", feature = "openssl-tls")
+        )),
+        expect(
+            dead_code,
+            reason = "the rustls store is reused directly; the DER copy is only needed by the OpenSSL-style backends"
+        )
+    )]
+    pub(crate) der_roots: Vec<Vec<u8>>,
+}
 
 impl Debug for CertStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

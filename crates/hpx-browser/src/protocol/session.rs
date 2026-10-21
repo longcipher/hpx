@@ -1,6 +1,10 @@
-use std::{collections::HashSet, time::SystemTime};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::atomic::{AtomicU32, Ordering},
+    time::SystemTime,
+};
 
-use crate::{page::Page, protocol::types::*};
+use crate::{dom::NodeId, page::Page, protocol::types::*};
 
 /// Per-connection CDP session state.
 pub struct CdpSession {
@@ -9,6 +13,15 @@ pub struct CdpSession {
     pub frame_id: String,
     loader_counter: u64,
     request_counter: u64,
+    /// Maps the node ids handed out to CDP clients onto the page's real DOM
+    /// nodes.
+    ///
+    /// CDP clients address nodes by an opaque integer. Handing out invented
+    /// ids (a constant for the document, another one for "a match") breaks
+    /// every follow-up command that references the node, so the session
+    /// keeps a real registry instead.
+    node_ids: HashMap<u32, NodeId>,
+    next_node_id: AtomicU32,
 }
 
 impl Default for CdpSession {
@@ -25,7 +38,21 @@ impl CdpSession {
             frame_id: "main".to_string(),
             loader_counter: 0,
             request_counter: 0,
+            node_ids: HashMap::new(),
+            next_node_id: AtomicU32::new(1),
         }
+    }
+
+    /// Register a real DOM node and return the CDP node id for it.
+    fn register_node(&mut self, node: NodeId) -> u32 {
+        let id = self.next_node_id.fetch_add(1, Ordering::Relaxed);
+        self.node_ids.insert(id, node);
+        id
+    }
+
+    /// Look up the DOM node behind a CDP node id.
+    pub fn resolve_node(&self, node_id: u32) -> Option<NodeId> {
+        self.node_ids.get(&node_id).copied()
     }
 
     pub fn next_request_id(&mut self) -> String {
@@ -199,10 +226,14 @@ impl CdpSession {
                     .get("depth")
                     .and_then(|v| v.as_i64())
                     .unwrap_or(1);
+                // Hand out the id of the real document root instead of a
+                // fabricated constant, so follow-up commands that reference
+                // the node address the actual DOM node.
+                let root_id = self.register_node(page.dom().document());
                 Ok(serde_json::json!({
                     "root": {
-                        "nodeId": 1,
-                        "backendNodeId": 1,
+                        "nodeId": root_id,
+                        "backendNodeId": root_id,
                         "nodeType": 9,
                         "nodeName": "#document",
                         "localName": "",
@@ -219,8 +250,13 @@ impl CdpSession {
                     .get("selector")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                let has = page.has_element(selector);
-                Ok(serde_json::json!({ "nodeId": if has { 2 } else { 0 } }))
+                // Resolve the selector against the live DOM and register the
+                // matched node; `0` is the CDP "no match" sentinel.
+                let node_id = match crate::page::query_selector(page.dom(), selector) {
+                    Some(node) => self.register_node(node),
+                    None => 0,
+                };
+                Ok(serde_json::json!({ "nodeId": node_id }))
             }
             "DOM.getOuterHTML" => {
                 let result = page
@@ -311,6 +347,11 @@ impl CdpSession {
             .and_then(|v| v.as_str())
             .unwrap_or("about:blank");
         let loader_id = self.next_loader_id();
+
+        // The node ids handed out so far refer to the previous document; a
+        // navigation replaces the DOM, so the registry is reset to keep it
+        // from growing without bound over a long-lived session.
+        self.node_ids.clear();
 
         // 1. Page.frameNavigated — emitted before navigation starts.
         if self.is_domain_enabled("Page") {
@@ -550,6 +591,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dom_node_ids_resolve_to_real_nodes() {
+        // Regression: the DOM domain handed out invented node ids (a
+        // constant for the document, another one for "a match"), so any
+        // follow-up command that referenced the node addressed nothing.
+        let mut session = CdpSession::new();
+        let mut page = Page::from_html(
+            "<html><head></head><body><div id=\"target\">hi</div></body></html>",
+            false,
+        )
+        .await
+        .unwrap();
+
+        let doc_req = CdpRequest {
+            id: 1,
+            method: "DOM.getDocument".to_string(),
+            params: serde_json::json!({}),
+            session_id: None,
+        };
+        let (doc_resp, _) = session.handle_request(&mut page, &doc_req).await;
+        let doc_id = extract_node_id(&doc_resp);
+        assert!(
+            session.resolve_node(doc_id).is_some(),
+            "the document node id must resolve to a real node: {doc_resp}"
+        );
+
+        let query_req = CdpRequest {
+            id: 2,
+            method: "DOM.querySelector".to_string(),
+            params: serde_json::json!({ "selector": "#target" }),
+            session_id: None,
+        };
+        let (query_resp, _) = session.handle_request(&mut page, &query_req).await;
+        let query_id = extract_node_id(&query_resp);
+        assert_ne!(
+            query_id, doc_id,
+            "the matched element must get its own node id: {query_resp}"
+        );
+        let node = session
+            .resolve_node(query_id)
+            .expect("the matched node id must resolve");
+        assert_eq!(page.dom().text_content(node), "hi");
+
+        // A selector that matches nothing must report the CDP "no match"
+        // sentinel instead of an invented id.
+        let miss_req = CdpRequest {
+            id: 3,
+            method: "DOM.querySelector".to_string(),
+            params: serde_json::json!({ "selector": "#missing" }),
+            session_id: None,
+        };
+        let (miss_resp, _) = session.handle_request(&mut page, &miss_req).await;
+        assert_eq!(extract_node_id(&miss_resp), 0, "response: {miss_resp}");
+    }
+
+    /// Extract the `nodeId` field from a CDP response body.
+    fn extract_node_id(response: &str) -> u32 {
+        serde_json::from_str::<serde_json::Value>(response)
+            .ok()
+            .and_then(|v| {
+                v.get("result")
+                    .and_then(|r| r.get("nodeId"))
+                    .or_else(|| {
+                        v.get("result")
+                            .and_then(|r| r.get("root"))
+                            .and_then(|r| r.get("nodeId"))
+                    })
+                    .and_then(|n| n.as_u64())
+            })
+            .unwrap_or(u64::from(u32::MAX)) as u32
+    }
+
+    #[tokio::test]
     async fn handle_unknown_method() {
         let mut session = CdpSession::new();
         let mut page = Page::from_html("<html><head></head><body></body></html>", false)
@@ -597,6 +710,43 @@ mod tests {
         let (resp, _) = session.handle_request(&mut page, &req).await;
         assert!(resp.contains("identifier"));
         assert_eq!(session.scripts_on_new_document.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn navigation_resets_the_node_id_registry() {
+        // The node ids refer to the document that was loaded; a navigation
+        // replaces the DOM, so the stale ids must not stay resolvable (and
+        // the registry must not grow without bound).
+        let mut session = CdpSession::new();
+        let mut page = Page::from_html(
+            "<html><head></head><body><div id=\"target\">hi</div></body></html>",
+            false,
+        )
+        .await
+        .unwrap();
+
+        let doc_req = CdpRequest {
+            id: 1,
+            method: "DOM.getDocument".to_string(),
+            params: serde_json::json!({}),
+            session_id: None,
+        };
+        let (doc_resp, _) = session.handle_request(&mut page, &doc_req).await;
+        let doc_id = extract_node_id(&doc_resp);
+        assert!(session.resolve_node(doc_id).is_some());
+
+        let nav_req = CdpRequest {
+            id: 2,
+            method: "Page.navigate".to_string(),
+            params: serde_json::json!({ "url": "about:blank" }),
+            session_id: None,
+        };
+        let _ = session.handle_request(&mut page, &nav_req).await;
+
+        assert!(
+            session.resolve_node(doc_id).is_none(),
+            "node ids of the previous document must not survive a navigation"
+        );
     }
 
     #[tokio::test]

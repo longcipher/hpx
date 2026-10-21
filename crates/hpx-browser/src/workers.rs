@@ -8,9 +8,9 @@ use crate::{dom::Dom, js_runtime::BrowserJsRuntime};
 /// A dedicated Web Worker running in its own V8 isolate.
 pub struct WebWorker {
     runtime: BrowserJsRuntime,
-    #[allow(dead_code)] // ponytail: RAII — keeps channel endpoint alive
+    #[expect(dead_code, reason = "RAII: keeps the channel endpoint alive")]
     rx: mpsc::Receiver<Value>,
-    #[allow(dead_code)] // ponytail: RAII — keeps channel endpoint alive
+    #[expect(dead_code, reason = "RAII: keeps the channel endpoint alive")]
     tx: mpsc::Sender<Value>,
     terminated: bool,
 }

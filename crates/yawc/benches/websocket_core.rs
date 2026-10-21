@@ -1,3 +1,18 @@
+//! Benchmarks for the WebSocket frame codec and masking hot paths.
+
+#![allow(
+    clippy::allow_attributes,
+    clippy::cast_lossless,
+    clippy::cast_ptr_alignment,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    missing_docs,
+    unreachable_pub
+)]
+
 use std::hint::black_box;
 
 use bytes::{Bytes, BytesMut};
@@ -217,7 +232,7 @@ mod simd_experimental {
             unsafe {
                 ptr.add(offset)
                     .cast::<u64>()
-                    .write_unaligned(word ^ mask_u64)
+                    .write_unaligned(word ^ mask_u64);
             };
         }
 
@@ -262,7 +277,7 @@ mod simd_experimental {
                 unsafe {
                     ptr.add(offset)
                         .cast::<u64>()
-                        .write_unaligned(word ^ mask_u64)
+                        .write_unaligned(word ^ mask_u64);
                 };
             }
         }
@@ -301,7 +316,10 @@ mod simd_experimental {
                 // must work for ANY alignment (including non-8-byte-aligned
                 // sub-slices), so we exercise the alignment_offset cases
                 // (1, 2, 3) which produce unaligned pointers.
-                #[allow(clippy::type_complexity)]
+                #[expect(
+                    clippy::type_complexity,
+                    reason = "the candidate list mirrors the mask variants"
+                )]
                 let candidates: &[(&str, fn(&mut [u8], [u8; 4]))] = &[
                     ("apply_mask_simd", apply_mask_simd),
                     ("safe_unaligned_u64", safe_unaligned_u64),

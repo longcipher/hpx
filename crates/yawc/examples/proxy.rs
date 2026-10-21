@@ -7,6 +7,16 @@
 //! - Handles client connections/disconnections and WebSocket handshakes
 //! - Provides a convenient way to fan-out data to multiple consumerss
 
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    missing_docs
+)]
+
 use std::{
     collections::BTreeMap,
     sync::{Arc, atomic::AtomicU64},
@@ -44,7 +54,7 @@ async fn handle_client(clients: Arc<Clients>, ws: HttpWebSocket) -> hpx_yawc::Re
 
     // Listen for incoming frames until a Close frame is received
     while let Some(frame) = stream.next().await {
-        if let OpCode::Close = frame.opcode() {
+        if frame.opcode() == OpCode::Close {
             break;
         }
     }

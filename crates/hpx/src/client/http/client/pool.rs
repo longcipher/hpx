@@ -91,13 +91,12 @@ struct PoolShard<T, K: Key> {
     // under load (the pool's p99.9), for an eviction policy that never fires
     // unless `max_pool_size` is configured. It is now a plain map, with
     // capacity enforced manually in `evict_over_capacity`.
-    idle: HashMap<K, Arc<Mutex<Vec<Idle<T>>>>>,
-    // Tracks active keys for iteration.
     //
-    // Ordered least-recently-used first, so capacity eviction can pop from the
-    // front. Only `put` reorders it — the checkout hot path does not touch the
-    // ordering, and the number of distinct hosts is tiny.
-    idle_keys: Vec<K>,
+    // Each entry carries the host's LRU recency stamp, so capacity eviction
+    // drops the *least recently used* host rather than the oldest inserted
+    // one. The stamp is refreshed on every checkout and put, which keeps the
+    // hot path O(1) (no reordering of a key list).
+    idle: HashMap<K, IdleEntry<T>>,
     // Upper bound on the number of distinct hosts tracked (`max_pool_size`).
     // `usize::MAX` when unset, so `evict_over_capacity` is a single compare.
     max_capacity: usize,
@@ -115,9 +114,20 @@ struct PoolShard<T, K: Key> {
     // A oneshot channel is used to allow the interval to be notified when
     // the Pool completely drops. That way, the interval can cancel immediately.
     idle_interval_ref: Option<oneshot::Sender<Infallible>>,
+    // Monotonic counter backing the LRU recency stamps of `idle` entries.
+    lru_counter: u64,
     exec: Exec,
     timer: Option<ArcTimer>,
     timeout: Option<Duration>,
+}
+
+/// A host's parked connections plus its LRU recency stamp.
+struct IdleEntry<T> {
+    /// The idle connections for this host.
+    list: Arc<Mutex<Vec<Idle<T>>>>,
+    /// Monotonic stamp of the host's most recent use. The smallest stamp
+    /// identifies the least recently used host during capacity eviction.
+    last_used: u64,
 }
 
 struct ShardedPool<T, K: Key> {
@@ -391,11 +401,11 @@ impl<T: Send + 'static, K: Key> PoolShard<T, K> {
         Self {
             connecting: HashSet::with_hasher(HASHER),
             idle: HashMap::with_hasher(HASHER),
-            idle_keys: Vec::new(),
             max_capacity,
             idle_interval_ref: None,
             max_idle_per_host: config.max_idle_per_host,
             waiters: HashMap::with_hasher(HASHER),
+            lru_counter: 0,
             exec: Exec::new(executor),
             timer: timer.map(ArcTimer::new),
             timeout: config.idle_timeout,
@@ -451,12 +461,21 @@ impl<T: Poolable, K: Key> PoolShard<T, K> {
         if let Some(value) = value {
             // Polonius: borrow from `self.idle.get()` is dead in the else branch,
             // so the explicit scope block is no longer needed.
-            let idle_list = if let Some(list) = self.idle.get(key).cloned() {
-                list
+            let stamp = self.next_lru_stamp();
+            let idle_list = if let Some(entry) = self.idle.get_mut(key) {
+                // The host was just used: refresh its recency stamp so
+                // capacity eviction does not drop an actively used host.
+                entry.last_used = stamp;
+                entry.list.clone()
             } else {
                 let new_list = Arc::new(Mutex::new(Vec::new()));
-                self.idle.insert(key.clone(), new_list.clone());
-                self.idle_keys.push(key.clone());
+                self.idle.insert(
+                    key.clone(),
+                    IdleEntry {
+                        list: new_list.clone(),
+                        last_used: stamp,
+                    },
+                );
                 new_list
             };
             let mut idle_guard = idle_list.lock();
@@ -559,23 +578,36 @@ impl<T, K: Key> PoolShard<T, K> {
 }
 
 impl<T: Poolable, K: Key> PoolShard<T, K> {
+    /// Returns the next monotonic LRU recency stamp.
+    fn next_lru_stamp(&mut self) -> u64 {
+        let stamp = self.lru_counter;
+        self.lru_counter = self.lru_counter.wrapping_add(1);
+        stamp
+    }
+
     /// Drops the least-recently-used host key while the pool is over capacity.
     ///
     /// moka used to enforce `max_pool_size` through its LRU policy; with a plain
-    /// map the bookkeeping is manual. `idle_keys` is ordered LRU-first, so this
-    /// pops from the front. With the default config (`max_pool_size` unset) the
-    /// capacity is `usize::MAX` and this is a single compare.
+    /// map the bookkeeping is manual. Each idle entry carries the stamp of its
+    /// host's most recent use, so the host with the smallest stamp — the least
+    /// recently used one — is dropped first. With the default config
+    /// (`max_pool_size` unset) the capacity is `usize::MAX` and this is a
+    /// single compare.
     ///
     /// Dropping a key drops its idle connections — they are only parked sockets,
     /// so eviction closes them when the `Idle` handles are dropped.
     fn evict_over_capacity(&mut self) {
         while self.idle.len() > self.max_capacity {
-            let Some(evict) = self.idle_keys.first().cloned() else {
+            let Some(evict) = self
+                .idle
+                .iter()
+                .min_by_key(|(_, entry)| entry.last_used)
+                .map(|(key, _)| key.clone())
+            else {
                 break;
             };
             trace!("pool over capacity, evicting host {:?}", evict);
             self.idle.remove(&evict);
-            self.idle_keys.remove(0);
         }
     }
 
@@ -583,72 +615,63 @@ impl<T: Poolable, K: Key> PoolShard<T, K> {
     fn clear_expired(&mut self) {
         let now = Instant::now();
 
+        // Hosts whose idle list became empty are dropped from the map. The
+        // keys are collected first because the map cannot be mutated while it
+        // is being iterated.
+        let mut empty_keys = Vec::new();
+
         match self.timeout {
             Some(dur) if dur != Duration::ZERO => {
-                self.idle_keys.retain(|key| {
-                    match self.idle.get(key).cloned() {
-                        Some(arc_list) => {
-                            let mut list = arc_list.lock();
-                            list.retain(|entry| {
-                                if !entry.value.is_open() {
-                                    trace!("idle interval evicting closed for {:?}", key);
-                                    return false;
-                                }
-
-                                // Avoid `Instant::sub` to avoid issues like rust-lang/rust#86470.
-                                if now.saturating_duration_since(entry.idle_at) > dur {
-                                    trace!("idle interval evicting expired for {:?}", key);
-                                    return false;
-                                }
-
-                                // Otherwise, keep this value...
-                                true
-                            });
-
-                            if list.is_empty() {
-                                // Polonius: `list` is dead after `is_empty()`, so the
-                                // explicit `drop(list)` is no longer needed before
-                                // reborrowing `self.idle`.
-                                trace!("idle interval removing empty key {:?}", key);
-                                self.idle.remove(key);
-                                false
-                            } else {
-                                true
-                            }
+                for (key, entry) in &self.idle {
+                    let mut list = entry.list.lock();
+                    list.retain(|idle| {
+                        if !idle.value.is_open() {
+                            trace!("idle interval evicting closed for {:?}", key);
+                            return false;
                         }
-                        None => false, // evicted or removed elsewhere
+
+                        // Avoid `Instant::sub` to avoid issues like rust-lang/rust#86470.
+                        if now.saturating_duration_since(idle.idle_at) > dur {
+                            trace!("idle interval evicting expired for {:?}", key);
+                            return false;
+                        }
+
+                        // Otherwise, keep this value...
+                        true
+                    });
+
+                    if list.is_empty() {
+                        trace!("idle interval removing empty key {:?}", key);
+                        empty_keys.push(key.clone());
                     }
-                });
+                }
             }
             _ => {
                 // No idle timeout configured: connections never expire by
                 // age, but bookkeeping must still drop entries whose
-                // connections were closed elsewhere — otherwise `idle_keys`
+                // connections were closed elsewhere — otherwise the idle map
                 // grows without bound.
-                self.idle_keys
-                    .retain(|key| match self.idle.get(key).cloned() {
-                        Some(arc_list) => {
-                            let mut list = arc_list.lock();
-                            list.retain(|entry| {
-                                if entry.value.is_open() {
-                                    true
-                                } else {
-                                    trace!("sweep evicting closed connection for {:?}", key);
-                                    false
-                                }
-                            });
-
-                            if list.is_empty() {
-                                trace!("sweep removing empty key {:?}", key);
-                                self.idle.remove(key);
-                                false
-                            } else {
-                                true
-                            }
+                for (key, entry) in &self.idle {
+                    let mut list = entry.list.lock();
+                    list.retain(|idle| {
+                        if idle.value.is_open() {
+                            true
+                        } else {
+                            trace!("sweep evicting closed connection for {:?}", key);
+                            false
                         }
-                        None => false, // evicted by moka or removed elsewhere
                     });
+
+                    if list.is_empty() {
+                        trace!("sweep removing empty key {:?}", key);
+                        empty_keys.push(key.clone());
+                    }
+                }
             }
+        }
+
+        for key in empty_keys {
+            self.idle.remove(&key);
         }
     }
 }
@@ -815,8 +838,8 @@ impl<T: Poolable, K: Key> Checkout<T, K> {
             let (shard, _shard_index) = pool.shard_for(&self.key);
             let mut inner = shard.lock();
             let expiration = Expiration::new(inner.timeout);
-            let maybe_entry = inner.idle.get(&self.key).and_then(|arc_list| {
-                let mut list = arc_list.lock();
+            let maybe_entry = inner.idle.get(&self.key).and_then(|idle_entry| {
+                let mut list = idle_entry.list.lock();
                 trace!("take? {:?}: expiration = {:?}", self.key, expiration.0);
                 // Polonius: `IdlePopper`'s borrow of `list` is dead after
                 // `pop()`, and `list` itself is dead after `is_empty()`, so the
@@ -842,7 +865,13 @@ impl<T: Poolable, K: Key> Checkout<T, K> {
 
             if empty {
                 inner.idle.remove(&self.key);
-                inner.idle_keys.retain(|k| k != &self.key);
+            } else {
+                // The host was just used: refresh its recency stamp so
+                // capacity eviction does not drop an actively used host.
+                let stamp = inner.next_lru_stamp();
+                if let Some(idle_entry) = inner.idle.get_mut(&self.key) {
+                    idle_entry.last_used = stamp;
+                }
             }
 
             if entry.is_none() && self.waiter.is_none() {
@@ -1129,7 +1158,7 @@ mod tests {
             pool.locked(&key)
                 .idle
                 .get(&key)
-                .map(|list| list.lock().len()),
+                .map(|entry| entry.list.lock().len()),
             Some(3)
         );
         let timeout = pool.locked(&key).timeout.unwrap();
@@ -1156,8 +1185,52 @@ mod tests {
             pool.locked(&key)
                 .idle
                 .get(&key)
-                .map(|list| list.lock().len()),
+                .map(|entry| entry.list.lock().len()),
             Some(2)
+        );
+    }
+
+    #[test]
+    fn test_pool_evicts_least_recently_used_host() {
+        // Regression: capacity eviction used to drop the oldest *inserted*
+        // host (FIFO) even when a newer host was actively reused, which is
+        // the opposite of the documented LRU policy.
+        let pool = Pool::new(
+            super::Config {
+                idle_timeout: Some(Duration::from_secs(60)),
+                max_idle_per_host: 10,
+                max_pool_size: NonZero::new(2),
+            },
+            TokioExecutor::new(),
+            Option::<ArcTimer>::None,
+        );
+
+        let key_a = host_key("a.example.com");
+        let key_b = host_key("b.example.com");
+        let key_c = host_key("c.example.com");
+
+        // Two hosts are tracked: `a` and `b`.
+        pool.pooled(c(key_a.clone()), Uniq(1));
+        pool.pooled(c(key_b.clone()), Uniq(2));
+
+        // Reusing `a` makes `b` the least recently used host.
+        pool.pooled(c(key_a.clone()), Uniq(3));
+
+        // Adding a third host exceeds the capacity of two hosts.
+        pool.pooled(c(key_c.clone()), Uniq(4));
+
+        let shard = pool.locked(&key_a);
+        assert!(
+            shard.idle.contains_key(&key_a),
+            "the recently used host must survive the eviction"
+        );
+        assert!(
+            !shard.idle.contains_key(&key_b),
+            "the least recently used host must be evicted"
+        );
+        assert!(
+            shard.idle.contains_key(&key_c),
+            "the newly tracked host must be kept"
         );
     }
 
@@ -1183,7 +1256,7 @@ mod tests {
             pool.locked(&key)
                 .idle
                 .get(&key)
-                .map(|list| list.lock().len()),
+                .map(|entry| entry.list.lock().len()),
             Some(3)
         );
 
@@ -1195,7 +1268,7 @@ mod tests {
             pool.locked(&key)
                 .idle
                 .get(&key)
-                .map(|list| list.lock().len()),
+                .map(|entry| entry.list.lock().len()),
             Some(3)
         );
 

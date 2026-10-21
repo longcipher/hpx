@@ -11,7 +11,10 @@ use crate::js_runtime::runtime::BrowserJsRuntime;
 use crate::{
     challenge::{ChallengeVerdict, EngineClass, engine_classify, engine_classify_lower},
     dom::{Dom, NodeId},
-    net::{HttpClient, NetConfig, RedirectPolicy, SharedNetConfig},
+    net::{
+        HttpClient, NetConfig, RedirectPolicy, SharedNetConfig,
+        csp::{Directive, PolicySet},
+    },
     resource_loader::{
         ResourceType, extract_resource_urls, fetch_resources, filter_by_block_types,
     },
@@ -22,6 +25,8 @@ use crate::{
 const DEFAULT_NAV_BUDGET: Duration = Duration::from_secs(15);
 /// Default max iterations for challenge retry loops.
 const DEFAULT_MAX_ITERATIONS: u8 = 3;
+/// Default budget for draining the JS event loop after scripts run.
+const DEFAULT_JS_EVENT_LOOP_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Common interface for browser page types.
 ///
@@ -52,6 +57,23 @@ pub struct Page {
     net_config: SharedNetConfig,
     /// Whether a proxy was set explicitly (wins over `StealthProfile::proxy`).
     explicit_proxy: bool,
+    /// Content-Security-Policy policies delivered by response headers.
+    csp_headers: PolicySet,
+    /// Content-Security-Policy policies delivered by `<meta http-equiv>`
+    /// elements in the document.
+    csp_meta: PolicySet,
+    /// Whether CSP violations block resource loading.
+    ///
+    /// Mirrors [`StealthProfile::enforce_csp`] (which also defaults to
+    /// `true`); when disabled the policies are still parsed (and reported)
+    /// but never block a request.
+    csp_enforced: bool,
+    /// Budget for draining the JS event loop after scripts run.
+    ///
+    /// The V8 runtime executes scripts synchronously; promise callbacks,
+    /// timers and `fetch()` continuations only run while the event loop is
+    /// polled. This bounds how long the page waits for that work to settle.
+    js_event_loop_timeout: std::time::Duration,
     #[cfg(feature = "v8")]
     js_runtime: Option<BrowserJsRuntime>,
 }
@@ -85,6 +107,10 @@ impl Page {
             subresource_block_types: HashSet::new(),
             net_config: NetConfig::shared(),
             explicit_proxy: false,
+            csp_headers: PolicySet::default(),
+            csp_meta: PolicySet::default(),
+            csp_enforced: true,
+            js_event_loop_timeout: DEFAULT_JS_EVENT_LOOP_TIMEOUT,
             #[cfg(feature = "v8")]
             js_runtime: None,
         }
@@ -103,7 +129,7 @@ impl Page {
         let dom = crate::html_parser::parse_html(html);
         let title = extract_title(html);
         let challenge_class = engine_classify(html);
-        Ok(Self {
+        let mut page = Self {
             dom,
             url: "about:blank".to_string(),
             title,
@@ -114,9 +140,15 @@ impl Page {
             subresource_block_types: HashSet::new(),
             net_config: NetConfig::shared(),
             explicit_proxy: false,
+            csp_headers: PolicySet::default(),
+            csp_meta: PolicySet::default(),
+            csp_enforced: true,
+            js_event_loop_timeout: DEFAULT_JS_EVENT_LOOP_TIMEOUT,
             #[cfg(feature = "v8")]
             js_runtime: None,
-        })
+        };
+        page.refresh_meta_csp();
+        Ok(page)
     }
 
     /// Create a page with profile and URL (no network).
@@ -139,18 +171,26 @@ impl Page {
             subresource_block_types: HashSet::new(),
             net_config: NetConfig::shared(),
             explicit_proxy: false,
+            csp_headers: PolicySet::default(),
+            csp_meta: PolicySet::default(),
+            csp_enforced: true,
+            js_event_loop_timeout: DEFAULT_JS_EVENT_LOOP_TIMEOUT,
             #[cfg(feature = "v8")]
             js_runtime: None,
         };
         // Apply the profile's proxy to the page network policy (always),
         // and its V8 runtime globals when the feature is enabled.
         page.apply_profile_network(&profile);
+        // The profile decides whether CSP violations block resource loading;
+        // this applies with and without the `v8` feature.
+        page.csp_enforced = profile.enforce_csp;
         #[cfg(feature = "v8")]
         page.set_profile(profile);
         #[cfg(not(feature = "v8"))]
         {
             page.profile = Some(profile);
         }
+        page.refresh_meta_csp();
         Ok(page)
     }
 
@@ -165,6 +205,7 @@ impl Page {
         self.html = html.to_string();
         self.title = extract_title_lower(&lowered_html, html);
         self.challenge_class = engine_classify_lower(&lowered_html);
+        self.refresh_meta_csp();
         #[cfg(feature = "v8")]
         {
             if self.js_runtime.is_some() {
@@ -183,6 +224,83 @@ impl Page {
                 }
             }
         }
+        self.sync_runtime_csp();
+    }
+
+    /// Re-collect the `<meta http-equiv="content-security-policy">` policies
+    /// from the current DOM.
+    fn refresh_meta_csp(&mut self) {
+        let mut policies = PolicySet::default();
+        for meta in self
+            .dom
+            .get_elements_by_tag_name(self.dom.document(), "meta")
+        {
+            let Some(node) = self.dom.get(meta) else {
+                continue;
+            };
+            let Some(elem) = node.as_element() else {
+                continue;
+            };
+            let http_equiv = elem
+                .attrs
+                .iter()
+                .find(|a| a.name.local.eq_ignore_ascii_case("http-equiv"))
+                .map(|a| a.value.as_str())
+                .unwrap_or_default();
+            if !http_equiv.eq_ignore_ascii_case("content-security-policy") {
+                continue;
+            }
+            let content = elem
+                .attrs
+                .iter()
+                .find(|a| a.name.local.eq_ignore_ascii_case("content"))
+                .map(|a| a.value.as_str())
+                .unwrap_or_default();
+            policies.push_meta(content);
+        }
+        self.csp_meta = policies;
+    }
+
+    /// Push the page's effective CSP into the JS runtime so that
+    /// `fetch()` calls honor `connect-src`.
+    #[cfg(feature = "v8")]
+    fn sync_runtime_csp(&mut self) {
+        let origin = self.page_origin();
+        let enforced = self.csp_enforced;
+        let headers = self.csp_headers.clone();
+        let meta = self.csp_meta.clone();
+        if let Some(ref mut rt) = self.js_runtime {
+            if enforced {
+                rt.set_csp(headers, meta, origin);
+            } else {
+                // Enforcement disabled: keep the runtime unconstrained.
+                rt.set_csp(PolicySet::default(), PolicySet::default(), None);
+            }
+        }
+    }
+
+    /// No-op without the `v8` feature.
+    #[cfg(not(feature = "v8"))]
+    fn sync_runtime_csp(&mut self) {}
+
+    /// The page's origin (used as the CSP base for `'self'` comparisons).
+    fn page_origin(&self) -> Option<url::Url> {
+        url::Url::parse(&self.url).ok()
+    }
+
+    /// Apply the Content-Security-Policy of the response headers.
+    ///
+    /// The `Content-Security-Policy` header is enforced; the
+    /// `Content-Security-Policy-Report-Only` header is parsed but never
+    /// blocks a request.
+    pub fn set_csp_headers(&mut self, enforced: Option<&str>, report_only: Option<&str>) {
+        self.csp_headers = PolicySet::from_document(enforced, report_only, None);
+        self.sync_runtime_csp();
+    }
+
+    /// Whether CSP violations block resource loading.
+    pub fn set_csp_enforced(&mut self, enforced: bool) {
+        self.csp_enforced = enforced;
     }
 
     /// Set the outbound proxy used for navigations, subresource fetches, and
@@ -296,6 +414,17 @@ impl Page {
             .request("GET", url, None, &[], RedirectPolicy::Follow(10))
             .await
             .map_err(PageError::Net)?;
+        // The response's Content-Security-Policy governs the document's
+        // subresource loads; the report-only variant is parsed but never
+        // blocks.
+        self.set_csp_headers(
+            resp.headers
+                .get("content-security-policy")
+                .map(String::as_str),
+            resp.headers
+                .get("content-security-policy-report-only")
+                .map(String::as_str),
+        );
         let mut current_html = resp.text();
         let mut current_url = resp.url.clone();
         let mut cookies_before = cookie_snapshot(client, &current_url).await;
@@ -374,13 +503,19 @@ impl Page {
         Ok(())
     }
 
+    /// Evaluate JavaScript and let the asynchronous work it schedules settle.
+    ///
+    /// The script runs synchronously; the JS event loop is then drained so
+    /// promise callbacks, timers and `fetch()` continuations scheduled by the
+    /// script actually run before the result is returned.
     pub async fn evaluate_async(&mut self, script: &str) -> Result<serde_json::Value, PageError> {
         #[cfg(feature = "v8")]
         {
             self.ensure_js_runtime();
             if let Some(ref mut rt) = self.js_runtime {
                 let result = rt
-                    .execute_script(script)
+                    .execute_script_async(script, self.js_event_loop_timeout)
+                    .await
                     .map_err(|e| PageError::Evaluation(e.to_string()))?;
                 return Ok(serde_json::Value::String(result));
             }
@@ -389,6 +524,14 @@ impl Page {
         Err(PageError::Evaluation(
             "evaluate_async requires v8 feature".into(),
         ))
+    }
+
+    /// Set the budget used for draining the JS event loop.
+    ///
+    /// Applies to [`Page::evaluate_async`] and to the script execution that
+    /// follows a navigation.
+    pub fn set_js_event_loop_timeout(&mut self, timeout: Duration) {
+        self.js_event_loop_timeout = timeout;
     }
 
     /// Evaluate JavaScript — uses V8 when available, stub otherwise.
@@ -417,6 +560,7 @@ impl Page {
             Ok(rt) => self.js_runtime = Some(rt),
             Err(e) => tracing::error!("BrowserJsRuntime init failed in ensure_js_runtime: {e}"),
         }
+        self.sync_runtime_csp();
     }
 
     /// Execute all inline `<script>` tags (those without `src`) in document order.
@@ -520,6 +664,7 @@ impl Page {
     #[cfg(feature = "v8")]
     pub fn set_profile(&mut self, profile: StealthProfile) {
         self.apply_profile_network(&profile);
+        self.csp_enforced = profile.enforce_csp;
         self.ensure_js_runtime();
         if let Some(ref mut rt) = self.js_runtime {
             rt.set_user_agent(&profile.user_agent);
@@ -528,6 +673,7 @@ impl Page {
             rt.run_page_init();
         }
         self.profile = Some(profile);
+        self.sync_runtime_csp();
     }
 
     /// Apply the profile's `proxy` field to this page.
@@ -616,7 +762,17 @@ impl Page {
     pub async fn load_subresources(&mut self) -> Result<(), PageError> {
         let resources = extract_resource_urls(&self.dom);
         let filtered = filter_by_block_types(resources, &self.subresource_block_types);
+        let filtered = self.filter_by_csp(filtered);
         if filtered.is_empty() {
+            // No external sub-resources, but the document's inline scripts
+            // still belong to the page: run them (and let their asynchronous
+            // work settle) before reporting the page as loaded.
+            let has_inline_scripts = !self.collect_inline_scripts().is_empty();
+            self.execute_inline_scripts()?;
+            if has_inline_scripts {
+                self.drain_js_event_loop().await;
+            }
+            self.html = self.dom.serialize_html(self.dom.document());
             return Ok(());
         }
         // Route subresources through the SSRF-guarded client so private
@@ -636,13 +792,92 @@ impl Page {
             .cloned()
             .collect();
 
+        // Only pages that actually ran scripts can have pending JS work.
+        // Draining the event loop for a script-less page would burn the whole
+        // settle budget on every navigation for nothing.
+        let ran_scripts = !scripts.is_empty() || !self.collect_inline_scripts().is_empty();
+
         self.apply_stylesheets(&styles);
         self.execute_scripts(&scripts)?;
+        if ran_scripts {
+            self.drain_js_event_loop().await;
+        }
 
         // Sync html field with DOM state (stylesheets injected as <style> tags).
         self.html = self.dom.serialize_html(self.dom.document());
 
         Ok(())
+    }
+
+    /// Drain the JS event loop so the asynchronous work scheduled by the
+    /// page's scripts (promise callbacks, timers, `fetch()` continuations)
+    /// settles before the page is considered loaded.
+    #[cfg(feature = "v8")]
+    async fn drain_js_event_loop(&mut self) {
+        if let Some(ref mut rt) = self.js_runtime {
+            rt.drain_event_loop(self.js_event_loop_timeout).await;
+        }
+    }
+
+    /// No-op without the `v8` feature.
+    #[cfg(not(feature = "v8"))]
+    async fn drain_js_event_loop(&mut self) {}
+
+    /// Drop the resources the page's Content Security Policy forbids.
+    ///
+    /// Each resource type maps to the CSP directive that governs it
+    /// (`script-src-elem`, `style-src-elem`, `img-src`, `font-src`,
+    /// `media-src`). Relative URLs are resolved against the page URL before
+    /// the check, exactly like a browser resolves them.
+    fn filter_by_csp(
+        &self,
+        resources: Vec<crate::resource_loader::ResourceUrl>,
+    ) -> Vec<crate::resource_loader::ResourceUrl> {
+        if !self.csp_enforced || (self.csp_headers.is_empty() && self.csp_meta.is_empty()) {
+            return resources;
+        }
+        let Some(origin) = self.page_origin() else {
+            return resources;
+        };
+
+        resources
+            .into_iter()
+            .filter(|resource| {
+                let resolved = origin.join(&resource.url).ok();
+                let Some(url) = resolved else {
+                    tracing::debug!(
+                        url = %resource.url,
+                        "resource URL could not be resolved against the page URL; blocked by CSP"
+                    );
+                    return false;
+                };
+                let directive = csp_directive_for(resource.resource_type);
+                let allowed = self
+                    .csp_headers
+                    .allows_url(directive, &url, &origin)
+                    .allowed
+                    && self.csp_meta.allows_url(directive, &url, &origin).allowed;
+                if !allowed {
+                    tracing::debug!(
+                        url = %resource.url,
+                        directive = directive.as_str(),
+                        "resource blocked by Content-Security-Policy"
+                    );
+                }
+                allowed
+            })
+            .collect()
+    }
+}
+
+/// Map a resource type to the CSP directive that governs it.
+fn csp_directive_for(resource_type: ResourceType) -> Directive {
+    match resource_type {
+        ResourceType::Script => Directive::ScriptSrcElem,
+        ResourceType::Stylesheet => Directive::StyleSrcElem,
+        ResourceType::Image => Directive::ImgSrc,
+        ResourceType::Font => Directive::FontSrc,
+        ResourceType::Media => Directive::MediaSrc,
     }
 }
 
@@ -668,7 +903,11 @@ impl PageLike for Page {
 ///
 /// Supports `#id`, `.class`, `tag`, `tag.class`, and `tag#id` selectors.
 /// Returns the first matching `NodeId` in document order.
-fn query_selector(dom: &Dom, selector: &str) -> Option<NodeId> {
+/// Resolve a CSS selector against the DOM, returning the first match.
+///
+/// `pub(crate)` so the CDP session can hand out real node ids for the nodes
+/// it reports.
+pub(crate) fn query_selector(dom: &Dom, selector: &str) -> Option<NodeId> {
     let sel = selector.trim();
     if sel.is_empty() {
         return None;
@@ -791,6 +1030,153 @@ pub enum PageError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── JS event loop wiring ───────────────────────────────────────────
+
+    #[cfg(feature = "v8")]
+    #[tokio::test]
+    async fn evaluate_async_drains_the_event_loop() {
+        // Regression: the page never drove the V8 event loop, so promise
+        // callbacks (and timers) scheduled by a script never ran.
+        let mut page = Page::from_html("<html><body></body></html>", false)
+            .await
+            .unwrap();
+
+        let value = page
+            .evaluate_async(
+                "globalThis.__settled = 'pending'; \
+                 Promise.resolve().then(() => { globalThis.__settled = 'resolved'; }); \
+                 'done'",
+            )
+            .await
+            .unwrap();
+        assert_eq!(value, serde_json::Value::String("done".to_string()));
+
+        assert_eq!(
+            page.evaluate("globalThis.__settled").unwrap(),
+            "resolved",
+            "the promise callback must have run while the event loop was drained"
+        );
+    }
+
+    #[cfg(feature = "v8")]
+    #[tokio::test]
+    async fn evaluate_async_runs_timers() {
+        let mut page = Page::from_html("<html><body></body></html>", false)
+            .await
+            .unwrap();
+
+        page.evaluate_async("globalThis.__timer = 'pending'; setTimeout(() => { globalThis.__timer = 'fired'; }, 10);")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            page.evaluate("globalThis.__timer").unwrap(),
+            "fired",
+            "the timer callback must have run while the event loop was drained"
+        );
+    }
+
+    #[cfg(feature = "v8")]
+    #[tokio::test]
+    async fn inline_scripts_run_without_external_subresources() {
+        // Regression: the subresource pipeline returned early when the page
+        // had no external resources, so inline scripts never ran.
+        let html = "<html><body><script>globalThis.__inline = 'ran';</script></body></html>";
+        let mut page = Page::from_html(html, false).await.unwrap();
+
+        page.load_subresources().await.unwrap();
+
+        assert_eq!(
+            page.evaluate("globalThis.__inline").unwrap(),
+            "ran",
+            "inline scripts must run even when the page has no external subresources"
+        );
+    }
+
+    // ── Content Security Policy wiring ─────────────────────────────────
+
+    #[tokio::test]
+    async fn csp_blocks_subresources_from_other_origins() {
+        // Regression: the CSP parser existed but was never consulted, so
+        // every subresource was loaded regardless of the page's policy.
+        // Enforcement is on by default, matching `StealthProfile::enforce_csp`.
+        let html = r#"<html><head>
+            <link rel="stylesheet" href="https://cdn.example.com/a.css">
+            <script src="https://evil.example.net/x.js"></script>
+        </head><body></body></html>"#;
+        let mut page = Page::from_html(html, false).await.unwrap();
+        page.set_csp_headers(Some("script-src 'self'"), None);
+
+        let resources = crate::resource_loader::extract_resource_urls(&page.dom);
+        let allowed = page.filter_by_csp(resources);
+        let urls: Vec<&str> = allowed.iter().map(|r| r.url.as_str()).collect();
+
+        assert!(
+            urls.iter().any(|u| u.contains("a.css")),
+            "resources without a governing directive stay allowed: {urls:?}"
+        );
+        assert!(
+            !urls.iter().any(|u| u.contains("x.js")),
+            "a script from another origin must be blocked by script-src 'self': {urls:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn csp_report_only_policy_never_blocks() {
+        let html =
+            r#"<html><head><script src="https://evil.example.net/x.js"></script></head></html>"#;
+        let mut page = Page::from_html(html, false).await.unwrap();
+        page.set_csp_headers(None, Some("script-src 'none'"));
+        page.set_csp_enforced(true);
+
+        let resources = crate::resource_loader::extract_resource_urls(&page.dom);
+        let allowed = page.filter_by_csp(resources);
+        assert_eq!(
+            allowed.len(),
+            1,
+            "a report-only policy must never block a resource"
+        );
+    }
+
+    #[tokio::test]
+    async fn csp_enforcement_can_be_disabled() {
+        let html =
+            r#"<html><head><script src="https://evil.example.net/x.js"></script></head></html>"#;
+        let mut page = Page::from_html(html, false).await.unwrap();
+        page.set_csp_headers(Some("script-src 'self'"), None);
+        page.set_csp_enforced(false);
+
+        let resources = crate::resource_loader::extract_resource_urls(&page.dom);
+        let allowed = page.filter_by_csp(resources);
+        assert_eq!(
+            allowed.len(),
+            1,
+            "CSP must not block resources when enforcement is disabled"
+        );
+    }
+
+    #[tokio::test]
+    async fn meta_csp_is_collected_from_the_document() {
+        let html = r#"<html><head>
+            <meta http-equiv="Content-Security-Policy" content="script-src 'none'">
+            <script src="https://evil.example.net/x.js"></script>
+        </head></html>"#;
+        let mut page = Page::from_html(html, false).await.unwrap();
+        page.set_csp_enforced(true);
+
+        assert!(
+            !page.csp_meta.is_empty(),
+            "the <meta http-equiv> policy must be collected"
+        );
+
+        let resources = crate::resource_loader::extract_resource_urls(&page.dom);
+        let allowed = page.filter_by_csp(resources);
+        assert!(
+            allowed.is_empty(),
+            "the meta policy must block the script: {allowed:?}"
+        );
+    }
 
     // ── BDD Scenario 1: Navigate to clean page ──────────────────────────
 

@@ -16,7 +16,7 @@
 
 ### Task 1.1: Fix double-connection bug
 
-**File**: `crates/hpx-transport/src/websocket/actor.rs`
+**File**: `crates/hpx/src/client/ws.rs`
 
 - [x] Locate the second WebSocket connection created in `run_ready_loop_internal()` (around the ready-loop in the file).
 - [x] Refactor so that `run_ready_loop_internal()` receives the already-authenticated WebSocket (read/write halves) from `run_connection()` instead of opening a new one.
@@ -27,7 +27,7 @@
 
 ### Task 1.2: Add handle-drop shutdown
 
-**File**: `crates/hpx-transport/src/websocket/actor.rs`
+**File**: `crates/hpx/src/client/ws.rs`
 
 - [x] Detect when all `WsClient` / command sender clones are dropped (`cmd_rx.recv()` returns `None`).
 - [x] Initiate graceful shutdown: close WebSocket, clear pending requests with error, exit task.
@@ -54,7 +54,7 @@
 
 ### Task 2.1: Define core types
 
-**File**: `crates/hpx-transport/src/websocket/connection.rs` (new)
+**File**: `crates/hpx/src/client/ws.rs` (new)
 
 - [x] Define `ConnectionEpoch(u64)`.
 - [x] Define `ControlCommand` enum: `Close`, `Reconnect { reason }`.
@@ -67,11 +67,11 @@
 - [x] Define `Event` enum: `Connected { epoch }`, `Disconnected { epoch, reason }`, `Message(IncomingMessage)`.
 - [x] All types: derive `Debug`; `Event` and commands: derive `Clone` where appropriate.
 
-**Acceptance**: Types compile; `cargo clippy -p hpx-transport` passes.
+**Acceptance**: Types compile; `cargo clippy -p hpx` passes.
 
 ### Task 2.2: Implement ConnectionHandle
 
-**File**: `crates/hpx-transport/src/websocket/connection.rs`
+**File**: `crates/hpx/src/client/ws.rs`
 
 - [x] Define `ConnectionHandle` struct:
   - `ctrl_tx: mpsc::Sender<ControlCommand>`
@@ -95,7 +95,7 @@
 
 ### Task 2.3: Implement ConnectionStream
 
-**File**: `crates/hpx-transport/src/websocket/connection.rs`
+**File**: `crates/hpx/src/client/ws.rs`
 
 - [x] Define `ConnectionStream` struct wrapping `mpsc::Receiver<Event>`.
 - [x] Implement `futures::Stream<Item = Event>` for `ConnectionStream`.
@@ -105,7 +105,7 @@
 
 ### Task 2.4: Implement connection task loop
 
-**File**: `crates/hpx-transport/src/websocket/connection.rs`
+**File**: `crates/hpx/src/client/ws.rs`
 
 - [x] Implement `async fn connection_task(...)` — the single-owner loop:
 
@@ -132,7 +132,7 @@
 
 ### Task 2.5: Implement connect + authentication flow
 
-**File**: `crates/hpx-transport/src/websocket/connection.rs`
+**File**: `crates/hpx/src/client/ws.rs`
 
 - [x] Implement `async fn establish_connection(config, handler) -> Result<(WsRead, WsWrite)>`:
   - Create WebSocket connection using existing `connect_websocket()` logic.
@@ -150,7 +150,7 @@
 
 ### Task 2.6: Implement reconnection with exponential backoff
 
-**File**: `crates/hpx-transport/src/websocket/connection.rs`
+**File**: `crates/hpx/src/client/ws.rs`
 
 - [x] On disconnect/error:
   - Emit `Event::Disconnected { epoch, reason }`.
@@ -169,7 +169,7 @@
 
 ### Task 2.7: Implement Connection::connect entry point
 
-**File**: `crates/hpx-transport/src/websocket/connection.rs`
+**File**: `crates/hpx/src/client/ws.rs`
 
 - [x] Implement `Connection::connect(config, handler) -> Result<(ConnectionHandle, ConnectionStream)>`:
   - Validate config.
@@ -185,7 +185,7 @@
 
 ### Task 2.8: Wire WsClient as compatibility wrapper
 
-**File**: `crates/hpx-transport/src/websocket/ws_client.rs`
+**File**: `crates/hpx/src/client/ws.rs`
 
 - [x] Refactor `WsClient<H>` to hold `ConnectionHandle` internally.
 - [x] `WsClient::connect()`:
@@ -200,7 +200,7 @@
 
 ### Task 2.9: Update module exports
 
-**File**: `crates/hpx-transport/src/websocket/mod.rs`
+**File**: `crates/hpx/src/client/ws.rs`
 
 - [x] Add `pub mod connection;`.
 - [x] Re-export: `Connection`, `ConnectionHandle`, `ConnectionStream`, `Event`, `ConnectionEpoch`.
@@ -210,7 +210,7 @@
 
 ### Task 2.10: Remove old ConnectionActor code
 
-**File**: `crates/hpx-transport/src/websocket/actor.rs`
+**File**: `crates/hpx/src/client/ws.rs`
 
 - [x] Remove `ActorCommand` enum.
 - [x] Remove `ConnectionActor` struct and all `impl` blocks.
@@ -223,8 +223,8 @@
 ### Task 2.11: Run full validation
 
 - [x] `cargo fmt --all -- --check` — no formatting issues.
-- [x] `cargo clippy -p hpx-transport -- -D warnings` — zero warnings.
-- [x] `cargo test -p hpx-transport --lib --tests` — all tests pass.
+- [x] `cargo clippy -p hpx -- -D warnings` — zero warnings.
+- [x] `cargo test -p hpx --lib --tests` — all tests pass.
 - [x] `cargo doc -p hpx-transport --no-deps` — docs build cleanly.
 
 **Acceptance**: All CI commands pass with zero errors.
@@ -239,7 +239,7 @@
 
 ### Task 3.1: Implement zero-spawn request path
 
-**Files**: `crates/hpx-transport/src/websocket/connection.rs`, `crates/hpx-transport/src/websocket/pending.rs`
+**Files**: `crates/hpx/src/client/ws.rs`, `crates/hpx/src/client/ws.rs`
 
 - [x] Note: base zero-spawn path exists in `ConnectionHandle::request`; ensure it is the only path by removing any remaining spawn-based forwarding from legacy code.
 - [x] Ensure `PendingRequestStore::add()` returns `oneshot::Receiver<TransportResult<String>>` (already the case).
@@ -256,7 +256,7 @@
 
 ### Task 3.2: Implement SubscriptionGuard
 
-**Files**: `crates/hpx-transport/src/websocket/connection.rs`, `crates/hpx-transport/src/websocket/subscription.rs`
+**Files**: `crates/hpx/src/client/ws.rs`, `crates/hpx/src/client/ws.rs`
 
 - [x] Define `SubscriptionGuard` in `connection.rs` (needs `DataCommand` + `cmd_tx`).
 - [x] Add `SubscriptionStore::decrement_ref(&self, topic) -> Option<usize>` in `subscription.rs`.
@@ -270,7 +270,7 @@
 
 ### Task 3.3: Update ConnectionHandle::subscribe to return SubscriptionGuard
 
-**File**: `crates/hpx-transport/src/websocket/connection.rs`
+**File**: `crates/hpx/src/client/ws.rs`
 
 - [x] `subscribe()` returns `SubscriptionGuard` instead of bare `broadcast::Receiver`.
 - [x] Wire `cmd_tx` clone into the guard for unsubscribe-on-drop.
@@ -291,8 +291,8 @@
 ### Task 3.5: Run full validation
 
 - [x] `cargo fmt --all -- --check` — clean.
-- [x] `cargo clippy -p hpx-transport -- -D warnings` — clean.
-- [x] `cargo test -p hpx-transport --lib --tests` — all pass.
+- [x] `cargo clippy -p hpx -- -D warnings` — clean.
+- [x] `cargo test -p hpx --lib --tests` — all pass.
 
 **Acceptance**: All CI commands pass.
 
@@ -375,7 +375,7 @@
 - [x] `cargo fmt --all -- --check` — clean.
 - [x] `cargo clippy -p hpx -- -D warnings` — clean.
 - [x] `cargo test -p hpx --lib --tests` — all pass.
-- [x] `cargo test -p hpx-transport --lib --tests` — all pass (no regression).
+- [x] `cargo test -p hpx --lib --tests` — all pass (no regression).
 
 **Acceptance**: All CI commands pass with zero errors.
 
@@ -409,7 +409,7 @@
 
 ### Task 5.3: Update crate-level documentation
 
-**Files**: `crates/hpx-transport/src/lib.rs`, `crates/hpx-transport/README.md`
+**Files**: `crates/hpx/src/client/ws.rs`, `crates/hpx-transport/README.md`
 
 - [x] Add documentation for new `Connection` / `ConnectionHandle` / `ConnectionStream` API.
 - [x] Add usage example showing the split API.

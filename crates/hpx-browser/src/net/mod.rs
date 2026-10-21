@@ -693,7 +693,7 @@ fn resolve_redirect(current_url: &str, location: &str) -> Result<String, NetErro
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(deprecated)]
+#[expect(deprecated, reason = "tests exercise deprecated header handling")]
 mod tests {
     use super::*;
 

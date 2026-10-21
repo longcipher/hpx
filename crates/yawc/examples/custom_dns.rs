@@ -1,3 +1,13 @@
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    missing_docs
+)]
+
 /// Example WebSocket client that uses a custom dns resolver leveraging yawc.
 use std::{collections::HashMap, net::SocketAddr};
 
@@ -9,7 +19,7 @@ struct CustomDnsResolver {
 }
 
 impl CustomDnsResolver {
-    pub fn resolve(&self, domain: &str) -> Option<Vec<SocketAddr>> {
+    fn resolve(&self, domain: &str) -> Option<Vec<SocketAddr>> {
         self.overrides.get(domain).cloned()
     }
 }

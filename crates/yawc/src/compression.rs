@@ -19,7 +19,7 @@ static PERMESSAGE_DEFLATE: &str = "permessage-deflate";
 /// for both server and client. By default, these values are unset or set to conservative defaults,
 /// and can be modified through [`DeflateOptions`].
 #[derive(Debug, Clone, Default)]
-pub struct WebSocketExtensions {
+pub(crate) struct WebSocketExtensions {
     pub(super) server_max_window_bits: Option<Option<u8>>,
     pub(super) client_max_window_bits: Option<Option<u8>>,
     pub(super) server_no_context_takeover: bool,
@@ -165,11 +165,7 @@ impl WebSocketExtensions {
             let val_end = rest
                 .find(|c: char| !c.is_ascii_digit())
                 .unwrap_or(rest.len());
-            let value = if val_end > 0 {
-                Some(&rest[..val_end])
-            } else {
-                None
-            };
+            let value = (val_end > 0).then(|| &rest[..val_end]);
             Ok((rest[val_end..].trim_start(), key, value))
         } else {
             Ok((rest, key, None))
@@ -218,7 +214,7 @@ fn parse_window_bits(value: Option<&str>) -> Result<Option<u8>, String> {
 /// `Compressor` is used to compress WebSocket message payloads, optimizing data transmission.
 /// It provides flexibility with different configurations, such as specifying compression level,
 /// window size (when using `zlib`), and no-context-takeover mode.
-pub struct Compressor {
+pub(crate) struct Compressor {
     compressor_type: CompressorType,
 }
 
@@ -240,7 +236,7 @@ impl Compressor {
     ///
     /// # Returns
     /// A `Compressor` instance in contextual mode.
-    pub fn new(level: CompressionLevel) -> Self {
+    pub(crate) fn new(level: CompressionLevel) -> Self {
         Self {
             compressor_type: CompressorType::Contextual(Deflate::new(level)),
         }
@@ -255,7 +251,7 @@ impl Compressor {
     /// # Returns
     /// A `Compressor` instance configured with the specified window size.
     #[cfg(feature = "zlib")]
-    pub fn new_with_window_bits(level: CompressionLevel, window_bits: u8) -> Self {
+    pub(crate) fn new_with_window_bits(level: CompressionLevel, window_bits: u8) -> Self {
         Self {
             compressor_type: CompressorType::Contextual(Deflate::new_with_window_bits(
                 level,
@@ -274,7 +270,7 @@ impl Compressor {
     ///
     /// # Returns
     /// A `Compressor` instance in no-context-takeover mode.
-    pub fn no_context_takeover(level: CompressionLevel) -> Self {
+    pub(crate) fn no_context_takeover(level: CompressionLevel) -> Self {
         Self {
             compressor_type: CompressorType::NoContextTakeover(Deflate::new(level)),
         }
@@ -289,7 +285,7 @@ impl Compressor {
     /// # Returns
     /// A `BytesMut` containing the compressed data, or an `io::Error` if compression fails.
     #[cfg_attr(feature = "hotpath", hotpath::measure(impl_type = "Compression"))]
-    pub fn compress(&mut self, input: &[u8], flush: bool) -> io::Result<Bytes> {
+    pub(crate) fn compress(&mut self, input: &[u8], flush: bool) -> io::Result<Bytes> {
         match &mut self.compressor_type {
             CompressorType::Contextual(compressor) => compressor.compress(input, flush),
             CompressorType::NoContextTakeover(compressor) => {
@@ -455,7 +451,7 @@ fn chunk(output: &mut BytesMut) -> &mut [u8] {
 ///
 /// - No-context-takeover mode: The decompression context is reset after each frame, trading
 ///   compression efficiency for reduced memory usage.
-pub struct Decompressor {
+pub(crate) struct Decompressor {
     decompressor_type: DecompressorType,
 }
 
@@ -495,7 +491,7 @@ impl Decompressor {
     /// # Returns
     ///
     /// Returns a new `Decompressor` instance that uses contextual decompression.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
@@ -517,7 +513,7 @@ impl Decompressor {
     ///
     /// This function is only available when compiled with the `zlib` feature enabled.
     #[cfg(feature = "zlib")]
-    pub fn new_with_window_bits(window_bits: u8) -> Self {
+    pub(crate) fn new_with_window_bits(window_bits: u8) -> Self {
         Self {
             decompressor_type: DecompressorType::Contextual(Inflate::new_with_window_bits(
                 window_bits,
@@ -534,7 +530,7 @@ impl Decompressor {
     /// # Returns
     ///
     /// Returns a new `Decompressor` instance that resets its context after each frame.
-    pub fn no_context_takeover() -> Self {
+    pub(crate) fn no_context_takeover() -> Self {
         Self {
             decompressor_type: DecompressorType::NoContextTakeover(Default::default()),
         }
@@ -548,7 +544,7 @@ impl Decompressor {
     /// cap is exceeded, [`Decompressor::decompress`] returns an I/O error and
     /// the caller should terminate the connection.
     #[must_use]
-    pub fn with_max_output(mut self, max_output: usize) -> Self {
+    pub(crate) fn with_max_output(mut self, max_output: usize) -> Self {
         match &mut self.decompressor_type {
             DecompressorType::Contextual(inflate)
             | DecompressorType::NoContextTakeover(inflate) => {
@@ -576,7 +572,7 @@ impl Decompressor {
     /// * `Ok(None)` - More input needed to complete decompression
     /// * `Err(io::Error)` - Decompression failed due to invalid/corrupt data
     #[cfg_attr(feature = "hotpath", hotpath::measure(impl_type = "Compression"))]
-    pub fn decompress(&mut self, input: &[u8], stream_end: bool) -> io::Result<Bytes> {
+    pub(crate) fn decompress(&mut self, input: &[u8], stream_end: bool) -> io::Result<Bytes> {
         match &mut self.decompressor_type {
             DecompressorType::Contextual(decompressor) => {
                 decompressor.decompress(input, stream_end)

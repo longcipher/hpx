@@ -68,7 +68,10 @@ impl Path2D {
             .push(PathCommand::ArcTo(x1, y1, x2, y2, radius));
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors the CanvasRenderingContext2D ellipse signature"
+    )]
     pub fn ellipse(
         &mut self,
         cx: f32,
@@ -183,7 +186,10 @@ fn append_arc(
     builder.arc_to(oval, start_deg, sweep_deg, false);
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the CanvasRenderingContext2D ellipse signature"
+)]
 fn append_ellipse(
     builder: &mut SkPathBuilder,
     cx: f32,

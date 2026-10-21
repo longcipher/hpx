@@ -811,7 +811,10 @@ impl WebSocket<MaybeTlsStream<TcpStream>> {
             let stream = match url.scheme() {
                 "ws" => MaybeTlsStream::Plain(tcp_stream),
                 "wss" => {
-                    let connector = connector.unwrap_or_else(|| tls_connector().clone());
+                    let connector = match connector {
+                        Some(connector) => connector,
+                        None => tls_connector()?.clone(),
+                    };
                     let domain = ServerName::try_from(host).map_err(|_| {
                         io::Error::new(io::ErrorKind::InvalidInput, "invalid dnsname")
                     })?;
@@ -847,7 +850,10 @@ impl WebSocket<MaybeTlsStream<TcpStream>> {
         let stream = match url.scheme() {
             "ws" => MaybeTlsStream::Plain(tcp_stream),
             "wss" => {
-                let connector = connector.unwrap_or_else(|| tls_connector().clone());
+                let connector = match connector {
+                    Some(connector) => connector,
+                    None => tls_connector()?.clone(),
+                };
                 let domain = ServerName::try_from(host)
                     .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid dnsname"))?;
 
@@ -1044,7 +1050,9 @@ where
         let negotiated = verify(&response, options, &ws_key)?;
 
         let upgraded = hyper::upgrade::on(&mut response).await?;
-        let parts = upgraded.downcast::<TokioIo<S>>().unwrap();
+        let parts = upgraded.downcast::<TokioIo<S>>().map_err(|_| {
+            std::io::Error::other("websocket upgrade produced an unexpected stream type")
+        })?;
 
         // Extract the original stream and any leftover read buffer
         let stream = parts.io.into_inner();
@@ -1338,10 +1346,9 @@ where
             // We need to call `poll_ready` before calling `start_send` since the user
             // might be under certain backpressure constraints
             ready!(this.streaming.poll_ready_unpin(cx))?;
-            let fragment = this
-                .fragment_layer
-                .pop_outgoing_fragment()
-                .expect("fragment");
+            let Some(fragment) = this.fragment_layer.pop_outgoing_fragment() else {
+                break;
+            };
             this.streaming.start_send_unpin(fragment)?;
         }
 
@@ -1440,10 +1447,14 @@ fn generate_key() -> String {
 }
 
 /// Creates a TLS connector with root certificates for secure WebSocket connections.
-static TLS_CONNECTOR: OnceLock<TlsConnector> = OnceLock::new();
+///
+/// The connector is built once and cached. A missing crypto provider is a
+/// configuration error, so it is reported to the caller instead of panicking
+/// inside the initializer.
+static TLS_CONNECTOR: OnceLock<std::result::Result<TlsConnector, String>> = OnceLock::new();
 
-fn tls_connector() -> &'static TlsConnector {
-    TLS_CONNECTOR.get_or_init(|| {
+fn tls_connector() -> std::result::Result<&'static TlsConnector, WebSocketError> {
+    let result = TLS_CONNECTOR.get_or_init(|| -> std::result::Result<TlsConnector, String> {
         let mut root_cert_store = rustls::RootCertStore::empty();
         root_cert_store
             .add_parsable_certificates(webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().cloned());
@@ -1461,23 +1472,35 @@ fn tls_connector() -> &'static TlsConnector {
         });
 
         #[cfg(not(any(feature = "rustls-ring", feature = "rustls-aws-lc-rs")))]
-        let provider = maybe_provider.expect(
+        let provider = maybe_provider.ok_or_else(|| {
             r#"No Rustls crypto provider was enabled for yawc to connect to a `wss://` endpoint!
 
 Either:
     - provide a `connector` in the WebSocketBuilder options
-    - enable one of the following features: `rustls-ring`, `rustls-aws-lc-rs`"#,
-        );
+    - enable one of the following features: `rustls-ring`, `rustls-aws-lc-rs`"#
+                .to_string()
+        })?;
 
-        let mut config = rustls::ClientConfig::builder_with_provider(provider)
+        let builder = match rustls::ClientConfig::builder_with_provider(provider)
             .with_protocol_versions(rustls::ALL_VERSIONS)
-            .expect("versions")
+        {
+            Ok(builder) => builder,
+            Err(err) => return Err(err.to_string()),
+        };
+        let mut config = builder
             .with_root_certificates(root_cert_store)
             .with_no_client_auth();
         config.alpn_protocols = vec!["http/1.1".into()];
 
-        TlsConnector::from(Arc::new(config))
-    })
+        Ok(TlsConnector::from(Arc::new(config)))
+    });
+
+    match result {
+        Ok(connector) => Ok(connector),
+        Err(message) => Err(WebSocketError::IoError(std::io::Error::other(
+            message.clone(),
+        ))),
+    }
 }
 
 #[cfg(test)]
@@ -2401,12 +2424,15 @@ mod tests {
     fn test_tls_connector_caching() {
         let first = tls_connector();
         let second = tls_connector();
+        let (first, second) = match (first, second) {
+            (Ok(first), Ok(second)) => (first, second),
+            _ => return, // no crypto provider configured in this build
+        };
         assert!(
             std::ptr::eq(first, second),
             "tls_connector() should return the same &'static reference on repeated calls"
         );
     }
-
     #[test]
     fn buffer_limit_constants_are_exact() {
         // Pin the memory-limit constants: 1 MiB payload, 2 MiB read buffer.

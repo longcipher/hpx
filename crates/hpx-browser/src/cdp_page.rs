@@ -70,7 +70,7 @@ impl CdpPage {
     #[must_use]
     pub fn start_har_capture(&self) -> HarCapture {
         let rx = self.cdp.subscribe_events();
-        HarCapture::new(rx)
+        HarCapture::new(rx, Some(self.session_id.clone()))
     }
 
     /// Ensure `Page.enable` has been sent for this session.
@@ -377,6 +377,14 @@ impl CdpPage {
     ) -> Result<JoinHandle<()>> {
         self.ensure_network_enabled().await?;
 
+        // Subscribe *before* enabling interception: once
+        // `Network.setRequestInterception` is in effect, Chrome pauses every
+        // request, and a request paused before the subscription exists would
+        // never be continued or failed.
+        let mut request_paused = self
+            .cdp
+            .subscribe_events_filtered(Some("Network.requestPaused"), Some(&self.session_id));
+
         self.cdp
             .send_command_with_session(
                 "Network.setRequestInterception",
@@ -384,10 +392,6 @@ impl CdpPage {
                 &self.session_id,
             )
             .await?;
-
-        let mut request_paused = self
-            .cdp
-            .subscribe_events_filtered(Some("Network.requestPaused"), Some(&self.session_id));
 
         let cdp = self.cdp.clone();
         let session_id = self.session_id.clone();
@@ -707,6 +711,86 @@ mod tests {
     }
 
     // ── Task 4.4: Network Request Interception Tests ───────────────────
+
+    #[tokio::test]
+    async fn intercept_requests_subscribes_before_enabling_interception() {
+        // Regression: the `Network.requestPaused` subscription used to be
+        // registered *after* `Network.setRequestInterception` was sent, so a
+        // request that Chrome paused in between was never continued or
+        // failed — it hung forever.
+        let client = Arc::new(CdpClient::new());
+        let (writer_tx, mut writer_rx) = mpsc::unbounded_channel::<String>();
+        client.set_test_writer(writer_tx);
+
+        // Mock CDP server: when the interception is enabled, emit a paused
+        // request *before* answering the command.
+        {
+            let client = client.clone();
+            tokio::spawn(async move {
+                while let Some(json_str) = writer_rx.recv().await {
+                    let Ok(req) = serde_json::from_str::<serde_json::Value>(&json_str) else {
+                        continue;
+                    };
+                    let id = req["id"].as_u64().unwrap_or(0) as u32;
+                    let method = req["method"].as_str().unwrap_or("unknown");
+                    let session_id = req["sessionId"].as_str().map(String::from);
+
+                    if method == "Network.setRequestInterception" {
+                        client.dispatch_message(CdpMessage {
+                            id: None,
+                            method: Some("Network.requestPaused".to_string()),
+                            params: Some(serde_json::json!({
+                                "requestId": "req-1",
+                                "request": {
+                                    "url": "https://example.com/early.js",
+                                    "resourceType": "Script"
+                                }
+                            })),
+                            result: None,
+                            error: None,
+                            session_id: session_id.clone(),
+                        });
+                    }
+
+                    client.dispatch_message(CdpMessage {
+                        id: Some(id),
+                        method: None,
+                        params: None,
+                        result: Some(serde_json::json!({ "method": method })),
+                        error: None,
+                        session_id,
+                    });
+                }
+            });
+        }
+
+        let page = CdpPage::new(
+            "target-1".to_string(),
+            "session-1".to_string(),
+            client.clone(),
+        );
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<(String, String)>();
+        let callback: Arc<dyn Fn(String, String) -> bool + Send + Sync> =
+            Arc::new(move |url, rt| {
+                let _ = tx.send((url, rt));
+                true
+            });
+
+        let handle = page
+            .intercept_requests(callback)
+            .await
+            .expect("intercept_requests should succeed");
+
+        let (url, resource_type) = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("the paused request must be observed")
+            .expect("callback channel closed");
+        assert_eq!(url, "https://example.com/early.js");
+        assert_eq!(resource_type, "Script");
+
+        handle.abort();
+    }
 
     #[tokio::test]
     async fn intercept_requests_sends_network_enable() {

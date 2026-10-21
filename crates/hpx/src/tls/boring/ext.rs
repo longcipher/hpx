@@ -31,7 +31,7 @@ impl SslConnectorBuilderExt for SslConnectorBuilder {
         store: Option<&CertStore>,
     ) -> crate::Result<SslConnectorBuilder> {
         if let Some(store) = store {
-            self.set_cert_store_ref(store.0.as_ref());
+            self.set_cert_store_ref(store.store.as_ref());
         } else {
             self.set_default_verify_paths().map_err(Error::tls)?;
         }

@@ -5,6 +5,16 @@
 //! - Use custom headers for API keys and bearer tokens
 //! - Handle authenticated connections with error recovery
 
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    missing_docs
+)]
+
 use futures::{SinkExt, StreamExt};
 use hpx_yawc::{Frame, HttpRequest, OpCode, Options, WebSocket};
 

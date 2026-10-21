@@ -585,8 +585,8 @@ mod tests {
         ));
 
         let urls: Vec<ResourceUrl> = routes
-            .iter()
-            .map(|(path, _)| ResourceUrl {
+            .keys()
+            .map(|path| ResourceUrl {
                 resource_type: if path.ends_with(".css") {
                     ResourceType::Stylesheet
                 } else if path.ends_with(".js") {

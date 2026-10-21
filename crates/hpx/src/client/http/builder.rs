@@ -158,6 +158,20 @@ impl ClientBuilder {
                 DynResolver::new(resolver)
             };
 
+            // Snapshot the client's TLS settings for the QUIC path before the
+            // TCP connector's `.with_tls` closure below moves `cert_store`,
+            // `identity`, and `keylog` out of `config.tls`.
+            #[cfg(feature = "http3")]
+            let quic_tls_settings = crate::tls::quic::QuicTlsSettings::new(
+                config.tls.cert_store.clone(),
+                config.tls.identity.clone(),
+                config.tls.cert_verification,
+                config.tls.keylog.clone(),
+                config.tls.tls_sni,
+                config.tls.min_version,
+                config.tls.max_version,
+            );
+
             // Build connector
             let connector = Connector::builder(config.proxy.proxies, resolver)
                 .timeout(config.transport.connect_timeout)
@@ -242,9 +256,16 @@ impl ClientBuilder {
                     // Production construction path: always wire a QuicConnector
                     // when the `http3` feature is enabled so both `http3_only()`
                     // and `prefer_http3()` (Alt-Svc upgrade) can open QUIC.
+                    // The QUIC path shares the client's TLS trust configuration
+                    // (custom CAs, disabled verification, client auth, keylog,
+                    // SNI) instead of silently using webpki roots.
                     let h3_opts = config.http3_options.clone().unwrap_or_default();
                     let transport_override = config.quic_config.take();
-                    match crate::tls::quic::default_quic_connector(&h3_opts, transport_override) {
+                    match crate::tls::quic::default_quic_connector(
+                        &h3_opts,
+                        quic_tls_settings,
+                        transport_override,
+                    ) {
                         Ok(conn) => builder = builder.h3_connector(conn),
                         Err(err) => {
                             tracing::warn!("failed to build QuicConnector: {err}");

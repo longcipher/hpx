@@ -220,11 +220,20 @@ pub struct HarCapture {
     handle: Option<tokio::task::JoinHandle<()>>,
     /// Watch channel to signal the background task to stop.
     stop_tx: Option<tokio::sync::watch::Sender<bool>>,
+    /// The CDP session this capture belongs to.
+    ///
+    /// Events of other sessions are ignored, so a capture started for one
+    /// page does not record the traffic of the other attached targets.
+    session_id: Option<String>,
 }
 
 impl HarCapture {
     /// Create a new capture bound to the given event receiver.
-    pub fn new(rx: broadcast::Receiver<CdpMessage>) -> Self {
+    ///
+    /// `session_id` restricts the capture to the events of a single CDP
+    /// session; `None` records every session the client reports.
+    #[must_use]
+    pub fn new(rx: broadcast::Receiver<CdpMessage>, session_id: Option<String>) -> Self {
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
         let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
 
@@ -235,6 +244,7 @@ impl HarCapture {
             state: CaptureState::new(),
             handle: Some(handle),
             stop_tx: Some(stop_tx),
+            session_id,
         }
     }
 
@@ -323,6 +333,16 @@ impl HarCapture {
 
     /// Process a single CDP message, updating capture state.
     fn process_event(&mut self, msg: CdpMessage) {
+        // Ignore events that belong to another CDP session: the capture
+        // listens to the client's broadcast channel, which carries the
+        // events of every attached target.
+        if let Some(session) = self.session_id.as_deref()
+            && let Some(event_session) = msg.session_id.as_deref()
+            && event_session != session
+        {
+            return;
+        }
+
         let method = match msg.method.as_deref() {
             Some(m) => m,
             None => return,
@@ -812,7 +832,7 @@ mod tests {
     #[tokio::test]
     async fn har_capture_new_has_empty_state() {
         let (_, rx) = broadcast::channel(1);
-        let capture = HarCapture::new(rx);
+        let capture = HarCapture::new(rx, None);
         assert!(capture.state.pending.is_empty());
         assert!(capture.state.entries.is_empty());
         assert!(capture.handle.is_some());
@@ -820,9 +840,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn har_capture_ignores_events_of_other_sessions() {
+        // Regression: the capture listened to the client's broadcast channel,
+        // which carries the events of every attached target, so a capture
+        // started for one page also recorded another page's traffic.
+        let (_, rx) = broadcast::channel::<CdpMessage>(8);
+        let mut capture = HarCapture::new(rx, Some("session-a".to_string()));
+
+        for (session, request_id, url) in [
+            ("session-a", "req-a", "https://example.com/a.js"),
+            ("session-b", "req-b", "https://other.com/b.js"),
+        ] {
+            capture.process_event(CdpMessage {
+                id: None,
+                method: Some("Network.requestWillBeSent".to_string()),
+                params: Some(serde_json::json!({
+                    "requestId": request_id,
+                    "timestamp": 1705293045.0,
+                    "request": {
+                        "method": "GET",
+                        "url": url,
+                        "httpVersion": "HTTP/1.1",
+                        "headers": {}
+                    }
+                })),
+                result: None,
+                error: None,
+                session_id: Some(session.to_string()),
+            });
+
+            capture.process_event(CdpMessage {
+                id: None,
+                method: Some("Network.loadingFinished".to_string()),
+                params: Some(serde_json::json!({
+                    "requestId": request_id,
+                    "encodedDataLength": 100
+                })),
+                result: None,
+                error: None,
+                session_id: Some(session.to_string()),
+            });
+        }
+
+        let archive = capture.stop().await.expect("stop should succeed");
+        assert_eq!(
+            archive.log.entries.len(),
+            1,
+            "only the captured session's requests belong in the archive"
+        );
+        assert_eq!(
+            archive.log.entries[0].request.url,
+            "https://example.com/a.js"
+        );
+    }
+
+    #[tokio::test]
     async fn har_capture_stop_returns_archive() {
         let (_, rx) = broadcast::channel::<CdpMessage>(1);
-        let mut capture = HarCapture::new(rx);
+        let mut capture = HarCapture::new(rx, None);
 
         // Process events directly to test stop() returns the archive
         capture.process_event(CdpMessage {
@@ -866,7 +941,7 @@ mod tests {
     #[tokio::test]
     async fn process_request_will_be_sent() {
         let (_, rx) = broadcast::channel(1);
-        let mut capture = HarCapture::new(rx);
+        let mut capture = HarCapture::new(rx, None);
 
         let msg = CdpMessage {
             id: None,
@@ -903,7 +978,7 @@ mod tests {
     #[tokio::test]
     async fn process_response_received() {
         let (_, rx) = broadcast::channel(1);
-        let mut capture = HarCapture::new(rx);
+        let mut capture = HarCapture::new(rx, None);
 
         // First: requestWillBeSent
         capture.process_event(CdpMessage {
@@ -953,7 +1028,7 @@ mod tests {
     #[tokio::test]
     async fn process_loading_finished_finalizes_entry() {
         let (_, rx) = broadcast::channel(1);
-        let mut capture = HarCapture::new(rx);
+        let mut capture = HarCapture::new(rx, None);
 
         // requestWillBeSent
         capture.process_event(CdpMessage {
@@ -1019,7 +1094,7 @@ mod tests {
     #[tokio::test]
     async fn process_loading_failed_sets_error_status() {
         let (_, rx) = broadcast::channel(1);
-        let mut capture = HarCapture::new(rx);
+        let mut capture = HarCapture::new(rx, None);
 
         capture.process_event(CdpMessage {
             id: None,
@@ -1062,7 +1137,7 @@ mod tests {
     #[tokio::test]
     async fn ignore_unknown_methods() {
         let (_, rx) = broadcast::channel(1);
-        let mut capture = HarCapture::new(rx);
+        let mut capture = HarCapture::new(rx, None);
 
         capture.process_event(CdpMessage {
             id: None,
@@ -1080,7 +1155,7 @@ mod tests {
     #[tokio::test]
     async fn ignore_messages_without_method() {
         let (_, rx) = broadcast::channel(1);
-        let mut capture = HarCapture::new(rx);
+        let mut capture = HarCapture::new(rx, None);
 
         capture.process_event(CdpMessage {
             id: Some(1),
@@ -1100,7 +1175,7 @@ mod tests {
     #[tokio::test]
     async fn export_snapshot_includes_pending() {
         let (_, rx) = broadcast::channel(1);
-        let mut capture = HarCapture::new(rx);
+        let mut capture = HarCapture::new(rx, None);
 
         // Simulate a request that hasn't finished yet
         capture.process_event(CdpMessage {
@@ -1130,7 +1205,7 @@ mod tests {
     #[tokio::test]
     async fn clear_resets_state() {
         let (_, rx) = broadcast::channel(1);
-        let mut capture = HarCapture::new(rx);
+        let mut capture = HarCapture::new(rx, None);
 
         capture.process_event(CdpMessage {
             id: None,
@@ -1161,7 +1236,7 @@ mod tests {
     #[tokio::test]
     async fn multiple_requests_tracked_independently() {
         let (_, rx) = broadcast::channel(1);
-        let mut capture = HarCapture::new(rx);
+        let mut capture = HarCapture::new(rx, None);
 
         // Request 1
         capture.process_event(CdpMessage {
@@ -1292,7 +1367,7 @@ mod tests {
     #[tokio::test]
     async fn full_lifecycle_via_broadcast_channel() {
         let (tx, rx) = broadcast::channel::<CdpMessage>(1);
-        let mut capture = HarCapture::new(rx);
+        let mut capture = HarCapture::new(rx, None);
 
         // Send requestWillBeSent
         let _ = tx.send(CdpMessage {

@@ -10,6 +10,16 @@
 //! 2. Zero or more continuation frames with FIN=0 and opcode=Continuation
 //! 3. A final continuation frame with FIN=1 and opcode=Continuation
 
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    missing_docs
+)]
+
 use eyre::Context;
 use futures::{SinkExt, StreamExt};
 use hpx_yawc::{Frame, OpCode, Options, WebSocket};

@@ -323,7 +323,6 @@ impl DynamicsCompressorKernel {
         self.k_cached
     }
 
-    #[allow(clippy::needless_range_loop)]
     fn process(
         &mut self,
         source_channels: &[&[f32]],

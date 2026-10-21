@@ -49,28 +49,46 @@ pub struct ParallelPager {
     next_worker: AtomicUsize,
 }
 
+/// Error returned when the parallel pager cannot start its workers.
+#[derive(Debug, thiserror::Error)]
+pub enum ParallelPagerError {
+    /// No workers were requested.
+    #[error("ParallelPager needs at least 1 worker")]
+    NoWorkers,
+    /// The OS refused to spawn a worker thread.
+    #[error("failed to spawn pager worker: {0}")]
+    Spawn(String),
+}
+
 impl ParallelPager {
     /// Spawn `num_workers` OS threads.
-    pub fn new(num_workers: usize) -> Self {
-        assert!(num_workers > 0, "ParallelPager needs at least 1 worker");
-        let workers = (0..num_workers)
-            .map(|i| {
-                let (tx, rx) = mpsc::channel::<Job>();
-                let thread = thread::Builder::new()
-                    .name(format!("hpx-browser-pager-{i}"))
-                    .stack_size(64 * 1024 * 1024)
-                    .spawn(move || worker_main(rx))
-                    .unwrap_or_else(|e| panic!("failed to spawn pager worker: {e}"));
-                WorkerHandle {
-                    tx,
-                    _thread: thread,
-                }
-            })
-            .collect();
-        Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParallelPagerError::NoWorkers`] when `num_workers` is zero
+    /// and [`ParallelPagerError::Spawn`] when the OS refuses to create a
+    /// worker thread.
+    pub fn new(num_workers: usize) -> Result<Self, ParallelPagerError> {
+        if num_workers == 0 {
+            return Err(ParallelPagerError::NoWorkers);
+        }
+        let mut workers = Vec::with_capacity(num_workers);
+        for i in 0..num_workers {
+            let (tx, rx) = mpsc::channel::<Job>();
+            let thread = thread::Builder::new()
+                .name(format!("hpx-browser-pager-{i}"))
+                .stack_size(64 * 1024 * 1024)
+                .spawn(move || worker_main(rx))
+                .map_err(|e| ParallelPagerError::Spawn(e.to_string()))?;
+            workers.push(WorkerHandle {
+                tx,
+                _thread: thread,
+            });
+        }
+        Ok(Self {
             workers,
             next_worker: AtomicUsize::new(0),
-        }
+        })
     }
 
     /// Dispatch a navigation to the next worker (round-robin).
@@ -172,14 +190,14 @@ mod tests {
 
     #[tokio::test]
     async fn parallel_pager_spawns_and_drops_cleanly() {
-        let pager = ParallelPager::new(2);
+        let pager = ParallelPager::new(2).expect("spawn pager workers");
         assert_eq!(pager.num_workers(), 2);
         drop(pager);
     }
 
     #[tokio::test]
     async fn parallel_navigate_returns_result() {
-        let pager = ParallelPager::new(1);
+        let pager = ParallelPager::new(1).expect("spawn pager worker");
         // about:blank is not an HTTP URI — verify pager dispatches and returns without panicking
         let result = pager.navigate("about:blank", None).await;
         assert!(result.elapsed.as_nanos() > 0, "job should have run");

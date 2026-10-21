@@ -1,3 +1,8 @@
+#![expect(
+    rustdoc::private_doc_tests,
+    reason = "the module is internal, but the example documents the low-level split API"
+)]
+
 //! Split read/write halves for WebSocket connections.
 //!
 //! # Architecture Layer: Fragment Assembly

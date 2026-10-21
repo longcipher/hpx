@@ -288,7 +288,7 @@ async fn handle_dl_command(
                 builder = builder.proxy(config);
             }
             let request = builder.build()?;
-            let id = engine.add(request)?;
+            let id = engine.add(request).await?;
             println!("Added download {id}");
 
             // Subscribe to events and display progress
@@ -320,17 +320,17 @@ async fn handle_dl_command(
         }
         cli::DlCommands::Pause { id } => {
             let download_id = id.parse::<uuid::Uuid>().map(hpx_dl::DownloadId::from)?;
-            engine.pause(download_id)?;
+            engine.pause(download_id).await?;
             println!("Paused {download_id}");
         }
         cli::DlCommands::Resume { id } => {
             let download_id = id.parse::<uuid::Uuid>().map(hpx_dl::DownloadId::from)?;
-            engine.resume(download_id)?;
+            engine.resume(download_id).await?;
             println!("Resumed {download_id}");
         }
         cli::DlCommands::Remove { id } => {
             let download_id = id.parse::<uuid::Uuid>().map(hpx_dl::DownloadId::from)?;
-            engine.remove(download_id)?;
+            engine.remove(download_id).await?;
             println!("Removed {download_id}");
         }
         cli::DlCommands::List { format } => {

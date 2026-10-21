@@ -19,7 +19,9 @@ canvas = [
     "dep:rustfft",
 ]
 cdp = ["dep:hpx-yawc", "dep:hyper", "dep:hyper-util", "hpx-yawc/axum"]
-cdp-client = ["dep:which"]
+# The CDP client modules (cdp_client, chrome, cdp_page, locator, har) build on
+# the CDP protocol types, so they require the `cdp` feature.
+cdp-client = ["cdp", "dep:which"]
 # Gates the in-tree property tests. `proptest` itself is a dev-dependency.
 proptest = []
 # SOCKS4/4a/5/5h proxy support (forwards to `hpx/socks`).

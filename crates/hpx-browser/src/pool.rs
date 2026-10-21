@@ -15,7 +15,7 @@ pub struct PagePool {
 }
 
 impl PagePool {
-    #[allow(
+    #[expect(
         clippy::arc_with_non_send_sync,
         reason = "single-threaded page pool; Arc shares idle queue within one thread"
     )]

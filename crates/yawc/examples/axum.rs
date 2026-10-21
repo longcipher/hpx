@@ -1,3 +1,13 @@
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    missing_docs
+)]
+
 // Required imports for axum web framework, futures, and websocket operations
 use axum::{Router, response::IntoResponse, routing::get};
 use futures::SinkExt;

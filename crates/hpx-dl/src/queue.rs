@@ -82,9 +82,16 @@ impl PriorityQueue {
     }
 
     /// Push an entry onto the queue, assigning a sequence number.
+    ///
+    /// Pushing an ID explicitly re-arms it, cancelling any tombstone created
+    /// by an earlier [`PriorityQueue::remove`]. Without this cancellation, a
+    /// removed entry that is later re-queued (pause → resume) would be
+    /// silently skipped by the first [`PriorityQueue::pop`], and the resumed
+    /// download would never be scheduled again.
     pub fn push(&mut self, mut entry: QueueEntry) {
         entry.seq = self.next_seq;
         self.next_seq = self.next_seq.wrapping_add(1);
+        self.tombstones.remove(&entry.id);
         self.heap.push(entry);
     }
 
@@ -107,10 +114,19 @@ impl PriorityQueue {
 
     /// Remove an entry by download ID.
     ///
-    /// O(1) amortized — marks the entry as tombstoned. The actual memory is
-    /// reclaimed when `pop()` encounters the tombstoned entry.
+    /// O(n) — checks whether the ID is still queued, then marks it as
+    /// tombstoned. The actual memory of a tombstoned entry is reclaimed when
+    /// [`PriorityQueue::pop`] encounters it. Removing an ID that is not
+    /// currently queued is a no-op, so tombstones never accumulate for
+    /// entries that were already popped.
+    ///
+    /// A later [`PriorityQueue::push`] for the same ID cancels the tombstone,
+    /// explicitly re-arming the entry.
     pub fn remove(&mut self, id: DownloadId) {
-        self.tombstones.insert(id);
+        let queued = self.heap.iter().any(|entry| entry.id == id);
+        if queued {
+            self.tombstones.insert(id);
+        }
     }
 
     /// Number of entries in the queue (may include tombstoned entries not yet popped).
@@ -309,6 +325,55 @@ mod tests {
         q.push(make_entry(DownloadPriority::Normal));
         q.remove(DownloadId::new());
         assert_eq!(q.len(), 1);
+    }
+
+    #[test]
+    fn push_after_remove_rearms_the_entry() {
+        // Regression: pause → resume used to push the entry back with a stale
+        // tombstone still registered for the ID, so the first pop silently
+        // dropped it and the resumed download was never scheduled again.
+        let mut q = PriorityQueue::new();
+        let entry = make_entry(DownloadPriority::Normal);
+        let id = entry.id;
+        q.push(entry);
+        q.remove(id);
+
+        // The queued entry is tombstoned away.
+        assert!(q.pop().is_none());
+
+        // Re-queueing the same ID must work again.
+        let requeued = QueueEntry::new(id, DownloadPriority::Normal, dummy_request(), 0);
+        q.push(requeued);
+        let popped = q.pop().expect("re-armed entry must be poppable");
+        assert_eq!(popped.id, id);
+    }
+
+    #[test]
+    fn remove_unpopped_entry_does_not_block_future_pops() {
+        // If the scheduler already popped (and started executing) the entry,
+        // a later remove() must not tombstone the heap: nothing is queued, so
+        // a subsequent push for the same ID must be popped normally instead
+        // of being consumed by a stale tombstone.
+        let mut q = PriorityQueue::new();
+        let entry = make_entry(DownloadPriority::Normal);
+        let id = entry.id;
+        q.push(entry);
+
+        // Simulate the scheduler popping the entry (it is now executing).
+        assert!(q.pop().is_some());
+        assert!(q.is_empty());
+
+        // pause(): nothing left to tombstone.
+        q.remove(id);
+
+        // resume(): the re-queued entry must be schedulable.
+        q.push(QueueEntry::new(
+            id,
+            DownloadPriority::Normal,
+            dummy_request(),
+            0,
+        ));
+        assert_eq!(q.pop().expect("resumed entry must pop").id, id);
     }
 
     #[test]

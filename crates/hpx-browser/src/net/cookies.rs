@@ -22,10 +22,12 @@ struct Cookie {
     #[serde(default)]
     domain: Option<String>,
     secure: bool,
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "field kept for the cookie model; read by the CDP path"
+    )]
     http_only: bool,
     /// Expiry as unix timestamp. None = session cookie.
-    #[allow(dead_code)]
     expires: Option<u64>,
 }
 

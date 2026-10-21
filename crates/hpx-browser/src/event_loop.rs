@@ -173,7 +173,10 @@ impl BrowserEventLoop {
 impl Default for BrowserEventLoop {
     // Default requires infallible construction; `new` returns Result, so we
     // panic on bootstrap failure. Use `new()` directly for fallible construction.
-    #[allow(clippy::expect_used)]
+    #[expect(
+        clippy::expect_used,
+        reason = "Default requires infallible construction"
+    )]
     fn default() -> Self {
         Self::new().expect("BrowserEventLoop::default bootstrap failed")
     }
@@ -183,7 +186,7 @@ impl Default for BrowserEventLoop {
 mod tests {
     use super::*;
 
-    #[allow(clippy::expect_used)]
+    #[expect(clippy::expect_used, reason = "test helper")]
     fn create_loop() -> BrowserEventLoop {
         BrowserEventLoop::new().expect("failed to create event loop")
     }

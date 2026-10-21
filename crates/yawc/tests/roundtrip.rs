@@ -5,6 +5,16 @@
 //! `HttpStream` are never exercised, so mutations that return fixed
 //! `Poll::Ready` values (e.g. writing zero bytes) would go undetected.
 
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    missing_docs
+)]
+
 use futures::{SinkExt, StreamExt};
 use hpx_yawc::{Frame, OpCode, Options, UpgradeFut, WebSocket};
 use hyper::{Request, body::Incoming, server::conn::http1, service::service_fn};

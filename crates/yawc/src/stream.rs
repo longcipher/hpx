@@ -9,8 +9,10 @@ use tokio_rustls::client::TlsStream;
 /// A stream that might be protected with TLS.
 #[non_exhaustive]
 #[derive(Debug)]
-#[allow(clippy::module_name_repetitions)]
-#[allow(clippy::large_enum_variant)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "the TLS variant carries a large stream type"
+)]
 pub enum MaybeTlsStream<S> {
     /// Unencrypted socket stream.
     Plain(S),

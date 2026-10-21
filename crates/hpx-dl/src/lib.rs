@@ -10,8 +10,6 @@
 // budget so `cargo clippy --all` / `cargo check --workspace` stay green.
 #![recursion_limit = "512"]
 // Unit tests are allowed to panic, unwrap, and print.
-// Unit tests are allowed to panic, unwrap, and print.
-// Unit tests are allowed to panic, unwrap, and print.
 #![cfg_attr(
     test,
     allow(

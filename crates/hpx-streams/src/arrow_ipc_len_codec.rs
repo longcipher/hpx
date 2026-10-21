@@ -7,7 +7,15 @@ use crate::{StreamBodyError, error::StreamBodyKind};
 pub(crate) struct ArrowIpcCodec {
     max_length: usize,
     decoder: StreamDecoder,
+    /// Number of bytes received for the object that is currently being
+    /// decoded (reset whenever a record was decoded).
     current_obj_len: usize,
+    /// Number of bytes left in the read buffer after the previous call.
+    ///
+    /// Used to tell how many bytes were *newly* received since the previous
+    /// call: the read buffer keeps the undecoded bytes, so its length alone
+    /// would count them again on every call.
+    pending_after_last: usize,
 }
 
 impl ArrowIpcCodec {
@@ -16,6 +24,7 @@ impl ArrowIpcCodec {
             max_length,
             decoder: StreamDecoder::new(),
             current_obj_len: 0,
+            pending_after_last: 0,
         }
     }
 }
@@ -28,8 +37,17 @@ impl tokio_util::codec::Decoder for ArrowIpcCodec {
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<RecordBatch>, StreamBodyError> {
         let buf_len = buf.len();
         if buf_len == 0 {
+            self.current_obj_len = 0;
+            self.pending_after_last = 0;
             return Ok(None);
         }
+
+        // Only the bytes that arrived since the previous call belong to the
+        // object that is currently being decoded. Counting the whole buffer
+        // again would count the already-buffered bytes once per chunk, so a
+        // message fed in N chunks was counted N times and tripped the
+        // max-length guard although it fits.
+        self.current_obj_len += buf_len.saturating_sub(self.pending_after_last);
 
         let obj_bytes = buf.as_ref();
         let obj_bytes_len = obj_bytes.len();
@@ -42,9 +60,13 @@ impl tokio_util::codec::Decoder for ArrowIpcCodec {
             )
         })?;
 
-        if maybe_record.is_none() {
-            self.current_obj_len += obj_bytes_len;
-        } else {
+        // Advance the read buffer by the bytes the Arrow decoder consumed.
+        let consumed = obj_bytes_len.saturating_sub(buffer.len());
+        buf.advance(consumed);
+        self.pending_after_last = buf.len();
+
+        if maybe_record.is_some() {
+            // The record was decoded: the next object starts from scratch.
             self.current_obj_len = 0;
         }
 
@@ -56,7 +78,6 @@ impl tokio_util::codec::Decoder for ArrowIpcCodec {
             ));
         }
 
-        buf.advance(obj_bytes_len - buffer.len());
         Ok(maybe_record)
     }
 
@@ -243,6 +264,29 @@ mod tests {
         buf.extend_from_slice(&data[half..]);
         let result = codec.decode(&mut buf).unwrap().unwrap();
         assert_eq!(result.num_rows(), 2);
+    }
+
+    #[test]
+    fn chunked_feeds_do_not_double_count_the_pending_length() {
+        // Regression: the pending length was accumulated on every decode call,
+        // so a message fed in many chunks was counted once per chunk and
+        // tripped the max-length guard although it fits comfortably.
+        let batch = make_batch();
+        let data = encode_ipc(&batch);
+
+        let mut codec = ArrowIpcCodec::new_with_max_length(data.len() + 16);
+        let mut buf = BytesMut::new();
+        let mut decoded = None;
+        for chunk in data.chunks(8) {
+            buf.extend_from_slice(chunk);
+            decoded = codec.decode(&mut buf).unwrap();
+            if decoded.is_some() {
+                break;
+            }
+        }
+
+        let decoded = decoded.expect("the batch must be decoded");
+        assert_eq!(decoded.num_rows(), 2);
     }
 
     #[test]

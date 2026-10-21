@@ -595,12 +595,12 @@ impl EngineInner {
     }
 
     async fn complete_download(&self, id: DownloadId, bytes: u64) -> Result<(), DownloadError> {
-        let entry = self
-            .downloads
-            .update_sync(&id, |_, entry| {
-                if entry.state == DownloadState::Paused {
-                    return entry.clone();
-                }
+        let mut completed = None;
+        let found = self.downloads.update_sync(&id, |_, entry| {
+            // Transitioning into `Completed` must go through the state
+            // machine: entries that are paused or already terminal are never
+            // silently overwritten.
+            if is_valid_transition(entry.state, DownloadState::Completed) {
                 entry.state = DownloadState::Completed;
                 entry.bytes_downloaded = bytes;
                 entry.last_error = None;
@@ -608,11 +608,15 @@ impl EngineInner {
                     segment.state = SegmentStatus::Completed;
                     segment.bytes_downloaded = segment.end - segment.start + 1;
                 }
-                entry.clone()
-            })
-            .ok_or(DownloadError::NotFound(id.0))?;
+                entry.touch();
+                completed = Some(entry.clone());
+            }
+        });
+        if found.is_none() {
+            return Err(DownloadError::NotFound(id.0));
+        }
 
-        if entry.state == DownloadState::Completed {
+        if let Some(entry) = completed {
             let record = entry.to_record(id);
             Arc::clone(&self.persistence).upsert_async(record).await?;
             let _ = self.events.emit(DownloadEvent::Completed { id });
@@ -626,19 +630,22 @@ impl EngineInner {
         error: &DownloadError,
     ) -> Result<(), DownloadError> {
         let message = error.to_string();
-        let entry = self
-            .downloads
-            .update_sync(&id, |_, entry| {
-                if entry.state == DownloadState::Paused {
-                    return entry.clone();
-                }
+        let mut failed = None;
+        let found = self.downloads.update_sync(&id, |_, entry| {
+            // Same state-machine discipline as `complete_download`: paused or
+            // terminal entries are left untouched.
+            if is_valid_transition(entry.state, DownloadState::Failed) {
                 entry.state = DownloadState::Failed;
                 entry.last_error = Some(message.clone());
-                entry.clone()
-            })
-            .ok_or(DownloadError::NotFound(id.0))?;
+                entry.touch();
+                failed = Some(entry.clone());
+            }
+        });
+        if found.is_none() {
+            return Err(DownloadError::NotFound(id.0));
+        }
 
-        if entry.state == DownloadState::Failed {
+        if let Some(entry) = failed {
             let record = entry.to_record(id);
             Arc::clone(&self.persistence).upsert_async(record).await?;
             let _ = self
@@ -648,8 +655,14 @@ impl EngineInner {
         Ok(())
     }
 
-    fn requeue(&self, id: DownloadId) -> Result<(), DownloadError> {
-        // Validate state and update atomically to avoid TOCTOU races.
+    async fn requeue(&self, id: DownloadId) -> Result<(), DownloadError> {
+        // Validate the state and update atomically to avoid TOCTOU races:
+        // only `Paused` and `Failed` downloads can be re-queued. The flag
+        // records whether the transition actually happened — re-reading the
+        // entry afterwards cannot distinguish "re-queued" from "was already
+        // queued", which would silently push a second queue entry for a
+        // download that is already scheduled.
+        let mut requeued = false;
         let updated = self.downloads.update_sync(&id, |_, entry| {
             if entry.state != DownloadState::Paused && entry.state != DownloadState::Failed {
                 return;
@@ -657,23 +670,25 @@ impl EngineInner {
             entry.state = DownloadState::Queued;
             entry.last_error = None;
             entry.touch();
+            requeued = true;
         });
         if updated.is_none() {
             return Err(DownloadError::NotFound(id.0));
         }
-
-        // Re-read to validate the transition happened and get the updated entry.
-        let entry = self.entry_snapshot(id)?;
-        if entry.state != DownloadState::Queued {
+        if !requeued {
+            let entry = self.entry_snapshot(id)?;
             return Err(DownloadError::InvalidState {
                 expected: "paused or failed".to_string(),
                 actual: entry.state.to_string(),
             });
         }
 
+        let entry = self.entry_snapshot(id)?;
         let request = entry.request.clone();
         let priority = request.priority;
-        self.persistence.upsert(entry.to_record(id))?;
+        Arc::clone(&self.persistence)
+            .upsert_async(entry.to_record(id))
+            .await?;
 
         self.queue
             .lock()
@@ -686,7 +701,7 @@ impl EngineInner {
         Ok(())
     }
 
-    fn pause_download(&self, id: DownloadId) -> Result<(), DownloadError> {
+    async fn pause_download(&self, id: DownloadId) -> Result<(), DownloadError> {
         self.queue.lock().remove(id);
 
         if let Some(handle) = self.active_tasks.lock().remove(&id) {
@@ -732,7 +747,9 @@ impl EngineInner {
         }
 
         let entry = self.entry_snapshot(id)?;
-        self.persistence.upsert(entry.to_record(id))?;
+        Arc::clone(&self.persistence)
+            .upsert_async(entry.to_record(id))
+            .await?;
         let _ = self.events.emit(DownloadEvent::StateChanged {
             id,
             state: DownloadState::Paused,
@@ -740,7 +757,7 @@ impl EngineInner {
         Ok(())
     }
 
-    fn remove_download(&self, id: DownloadId) -> Result<(), DownloadError> {
+    async fn remove_download(&self, id: DownloadId) -> Result<(), DownloadError> {
         let _ = self.entry_snapshot(id)?;
 
         self.queue.lock().remove(id);
@@ -749,7 +766,7 @@ impl EngineInner {
             handle.abort();
         }
 
-        self.persistence.delete(id)?;
+        Arc::clone(&self.persistence).delete_async(id).await?;
 
         let removed = self.downloads.remove_sync(&id);
         if removed.is_none() {
@@ -860,6 +877,25 @@ impl EngineInner {
         });
 
         self.active_tasks.lock().insert(id, handle);
+
+        // Re-check after registration: pause()/remove() may have run between
+        // the scheduler's pop and this insertion. If the download is no
+        // longer schedulable (paused or removed), the just-spawned task must
+        // be aborted; otherwise, if the task already ended and its
+        // `TaskGuard::drop` ran before the insert above, a stale
+        // `JoinHandle` would leak into `active_tasks`.
+        let schedulable = self
+            .downloads
+            .read_sync(&id, |_, entry| {
+                matches!(
+                    entry.state,
+                    DownloadState::Queued | DownloadState::Connecting | DownloadState::Downloading
+                )
+            })
+            .unwrap_or(false);
+        if !schedulable && let Some(handle) = self.active_tasks.lock().remove(&id) {
+            handle.abort();
+        }
     }
 
     fn should_coalesce_idle_start(&self) -> bool {
@@ -1125,7 +1161,15 @@ impl DownloadEngine {
     }
 
     /// Queue a new download.
-    pub fn add(&self, request: DownloadRequest) -> Result<DownloadId, DownloadError> {
+    ///
+    /// This is an `async` method: the initial record is persisted through the
+    /// storage worker without blocking the caller's thread.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DownloadError::AlreadyExists`] on an internal ID collision
+    /// and [`DownloadError::Storage`] if the record cannot be persisted.
+    pub async fn add(&self, request: DownloadRequest) -> Result<DownloadId, DownloadError> {
         let id = DownloadId::new();
         let entry = DownloadEntry::new(request.clone());
 
@@ -1137,10 +1181,10 @@ impl DownloadEngine {
         }
 
         // Persist to storage. If this fails, remove from memory to stay consistent.
-        if let Err(err) = self
-            .inner
-            .persistence
-            .upsert(self.inner.entry_snapshot(id)?.to_record(id))
+        let record = self.inner.entry_snapshot(id)?.to_record(id);
+        if let Err(err) = Arc::clone(&self.inner.persistence)
+            .upsert_async(record)
+            .await
         {
             self.inner.downloads.remove_sync(&id);
             return Err(err);
@@ -1157,20 +1201,20 @@ impl DownloadEngine {
     }
 
     /// Pause an active download.
-    pub fn pause(&self, id: DownloadId) -> Result<(), DownloadError> {
-        self.inner.pause_download(id)
+    pub async fn pause(&self, id: DownloadId) -> Result<(), DownloadError> {
+        self.inner.pause_download(id).await
     }
 
     /// Resume a paused or failed download.
-    pub fn resume(&self, id: DownloadId) -> Result<(), DownloadError> {
-        self.inner.requeue(id)?;
+    pub async fn resume(&self, id: DownloadId) -> Result<(), DownloadError> {
+        self.inner.requeue(id).await?;
         self.inner.trigger_scheduler();
         Ok(())
     }
 
     /// Remove a download from the queue or registry.
-    pub fn remove(&self, id: DownloadId) -> Result<(), DownloadError> {
-        self.inner.remove_download(id)
+    pub async fn remove(&self, id: DownloadId) -> Result<(), DownloadError> {
+        self.inner.remove_download(id).await
     }
 
     /// Get the current status of a download.
@@ -1419,7 +1463,13 @@ const fn is_valid_transition(from: DownloadState, to: DownloadState) -> bool {
     match (from, to) {
         (Queued, Connecting | Downloading) => true,
         (Connecting, Downloading | Paused | Failed) => true,
-        (Downloading, Paused | Failed) => true,
+        // Mirror failover: after a candidate URL fails mid-download, the next
+        // candidate restarts the connection phase from `Downloading`.
+        (Downloading, Connecting | Paused | Failed) => true,
+        // Success paths: a finished download is marked completed from either
+        // active state. `Completed` itself remains terminal — no outgoing
+        // transitions.
+        (Connecting | Downloading, Completed) => true,
         (Paused | Failed, Queued) => true,
         // Same-state no-op re-entry for non-terminal states.
         (Queued, Queued)
@@ -1713,8 +1763,8 @@ mod tests {
         assert_eq!(statuses[0].state, DownloadState::Paused);
     }
 
-    #[test]
-    fn add_returns_storage_error_when_persistence_fails() {
+    #[tokio::test]
+    async fn add_returns_storage_error_when_persistence_fails() {
         let engine = EngineBuilder::new()
             .storage(Arc::new(TestStorage::failing_save()))
             .build()
@@ -1725,6 +1775,7 @@ mod tests {
             .unwrap();
         let error = engine
             .add(request)
+            .await
             .expect_err("add should surface storage failure");
         assert!(
             matches!(error, DownloadError::Storage(message) if message.contains("save failed"))
@@ -1741,7 +1792,7 @@ mod tests {
         let request = DownloadRequest::builder("https://example.com/file.bin", "/tmp/file.bin")
             .build()
             .unwrap();
-        let id = engine.add(request).expect("add download");
+        let id = engine.add(request).await.expect("add download");
 
         let segments: Vec<SegmentState> = (0..5u32)
             .map(|i| SegmentState {
@@ -1788,7 +1839,7 @@ mod tests {
         let url = "https://example.com/file.bin";
         let dest = "/tmp/file.bin";
         let request = DownloadRequest::builder(url, dest).build().unwrap();
-        let id = engine.add(request).expect("add download");
+        let id = engine.add(request).await.expect("add download");
 
         // Verify initial persisted state: Queued
         let records = engine
@@ -1952,6 +2003,41 @@ mod tests {
     }
 
     #[test]
+    fn transition_table_allows_mirror_failover_from_downloading() {
+        // Regression: a candidate URL that fails mid-download must be able to
+        // re-enter `Connecting` for the next mirror, otherwise mirror
+        // failover aborted with an invalid-transition error whenever the
+        // failure happened after the `Downloading` transition.
+        assert!(is_valid_transition(
+            DownloadState::Downloading,
+            DownloadState::Connecting
+        ));
+    }
+
+    #[test]
+    fn transition_table_allows_completion_from_active_states() {
+        // Incoming edges into `Completed` — these drive `complete_download`.
+        assert!(is_valid_transition(
+            DownloadState::Connecting,
+            DownloadState::Completed
+        ));
+        assert!(is_valid_transition(
+            DownloadState::Downloading,
+            DownloadState::Completed
+        ));
+        // Zero-byte completions are handled from the connection phase only in
+        // practice, but both active states may legitimately complete.
+        assert!(!is_valid_transition(
+            DownloadState::Queued,
+            DownloadState::Completed
+        ));
+        assert!(!is_valid_transition(
+            DownloadState::Failed,
+            DownloadState::Completed
+        ));
+    }
+
+    #[test]
     fn transition_table_rejects_invalid_jumps() {
         assert!(!is_valid_transition(
             DownloadState::Queued,
@@ -2002,6 +2088,59 @@ mod tests {
             DownloadState::Completed,
             DownloadState::Completed
         ));
+    }
+
+    #[tokio::test]
+    async fn resume_requeues_a_failed_download() {
+        // Regression: `requeue` must accept both terminal states that can be
+        // retried — `Paused` and `Failed` — and must reject every other
+        // state. Accepting only one of them leaves a failed download stuck in
+        // `Failed` forever; accepting extra states pushes a second queue
+        // entry for a download that is already scheduled.
+        let engine = EngineBuilder::new()
+            .storage(Arc::new(TestStorage::default()))
+            .build()
+            .expect("build engine");
+
+        // Insert directly (bypassing the queue + scheduler) so the scheduler
+        // cannot race this test's state assertions.
+        let request = DownloadRequest::builder("https://example.com/file.bin", "/tmp/file.bin")
+            .build()
+            .unwrap();
+        let id = DownloadId::new();
+        let _ = engine
+            .inner
+            .downloads
+            .insert_sync(id, DownloadEntry::new(request));
+
+        // A queued download is not in a state that can be resumed.
+        let err = engine
+            .resume(id)
+            .await
+            .expect_err("resuming a queued download must be rejected");
+        assert!(matches!(err, DownloadError::InvalidState { .. }));
+        assert_eq!(
+            engine.status(id).expect("status").state,
+            DownloadState::Queued
+        );
+
+        // Drive the download into the failed state.
+        engine
+            .inner
+            .downloads
+            .update_sync(&id, |_, entry| entry.state = DownloadState::Failed);
+        assert_eq!(
+            engine.status(id).expect("status").state,
+            DownloadState::Failed
+        );
+
+        engine.resume(id).await.expect("resume a failed download");
+
+        assert_eq!(
+            engine.status(id).expect("status").state,
+            DownloadState::Queued,
+            "a failed download must be re-queued by resume()"
+        );
     }
 
     #[tokio::test]

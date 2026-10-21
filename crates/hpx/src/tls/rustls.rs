@@ -278,7 +278,7 @@ impl TlsConnectorBuilder {
         let store_ptr = self
             .cert_store
             .as_ref()
-            .map(|s| Arc::as_ptr(&s.0) as usize)
+            .map(|s| Arc::as_ptr(&s.store) as usize)
             .unwrap_or(0);
         let store_is_default = self.cert_store.is_none();
 
@@ -322,7 +322,7 @@ impl TlsConnectorBuilder {
         }
 
         let root_store = if let Some(store) = &self.cert_store {
-            (*store.0).clone()
+            (*store.store).clone()
         } else {
             let mut root_store = rustls::RootCertStore::empty();
             root_store.add_parsable_certificates(

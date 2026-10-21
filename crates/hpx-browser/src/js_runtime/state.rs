@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     dom::Dom,
-    net::{HttpClient, NetConfig, SharedNetConfig},
+    net::{HttpClient, NetConfig, SharedNetConfig, csp::PolicySet},
 };
 
 /// Shared state stored in deno_core's OpState, accessible by all ops.
@@ -28,6 +28,13 @@ pub struct FetchState {
     pub net_config: SharedNetConfig,
     pub client: HttpClient,
     pub(crate) last_config: Arc<NetConfig>,
+    /// Content-Security-Policy governing JS-initiated requests
+    /// (`connect-src`). Empty when the page has no policy or when CSP
+    /// enforcement is disabled.
+    pub(crate) csp: PolicySet,
+    /// Origin of the document that issues the requests, used as the base for
+    /// `'self'` comparisons.
+    pub(crate) page_origin: Option<url::Url>,
 }
 
 impl FetchState {
@@ -39,7 +46,15 @@ impl FetchState {
             net_config,
             client,
             last_config,
+            csp: PolicySet::default(),
+            page_origin: None,
         }
+    }
+
+    /// Apply the document's Content-Security-Policy to JS-initiated requests.
+    pub fn set_csp(&mut self, csp: PolicySet, page_origin: Option<url::Url>) {
+        self.csp = csp;
+        self.page_origin = page_origin;
     }
 }
 

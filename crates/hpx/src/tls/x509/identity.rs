@@ -737,6 +737,75 @@ fn extract_private_key_der(pem_text: &str) -> Option<PrivateKeyDer<'static>> {
     None
 }
 
+// Extracts the client-auth material from an `Identity` as DER.
+//
+// The QUIC (rustls) path always consumes raw DER, but under feature
+// unification (e.g. `--features http3,boring-tls`) the `Identity` holds
+// BoringSSL/OpenSSL-native objects. This inherent helper converts them to a
+// `(certificate chain [leaf first], PKCS#8 private key)` DER pair so the
+// rustls-based QUIC builder can honor client authentication regardless of
+// which TLS backend was unified in.
+impl Identity {
+    #[cfg(feature = "boring-tls")]
+    #[cfg_attr(
+        not(feature = "http3"),
+        expect(
+            dead_code,
+            reason = "only the QUIC (rustls) path consumes the DER form"
+        )
+    )]
+    pub(crate) fn client_auth_der(&self) -> crate::Result<(Vec<Vec<u8>>, Vec<u8>)> {
+        let mut chain = Vec::with_capacity(1 + self.chain.len());
+        chain.push(self.cert.to_der().map_err(crate::Error::tls)?);
+        for cert in &self.chain {
+            chain.push(cert.to_der().map_err(crate::Error::tls)?);
+        }
+        let key = self
+            .pkey
+            .private_key_to_der_pkcs8()
+            .map_err(crate::Error::tls)?;
+        Ok((chain, key))
+    }
+
+    #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
+    #[cfg_attr(
+        not(feature = "http3"),
+        expect(
+            dead_code,
+            reason = "only the QUIC (rustls) path consumes the DER form"
+        )
+    )]
+    pub(crate) fn client_auth_der(&self) -> crate::Result<(Vec<Vec<u8>>, Vec<u8>)> {
+        let mut chain = Vec::with_capacity(1 + self.chain.len());
+        chain.push(self.cert.to_der().map_err(crate::Error::tls)?);
+        for cert in &self.chain {
+            chain.push(cert.to_der().map_err(crate::Error::tls)?);
+        }
+        let key = self
+            .pkey
+            .private_key_to_pkcs8()
+            .map_err(crate::Error::tls)?;
+        Ok((chain, key))
+    }
+
+    #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
+    #[cfg_attr(
+        not(feature = "http3"),
+        expect(
+            dead_code,
+            reason = "only the QUIC (rustls) path consumes the DER form"
+        )
+    )]
+    pub(crate) fn client_auth_der(&self) -> crate::Result<(Vec<Vec<u8>>, Vec<u8>)> {
+        let chain = self
+            .cert
+            .iter()
+            .map(|cert| cert.as_ref().to_vec())
+            .collect();
+        Ok((chain, self.key.as_ref().secret_der().to_vec()))
+    }
+}
+
 #[cfg(test)]
 mod test {
     #[cfg(any(

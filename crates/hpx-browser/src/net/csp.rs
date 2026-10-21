@@ -409,6 +409,45 @@ impl PolicySet {
             }
         }
     }
+
+    /// Build the effective policy set of a document.
+    ///
+    /// A document is governed by the `Content-Security-Policy` response
+    /// header, the `Content-Security-Policy-Report-Only` header (which never
+    /// blocks), and any `<meta http-equiv="content-security-policy">`
+    /// element. All of them apply simultaneously, so they are collected into
+    /// one set whose [`PolicySet::allows`] intersects them.
+    pub fn from_document(
+        enforced_header: Option<&str>,
+        report_only_header: Option<&str>,
+        meta_content: Option<&str>,
+    ) -> Self {
+        let mut set = PolicySet::default();
+        if let Some(value) = enforced_header {
+            set.push_header(value, false);
+        }
+        if let Some(value) = report_only_header {
+            set.push_header(value, true);
+        }
+        if let Some(content) = meta_content {
+            set.push_meta(content);
+        }
+        set
+    }
+
+    /// Check a network request against this policy set.
+    ///
+    /// `page_origin` is the origin of the document that issued the request;
+    /// `nonce` and `parser_inserted` do not apply to network-path checks.
+    pub fn allows_url(&self, directive: Directive, url: &Url, page_origin: &Url) -> AllowDecision {
+        self.allows(&CheckCtx {
+            directive,
+            url,
+            page_origin,
+            nonce: None,
+            parser_inserted: false,
+        })
+    }
 }
 
 impl Policy {

@@ -432,7 +432,7 @@ async fn engine_fails_when_content_length_missing() {
     let request = DownloadRequest::builder(format!("http://{addr}/file.bin"), &dest)
         .build()
         .expect("build request");
-    let id = engine.add(request).expect("add download");
+    let id = engine.add(request).await.expect("add download");
 
     // Wait for the scheduler to probe and fail.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
@@ -453,5 +453,125 @@ async fn engine_fails_when_content_length_missing() {
     assert!(
         !dest.exists(),
         "no destination file should be created for unknown-size downloads"
+    );
+}
+
+#[tokio::test]
+async fn mirror_failover_completes_after_primary_mid_download_failure() {
+    // Regression: the primary mirror claims the range but sends only half of
+    // it, so the engine reaches `Downloading` and then fails. Failover to the
+    // healthy mirror requires a `Downloading -> Connecting` transition that
+    // the state machine must accept.
+    let primary = spawn_server(Mode::Short).await;
+    let mirror = spawn_server(Mode::Ok).await;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dest = tmp.path().join("out.bin");
+
+    let engine = DownloadEngine::builder()
+        .client(hpx::Client::new())
+        .storage(Arc::new(TestStorage::default()))
+        // Fail fast so the failover is exercised without long backoff.
+        .retry_max_attempts(0)
+        .build()
+        .expect("build engine");
+
+    let request = DownloadRequest::builder(format!("http://{primary}/file.bin"), &dest)
+        .mirror(format!("http://{mirror}/file.bin"))
+        .build()
+        .expect("build request");
+    let id = engine.add(request).await.expect("add download");
+
+    // The engine must complete from the mirror within the deadline.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let status = engine.status(id).expect("status");
+        if status.state == hpx_dl::DownloadState::Completed {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "engine did not complete failover within deadline; state: {:?}, last_error: ??",
+            status.state
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let written = tokio::fs::read(&dest).await.expect("read destination");
+    assert_eq!(
+        written,
+        file_bytes(),
+        "mirror failover must produce the exact file content"
+    );
+}
+
+#[tokio::test]
+async fn pause_then_resume_completes_download() {
+    // Regression: pausing an executing download tombstoned the popped queue
+    // entry; the resume re-push was then silently skipped, leaving the
+    // download in `Queued` forever.
+    let addr = spawn_server(Mode::Ok).await;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dest = tmp.path().join("out.bin");
+
+    let engine = DownloadEngine::builder()
+        .client(hpx::Client::new())
+        .storage(Arc::new(TestStorage::default()))
+        .build()
+        .expect("build engine");
+
+    let request = DownloadRequest::builder(format!("http://{addr}/file.bin"), &dest)
+        .build()
+        .expect("build request");
+    let id = engine.add(request).await.expect("add download");
+
+    // Wait until the download is executing, then pause it.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let status = engine.status(id).expect("status");
+        if matches!(
+            status.state,
+            hpx_dl::DownloadState::Downloading | hpx_dl::DownloadState::Completed
+        ) {
+            if status.state == hpx_dl::DownloadState::Downloading {
+                engine.pause(id).await.expect("pause download");
+            }
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "download never started; state: {:?}",
+            status.state
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // Give the pause a chance to take effect, then resume.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let status = engine.status(id).expect("status after pause");
+    if status.state != hpx_dl::DownloadState::Completed {
+        engine.resume(id).await.expect("resume download");
+    }
+
+    // The resumed download must reach Completed — not stay Queued forever.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let status = engine.status(id).expect("status");
+        if status.state == hpx_dl::DownloadState::Completed {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "resumed download never completed; state: {:?} (resume must schedule again)",
+            status.state
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let written = tokio::fs::read(&dest).await.expect("read destination");
+    assert_eq!(
+        written,
+        file_bytes(),
+        "content must be intact after pause/resume"
     );
 }

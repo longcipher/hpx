@@ -144,6 +144,50 @@ impl BrowserJsRuntime {
             .map_err(|e| JsError::Execution(e.to_string()))
     }
 
+    /// Drive the event loop until the runtime reports no pending work.
+    ///
+    /// The loop is polled in short slices so a page that schedules a
+    /// long-running timer (`setTimeout` far in the future, `setInterval`)
+    /// cannot stall the caller past `timeout`.
+    pub async fn drain_event_loop(&mut self, timeout: std::time::Duration) {
+        const SLICE: std::time::Duration = std::time::Duration::from_millis(50);
+
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            let slice = remaining.min(SLICE);
+            match tokio::time::timeout(slice, self.run_event_loop()).await {
+                // No pending work left: the loop is idle.
+                Ok(Ok(())) => break,
+                Ok(Err(err)) => {
+                    tracing::debug!(error = %err, "js event loop failed while draining");
+                    break;
+                }
+                // The slice elapsed: more work is pending, keep draining.
+                Err(_elapsed) => {}
+            }
+        }
+    }
+
+    /// Execute a JavaScript script and then drain the event loop.
+    ///
+    /// Promise callbacks, `setTimeout` callbacks and `fetch()` continuations
+    /// only run while the event loop is polled, so a script that schedules
+    /// asynchronous work needs the loop to be driven afterwards for its
+    /// effects to become observable.
+    pub async fn execute_script_async(
+        &mut self,
+        code: &str,
+        timeout: std::time::Duration,
+    ) -> Result<String, JsError> {
+        let result = self.execute_script(code)?;
+        self.drain_event_loop(timeout).await;
+        Ok(result)
+    }
+
     /// Get console output captured so far.
     pub fn console_output(&mut self) -> Vec<crate::js_runtime::state::ConsoleMessage> {
         let state = self.inner.op_state();
@@ -183,6 +227,24 @@ impl BrowserJsRuntime {
         );
     }
 
+    /// Apply the document's Content-Security-Policy to JS-initiated requests.
+    ///
+    /// `fetch()` calls are checked against the `connect-src` directive of the
+    /// given policies. An empty policy set disables the check.
+    pub fn set_csp(
+        &mut self,
+        headers: crate::net::csp::PolicySet,
+        meta: crate::net::csp::PolicySet,
+        page_origin: Option<url::Url>,
+    ) {
+        let mut combined = headers;
+        combined.policies.extend(meta.policies);
+        let state = self.inner.op_state();
+        let mut state = state.borrow_mut();
+        let fetch_state = state.borrow_mut::<crate::js_runtime::state::FetchState>();
+        fetch_state.set_csp(combined, page_origin);
+    }
+
     pub fn run_page_init(&mut self) {
         let _ = self
             .inner
@@ -194,7 +256,10 @@ impl Default for BrowserJsRuntime {
     // Default requires infallible construction; the only way to satisfy that
     // for a Result-returning `new` is to panic on bootstrap failure. Allow the
     // lint here so callers that need fallible construction can use `new()`.
-    #[allow(clippy::expect_used)]
+    #[expect(
+        clippy::expect_used,
+        reason = "Default requires infallible construction"
+    )]
     fn default() -> Self {
         Self::new(Dom::new()).expect("BrowserJsRuntime::default bootstrap failed")
     }

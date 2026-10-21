@@ -311,9 +311,9 @@ pin_project_lite::pin_project! {
 }
 
 impl std::future::Future for UpgradeFut {
-    type Output = hyper::Result<WebSocket<HttpStream>>;
+    type Output = crate::Result<WebSocket<HttpStream>>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
         let upgraded = match this.inner.poll(cx) {
             Poll::Ready(x) => x,
@@ -321,7 +321,11 @@ impl std::future::Future for UpgradeFut {
         };
 
         let io = TokioIo::new(upgraded?);
-        let negotiation = this.negotiation.take().unwrap();
+        let Some(negotiation) = this.negotiation.take() else {
+            return Poll::Ready(Err(crate::WebSocketError::IoError(std::io::Error::other(
+                "websocket upgrade finished without a negotiation result",
+            ))));
+        };
 
         Poll::Ready(Ok(WebSocket::new(
             Role::Server,

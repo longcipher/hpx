@@ -2,6 +2,14 @@
 
 > Repositioning hpx-transport from a "duplicate wrapper of hpx" to a "specialized toolkit for building Exchange SDKs"
 
+**Status: historical design record.**
+
+The `hpx-transport` crate this document describes was removed from the
+workspace (its WebSocket client and server live in `crates/yawc`, its HTTP
+functionality in `crates/hpx`). The file paths and command lines below refer to
+that crate and therefore do not apply to the current tree; they are kept as the
+design rationale behind the current architecture.
+
 ## 1. Background and Issues
 
 ### 1.1 Current Status Analysis

@@ -63,15 +63,21 @@ where
 {
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn hash<H2: Hasher>(&self, state: &mut H2) {
-        if self.computed.load(Ordering::Relaxed) {
+        if self.computed.load(Ordering::Acquire) {
+            // The acquire load pairs with the release store below, so the
+            // memoized hash value is guaranteed to be visible to this thread.
             state.write_u64(self.hash.load(Ordering::Relaxed));
             return;
         }
 
         let computed_hash = self.hasher.hash_one(&self.value);
 
+        // Publish the hash value *before* the flag. The release store makes
+        // the preceding hash store visible to any thread that observes
+        // `computed == true` through its acquire load; without that pairing a
+        // reader could see the flag but a stale hash value.
         self.hash.store(computed_hash, Ordering::Relaxed);
-        self.computed.store(true, Ordering::Relaxed);
+        self.computed.store(true, Ordering::Release);
         state.write_u64(computed_hash);
     }
 }
@@ -130,5 +136,60 @@ where
 {
     fn borrow(&self) -> &T {
         &self.value
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Hash a memoized value with the crate's fixed-seed hasher.
+    ///
+    /// The lint's suggested rewrite (`hasher.hash_one(&memo.value)`) would
+    /// hash the wrapped value instead of the memo, which is a different
+    /// computation.
+    #[expect(
+        clippy::manual_hash_one,
+        reason = "the memo's hash must be hashed, not the value it wraps"
+    )]
+    fn hash_of<T, H>(memo: &HashMemo<T, H>) -> u64
+    where
+        T: Eq + Hash,
+        H: BuildHasher,
+    {
+        let mut hasher = HASHER.build_hasher();
+        memo.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    #[test]
+    fn hash_memo_distinguishes_different_values() {
+        // A memoized hash that collapsed to a constant would map every key
+        // to the same bucket.
+        let a = HashMemo::with_hasher("alpha".to_string(), HASHER);
+        let b = HashMemo::with_hasher("beta".to_string(), HASHER);
+
+        assert_ne!(hash_of(&a), hash_of(&b));
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn hash_memo_is_stable_across_calls() {
+        // The memoized value must not change between calls: the flag and the
+        // cached hash are published with the right ordering.
+        let memo = HashMemo::with_hasher("stable".to_string(), HASHER);
+
+        let first = hash_of(&memo);
+        let second = hash_of(&memo);
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn hash_memo_of_equal_values_matches() {
+        let a = HashMemo::with_hasher("same".to_string(), HASHER);
+        let b = HashMemo::with_hasher("same".to_string(), HASHER);
+
+        assert_eq!(a, b);
+        assert_eq!(hash_of(&a), hash_of(&b));
     }
 }

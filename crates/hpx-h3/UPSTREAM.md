@@ -9,7 +9,10 @@
 
 ## Custom Patches
 
-- RFC 9220 WebSocket over HTTP/3 support
+- RFC 9220 `:protocol` pseudo-header constant (`Protocol::WEBSOCKET`). The
+  WebSocket-over-HTTP/3 implementation itself is *not* part of this fork: it
+  lives in the `hpx` crate (`crates/hpx/src/client/core/http3.rs`), which
+  drives the extended CONNECT tunnel through this fork.
 - Quinn QUIC transport backend (merged from hpx-h3-quinn)
 - Is0rtt trait for 0-RTT detection
 - Edition 2024 migration

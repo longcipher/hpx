@@ -366,7 +366,9 @@ where
         while !self.obligated_sends.is_empty() {
             ready!(self.write_half.poll_ready(&mut self.stream, cx))?;
 
-            let next = self.obligated_sends.pop_front().expect("obligated send");
+            let Some(next) = self.obligated_sends.pop_front() else {
+                break;
+            };
             self.write_half.start_send(&mut self.stream, next)?;
             self.flush_sends = true;
         }

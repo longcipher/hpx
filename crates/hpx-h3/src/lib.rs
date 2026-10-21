@@ -1,9 +1,10 @@
 //! HTTP/3 client and server.
 //!
 //! This crate is a fork of [`hyperium/h3`](https://github.com/hyperium/h3) vendored
-//! into the hpx workspace with RFC 9220 WebSocket support. It tracks upstream
-//! closely; lint configuration lives in `Cargo.toml` to keep the source diff
-//! minimal.
+//! into the hpx workspace. It adds the RFC 9220 `:protocol` pseudo-header
+//! constant (`Protocol::WEBSOCKET`); the WebSocket-over-HTTP/3 implementation
+//! itself lives in the `hpx` crate. The fork tracks upstream closely; lint
+//! configuration lives in `Cargo.toml` to keep the source diff minimal.
 
 // Lint configuration lives in Cargo.toml [lints.clippy] / [lints.rust].
 // Per-module overrides (e.g. `#[allow(dead_code)]` on private internals) are

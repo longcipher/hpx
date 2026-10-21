@@ -1,6 +1,16 @@
 //! A WebSocket echo server implementation using yawc and hyper.
 //! This server accepts WebSocket connections and echoes back any text or binary messages it receives.
 
+#![allow(
+    clippy::allow_attributes,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    missing_docs
+)]
+
 use futures::{SinkExt, StreamExt};
 use hpx_yawc::{OpCode, Options, WebSocket};
 use http_body_util::Empty;

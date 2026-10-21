@@ -2,6 +2,14 @@
 
 > Design for a robust, exchange-agnostic WebSocket client supporting dual interaction patterns (Promise-driven and Event-driven) with automatic reconnection and subscription management.
 
+**Status: historical design record.**
+
+The `hpx-transport` crate this document describes was removed from the
+workspace (its WebSocket client and server live in `crates/yawc`, its HTTP
+functionality in `crates/hpx`). The file paths and command lines below refer to
+that crate and therefore do not apply to the current tree; they are kept as the
+design rationale behind the current architecture.
+
 ## 1. Executive Summary
 
 This document describes the design for extending `hpx-transport` with advanced WebSocket capabilities. The design draws inspiration from the bybit-api Node.js library while addressing its limitations and leveraging Rust's type system and async runtime for improved safety and performance.

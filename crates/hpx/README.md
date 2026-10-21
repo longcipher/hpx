@@ -22,7 +22,7 @@ This is the core crate of the [hpx](https://github.com/longcipher/hpx) project.
 - **Retry Configuration** with backoff strategies
 - **Compression**: gzip, brotli, deflate, zstd
 - **Character Encoding** support
-- **WebSocket Upgrade** with switchable backends (yawc or fastwebsockets)
+- **WebSocket Upgrade** via the `hpx-yawc` backend (RFC 6455, with permessage-deflate)
 - **TLS Backends**: BoringSSL (default) and Rustls
 - **HTTP/1.1 and HTTP/2** support
 
@@ -135,7 +135,6 @@ async fn main() -> hpx::Result<()> {
 | `stream` | No | Streaming request/response bodies |
 | `ws` | No | WebSocket support (alias for `ws-yawc`) |
 | `ws-yawc` | No | WebSocket via hpx-yawc backend |
-| `ws-fastwebsockets` | No | WebSocket via fastwebsockets backend |
 | `socks` | No | SOCKS proxy support |
 | `hickory-dns` | No | Async DNS resolver (Hickory) |
 | `webpki-roots` | No | WebPKI root certificates for TLS |

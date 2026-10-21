@@ -25,7 +25,7 @@ impl SslConnectorBuilderExt for SslConnectorBuilder {
             // from the certificate list. This is O(n) per connector build but
             // unavoidable with the current openssl crate API.
             let mut builder = X509StoreBuilder::new().map_err(Error::tls)?;
-            for cert in store.0.all_certificates() {
+            for cert in store.store.all_certificates() {
                 builder.add_cert(cert).map_err(Error::tls)?;
             }
             self.set_verify_cert_store(builder.build())

@@ -46,54 +46,61 @@ where
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<T>, StreamBodyError> {
-        // No length prefix read yet: we need at least one byte to start.
-        if !self.cursor.have_len {
-            if buf.is_empty() {
-                return Ok(None);
+        // The decoder loops instead of returning after the length prefix:
+        // `FramedRead` only calls `decode` again after it received more bytes
+        // from the stream, so a codec that returns "need more data" right
+        // after the prefix keeps a fully buffered message stuck in the buffer
+        // until the peer sends something else.
+        loop {
+            if !self.cursor.have_len {
+                if buf.is_empty() {
+                    return Ok(None);
+                }
+                let bytes = buf.chunk();
+                let byte = bytes[0];
+                if byte < 0x80 {
+                    buf.advance(1);
+                    self.cursor.current_obj_len = usize::from(byte);
+                    self.cursor.have_len = true;
+                } else if varint_is_complete(bytes) {
+                    let (value, advance) = decode_varint_slice(bytes)?;
+                    buf.advance(advance);
+                    self.cursor.current_obj_len = usize::try_from(value).map_err(|_| {
+                        StreamBodyError::new(
+                            StreamBodyKind::MaxLenReachedError,
+                            None,
+                            Some("length prefix exceeds addressable size".into()),
+                        )
+                    })?;
+                    self.cursor.have_len = true;
+                } else {
+                    // A multi-byte varint is still incomplete: wait for more
+                    // data before attempting to yield a message.
+                    return Ok(None);
+                }
+                // The prefix is known now; continue with the body.
+                continue;
             }
-            let bytes = buf.chunk();
-            let byte = bytes[0];
-            if byte < 0x80 {
-                buf.advance(1);
-                self.cursor.current_obj_len = usize::from(byte);
-                self.cursor.have_len = true;
-            } else if varint_is_complete(bytes) {
-                let (value, advance) = decode_varint_slice(bytes)?;
-                buf.advance(advance);
-                self.cursor.current_obj_len = usize::try_from(value).map_err(|_| {
-                    StreamBodyError::new(
-                        StreamBodyKind::MaxLenReachedError,
-                        None,
-                        Some("length prefix exceeds addressable size".into()),
-                    )
-                })?;
-                self.cursor.have_len = true;
-            }
-            // Either we just read the prefix (have_len=true) or a multi-byte
-            // varint is still incomplete; in both cases wait for more data
-            // before attempting to yield a message.
-            return Ok(None);
-        }
 
-        // have_len == true: a length prefix is known; wait for the full body.
-        if self.cursor.current_obj_len > self.max_length {
-            return Err(StreamBodyError::new(
-                StreamBodyKind::MaxLenReachedError,
-                None,
-                Some("Max object length reached".into()),
-            ));
-        }
-        if buf.len() >= self.cursor.current_obj_len {
-            let obj_bytes = buf.copy_to_bytes(self.cursor.current_obj_len);
-            let result: Result<Option<T>, StreamBodyError> =
-                prost::Message::decode(obj_bytes).map(Some).map_err(|err| {
-                    StreamBodyError::new(StreamBodyKind::CodecError, Some(Box::new(err)), None)
-                });
-            self.cursor.current_obj_len = 0;
-            self.cursor.have_len = false;
-            result
-        } else {
-            Ok(None)
+            // have_len == true: a length prefix is known; wait for the full body.
+            if self.cursor.current_obj_len > self.max_length {
+                return Err(StreamBodyError::new(
+                    StreamBodyKind::MaxLenReachedError,
+                    None,
+                    Some("Max object length reached".into()),
+                ));
+            }
+            if buf.len() >= self.cursor.current_obj_len {
+                let obj_bytes = buf.copy_to_bytes(self.cursor.current_obj_len);
+                let result: Result<Option<T>, StreamBodyError> =
+                    prost::Message::decode(obj_bytes).map(Some).map_err(|err| {
+                        StreamBodyError::new(StreamBodyKind::CodecError, Some(Box::new(err)), None)
+                    });
+                self.cursor.current_obj_len = 0;
+                self.cursor.have_len = false;
+                return result;
+            }
+            return Ok(None);
         }
     }
 
@@ -299,11 +306,15 @@ mod tests {
         let data = encode_len_prefixed(&msg);
         let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(1024);
         let mut buf = BytesMut::from(&data[..]);
-        // First decode reads varint, returns None
-        assert!(matches!(codec.decode(&mut buf), Ok(None)));
-        // Second decode reads the message body
+        // A single decode must deliver the message: prefix and body are both
+        // buffered, so returning "need more data" after the prefix would keep
+        // the message stuck until the peer sends something else.
         let result = codec.decode(&mut buf).unwrap();
         assert_eq!(result, Some(msg));
+        assert!(
+            buf.is_empty(),
+            "the message must be consumed from the buffer"
+        );
     }
 
     #[test]
@@ -334,9 +345,7 @@ mod tests {
         let data = encode_len_prefixed(&msg);
         let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(5);
         let mut buf = BytesMut::from(&data[..]);
-        // First decode reads varint, returns None
-        let _ = codec.decode(&mut buf);
-        // Second decode: message body (10 bytes) exceeds max_length (5)
+        // The decode that reads the prefix also validates the length.
         assert!(codec.decode(&mut buf).is_err());
     }
 
@@ -355,12 +364,11 @@ mod tests {
 
         let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(1024);
         let mut buf = BytesMut::from(&data[..]);
-        // First message: varint + body
-        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+        // First message: prefix + body arrive together.
         assert_eq!(codec.decode(&mut buf).unwrap(), Some(m1));
-        // Second message: varint + body
-        assert!(matches!(codec.decode(&mut buf), Ok(None)));
+        // Second message: prefix + body arrive together.
         assert_eq!(codec.decode(&mut buf).unwrap(), Some(m2));
+        assert!(buf.is_empty());
     }
 
     #[test]
@@ -371,9 +379,7 @@ mod tests {
         let data = encode_len_prefixed(&msg);
         let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(1024);
         let mut buf = BytesMut::from(&data[..]);
-        // First decode reads the varint length prefix.
-        assert!(matches!(codec.decode(&mut buf), Ok(None)));
-        // Second decode yields the zero-length message.
+        // A single decode yields the zero-length message.
         assert_eq!(codec.decode(&mut buf).unwrap(), Some(msg));
     }
 
@@ -414,7 +420,6 @@ mod tests {
         let data = encode_len_prefixed(&msg);
         let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(1024);
         let mut buf = BytesMut::from(&data[..]);
-        assert!(matches!(codec.decode(&mut buf), Ok(None)));
         let result = codec.decode(&mut buf).unwrap().unwrap();
         assert_eq!(result.name.len(), 500);
         assert_eq!(result.value, u32::MAX);
@@ -510,7 +515,6 @@ mod tests {
 
         let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(1024);
         let mut buf = BytesMut::from(&data[..]);
-        assert!(matches!(codec.decode(&mut buf), Ok(None)));
         let result = codec.decode(&mut buf).unwrap().unwrap();
         assert_eq!(result.name, "x");
     }
@@ -590,11 +594,29 @@ mod tests {
         let data = encode_len_prefixed(&msg);
         let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(1024);
         let mut buf = BytesMut::from(&data[..]);
-        // First decode reads the length prefix.
-        assert!(matches!(codec.decode(&mut buf), Ok(None)));
-        // decode_eof must flush the pending message body.
-        let result = codec.decode_eof(&mut buf).unwrap();
-        assert_eq!(result, Some(msg));
+        // The prefix and the body are both buffered, so the message is
+        // delivered right away.
+        assert_eq!(codec.decode(&mut buf).unwrap(), Some(msg));
+        // The stream ends cleanly afterwards.
+        assert!(codec.decode_eof(&mut buf).unwrap().is_none());
+    }
+
+    #[test]
+    fn decode_delivers_a_buffered_message_without_waiting_for_more_bytes() {
+        // Regression: the codec used to return "need more data" right after
+        // reading the length prefix. `FramedRead` only calls `decode` again
+        // after it received more bytes, so a fully buffered message stayed in
+        // the buffer until the peer happened to send something else.
+        let msg = TestMsg {
+            name: "buffered".into(),
+            value: 11,
+        };
+        let data = encode_len_prefixed(&msg);
+        let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(1024);
+        let mut buf = BytesMut::from(&data[..]);
+
+        assert_eq!(codec.decode(&mut buf).unwrap(), Some(msg));
+        assert!(buf.is_empty(), "the message must be consumed");
     }
 
     #[test]
@@ -943,7 +965,6 @@ mod tests {
 
         let mut codec = ProtobufLenPrefixCodec::<TestMsg>::new_with_max_length(body_len);
         let mut buf = BytesMut::from(&data[..]);
-        assert!(matches!(codec.decode(&mut buf), Ok(None)));
         let result = codec.decode(&mut buf).unwrap();
         assert_eq!(result, Some(msg));
     }
