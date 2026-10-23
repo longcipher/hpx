@@ -11,6 +11,7 @@ use system_configuration::{
         kSCPropNetProxiesExceptionsList, kSCPropNetProxiesExcludeSimpleHostnames,
         kSCPropNetProxiesHTTPEnable, kSCPropNetProxiesHTTPPort, kSCPropNetProxiesHTTPProxy,
         kSCPropNetProxiesHTTPSEnable, kSCPropNetProxiesHTTPSPort, kSCPropNetProxiesHTTPSProxy,
+        kSCPropNetProxiesSOCKSEnable, kSCPropNetProxiesSOCKSPort, kSCPropNetProxiesSOCKSProxy,
     },
 };
 
@@ -52,6 +53,24 @@ pub(super) fn with_system(builder: &mut super::matcher::Builder) {
         if let Some(https) = https_proxy_config {
             builder.https = https;
         }
+    }
+
+    // macOS configures a SOCKS proxy independently of the web proxies, and
+    // uses it for the protocols that have no dedicated proxy. The matcher
+    // models that with its catch-all slot.
+    if builder.all.is_empty() {
+        let socks_proxy_config = parse_setting_from_dynamic_store(
+            &proxies_map,
+            // SAFETY: `kSCPropNetProxiesSOCKS*` are immutable `CFStringRef`
+            // extern statics provided by the system Configuration framework.
+            // They point to statically-allocated, never-freed string constants
+            // and are safe to read at any time.
+            unsafe { kSCPropNetProxiesSOCKSEnable },
+            unsafe { kSCPropNetProxiesSOCKSProxy },
+            unsafe { kSCPropNetProxiesSOCKSPort },
+        );
+
+        super::sysproxy::apply_macos_socks_proxy(builder, socks_proxy_config.as_deref());
     }
 
     // Import the system proxy bypass list. Without this, loopback and LAN

@@ -12,6 +12,8 @@
 
 use std::time::Duration;
 
+#[cfg(all(feature = "socks", feature = "http3"))]
+pub use crate::client::conn::quic::Socks5Proxy;
 // Re-export HTTP/3 connector primitives so integration tests (and downstream
 // users) can construct `QuicConnector` and `H3Connection` directly via
 // `hpx::http3::{QuicConnector, H3Connection, H3Error}`. Marked `#[doc(hidden)]`

@@ -22,8 +22,8 @@ use std::{
 use bytes::Bytes;
 use futures_util::future::{Either, FutureExt, TryFutureExt};
 use http::{
-    HeaderValue, Method, Request, Response, Uri, Version,
-    header::{HOST, PROXY_AUTHORIZATION},
+    HeaderMap, HeaderValue, Method, Request, Response, StatusCode, Uri, Version,
+    header::{HOST, PROXY_AUTHENTICATE, PROXY_AUTHORIZATION},
 };
 use http_body::Body;
 use pool::Ver;
@@ -46,6 +46,7 @@ use crate::client::core::http1::Http1Options;
 use crate::client::core::http2::Http2Options;
 use crate::{
     client::{
+        body::ReplayBody,
         conn::{Connected, Connection},
         core::{
             body::Incoming,
@@ -57,10 +58,27 @@ use crate::{
     config::RequestConfig,
     error::BoxError,
     hash::{HASHER, HashMemo},
+    proxy::auth::{Authenticator, Challenge, parse_challenges},
     tls::AlpnProtocol,
 };
 
 type BoxSendFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+
+/// Collects the `Proxy-Authenticate` challenges from the response headers.
+fn collect_proxy_challenges(headers: &HeaderMap) -> Vec<Challenge> {
+    let values: Vec<&HeaderValue> = headers.get_all(PROXY_AUTHENTICATE).iter().collect();
+    parse_challenges(&values)
+}
+
+/// Drains a response body so the connection can carry another request.
+async fn drain_body(mut body: Incoming) -> Result<(), BoxError> {
+    use http_body_util::BodyExt as _;
+
+    while let Some(frame) = body.frame().await {
+        frame?;
+    }
+    Ok(())
+}
 
 /// Returns true if the connection that just failed a send is genuinely dead
 /// and must not be returned to the pool.
@@ -204,6 +222,14 @@ pub struct HttpClient<C, B> {
     /// (default 60s). Shared across `HttpClient` clones via `Arc`.
     #[cfg(feature = "http3")]
     h3_failure_tracker: Arc<H3FailureTracker>,
+    /// The client-level proxy rules.
+    ///
+    /// The TCP connector applies these when it opens a connection. The
+    /// HTTP/3 path keeps its own copy so it can tell whether a request would
+    /// be proxied: QUIC has no proxy support, so an h3 attempt for a proxied
+    /// destination must not silently bypass the proxy.
+    #[cfg(feature = "http3")]
+    proxies: Arc<Vec<crate::proxy::Matcher>>,
     pool: pool::Pool<PoolClient<B>, ConnectIdentity>,
 }
 
@@ -254,7 +280,7 @@ where
     C::Response: AsyncRead + AsyncWrite + Connection + Unpin + Send + 'static,
     C::Error: Into<BoxError>,
     C::Future: Unpin + Send + 'static,
-    B: Body + Send + 'static + Unpin,
+    B: Body + ReplayBody + Send + 'static + Unpin,
     B::Data: Send + Into<Bytes>,
     B::Error: Into<BoxError>,
 {
@@ -420,6 +446,15 @@ where
         req: Request<B>,
         original_uri: &Uri,
     ) -> H3UpgradeOutcome<B> {
+        // QUIC has no proxy support. When the request would be sent through
+        // a proxy, upgrading to HTTP/3 would bypass it and expose the
+        // client's IP to the origin. Fall back to TCP, which honours the
+        // proxy.
+        if self.h3_bypasses_proxy(connect_req) {
+            trace!("h3 upgrade skipped: the request would bypass the proxy");
+            return H3UpgradeOutcome::FallThrough(req);
+        }
+
         let Some(host) = connect_req.uri().host() else {
             return H3UpgradeOutcome::FallThrough(req);
         };
@@ -593,6 +628,19 @@ where
             completed: Arc::clone(&request_completed),
         };
 
+        // A proxy that requires authentication answers with `407`. When the
+        // body can be replayed, the request is sent again with the computed
+        // `Proxy-Authorization` header.
+        let replay = req.body().try_replay().map(|body| {
+            let mut replay = http::Request::new(body);
+            *replay.method_mut() = req.method().clone();
+            *replay.uri_mut() = req.uri().clone();
+            *replay.version_mut() = req.version();
+            *replay.headers_mut() = req.headers().clone();
+            *replay.extensions_mut() = req.extensions().clone();
+            replay
+        });
+
         let mut res = match pooled.try_send_request(req).await {
             Ok(res) => res,
             Err(mut err) => {
@@ -620,6 +668,64 @@ where
                 };
             }
         };
+
+        // Answer a proxy authentication challenge.
+        if res.status() == StatusCode::PROXY_AUTHENTICATION_REQUIRED
+            && let Some(mut replay) = replay
+            && let Some(credentials) = pooled.conn_info.proxy_credentials()
+        {
+            let challenges = collect_proxy_challenges(res.headers());
+            let uri = replay.uri().to_string();
+            let method = replay.method().as_str().to_owned();
+
+            let mut authenticator = Authenticator::new(credentials.clone());
+            let authorization = authenticator.respond(&challenges, &method, &uri);
+
+            if let Some(authorization) = authorization {
+                // The challenge body must be consumed before the connection
+                // can carry another request.
+                let body = res.into_body();
+                match drain_body(body).await {
+                    Ok(()) => {
+                        replay
+                            .headers_mut()
+                            .insert(http::header::PROXY_AUTHORIZATION, authorization);
+
+                        match pooled.try_send_request(replay).await {
+                            Ok(retried) => {
+                                res = retried;
+                            }
+                            Err(mut err) => {
+                                if connection_is_dead(&err.error) {
+                                    pooled.conn_info.poison();
+                                }
+                                request_completed.store(true, Ordering::Relaxed);
+                                return if let Some(req) = err.take_message() {
+                                    Err(TrySendError::Retryable {
+                                        connection_reused: pooled.is_reused(),
+                                        error: Error::new(ErrorKind::Canceled, err.into_error())
+                                            .with_connect_info(pooled.conn_info.clone()),
+                                        req,
+                                    })
+                                } else {
+                                    Err(TrySendError::Nope(
+                                        Error::new(ErrorKind::SendRequest, err.into_error())
+                                            .with_connect_info(pooled.conn_info.clone()),
+                                    ))
+                                };
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        request_completed.store(true, Ordering::Relaxed);
+                        return Err(TrySendError::Nope(
+                            Error::new(ErrorKind::SendRequest, err)
+                                .with_connect_info(pooled.conn_info.clone()),
+                        ));
+                    }
+                }
+            }
+        }
 
         request_completed.store(true, Ordering::Relaxed);
 
@@ -790,6 +896,10 @@ where
         // h3 branch below.
         #[cfg(feature = "http3")]
         let h3_connector = self.h3_connector.clone();
+        // Whether the request would be sent through a proxy. Computed before
+        // the closure is built because the closure must be `'static`.
+        #[cfg(feature = "http3")]
+        let is_proxied = self.h3_bypasses_proxy(&req);
         lazy(move || {
             // ===== HTTP/3 (QUIC) branch =====
             //
@@ -809,6 +919,16 @@ where
             // type without needing a per-branch cast at the call site.
             #[cfg(feature = "http3")]
             if ver == Ver::Http3 {
+                // QUIC cannot be tunnelled through an HTTP or SOCKS proxy.
+                // Fail closed instead of connecting directly and leaking the
+                // client's IP to the origin.
+                if is_proxied {
+                    return Box::pin(futures_util::future::err(Error::new_kind(
+                        ErrorKind::UserUnsupportedVersion,
+                    )))
+                        as Pin<Box<dyn Future<Output = _> + Send + 'static>>;
+                }
+
                 return Self::connect_h3(h3_connector, pool, req);
             }
 
@@ -1128,6 +1248,54 @@ impl<C, B> HttpClient<C, B> {
         &self.alt_svc_cache
     }
 
+    /// Returns true when the HTTP/3 path would bypass the proxy.
+    ///
+    /// QUIC runs over UDP, so it cannot be tunnelled through an HTTP
+    /// `CONNECT` tunnel. The only proxy that can carry it is a SOCKS5 proxy
+    /// that relays UDP, which the QUIC endpoint uses when the client's proxy
+    /// configuration resolves to exactly one such proxy.
+    ///
+    /// When the request would be proxied by a proxy the QUIC endpoint
+    /// cannot use, the HTTP/3 path must not be taken: connecting directly
+    /// would expose the client's IP to the origin.
+    #[cfg(feature = "http3")]
+    fn h3_bypasses_proxy(&self, req: &ConnectRequest) -> bool {
+        // The proxy that would handle the request.
+        let proxy = match req.extra().proxy_selection() {
+            crate::client::layer::config::ProxySelection::Inherit => self
+                .proxies
+                .iter()
+                .find_map(|prox| prox.intercept(req.uri())),
+            crate::client::layer::config::ProxySelection::Direct => None,
+            crate::client::layer::config::ProxySelection::Rule(matcher) => {
+                matcher.intercept(req.uri())
+            }
+        };
+
+        let Some(proxy) = proxy else {
+            // The request is not proxied at all.
+            return false;
+        };
+
+        let crate::proxy::Intercepted::Proxy(intercept) = proxy else {
+            // A Unix socket proxy cannot carry QUIC either.
+            return true;
+        };
+
+        // The QUIC endpoint tunnels through this very SOCKS5 proxy, so the
+        // traffic is proxied as well.
+        if let Some(relay) = self
+            .h3_connector
+            .as_ref()
+            .and_then(crate::client::conn::quic::QuicConnector::socks5_proxy)
+            && relay.uri == intercept.uri().to_string()
+        {
+            return false;
+        }
+
+        true
+    }
+
     /// Test helper: checks whether the Alt-Svc cache has a non-expired
     /// entry for the given authority `(host, port)`.
     ///
@@ -1158,7 +1326,7 @@ where
     C::Response: AsyncRead + AsyncWrite + Connection + Unpin + Send + 'static,
     C::Error: Into<BoxError>,
     C::Future: Unpin + Send + 'static,
-    B: Body + Send + 'static + Unpin,
+    B: Body + ReplayBody + Send + 'static + Unpin,
     B::Data: Send + Into<Bytes>,
     B::Error: Into<BoxError>,
 {
@@ -1181,7 +1349,7 @@ where
     C::Response: AsyncRead + AsyncWrite + Connection + Unpin + Send + 'static,
     C::Error: Into<BoxError>,
     C::Future: Unpin + Send + 'static,
-    B: Body + Send + 'static + Unpin,
+    B: Body + ReplayBody + Send + 'static + Unpin,
     B::Data: Send + Into<Bytes>,
     B::Error: Into<BoxError>,
 {
@@ -1216,6 +1384,8 @@ impl<C: Clone, B> Clone for HttpClient<C, B> {
             h3_connector: self.h3_connector.clone(),
             #[cfg(feature = "http3")]
             alt_svc_cache: self.alt_svc_cache.clone(),
+            #[cfg(feature = "http3")]
+            proxies: self.proxies.clone(),
             #[cfg(feature = "http3")]
             h3_failure_tracker: self.h3_failure_tracker.clone(),
             pool: self.pool.clone(),
@@ -1322,7 +1492,7 @@ impl<B> PoolClient<B> {
     }
 }
 
-impl<B: Body + 'static> PoolClient<B> {
+impl<B: Body + ReplayBody + 'static> PoolClient<B> {
     #[expect(clippy::result_large_err)]
     fn try_send_request(
         &mut self,
@@ -1637,6 +1807,12 @@ pub struct Builder {
     /// of creating a new one with the default 60s cooldown.
     #[cfg(feature = "http3")]
     h3_failure_tracker: Option<Arc<H3FailureTracker>>,
+    /// The client-level proxy rules, shared with the TCP connector.
+    ///
+    /// The HTTP/3 path uses them to detect requests that would be proxied,
+    /// because QUIC cannot be tunnelled through an HTTP or SOCKS proxy.
+    #[cfg(feature = "http3")]
+    proxies: Arc<Vec<crate::proxy::Matcher>>,
     pool_config: pool::Config,
     pool_timer: Option<ArcTimer>,
 }
@@ -1674,6 +1850,8 @@ impl Builder {
             alt_svc_cache: None,
             #[cfg(feature = "http3")]
             h3_failure_tracker: None,
+            #[cfg(feature = "http3")]
+            proxies: Arc::new(Vec::new()),
             pool_config: pool::Config {
                 idle_timeout: Some(Duration::from_secs(90)),
                 max_idle_per_host: usize::MAX,
@@ -1874,6 +2052,18 @@ impl Builder {
         self
     }
 
+    /// Provide the client-level proxy rules.
+    ///
+    /// The HTTP/3 path needs them to detect requests that would be sent
+    /// through a proxy: QUIC has no proxy support, so those requests must
+    /// fall back to TCP instead of bypassing the proxy.
+    #[cfg(feature = "http3")]
+    #[inline]
+    pub(crate) fn proxies(mut self, proxies: Arc<Vec<crate::proxy::Matcher>>) -> Self {
+        self.proxies = proxies;
+        self
+    }
+
     /// Combine the configuration of this builder with a connector to create a `HttpClient`.
     pub fn build<C, B>(self, connector: C) -> HttpClient<C, B>
     where
@@ -1881,7 +2071,7 @@ impl Builder {
         C::Response: AsyncRead + AsyncWrite + Connection + Unpin + Send + 'static,
         C::Error: Into<BoxError>,
         C::Future: Unpin + Send + 'static,
-        B: Body + Send + 'static,
+        B: Body + ReplayBody + Send + 'static,
         B::Data: Send,
     {
         let exec = self.exec.clone();
@@ -1904,6 +2094,8 @@ impl Builder {
             h3_failure_tracker: self
                 .h3_failure_tracker
                 .unwrap_or_else(|| Arc::new(H3FailureTracker::new(Duration::from_secs(60)))),
+            #[cfg(feature = "http3")]
+            proxies: self.proxies,
             connector,
             pool: pool::Pool::new(self.pool_config, exec, timer),
         }

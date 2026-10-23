@@ -5,10 +5,9 @@ use http::{Uri, Version};
 use crate::{
     client::{
         conn::TcpConnectOptions,
-        layer::config::{RequestOptions, TransportOptions},
+        layer::config::{ProxySelection, RequestOptions, TransportOptions},
     },
     hash::HashMemo,
-    proxy::Matcher as ProxyMacher,
     tls::{AlpnProtocol, TlsOptions},
 };
 
@@ -93,10 +92,12 @@ impl ConnectExtra {
         }
     }
 
-    /// Return a reference to the [`ProxyMacher`].
+    /// Return the proxy selection for this connection.
     #[inline]
-    pub(crate) fn proxy_matcher(&self) -> Option<&Arc<ProxyMacher>> {
-        self.extra.as_ref().and_then(RequestOptions::proxy_matcher)
+    pub(crate) fn proxy_selection(&self) -> &ProxySelection {
+        self.extra
+            .as_ref()
+            .map_or(&ProxySelection::Inherit, RequestOptions::proxy)
     }
 
     /// Return a reference to the [`TlsOptions`].
@@ -184,5 +185,56 @@ mod tests {
         let ia = ConnectExtra::new(a, None::<RequestOptions>);
         let ib = ConnectExtra::new(b, None::<RequestOptions>);
         assert_ne!(ia, ib);
+    }
+
+    /// Two requests that select different proxies must not share a pooled
+    /// connection: the connection is established through a different peer.
+    #[test]
+    fn different_proxy_selections_produce_different_identity() {
+        let uri: Uri = "https://example.com".parse().unwrap();
+
+        let direct = RequestOptions::default();
+        assert_eq!(direct.proxy(), &ProxySelection::Inherit);
+
+        let mut proxied = RequestOptions::default();
+        proxied
+            .proxy_mut()
+            .clone_from(&ProxySelection::Rule(Arc::new(
+                crate::Proxy::all("http://proxy.local:8080")
+                    .unwrap()
+                    .into_matcher(),
+            )));
+
+        let id = ConnectExtra::new(uri.clone(), None::<RequestOptions>);
+        let ip = ConnectExtra::new(uri, Some(proxied));
+
+        assert_ne!(id, ip);
+        assert_ne!(hash_of(&id), hash_of(&ip));
+    }
+
+    /// The same custom proxy rule produces the same pool identity, so the
+    /// connection is reused across requests.
+    #[test]
+    fn the_same_custom_proxy_produces_the_same_identity() {
+        let uri: Uri = "https://example.com".parse().unwrap();
+
+        // A single proxy instance, cloned: clones share the identity of the
+        // closure, so they hash and compare equal.
+        let proxy = crate::Proxy::custom(|_: &http::Uri| Some("http://proxy.local:8080"));
+        let matcher = Arc::new(proxy.clone().into_matcher());
+
+        let build = || {
+            let mut options = RequestOptions::default();
+            options
+                .proxy_mut()
+                .clone_from(&ProxySelection::Rule(matcher.clone()));
+            options
+        };
+
+        let a = ConnectExtra::new(uri.clone(), Some(build()));
+        let b = ConnectExtra::new(uri, Some(build()));
+
+        assert_eq!(a, b);
+        assert_eq!(hash_of(&a), hash_of(&b));
     }
 }

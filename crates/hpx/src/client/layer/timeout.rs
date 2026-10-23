@@ -65,7 +65,7 @@ impl Default for TimeoutOptions {
             recv_body: None,
             total_timeout: None,
             read_timeout: None,
-            max_response_header_size: Some(64 * 1024),
+            max_response_header_size: None,
         }
     }
 }
@@ -224,7 +224,11 @@ impl TimeoutOptions {
 
     /// Sets the max response header size in bytes.
     ///
-    /// Default is 64KB. Set to `None` to disable the limit.
+    /// A response whose header block exceeds the limit is rejected. The
+    /// limit bounds the memory a single response can consume.
+    ///
+    /// Default is no limit, which leaves the header block bounded by the
+    /// protocol's own read buffer.
     #[inline]
     pub const fn set_max_response_header_size(&mut self, size: Option<usize>) -> &mut Self {
         self.max_response_header_size = size;

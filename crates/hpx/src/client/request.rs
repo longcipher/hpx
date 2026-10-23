@@ -24,7 +24,7 @@ use super::{
     Body, EmulationFactory, Response,
     http::{Client, future::Pending},
     layer::{
-        config::{DefaultHeaders, RequestOptions},
+        config::{DefaultHeaders, ProxySelection, RequestOptions},
         timeout::TimeoutOptions,
     },
 };
@@ -752,12 +752,67 @@ impl RequestBuilder {
     }
 
     /// Set the proxy for this request.
+    ///
+    /// The given rule replaces the client-level proxy configuration for this
+    /// request only: when the rule does not match the request URI, the
+    /// request is sent directly instead of falling back to a client-level
+    /// proxy.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use hpx::Error;
+    /// #
+    /// # async fn run() -> Result<(), Error> {
+    /// use hpx::{Client, Proxy};
+    ///
+    /// let proxy = Proxy::http("http://proxy:8080").unwrap();
+    /// let client = Client::new();
+    /// let response = client.get("http://example.com").proxy(proxy).send().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn proxy(mut self, proxy: Proxy) -> Self {
         if let Ok(ref mut req) = self.request {
             req.config_mut::<RequestOptions>()
                 .get_or_insert_default()
-                .proxy_matcher_mut()
-                .replace(Arc::new(proxy.into_matcher()));
+                .proxy_mut()
+                .clone_from(&ProxySelection::Rule(Arc::new(proxy.into_matcher())));
+        }
+        self
+    }
+
+    /// Bypass every configured proxy for this request.
+    ///
+    /// The request is sent directly, even when the client was configured with
+    /// proxies (including the system proxy). This is the escape hatch for
+    /// reaching an internal endpoint that must not go through the proxy.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use hpx::Error;
+    /// #
+    /// # async fn run() -> Result<(), Error> {
+    /// use hpx::Client;
+    ///
+    /// let client = Client::builder()
+    ///     .proxy(hpx::Proxy::all("http://proxy:8080").unwrap())
+    ///     .build()
+    ///     .unwrap();
+    ///
+    /// let response = client
+    ///     .get("http://internal.example")
+    ///     .no_proxy()
+    ///     .send()
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn no_proxy(mut self) -> Self {
+        if let Ok(ref mut req) = self.request {
+            req.config_mut::<RequestOptions>()
+                .get_or_insert_default()
+                .proxy_mut()
+                .clone_from(&ProxySelection::Direct);
         }
         self
     }

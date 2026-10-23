@@ -117,6 +117,20 @@ pub struct Options {
     ///
     /// Default: `None` (uses tokio-util default)
     pub max_backpressure_write_boundary: Option<usize>,
+
+    /// The WebSocket subprotocols offered during the handshake, in
+    /// preference order.
+    ///
+    /// The client sends the list in the `Sec-WebSocket-Protocol` request
+    /// header; the server picks one of them and echoes it back. The
+    /// negotiated value is available through
+    /// [`crate::WebSocket::protocol`].
+    ///
+    /// On the server side the list declares which subprotocols the server
+    /// supports; the first entry that the client also offered is selected.
+    ///
+    /// Default: empty (no subprotocol is offered)
+    pub protocols: Vec<String>,
 }
 
 impl Default for Options {
@@ -129,6 +143,7 @@ impl Default for Options {
             check_utf8: false,
             no_delay: true,
             max_backpressure_write_boundary: None,
+            protocols: Vec::new(),
         }
     }
 }
@@ -214,7 +229,7 @@ impl Options {
     /// let options = Options::default()
     ///     .with_limits(2 * 1024 * 1024, 4 * 1024 * 1024); // 2MB payload, 4MB buffer
     /// ```
-    pub const fn with_limits(self, max_payload: usize, max_buffer: usize) -> Self {
+    pub fn with_limits(self, max_payload: usize, max_buffer: usize) -> Self {
         Self {
             max_payload_read: Some(max_payload),
             max_read_buffer: Some(max_buffer),
@@ -320,6 +335,28 @@ impl Options {
         }
     }
 
+    /// Sets the WebSocket subprotocols offered during the handshake.
+    ///
+    /// The values are sent in the `Sec-WebSocket-Protocol` request header in
+    /// the given order, which is the client's preference order. The server
+    /// selects one of them and echoes it back; the negotiated value is
+    /// available through [`crate::WebSocket::protocol`].
+    ///
+    /// # Example
+    /// ```rust
+    /// use hpx_yawc::Options;
+    ///
+    /// let options = Options::default().with_protocols(["graphql-transport-ws"]);
+    /// ```
+    pub fn with_protocols<I, S>(mut self, protocols: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.protocols = protocols.into_iter().map(Into::into).collect();
+        self
+    }
+
     /// Disables compression for the WebSocket connection.
     ///
     /// Removes any previously configured compression settings, ensuring that
@@ -329,7 +366,7 @@ impl Options {
     ///
     /// # Returns
     /// A modified `Options` instance with compression disabled.
-    pub const fn without_compression(self) -> Self {
+    pub fn without_compression(self) -> Self {
         Self {
             compression: None,
             ..self
@@ -347,7 +384,7 @@ impl Options {
     ///
     /// # Returns
     /// A modified `Options` instance with the specified payload size limit.
-    pub const fn with_max_payload_read(self, size: usize) -> Self {
+    pub fn with_max_payload_read(self, size: usize) -> Self {
         Self {
             max_payload_read: Some(size),
             ..self
@@ -366,7 +403,7 @@ impl Options {
     ///
     /// # Returns
     /// A modified `Options` instance with the specified read buffer size limit.
-    pub const fn with_max_read_buffer(self, size: usize) -> Self {
+    pub fn with_max_read_buffer(self, size: usize) -> Self {
         Self {
             max_read_buffer: Some(size),
             ..self
@@ -381,7 +418,7 @@ impl Options {
     ///
     /// # Returns
     /// A modified `Options` instance with UTF-8 validation enabled.
-    pub const fn with_utf8(self) -> Self {
+    pub fn with_utf8(self) -> Self {
         Self {
             check_utf8: true,
             ..self
@@ -396,7 +433,7 @@ impl Options {
     ///
     /// # Returns
     /// A modified `Options` instance with TCP_NODELAY enabled.
-    pub const fn with_no_delay(self) -> Self {
+    pub fn with_no_delay(self) -> Self {
         Self {
             no_delay: true,
             ..self
@@ -476,7 +513,7 @@ impl Options {
     ///
     /// let options = Options::default().with_backpressure_boundary(128 * 1024); // 128 KiB boundary
     /// ```
-    pub const fn with_backpressure_boundary(self, size: usize) -> Self {
+    pub fn with_backpressure_boundary(self, size: usize) -> Self {
         Self {
             max_backpressure_write_boundary: Some(size),
             ..self

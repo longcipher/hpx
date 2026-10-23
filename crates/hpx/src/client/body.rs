@@ -580,6 +580,28 @@ pub trait AsSendBody {
     }
 }
 
+/// A request body that can be duplicated so a request can be replayed.
+///
+/// Some responses require the request to be sent again — a proxy that
+/// answers with `407 Proxy Authentication Required` is the common case. The
+/// body of such a request must be available twice, which is only possible
+/// when it is fully buffered.
+///
+/// The trait is implemented for [`Body`]. A custom body type that can be
+/// duplicated should implement it as well, otherwise requests sent through
+/// such a body cannot be replayed.
+pub trait ReplayBody: HttpBody + Sized {
+    /// Duplicates the body, or returns `None` when it cannot be duplicated.
+    fn try_replay(&self) -> Option<Self>;
+}
+
+impl ReplayBody for Body {
+    #[inline]
+    fn try_replay(&self) -> Option<Self> {
+        self.try_clone()
+    }
+}
+
 impl AsSendBody for Body {
     #[inline]
     fn into_send_body(self) -> Body {

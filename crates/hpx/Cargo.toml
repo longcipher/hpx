@@ -70,8 +70,11 @@ stream = ["tokio/fs", "dep:tokio-util", "dep:sync_wrapper"]
 # Enable SOCKS proxy support.
 socks = ["dep:tokio-socks", "hpx-yawc/socks"]
 
+# Enable Proxy Auto-Config (PAC) script support.
+pac = ["dep:boa_engine"]
+
 # Enable WebSocket support (defaults to yawc backend).
-ws = ["ws-yawc", "dep:flate2"]
+ws = ["ws-yawc", "dep:flate2", "hpx-yawc/h2"]
 
 # Enable WebSocket support via yawc backend.
 ws-yawc = ["dep:hpx-yawc", "hpx-yawc/proxy"]
@@ -123,11 +126,9 @@ rustls-tls = [
     "dep:rustls-pemfile",
     "dep:const-oid",
     "dep:der",
-    "dep:hmac",
     "dep:pkcs12",
     "dep:pkcs8",
     "dep:sha1",
-    "dep:sha2",
 ]
 
 # Enable Rustls QUIC support (internal; used by http3).
@@ -189,6 +190,7 @@ openssl-tls = ["dep:openssl", "dep:tokio-openssl"]
 
 # Enable vendored OpenSSL (static linking).
 openssl-vendored = ["openssl-tls", "openssl/vendored"]
+boa_engine = ["dep:boa_engine"]
 
 ## macOS system proxy
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -207,6 +209,7 @@ ahash = { workspace = true }
 arc-swap = { workspace = true, optional = true }
 async-trait = { workspace = true, optional = true }
 base64-simd = { workspace = true }
+boa_engine = { workspace = true, optional = true }
 boring = { workspace = true, optional = true }
 brotli = { workspace = true, optional = true }
 bytes = { workspace = true }
@@ -219,7 +222,7 @@ flate2 = { workspace = true, optional = true }
 futures-channel = { workspace = true }
 futures-util = { workspace = true }
 hickory-resolver = { workspace = true, optional = true }
-hmac = { workspace = true, optional = true }
+hmac = { workspace = true }
 hotpath = { workspace = true, features = [
     "hotpath",
 ], optional = true }
@@ -232,6 +235,8 @@ http-body-util = { workspace = true }
 http2 = { workspace = true, features = ["unstable", "tracing"], optional = true }
 httparse = { workspace = true, optional = true }
 ipnet = { workspace = true }
+md-5.workspace = true
+md4 = { workspace = true }
 memchr = { workspace = true, optional = true }
 mime = { workspace = true, optional = true }
 mime_guess = { workspace = true, optional = true }
@@ -259,7 +264,7 @@ serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
 serde_urlencoded = { workspace = true, optional = true }
 sha1 = { workspace = true, optional = true }
-sha2 = { workspace = true, optional = true }
+sha2 = { workspace = true }
 simd-json = { workspace = true, optional = true }
 smallvec = { workspace = true, features = [
     "const_generics",
@@ -313,6 +318,8 @@ zstd = { workspace = true }
 
 # HTTP/3 test-only dependency (self-signed cert generation for QUIC integration tests).
 rcgen = { workspace = true }
+rustls.workspace = true
+tokio-rustls.workspace = true
 
 [[test]]
 name = "http3"

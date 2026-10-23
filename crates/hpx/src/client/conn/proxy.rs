@@ -2,6 +2,8 @@
 
 #[cfg(feature = "socks")]
 pub(crate) mod socks;
+#[cfg(all(feature = "socks", feature = "http3"))]
+pub(crate) mod socks_udp;
 pub(crate) mod tunnel;
 
 use std::{

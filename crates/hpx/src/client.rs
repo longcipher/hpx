@@ -31,7 +31,7 @@ pub use self::core::http3;
 #[cfg(any(feature = "boring-tls", feature = "openssl-tls"))]
 pub(crate) use self::http::ConnectIdentity;
 pub use self::{
-    body::{AsSendBody, Body, ClientResponseBody},
+    body::{AsSendBody, Body, ClientResponseBody, ReplayBody},
     core::upgrade::Upgraded,
     emulation::{BrowserProfile, Emulation, EmulationBuilder, EmulationFactory},
     http::{Client, ClientBuilder},

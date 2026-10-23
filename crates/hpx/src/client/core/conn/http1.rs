@@ -20,6 +20,7 @@ use crate::client::core::{
     error::BoxError,
     http1::Http1Options,
     proto,
+    proto::h1::MINIMUM_MAX_BUFFER_SIZE,
 };
 
 type Dispatcher<T, B> =
@@ -288,6 +289,13 @@ impl Builder {
         // Set the maximum size of the request headers
         if let Some(max_headers) = self.opts.h1_max_headers {
             conn.set_http1_max_headers(max_headers);
+        }
+
+        // Set the maximum size of the response header block. The head is
+        // read into the read buffer, so the buffer limit bounds it too.
+        if let Some(max_header_size) = self.opts.h1_max_header_size {
+            conn.set_http1_max_header_size_limit(Some(max_header_size));
+            conn.set_http1_max_read_buf_size(max_header_size.max(MINIMUM_MAX_BUFFER_SIZE));
         }
 
         // Enable HTTP/0.9 responses if requested

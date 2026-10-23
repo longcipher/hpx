@@ -10,22 +10,12 @@ pub(super) fn with_system(builder: &mut super::matcher::Builder) {
     }
 
     if let Ok(val) = settings.get_string("ProxyServer") {
-        if builder.http.is_empty() {
-            builder.http = val.clone();
-        }
-        if builder.https.is_empty() {
-            builder.https = val;
-        }
+        super::sysproxy::apply_windows_proxy_server(builder, &val);
     }
 
-    if builder.no.is_empty() {
-        if let Ok(val) = settings.get_string("ProxyOverride") {
-            builder.no = val
-                .split(';')
-                .map(|s| s.trim())
-                .collect::<Vec<&str>>()
-                .join(",")
-                .replace("*.", "");
-        }
+    if builder.no.is_empty()
+        && let Ok(val) = settings.get_string("ProxyOverride")
+    {
+        builder.no = super::sysproxy::parse_windows_proxy_override(&val);
     }
 }

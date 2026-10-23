@@ -114,6 +114,8 @@
 //! - Streaming compression is needed for real-time data
 
 mod builder;
+#[cfg(feature = "h2")]
+pub mod h2;
 mod options;
 #[cfg(feature = "proxy")]
 pub mod proxy;
@@ -140,6 +142,8 @@ use codec::Codec;
 use compression::{Compressor, Decompressor, WebSocketExtensions};
 pub use frame::{Frame, OpCode};
 use futures::{SinkExt, task::AtomicWaker};
+#[cfg(feature = "h2")]
+pub use h2::{H2Stream, H2WebSocket, H2WebSocketBuilder};
 use http_body_util::Empty;
 use hyper::{Request, Response, StatusCode, body::Incoming, header, upgrade::Upgraded};
 use hyper_util::rt::TokioIo;
@@ -225,6 +229,8 @@ pub(crate) struct Negotiation {
     pub(crate) utf8: bool,
     pub(crate) fragmentation: Option<options::Fragmentation>,
     pub(crate) max_backpressure_write_boundary: Option<usize>,
+    /// The subprotocol negotiated during the handshake, if any.
+    pub(crate) protocol: Option<String>,
 }
 
 impl Negotiation {
@@ -758,6 +764,8 @@ pub struct WebSocket<S> {
     /// Negotiated permessage-deflate extensions from the handshake response.
     /// `Some` if the server accepted compression, `None` otherwise.
     negotiated_extensions: Option<WebSocketExtensions>,
+    /// The subprotocol negotiated during the handshake, if any.
+    negotiated_protocol: Option<String>,
 }
 
 impl WebSocket<MaybeTlsStream<TcpStream>> {
@@ -1029,6 +1037,17 @@ where
                 .insert(header::SEC_WEBSOCKET_EXTENSIONS, header_value);
         }
 
+        // Offer the configured subprotocols (RFC 6455 §4.1). The values are
+        // sent in preference order.
+        if !options.protocols.is_empty() {
+            let offered = options.protocols.join(", ");
+            let header_value = offered.parse().map_err(|e: header::InvalidHeaderValue| {
+                io::Error::new(io::ErrorKind::InvalidInput, e.to_string())
+            })?;
+            req.headers_mut()
+                .insert(header::SEC_WEBSOCKET_PROTOCOL, header_value);
+        }
+
         let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(io)).await?;
 
         #[cfg(not(feature = "smol"))]
@@ -1098,6 +1117,25 @@ impl WebSocket<HttpStream> {
             .map(WebSocketExtensions::from_str)
             .and_then(std::result::Result::ok);
 
+        // RFC 6455 §4.1: the server selects one of the subprotocols the
+        // client offered. The first server-supported protocol that the
+        // client also offered wins.
+        let client_protocols = request
+            .headers()
+            .get(header::SEC_WEBSOCKET_PROTOCOL)
+            .and_then(|h| h.to_str().ok())
+            .map(|value| {
+                value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let selected_protocol = select_protocol(&options.protocols, &client_protocols);
+
         let mut response = Response::builder()
             .status(hyper::StatusCode::SWITCHING_PROTOCOLS)
             .header(hyper::header::CONNECTION, "upgrade")
@@ -1110,6 +1148,18 @@ impl WebSocket<HttpStream> {
             .map_err(|e| {
                 io::Error::new(io::ErrorKind::InvalidInput, format!("build response: {e}"))
             })?;
+
+        if let Some(selected) = selected_protocol.as_deref() {
+            let header_value = selected.parse().map_err(|e: header::InvalidHeaderValue| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("subprotocol header: {e}"),
+                )
+            })?;
+            response
+                .headers_mut()
+                .insert(header::SEC_WEBSOCKET_PROTOCOL, header_value);
+        }
 
         let extensions = if let Some(client_compression) = maybe_compression {
             if let Some(server_compression) = options.compression.as_ref() {
@@ -1157,6 +1207,7 @@ impl WebSocket<HttpStream> {
                 utf8: options.check_utf8,
                 fragmentation: options.fragmentation.clone(),
                 max_backpressure_write_boundary: options.max_backpressure_write_boundary,
+                protocol: selected_protocol,
             }),
         };
 
@@ -1255,6 +1306,7 @@ where
                 opts.fragmentation.as_ref().and_then(|f| f.timeout),
             ),
             negotiated_extensions: opts.extensions,
+            negotiated_protocol: opts.protocol,
         }
     }
 
@@ -1270,6 +1322,20 @@ where
     #[inline]
     pub const fn compression_accepted(&self) -> bool {
         self.negotiated_extensions.is_some()
+    }
+
+    /// Returns the WebSocket subprotocol negotiated during the handshake.
+    ///
+    /// When the client offers subprotocols through
+    /// [`Options::with_protocols`], the server selects one of them and
+    /// echoes it in the `Sec-WebSocket-Protocol` response header. This
+    /// method returns the selected value.
+    ///
+    /// Returns `None` when no subprotocol was offered, or when the server
+    /// declined to select one.
+    #[inline]
+    pub fn protocol(&self) -> Option<&str> {
+        self.negotiated_protocol.as_deref()
     }
 
     #[cfg_attr(feature = "hotpath", hotpath::measure(impl_type = "WebSocket"))]
@@ -1423,6 +1489,25 @@ fn verify(response: &Response<Incoming>, options: Options, key: &str) -> Result<
         .map(WebSocketExtensions::from_str)
         .and_then(std::result::Result::ok);
 
+    // RFC 6455 §4.1: the server may select one of the offered subprotocols.
+    // A server that selects a protocol the client did not offer must fail
+    // the connection.
+    let selected_protocol = headers
+        .get(header::SEC_WEBSOCKET_PROTOCOL)
+        .and_then(|h| h.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+
+    if let Some(selected) = selected_protocol.as_deref()
+        && !options
+            .protocols
+            .iter()
+            .any(|offered| offered.eq_ignore_ascii_case(selected))
+    {
+        return Err(WebSocketError::InvalidSecWebSocketProtocol);
+    }
+
     let max_read_buffer = options.max_read_buffer.unwrap_or(
         options
             .max_payload_read
@@ -1438,12 +1523,28 @@ fn verify(response: &Response<Incoming>, options: Options, key: &str) -> Result<
         utf8: options.check_utf8,
         fragmentation: options.fragmentation.clone(),
         max_backpressure_write_boundary: options.max_backpressure_write_boundary,
+        protocol: selected_protocol,
     })
 }
 
 fn generate_key() -> String {
     let input: [u8; 16] = rand::random();
     base64_simd::STANDARD.encode_to_string(&input[..])
+}
+
+/// Selects the WebSocket subprotocol to use for a handshake (RFC 6455 §4.1).
+///
+/// The first entry of `supported` that the peer also offered wins. The
+/// comparison is case-insensitive, as subprotocol tokens are.
+fn select_protocol(supported: &[String], offered: &[String]) -> Option<String> {
+    supported
+        .iter()
+        .find(|candidate| {
+            offered
+                .iter()
+                .any(|offer| offer.eq_ignore_ascii_case(candidate))
+        })
+        .cloned()
 }
 
 /// Creates a TLS connector with root certificates for secure WebSocket connections.
@@ -1454,46 +1555,7 @@ fn generate_key() -> String {
 static TLS_CONNECTOR: OnceLock<std::result::Result<TlsConnector, String>> = OnceLock::new();
 
 fn tls_connector() -> std::result::Result<&'static TlsConnector, WebSocketError> {
-    let result = TLS_CONNECTOR.get_or_init(|| -> std::result::Result<TlsConnector, String> {
-        let mut root_cert_store = rustls::RootCertStore::empty();
-        root_cert_store
-            .add_parsable_certificates(webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().cloned());
-
-        let maybe_provider = rustls::crypto::CryptoProvider::get_default().cloned();
-
-        #[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc-rs"))]
-        let provider = maybe_provider.unwrap_or_else(|| {
-            #[cfg(feature = "rustls-ring")]
-            let _provider = rustls::crypto::ring::default_provider();
-            #[cfg(feature = "rustls-aws-lc-rs")]
-            let _provider = rustls::crypto::aws_lc_rs::default_provider();
-
-            Arc::new(_provider)
-        });
-
-        #[cfg(not(any(feature = "rustls-ring", feature = "rustls-aws-lc-rs")))]
-        let provider = maybe_provider.ok_or_else(|| {
-            r#"No Rustls crypto provider was enabled for yawc to connect to a `wss://` endpoint!
-
-Either:
-    - provide a `connector` in the WebSocketBuilder options
-    - enable one of the following features: `rustls-ring`, `rustls-aws-lc-rs`"#
-                .to_string()
-        })?;
-
-        let builder = match rustls::ClientConfig::builder_with_provider(provider)
-            .with_protocol_versions(rustls::ALL_VERSIONS)
-        {
-            Ok(builder) => builder,
-            Err(err) => return Err(err.to_string()),
-        };
-        let mut config = builder
-            .with_root_certificates(root_cert_store)
-            .with_no_client_auth();
-        config.alpn_protocols = vec!["http/1.1".into()];
-
-        Ok(TlsConnector::from(Arc::new(config)))
-    });
+    let result = TLS_CONNECTOR.get_or_init(|| build_tls_connector(vec!["http/1.1".into()]));
 
     match result {
         Ok(connector) => Ok(connector),
@@ -1501,6 +1563,81 @@ Either:
             message.clone(),
         ))),
     }
+}
+
+/// TLS connector used for `https://` proxy endpoints.
+///
+/// The tunnel to the proxy is secured with TLS, but the CONNECT request
+/// inside that session is plain HTTP/1.1, so no ALPN protocol is advertised.
+#[cfg(feature = "proxy")]
+static PROXY_TLS_CONNECTOR: OnceLock<std::result::Result<TlsConnector, String>> = OnceLock::new();
+
+/// Returns the TLS connector used to reach an `https://` proxy endpoint.
+#[cfg(feature = "proxy")]
+pub(super) fn proxy_tls_connector() -> std::io::Result<&'static TlsConnector> {
+    let result = PROXY_TLS_CONNECTOR.get_or_init(|| build_tls_connector(Vec::new()));
+
+    match result {
+        Ok(connector) => Ok(connector),
+        Err(message) => Err(std::io::Error::other(message.clone())),
+    }
+}
+
+/// Returns a TLS connector advertising the given ALPN protocols.
+///
+/// Used by transports that need an ALPN token other than `http/1.1`, such
+/// as the RFC 8441 handshake, which requires `h2`.
+#[cfg(feature = "h2")]
+pub(super) fn tls_connector_for_alpn(
+    alpn_protocols: Vec<Vec<u8>>,
+) -> std::result::Result<TlsConnector, WebSocketError> {
+    build_tls_connector(alpn_protocols)
+        .map_err(|message| WebSocketError::IoError(std::io::Error::other(message.clone())))
+}
+
+/// Builds a rustls client configuration with the webpki root store.
+///
+/// A missing crypto provider is a configuration error, so it is reported to
+/// the caller instead of panicking inside the initializer.
+fn build_tls_connector(alpn_protocols: Vec<Vec<u8>>) -> std::result::Result<TlsConnector, String> {
+    let mut root_cert_store = rustls::RootCertStore::empty();
+    root_cert_store
+        .add_parsable_certificates(webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().cloned());
+
+    let maybe_provider = rustls::crypto::CryptoProvider::get_default().cloned();
+
+    #[cfg(any(feature = "rustls-ring", feature = "rustls-aws-lc-rs"))]
+    let provider = maybe_provider.unwrap_or_else(|| {
+        #[cfg(feature = "rustls-ring")]
+        let _provider = rustls::crypto::ring::default_provider();
+        #[cfg(feature = "rustls-aws-lc-rs")]
+        let _provider = rustls::crypto::aws_lc_rs::default_provider();
+
+        Arc::new(_provider)
+    });
+
+    #[cfg(not(any(feature = "rustls-ring", feature = "rustls-aws-lc-rs")))]
+    let provider = maybe_provider.ok_or_else(|| {
+        r#"No Rustls crypto provider was enabled for yawc to connect to a `wss://` endpoint!
+
+Either:
+    - provide a `connector` in the WebSocketBuilder options
+    - enable one of the following features: `rustls-ring`, `rustls-aws-lc-rs`"#
+            .to_string()
+    })?;
+
+    let builder = match rustls::ClientConfig::builder_with_provider(provider)
+        .with_protocol_versions(rustls::ALL_VERSIONS)
+    {
+        Ok(builder) => builder,
+        Err(err) => return Err(err.to_string()),
+    };
+    let mut config = builder
+        .with_root_certificates(root_cert_store)
+        .with_no_client_auth();
+    config.alpn_protocols = alpn_protocols;
+
+    Ok(TlsConnector::from(Arc::new(config)))
 }
 
 #[cfg(test)]
@@ -1515,6 +1652,43 @@ mod tests {
 
     use super::*;
     use crate::close::{self, CloseCode};
+
+    /// RFC 6455 §4.1: the server selects one of the subprotocols the client
+    /// offered.
+    #[test]
+    fn select_protocol_prefers_the_server_order() {
+        let supported = vec!["chat".to_string(), "superchat".to_string()];
+        let offered = vec!["superchat".to_string(), "chat".to_string()];
+
+        assert_eq!(
+            select_protocol(&supported, &offered),
+            Some("chat".to_string())
+        );
+    }
+
+    /// The comparison is case-insensitive, as subprotocol tokens are.
+    #[test]
+    fn select_protocol_is_case_insensitive() {
+        let supported = vec!["Chat".to_string()];
+        let offered = vec!["cHaT".to_string()];
+
+        assert_eq!(
+            select_protocol(&supported, &offered),
+            Some("Chat".to_string())
+        );
+    }
+
+    /// When the client offered nothing the server-supported, no subprotocol
+    /// is selected.
+    #[test]
+    fn select_protocol_without_a_common_entry() {
+        let supported = vec!["chat".to_string()];
+        let offered = vec!["superchat".to_string()];
+
+        assert_eq!(select_protocol(&supported, &offered), None);
+        assert_eq!(select_protocol(&[], &offered), None);
+        assert_eq!(select_protocol(&supported, &[]), None);
+    }
 
     /// Regression test for H-2: an error while receiving a fragmented message must
     /// drop the buffered fragment state so a subsequently received complete frame is
@@ -1638,6 +1812,7 @@ mod tests {
             max_payload_read: MAX_PAYLOAD_READ,
             max_read_buffer: MAX_READ_BUFFER,
             utf8: false,
+            protocol: None,
             fragmentation: fragment_size.map(|size| options::Fragmentation {
                 timeout: None,
                 fragment_size: Some(size),
@@ -2082,6 +2257,7 @@ mod tests {
             max_payload_read: MAX_PAYLOAD_READ,
             max_read_buffer: MAX_READ_BUFFER,
             utf8: false,
+            protocol: None,
             fragmentation: Some(options::Fragmentation {
                 timeout: None,
                 fragment_size: Some(100),
@@ -2122,6 +2298,7 @@ mod tests {
             max_payload_read: MAX_PAYLOAD_READ,
             max_read_buffer: MAX_READ_BUFFER,
             utf8: false,
+            protocol: None,
             fragmentation: Some(options::Fragmentation {
                 timeout: None,
                 fragment_size: Some(100),
@@ -2162,6 +2339,7 @@ mod tests {
             max_payload_read: MAX_PAYLOAD_READ,
             max_read_buffer: MAX_READ_BUFFER,
             utf8: false,
+            protocol: None,
             fragmentation: None,
             max_backpressure_write_boundary: None,
         };

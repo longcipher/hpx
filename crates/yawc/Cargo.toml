@@ -28,8 +28,9 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 # Optional feature configurations
 [features]
-axum = ["axum-core", "http"]
+axum = ["axum-core", "dep:http"]
 default = ["rustls-ring"]
+h2 = ["dep:http2", "dep:http"]
 hotpath = ["dep:hotpath"]
 hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]
 proxy = []
@@ -67,6 +68,7 @@ base64-simd = { workspace = true }
 flate2 = { workspace = true }
 http = { workspace = true, optional = true }
 http-body-util = { workspace = true }
+http2 = { workspace = true, optional = true }
 # HTTP clients
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["tokio"] }
@@ -134,8 +136,10 @@ axum = { workspace = true }
 criterion = { workspace = true }
 eyre = { workspace = true }
 futures-rustls = { workspace = true }
+http2.workspace = true
 hyper = { workspace = true, features = ["http1", "server", "client"] }
 rand = { workspace = true }
+rcgen.workspace = true
 rustls = { workspace = true, features = ["ring"] }
 rustls-native-certs = { workspace = true }
 rustls-pki-types = { workspace = true }

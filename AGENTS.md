@@ -72,3 +72,4 @@ just mutate
 - `hpx-h3` is a vendored fork: keep changes minimal and upstream-shaped, and never enable mutation testing on it.
 - Fuzz targets are per crate under `crates/<crate>/fuzz`; build them with `just fuzz-build` and gate them with `just fuzz-smoke`. A crash is a finding, not a flake.
 - Publishing order is dependency order: `hpx-yawc`, `hpx-h3`, `hpx`, `hpx-browser`, `hpx-dl`, `hpx-emulation`, `hpx-streams`, `hpxless`, `hpx-cli`. Use `just publish`.
+- Always re-add brackets around IPv6 literals when building `host:port` authorities or dial targets: `Url::host_str` strips them, while `url::Host`'s `Display` keeps them.

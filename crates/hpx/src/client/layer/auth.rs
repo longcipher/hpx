@@ -122,15 +122,32 @@ impl AuthMethod {
 
     /// Create a dynamic bearer token provider authentication method.
     ///
-    /// # Warning
+    /// The provider is awaited before every request, so the token can be
+    /// refreshed asynchronously. Implement [`CachedTokenProvider`] to avoid
+    /// fetching a token for every request.
     ///
-    /// This variant requires an async token refresh mechanism. The auth layer
-    /// operates synchronously, so this method returns an error at request time.
-    /// Use [`CachedTokenProvider`] or hooks-based auth instead.
-    #[deprecated(
-        since = "2.5.0",
-        note = "BearerProvider cannot be used synchronously. Use `cached_token_provider()` or hooks instead."
-    )]
+    /// # Example
+    /// ```
+    /// # extern crate hpx;
+    /// # fn run() -> Result<(), Box<dyn std::error::Error>> {
+    /// use std::sync::Arc;
+    ///
+    /// use hpx::auth::{AuthMethod, BearerTokenProvider, Token};
+    ///
+    /// struct MyProvider;
+    ///
+    /// #[async_trait::async_trait]
+    /// impl BearerTokenProvider for MyProvider {
+    ///     async fn get_token(&self) -> Result<Token, hpx::Error> {
+    ///         Ok(Token::permanent("secret".to_owned()))
+    ///     }
+    /// }
+    ///
+    /// let auth = AuthMethod::bearer_provider(Arc::new(MyProvider));
+    /// # Ok(())
+    /// # }
+    /// # fn main() {}
+    /// ```
     pub fn bearer_provider(provider: Arc<dyn BearerTokenProvider>) -> Self {
         Self::BearerProvider { provider }
     }
@@ -232,8 +249,31 @@ where
     }
 
     fn call(&mut self, mut req: Request<Body>) -> Self::Future {
+        let auth = self.auth.clone();
+
+        // A token provider is asynchronous, so the token is fetched before
+        // the request is handed to the inner service.
+        if let AuthMethod::BearerProvider { provider } = auth.as_ref() {
+            let provider = provider.clone();
+            let mut inner = self.inner.clone();
+            return Box::pin(async move {
+                let token = provider.get_token().await.map_err(|err| {
+                    trace!("Auth failed: {}", err);
+                    crate::error::BoxError::from(err)
+                })?;
+
+                apply_bearer(&token.value, req.headers_mut()).map_err(|err| {
+                    trace!("Auth failed: {}", err);
+                    crate::error::BoxError::from(err)
+                })?;
+
+                trace!("Auth applied to {} {}", req.method(), req.uri());
+                inner.call(req).await.map_err(Into::into)
+            });
+        }
+
         // Apply authentication headers
-        if let Err(e) = apply_auth(&self.auth, &mut req) {
+        if let Err(e) = apply_auth(&auth, &mut req) {
             trace!("Auth failed: {}", e);
             return Box::pin(async move { Err(e.into()) });
         }
@@ -248,26 +288,14 @@ where
 fn apply_auth(auth: &AuthMethod, req: &mut Request<Body>) -> Result<(), Error> {
     match auth {
         AuthMethod::Bearer { token } => {
-            req.headers_mut().insert(
-                http::header::AUTHORIZATION,
-                HeaderValue::from_str(&format!("Bearer {token}")).map_err(|e| {
-                    Error::builder(Box::<dyn std::error::Error + Send + Sync>::from(e))
-                })?,
-            );
+            apply_bearer(token, req.headers_mut())?;
         }
         AuthMethod::BearerProvider { .. } => {
-            // Provider-based auth requires async, handled via blocking_get_token
-            // in a spawn_blocking context. For simplicity, we use the blocking approach here.
-            // In production, consider using a cached token with ArcSwap.
-            // The provider call happens synchronously via a cached token pattern.
-            // Users should implement their own caching layer or use `ArcSwap`.
-            //
-            // For now, we'll panic in the provider case since it requires async.
-            // The recommended approach is to use hooks for provider-based auth.
+            // The provider is awaited by the service, which is the only place
+            // that can suspend.
             return Err(Error::builder(
                 Box::<dyn std::error::Error + Send + Sync>::from(
-                    "BearerProvider auth requires async token refresh. \
-                     Use hooks or implement a cached token provider with ArcSwap.",
+                    "BearerProvider auth must be applied by the service, not synchronously.",
                 ),
             ));
         }
@@ -286,6 +314,16 @@ fn apply_auth(auth: &AuthMethod, req: &mut Request<Body>) -> Result<(), Error> {
             applier(req.headers_mut())?;
         }
     }
+    Ok(())
+}
+
+/// Writes the `Authorization: Bearer` header.
+fn apply_bearer(token: &str, headers: &mut HeaderMap) -> Result<(), Error> {
+    headers.insert(
+        http::header::AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {token}"))
+            .map_err(|e| Error::builder(Box::<dyn std::error::Error + Send + Sync>::from(e)))?,
+    );
     Ok(())
 }
 
@@ -364,7 +402,69 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    };
+
     use super::*;
+
+    /// A provider that yields a token and counts how often it was called.
+    struct CountingProvider {
+        calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl BearerTokenProvider for CountingProvider {
+        async fn get_token(&self) -> Result<Token, Error> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Token::permanent("refreshed-token"))
+        }
+    }
+
+    /// A service that records the `Authorization` header it received.
+    #[derive(Clone)]
+    struct RecordingService {
+        seen: Arc<Mutex<Vec<HeaderValue>>>,
+    }
+
+    impl Service<Request<Body>> for RecordingService {
+        type Response = Response<Body>;
+        type Error = crate::error::BoxError;
+        type Future = BoxFut<Result<Response<Body>, crate::error::BoxError>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: Request<Body>) -> Self::Future {
+            if let Some(value) = req.headers().get(http::header::AUTHORIZATION) {
+                self.seen.lock().unwrap().push(value.clone());
+            }
+            Box::pin(async move { Ok(Response::new(Body::empty())) })
+        }
+    }
+
+    /// The token provider is awaited before the request is sent.
+    #[tokio::test]
+    async fn bearer_provider_is_awaited() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let provider = Arc::new(CountingProvider {
+            calls: calls.clone(),
+        });
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mut service = AuthLayer::new(AuthMethod::bearer_provider(provider))
+            .layer(RecordingService { seen: seen.clone() });
+
+        let req = Request::new(Body::empty());
+        service.call(req).await.unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0], "Bearer refreshed-token");
+    }
 
     #[test]
     fn test_token_permanent() {

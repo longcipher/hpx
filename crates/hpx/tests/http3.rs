@@ -3757,3 +3757,326 @@ async fn http3_extended_connect_websocket() -> TestResult<()> {
 
     Ok(())
 }
+
+/// BDD Scenario: `http3_transport.feature::HTTP/3 request through a proxy fails closed`.
+///
+/// QUIC has no proxy support, so an HTTP/3 request for a destination that
+/// would be proxied must fail instead of connecting directly and exposing
+/// the client's IP to the origin.
+///
+/// The test configures a client with an HTTP proxy and `http3_only()`, then
+/// sends a request. The request MUST fail, and the proxy MUST NOT be
+/// contacted (the whole point is that the request never leaves the machine).
+#[tokio::test]
+async fn http3_through_proxy_fails_closed() -> TestResult<()> {
+    // A TCP listener that would record any connection. The request must
+    // never reach it.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let proxy_addr = listener.local_addr()?;
+    let contacted = Arc::new(AtomicU64::new(0));
+
+    let contacted_task = {
+        let contacted = contacted.clone();
+        tokio::spawn(async move {
+            let (mut stream, _) = match listener.accept().await {
+                Ok(accepted) => accepted,
+                Err(_) => return,
+            };
+            contacted.fetch_add(1, Ordering::SeqCst);
+            // Hold the connection open briefly so the test can observe it.
+            let mut buf = [0u8; 256];
+            let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await;
+        })
+    };
+
+    let proxy = format!("http://{proxy_addr}");
+
+    let client = Client::builder()
+        .proxy(hpx::Proxy::all(&proxy).unwrap())
+        .http3_only()
+        .build()?;
+
+    let err = client
+        .get("https://example.com/")
+        .send()
+        .await
+        .err()
+        .ok_or("expected the proxied HTTP/3 request to fail")?;
+
+    // The error must be a client-level error, not a successful response.
+    assert!(
+        err.to_string().contains("client error"),
+        "unexpected error: {err}"
+    );
+
+    // Nothing was sent to the proxy: the request was rejected before any
+    // connection was attempted.
+    assert_eq!(
+        contacted.load(Ordering::SeqCst),
+        0,
+        "the proxy must not be contacted for a failed HTTP/3 request"
+    );
+
+    contacted_task.abort();
+    let _ = contacted_task.await;
+
+    Ok(())
+}
+
+/// BDD Scenario: `http3_transport.feature::HTTP/3 request with a body`.
+///
+/// The HTTP/3 path must send the request body, not only the headers.
+#[tokio::test]
+async fn http3_request_with_body() -> TestResult<()> {
+    use bytes::Buf as _;
+    use tower::Service;
+
+    // 1. A self-signed certificate for the h3 server.
+    let certified_key = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])?;
+    let cert_der: CertificateDer<'static> = certified_key.cert.der().clone();
+    let key_der: PrivateKeyDer<'static> =
+        PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der()).into();
+
+    // 2. The server-side rustls configuration with ALPN `[b"h3"]`.
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut server_rustls_config = RustlsServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            format!("bad protocol versions: {e}").into()
+        })?
+        .with_no_client_auth()
+        .with_single_cert(vec![cert_der.clone()], key_der)?;
+    server_rustls_config.alpn_protocols = vec![b"h3".to_vec()];
+
+    // 3. The QUIC server endpoint.
+    let server_quic_config = QuicServerConfig::try_from(Arc::new(server_rustls_config))?;
+    let server_config = ServerConfig::with_crypto(Arc::new(server_quic_config));
+    let server_endpoint = Endpoint::server(server_config, "127.0.0.1:0".parse()?)?;
+    let server_addr: SocketAddr = server_endpoint.local_addr()?;
+
+    // 4. The h3 server: it collects the request body and echoes its length.
+    let server_task = tokio::spawn(async move {
+        while let Some(incoming) = server_endpoint.accept().await {
+            match incoming.await {
+                Ok(quinn_conn) => {
+                    tokio::spawn(async move {
+                        let h3_quinn_conn = hpx_h3::quinn::Connection::new(quinn_conn);
+                        let mut h3_conn: hpx_h3::server::Connection<
+                            hpx_h3::quinn::Connection,
+                            bytes::Bytes,
+                        > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
+                            Ok(c) => c,
+                            Err(_) => return,
+                        };
+                        loop {
+                            match h3_conn.accept().await {
+                                Ok(Some(resolver)) => {
+                                    let (req, mut stream) = match resolver.resolve_request().await {
+                                        Ok(parts) => parts,
+                                        Err(_) => continue,
+                                    };
+                                    // Collect the request body.
+                                    let mut received = Vec::new();
+                                    while let Ok(Some(data)) = stream.recv_data().await {
+                                        let chunk = data.chunk();
+                                        received.extend_from_slice(chunk);
+                                    }
+                                    let body = format!("received {} bytes", received.len());
+                                    let resp = match http::Response::builder()
+                                        .status(http::StatusCode::OK)
+                                        .body(())
+                                    {
+                                        Ok(r) => r,
+                                        Err(_) => continue,
+                                    };
+                                    if stream.send_response(resp).await.is_err() {
+                                        continue;
+                                    }
+                                    if stream.send_data(bytes::Bytes::from(body)).await.is_err() {
+                                        continue;
+                                    }
+                                    let _ = stream.finish().await;
+                                    let _ = req;
+                                }
+                                Ok(None) => break,
+                                Err(_) => break,
+                            }
+                        }
+                    });
+                }
+                Err(_) => continue,
+            }
+        }
+    });
+    let _ = server_task;
+
+    // 5. The client.
+    let mut root_store = RootCertStore::empty();
+    root_store.add(cert_der.clone())?;
+    let client_provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut client_tls_config = rustls::ClientConfig::builder_with_provider(client_provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            format!("bad protocol versions: {e}").into()
+        })?
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+    client_tls_config.alpn_protocols = vec![b"h3".to_vec()];
+    let tls_config: Arc<rustls::ClientConfig> = Arc::new(client_tls_config);
+
+    let client_endpoint = build_quinn_endpoint("127.0.0.1:0".parse()?)?;
+    let transport_config = Arc::new(quinn::TransportConfig::default());
+    let mut connector = QuicConnector::new(
+        client_endpoint,
+        transport_config,
+        tls_config,
+        Http3Options::default(),
+    );
+
+    let waker = futures_util::task::noop_waker();
+    let mut cx = std::task::Context::from_waker(&waker);
+    match connector.poll_ready(&mut cx) {
+        std::task::Poll::Ready(Ok(())) => {}
+        other => {
+            return Err(format!("poll_ready should be Ok, got {other:?}").into());
+        }
+    }
+
+    let client = Client::builder()
+        .no_proxy()
+        .http3_only()
+        .__test_with_quic_connector(connector)
+        .build()?;
+
+    // 6. Send a POST with a body.
+    let payload = "hello, http/3 body";
+    let response = client
+        .post(format!("https://{server_addr}/upload"))
+        .body(payload.to_owned())
+        .send()
+        .await?;
+
+    assert_eq!(response.status(), http::StatusCode::OK);
+    let body = response.text().await?;
+    assert_eq!(body, format!("received {} bytes", payload.len()));
+
+    Ok(())
+}
+
+/// BDD Scenario: `http3_transport.feature::HTTP/3 request through a SOCKS5 proxy`.
+///
+/// QUIC runs over UDP, so it cannot be tunnelled through an HTTP `CONNECT`
+/// tunnel. The only proxy that can carry HTTP/3 is a SOCKS5 proxy that
+/// relays UDP, which is what this test exercises.
+///
+/// The test stands up a local h3 server, a local SOCKS5 proxy that relays
+/// UDP, and a client configured with `http3_only()` plus the SOCKS5 proxy.
+/// The request MUST succeed and return the server's body, which proves the
+/// QUIC traffic went through the relay.
+#[cfg(feature = "socks")]
+#[tokio::test]
+async fn http3_through_socks5_proxy() -> TestResult<()> {
+    use support::socks5_udp::Socks5UdpProxy;
+
+    // 1. A self-signed certificate for the h3 server.
+    let certified_key = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])?;
+    let cert_der: CertificateDer<'static> = certified_key.cert.der().clone();
+    let key_der: PrivateKeyDer<'static> =
+        PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der()).into();
+
+    // 2. The server-side rustls configuration with ALPN `[b"h3"]`.
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut server_rustls_config = RustlsServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            format!("bad protocol versions: {e}").into()
+        })?
+        .with_no_client_auth()
+        .with_single_cert(vec![cert_der], key_der)?;
+    server_rustls_config.alpn_protocols = vec![b"h3".to_vec()];
+
+    // 3. The QUIC server endpoint.
+    let server_quic_config = QuicServerConfig::try_from(Arc::new(server_rustls_config))?;
+    let server_config = ServerConfig::with_crypto(Arc::new(server_quic_config));
+    let server_endpoint = Endpoint::server(server_config, "127.0.0.1:0".parse()?)?;
+    let server_addr: SocketAddr = server_endpoint.local_addr()?;
+
+    // 4. The h3 server task.
+    let server_task = tokio::spawn(async move {
+        while let Some(incoming) = server_endpoint.accept().await {
+            match incoming.await {
+                Ok(quinn_conn) => {
+                    tokio::spawn(async move {
+                        let h3_quinn_conn = hpx_h3::quinn::Connection::new(quinn_conn);
+                        let mut h3_conn: hpx_h3::server::Connection<
+                            hpx_h3::quinn::Connection,
+                            bytes::Bytes,
+                        > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
+                            Ok(c) => c,
+                            Err(_) => return,
+                        };
+                        loop {
+                            match h3_conn.accept().await {
+                                Ok(Some(resolver)) => {
+                                    let (_req, mut stream) = match resolver.resolve_request().await
+                                    {
+                                        Ok(parts) => parts,
+                                        Err(_) => continue,
+                                    };
+                                    let resp = match http::Response::builder()
+                                        .status(http::StatusCode::OK)
+                                        .body(())
+                                    {
+                                        Ok(r) => r,
+                                        Err(_) => continue,
+                                    };
+                                    if stream.send_response(resp).await.is_err() {
+                                        continue;
+                                    }
+                                    if stream
+                                        .send_data(bytes::Bytes::from_static(b"hello, socks5"))
+                                        .await
+                                        .is_err()
+                                    {
+                                        continue;
+                                    }
+                                    while matches!(stream.recv_data().await, Ok(Some(_))) {}
+                                    let _ = stream.finish().await;
+                                }
+                                Ok(None) => break,
+                                Err(_) => break,
+                            }
+                        }
+                    });
+                }
+                Err(_) => continue,
+            }
+        }
+    });
+    let _ = server_task;
+
+    // 5. The SOCKS5 proxy that relays UDP.
+    let proxy = Socks5UdpProxy::start().await;
+
+    // 6. The client: `http3_only()` with the SOCKS5 proxy. The certificate
+    //    verification is disabled because the h3 server uses a self-signed
+    //    certificate.
+    let client = Client::builder()
+        .no_proxy()
+        .proxy(hpx::Proxy::all(proxy.url()).unwrap())
+        .cert_verification(false)
+        .http3_only()
+        .build()?;
+
+    // 7. The request goes through the SOCKS5 UDP relay.
+    let response = client
+        .get(format!("https://{server_addr}/hello"))
+        .send()
+        .await?;
+
+    assert_eq!(response.status(), http::StatusCode::OK);
+    let body = response.text().await?;
+    assert_eq!(body, "hello, socks5");
+
+    Ok(())
+}

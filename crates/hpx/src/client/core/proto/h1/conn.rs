@@ -57,6 +57,7 @@ where
                 method: None,
                 h1_parser_config: ParserConfig::default(),
                 h1_max_headers: None,
+                h1_max_header_size: None,
                 h09_responses: false,
                 notify_read: false,
                 reading: Reading::Init,
@@ -97,6 +98,17 @@ where
 
     pub(crate) const fn set_http1_max_headers(&mut self, val: usize) {
         self.state.h1_max_headers = Some(val);
+    }
+
+    /// Limits the size of the response header block.
+    pub(crate) const fn set_http1_max_header_size_limit(&mut self, val: Option<usize>) {
+        self.io.set_max_header_size(val);
+    }
+
+    /// Limits the size of the read buffer, which also bounds the response
+    /// head that is read into it.
+    pub(crate) fn set_http1_max_read_buf_size(&mut self, val: usize) {
+        self.io.set_read_buf_max_size(val);
     }
 
     pub(crate) fn into_inner(self) -> (I, Bytes) {
@@ -224,19 +236,17 @@ where
                 self.try_keep_alive(cx);
             }
         } else if msg.expect_continue && msg.head.version.gt(&Version::HTTP_10) {
-            let h1_max_header_size = None; // TODO: remove this when we land h1_max_header_size support
             self.state.reading = Reading::Continue(Decoder::new(
                 msg.decode,
                 self.state.h1_max_headers,
-                h1_max_header_size,
+                self.state.h1_max_header_size,
             ));
             wants = wants.add(Wants::EXPECT);
         } else {
-            let h1_max_header_size = None; // TODO: remove this when we land h1_max_header_size support
             self.state.reading = Reading::Body(Decoder::new(
                 msg.decode,
                 self.state.h1_max_headers,
-                h1_max_header_size,
+                self.state.h1_max_header_size,
             ));
         }
 
@@ -866,6 +876,8 @@ struct State {
     method: Option<Method>,
     h1_parser_config: ParserConfig,
     h1_max_headers: Option<usize>,
+    /// The maximum size of the response header block, in bytes.
+    h1_max_header_size: Option<usize>,
     h09_responses: bool,
     /// Set to true when the Dispatcher should poll read operations
     /// again. See the `maybe_notify` method for more.

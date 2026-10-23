@@ -69,6 +69,10 @@ pub struct IncomingUpgrade {
     /// Optional WebSocket extensions negotiated with the client, such as permessage-deflate compression.
     /// These configure protocol-level behavior if enabled.
     extensions: Option<WebSocketExtensions>,
+
+    /// The subprotocols offered by the client, in the client's preference
+    /// order (RFC 6455 §4.1).
+    protocols: Vec<String>,
 }
 
 #[cfg_attr(docsrs, doc(cfg(feature = "axum")))]
@@ -133,6 +137,15 @@ impl IncomingUpgrade {
             _ => (builder, None),
         };
 
+        // RFC 6455 §4.1: select the first server-supported subprotocol that
+        // the client also offered.
+        let selected_protocol = super::select_protocol(&options.protocols, &self.protocols);
+
+        let builder = match selected_protocol.as_deref() {
+            Some(selected) => builder.header(header::SEC_WEBSOCKET_PROTOCOL, selected),
+            None => builder,
+        };
+
         let response = builder.body(Empty::new()).map_err(|e| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -161,6 +174,7 @@ impl IncomingUpgrade {
                 fragmentation: options.fragmentation.clone(),
                 max_read_buffer,
                 utf8: options.check_utf8,
+                protocol: selected_protocol,
             }),
         };
 
@@ -234,6 +248,20 @@ where
                 .map(WebSocketExtensions::from_str)
                 .and_then(std::result::Result::ok);
 
+            let protocols = parts
+                .headers
+                .get(header::SEC_WEBSOCKET_PROTOCOL)
+                .and_then(|h| h.to_str().ok())
+                .map(|value| {
+                    value
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
             let on_upgrade = parts
                 .extensions
                 .remove::<hyper::upgrade::OnUpgrade>()
@@ -242,6 +270,7 @@ where
             Ok(Self {
                 on_upgrade,
                 extensions,
+                protocols,
                 key: sec_websocket_protocol(key.as_bytes()),
             })
         }

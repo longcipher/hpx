@@ -166,6 +166,20 @@ impl Connection for H3Connection {
 pub struct QuicConnector {
     /// The `quinn::Endpoint` used to initiate outgoing QUIC connections.
     endpoint: quinn::Endpoint,
+    /// The SOCKS5 proxy that carries the QUIC traffic, when one is
+    /// configured.
+    ///
+    /// QUIC runs over UDP, so it cannot be tunnelled through an HTTP
+    /// `CONNECT` tunnel. A SOCKS5 proxy that relays UDP is the only way to
+    /// carry HTTP/3 through a proxy.
+    #[cfg(all(feature = "socks", feature = "http3"))]
+    socks5: Option<Socks5Proxy>,
+    /// The endpoint that tunnels QUIC through the SOCKS5 proxy.
+    ///
+    /// It is created on first use, because the UDP relay needs an
+    /// asynchronous handshake with the proxy.
+    #[cfg(all(feature = "socks", feature = "http3"))]
+    socks5_endpoint: Arc<tokio::sync::OnceCell<quinn::Endpoint>>,
     /// QUIC transport configuration (`Arc`-shared, replaceable per DIP).
     transport_config: Arc<quinn::TransportConfig>,
     /// rustls client configuration for QUIC TLS (`Arc`-shared, replaceable).
@@ -173,6 +187,18 @@ pub struct QuicConnector {
     /// HTTP/3 protocol options (max field section size, grease, …).
     h3_options: Http3Options,
     // TODO(T2.2): add alt_svc_cache: Arc<AltSvcCache> (Phase 2; omitted per YAGNI).
+}
+
+/// A SOCKS5 proxy that relays the QUIC traffic.
+#[cfg(all(feature = "socks", feature = "http3"))]
+#[derive(Debug, Clone)]
+pub struct Socks5Proxy {
+    /// The address of the proxy.
+    pub address: SocketAddr,
+    /// The credentials, when the proxy requires them.
+    pub credentials: Option<(String, String)>,
+    /// The proxy URI, used to recognise the proxy in the request routing.
+    pub uri: String,
 }
 
 impl fmt::Debug for QuicConnector {
@@ -192,7 +218,7 @@ impl QuicConnector {
     ///
     /// All inputs are `Arc`-shared and replaceable (DIP per §5.1.5).
     #[must_use]
-    pub const fn new(
+    pub fn new(
         endpoint: quinn::Endpoint,
         transport_config: Arc<quinn::TransportConfig>,
         tls_config: Arc<rustls::ClientConfig>,
@@ -200,10 +226,32 @@ impl QuicConnector {
     ) -> Self {
         Self {
             endpoint,
+            #[cfg(all(feature = "socks", feature = "http3"))]
+            socks5: None,
+            #[cfg(all(feature = "socks", feature = "http3"))]
+            socks5_endpoint: Arc::new(tokio::sync::OnceCell::new()),
             transport_config,
             tls_config,
             h3_options,
         }
+    }
+
+    /// Routes the QUIC traffic through a SOCKS5 proxy.
+    ///
+    /// The proxy must relay UDP, because QUIC cannot be tunnelled through an
+    /// HTTP `CONNECT` tunnel.
+    #[cfg(all(feature = "socks", feature = "http3"))]
+    #[must_use]
+    pub fn with_socks5_proxy(mut self, proxy: Socks5Proxy) -> Self {
+        self.socks5 = Some(proxy);
+        self
+    }
+
+    /// The SOCKS5 proxy the QUIC traffic is routed through, if any.
+    #[cfg(all(feature = "socks", feature = "http3"))]
+    #[must_use]
+    pub fn socks5_proxy(&self) -> Option<&Socks5Proxy> {
+        self.socks5.as_ref()
     }
 
     /// Drive the h3 connection to completion, polling `poll_close` and feeding
@@ -277,12 +325,59 @@ impl Service<ConnectRequest> for QuicConnector {
     }
 
     fn call(&mut self, req: ConnectRequest) -> Self::Future {
+        #[cfg(all(feature = "socks", feature = "http3"))]
+        let socks5 = self.socks5.clone();
+        #[cfg(all(feature = "socks", feature = "http3"))]
+        let socks5_endpoint = self.socks5_endpoint.clone();
         let endpoint = self.endpoint.clone();
         let transport_config = self.transport_config.clone();
         let tls_config = self.tls_config.clone();
         let h3_options = self.h3_options.clone();
 
         Box::pin(async move {
+            // The endpoint that carries the traffic. When a SOCKS5 proxy is
+            // configured, the QUIC datagrams are relayed by the proxy, so the
+            // endpoint is built on top of the UDP relay.
+            #[cfg(all(feature = "socks", feature = "http3"))]
+            let endpoint: quinn::Endpoint = match socks5 {
+                Some(proxy) => {
+                    let created = socks5_endpoint
+                        .get_or_try_init(|| async {
+                            let relay =
+                                crate::client::conn::proxy::socks_udp::Socks5UdpSocket::connect(
+                                    proxy.address,
+                                    proxy.credentials.clone(),
+                                )
+                                .await
+                                .map_err(|err| {
+                                    std::io::Error::other(format!(
+                                        "failed to establish the SOCKS5 UDP relay: {err}"
+                                    ))
+                                })?;
+
+                            quinn::Endpoint::new_with_abstract_socket(
+                                quinn::EndpointConfig::default(),
+                                None,
+                                Arc::new(relay),
+                                quinn::default_runtime()
+                                    .unwrap_or_else(|| Arc::new(quinn::TokioRuntime)),
+                            )
+                            .map_err(|err| {
+                                std::io::Error::other(format!(
+                                    "failed to create the QUIC endpoint: {err}"
+                                ))
+                            })
+                        })
+                        .await;
+
+                    match created {
+                        Ok(endpoint) => endpoint.clone(),
+                        Err(err) => return Err(H3Error::Other(Box::new(err))),
+                    }
+                }
+                None => endpoint,
+            };
+
             // 1. Extract host and port from the request URI.
             let uri = req.uri().clone();
             let host = uri

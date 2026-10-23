@@ -65,6 +65,48 @@ use crate::{
     tls::{AlpnProtocol, CertStore, Identity, KeyLog, TlsOptions, TlsVersion},
 };
 
+/// The SOCKS5 proxy that should carry the QUIC traffic, if the client's proxy
+/// configuration resolves to exactly one such proxy.
+///
+/// QUIC cannot be tunnelled through an HTTP `CONNECT` tunnel, so the HTTP/3
+/// path can only use a SOCKS5 proxy that relays UDP. When the client
+/// configuration offers more than one SOCKS5 proxy — or none — the HTTP/3
+/// path stays unavailable, and the request fails closed instead of bypassing
+/// the proxy.
+#[cfg(all(feature = "http3", feature = "socks"))]
+fn socks5_quic_proxy(proxies: &[crate::proxy::Matcher]) -> Option<crate::http3::Socks5Proxy> {
+    let mut endpoints: Vec<&http::Uri> = Vec::new();
+    for proxy in proxies {
+        for endpoint in proxy.socks5_endpoints() {
+            if !endpoints.contains(&endpoint) {
+                endpoints.push(endpoint);
+            }
+        }
+    }
+
+    let endpoint = match endpoints.as_slice() {
+        [single] => *single,
+        _ => return None,
+    };
+
+    let host = endpoint.host()?;
+    let port = endpoint.port_u16().unwrap_or(1080);
+    let address = match host.parse::<std::net::IpAddr>() {
+        Ok(ip) => std::net::SocketAddr::new(ip, port),
+        Err(_) => {
+            // A host name has to be resolved before the relay can be
+            // established, which is not possible while the client is built.
+            return None;
+        }
+    };
+
+    Some(crate::http3::Socks5Proxy {
+        address,
+        credentials: None,
+        uri: endpoint.to_string(),
+    })
+}
+
 impl ClientBuilder {
     /// Replace the transport-layer configuration as a reusable group.
     #[inline]
@@ -136,10 +178,38 @@ impl ClientBuilder {
         // Create base client service
         let service = {
             let tls_options = config.transport.transport_options.tls_options.take();
+            // The maximum response header size bounds the header block of
+            // every response, so it is applied to the protocol options.
+            let max_response_header_size =
+                config.protocol.timeout_options.max_response_header_size();
+
             #[cfg(feature = "http1")]
-            let http1_options = config.transport.transport_options.http1_options.take();
+            let http1_options = {
+                let mut options = config
+                    .transport
+                    .transport_options
+                    .http1_options
+                    .take()
+                    .unwrap_or_default();
+                if let Some(limit) = max_response_header_size {
+                    options.h1_max_header_size = Some(limit);
+                }
+                Some(options)
+            };
+
             #[cfg(feature = "http2")]
-            let http2_options = config.transport.transport_options.http2_options.take();
+            let http2_options = {
+                let mut options = config
+                    .transport
+                    .transport_options
+                    .http2_options
+                    .take()
+                    .unwrap_or_default();
+                if let Some(limit) = max_response_header_size {
+                    options.max_header_list_size = Some(u32::try_from(limit).unwrap_or(u32::MAX));
+                }
+                Some(options)
+            };
 
             let resolver = {
                 let mut resolver: Arc<dyn Resolve> = match config.dns.dns_resolver {
@@ -173,7 +243,7 @@ impl ClientBuilder {
             );
 
             // Build connector
-            let connector = Connector::builder(config.proxy.proxies, resolver)
+            let connector = Connector::builder(config.proxy.proxies.clone(), resolver)
                 .timeout(config.transport.connect_timeout)
                 .tls_info(config.tls.tls_info)
                 .tls_options(tls_options)
@@ -261,10 +331,16 @@ impl ClientBuilder {
                     // SNI) instead of silently using webpki roots.
                     let h3_opts = config.http3_options.clone().unwrap_or_default();
                     let transport_override = config.quic_config.take();
+                    // QUIC runs over UDP, so it can only be carried by a
+                    // SOCKS5 proxy that relays UDP. When the client's proxy
+                    // configuration resolves to exactly one such proxy, the
+                    // QUIC endpoint is built on top of its UDP relay.
+                    let socks5 = socks5_quic_proxy(&config.proxy.proxies);
                     match crate::tls::quic::default_quic_connector(
                         &h3_opts,
                         quic_tls_settings,
                         transport_override,
+                        socks5,
                     ) {
                         Ok(conn) => builder = builder.h3_connector(conn),
                         Err(err) => {
@@ -274,6 +350,10 @@ impl ClientBuilder {
                 }
                 builder = builder.alt_svc_cache(alt_svc_cache.clone());
                 builder = builder.h3_failure_tracker(h3_failure_tracker.clone());
+                // The HTTP/3 path needs the proxy rules to detect requests
+                // that would be proxied: QUIC has no proxy support, so those
+                // requests must not be upgraded to h3.
+                builder = builder.proxies(Arc::new(config.proxy.proxies.clone()));
             }
 
             builder
@@ -798,6 +878,35 @@ impl ClientBuilder {
         self
     }
 
+    /// Add every proxy rule described by the standard environment variables.
+    ///
+    /// The `HTTP_PROXY` / `http_proxy`, `HTTPS_PROXY` / `https_proxy` and
+    /// `ALL_PROXY` / `all_proxy` variables are honoured with the usual
+    /// precedence: plain HTTP goes through `HTTP_PROXY`, HTTPS goes through
+    /// `HTTPS_PROXY`, and anything left over falls back to `ALL_PROXY`.
+    /// `NO_PROXY` / `no_proxy` is applied as the exclusion list of every
+    /// rule.
+    ///
+    /// # Note
+    ///
+    /// This disables the automatic usage of the "system" proxy, because the
+    /// environment variables are already the source of truth here.
+    ///
+    /// # Example
+    /// ```
+    /// use hpx::Client;
+    ///
+    /// let client = Client::builder().proxies_from_env().build().unwrap();
+    /// ```
+    #[inline]
+    pub fn proxies_from_env(mut self) -> Self {
+        for proxy in crate::proxy::Proxy::from_env_all() {
+            self.config.proxy.proxies.push(proxy.into_matcher());
+        }
+        self.config.proxy.auto_sys_proxy = false;
+        self
+    }
+
     /// Configure a proxy pool middleware for request-level proxy rotation.
     ///
     /// This middleware selects a proxy for each request based on the configured
@@ -971,8 +1080,12 @@ impl ClientBuilder {
 
     /// Set the maximum size of HTTP response headers in bytes.
     ///
-    /// This protects against servers sending unreasonably large response headers.
-    /// Default is 64KB (65536 bytes). Set to `None` to disable the limit.
+    /// This protects against servers sending unreasonably large response
+    /// headers: a response whose header block exceeds the limit is rejected
+    /// instead of being buffered.
+    ///
+    /// Default is no limit, which leaves the header block bounded by the
+    /// protocol's own read buffer. Set to `Some(size)` to enable the limit.
     #[inline]
     pub const fn max_response_header_size(mut self, size: Option<usize>) -> Self {
         self.config

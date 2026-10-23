@@ -14,8 +14,11 @@ use rand::RngExt;
 use tower::{Layer, Service};
 
 use crate::{
-    Body, Error, Proxy, client::layer::config::RequestOptions, config::RequestConfig,
-    error::BoxError, proxy::Matcher,
+    Body, Error, Proxy,
+    client::layer::config::{ProxySelection, RequestOptions},
+    config::RequestConfig,
+    error::BoxError,
+    proxy::Matcher,
 };
 
 /// Strategy used when selecting a proxy from a [`ProxyPool`].
@@ -261,8 +264,8 @@ where
 
         RequestConfig::<RequestOptions>::get_mut(req.extensions_mut())
             .get_or_insert_default()
-            .proxy_matcher_mut()
-            .replace(selected.matcher.clone());
+            .proxy_mut()
+            .clone_from(&ProxySelection::Rule(selected.matcher.clone()));
 
         let pool = self.pool.clone();
         let mut inner = self.inner.clone();

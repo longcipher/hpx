@@ -511,6 +511,131 @@ async fn proxy_tunnel_connect_error() {
     }
 }
 
+#[tokio::test]
+async fn custom_proxy_routes_per_request() {
+    let url = "http://hyper.rs.local/prox";
+
+    let server = server::http(move |req| {
+        assert_eq!(req.uri(), url);
+
+        async { http::Response::default() }
+    });
+
+    let proxy = format!("http://{}", server.addr());
+
+    let proxy_addr = proxy.clone();
+    let client = Client::builder()
+        .no_proxy()
+        .proxy(hpx::Proxy::custom(move |uri: &http::Uri| {
+            (uri.host() == Some("hyper.rs.local")).then(|| proxy_addr.clone())
+        }))
+        .build()
+        .unwrap();
+
+    let res = client.get(url).send().await.unwrap();
+
+    assert_eq!(res.uri(), url);
+    assert_eq!(res.status(), hpx::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn custom_proxy_can_skip_a_request() {
+    // The proxy would fail the assertion below if it were ever contacted, so
+    // reaching the origin proves the custom rule returned `None`.
+    let server = server::http(move |_req| async {
+        let mut res = http::Response::default();
+        *res.status_mut() = http::StatusCode::IM_A_TEAPOT;
+        res
+    });
+
+    let origin = format!("http://{}", server.addr());
+
+    let client = Client::builder()
+        .no_proxy()
+        .proxy(hpx::Proxy::custom(move |_: &http::Uri| -> Option<&str> {
+            None
+        }))
+        .build()
+        .unwrap();
+
+    // The custom rule never matches, so the client connects directly. The
+    // origin is addressed by IP, so no DNS lookup is required.
+    let res = client.get(&origin).send().await.unwrap();
+
+    assert_eq!(res.status(), hpx::StatusCode::IM_A_TEAPOT);
+}
+
+#[tokio::test]
+async fn request_no_proxy_bypasses_client_proxy() {
+    // The proxy must never be contacted for this request.
+    let proxy_server = server::http(move |_req| async {
+        let mut res = http::Response::default();
+        *res.status_mut() = http::StatusCode::BAD_GATEWAY;
+        res
+    });
+
+    let proxy = format!("http://{}", proxy_server.addr());
+
+    let origin_server = server::http(move |req| {
+        assert_eq!(req.uri().path(), "/");
+
+        async { http::Response::default() }
+    });
+
+    let origin = format!("http://{}", origin_server.addr());
+
+    let client = Client::builder()
+        .no_proxy()
+        .proxy(hpx::Proxy::all(&proxy).unwrap())
+        .build()
+        .unwrap();
+
+    // Without the bypass the request would be answered by the proxy with
+    // 502. With the bypass it reaches the origin.
+    let res = client.get(&origin).no_proxy().send().await.unwrap();
+
+    assert_eq!(res.status(), hpx::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn request_proxy_is_authoritative() {
+    let url = "http://hyper.rs.local/prox";
+
+    let client_proxy_server = server::http(move |_req| async {
+        let mut res = http::Response::default();
+        *res.status_mut() = http::StatusCode::BAD_GATEWAY;
+        res
+    });
+
+    let client_proxy = format!("http://{}", client_proxy_server.addr());
+
+    let request_proxy_server = server::http(move |req| {
+        assert_eq!(req.uri(), url);
+
+        async { http::Response::default() }
+    });
+
+    let request_proxy = format!("http://{}", request_proxy_server.addr());
+
+    let client = Client::builder()
+        .no_proxy()
+        .proxy(hpx::Proxy::all(&client_proxy).unwrap())
+        .build()
+        .unwrap();
+
+    // The per-request proxy replaces the client-level one; it must not fall
+    // back to the client-level proxy when it does not match.
+    let res = client
+        .get(url)
+        .proxy(hpx::Proxy::http(&request_proxy).unwrap())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.uri(), url);
+    assert_eq!(res.status(), hpx::StatusCode::OK);
+}
+
 #[cfg(any(feature = "boring-tls", feature = "rustls-tls"))]
 const CA_CERT_PEM: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -833,4 +958,464 @@ async fn https_proxy_supports_origin_mtls_with_rustls() {
 
     proxy_server.await.unwrap();
     origin_server.await.unwrap();
+}
+
+/// A proxy that answers the first `CONNECT` with a `407` challenge and
+/// accepts the second one when it carries the computed credentials.
+struct ChallengeProxy {
+    /// The `Proxy-Authorization` values the proxy received, in order.
+    received: Arc<std::sync::Mutex<Vec<String>>>,
+    /// The number of `CONNECT` requests the proxy answered.
+    connects: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl ChallengeProxy {
+    fn new() -> Self {
+        Self {
+            received: Arc::new(std::sync::Mutex::new(Vec::new())),
+            connects: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        }
+    }
+
+    /// Records the `Proxy-Authorization` header of a request.
+    fn record(&self, req: &http::Request<hyper::body::Incoming>) {
+        let value = req
+            .headers()
+            .get("proxy-authorization")
+            .and_then(|v| v.to_str().ok())
+            .map(ToOwned::to_owned);
+        if let Some(value) = value {
+            self.received
+                .lock()
+                .unwrap_or_else(|err| err.into_inner())
+                .push(value);
+        }
+    }
+}
+
+/// The client answers a `Digest` challenge and retries the `CONNECT`.
+#[tokio::test]
+async fn tunnel_answers_a_digest_challenge() {
+    let state = Arc::new(ChallengeProxy::new());
+
+    let server = {
+        let state = state.clone();
+        server::http(move |req| {
+            let state = state.clone();
+            async move {
+                state.record(&req);
+                let leg = state
+                    .connects
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut res = http::Response::default();
+                if leg == 0 {
+                    *res.status_mut() = http::StatusCode::PROXY_AUTHENTICATION_REQUIRED;
+                    res.headers_mut().insert(
+                        "proxy-authenticate",
+                        "Digest realm=\"proxy\", nonce=\"abc123\", qop=\"auth\""
+                            .parse()
+                            .unwrap(),
+                    );
+                    res.headers_mut()
+                        .insert("content-length", "0".parse().unwrap());
+                } else {
+                    *res.status_mut() = http::StatusCode::OK;
+                }
+                res
+            }
+        })
+    };
+
+    let proxy = format!("http://{}", server.addr());
+
+    let err = Client::builder()
+        .no_proxy()
+        .proxy(hpx::Proxy::https(&proxy).unwrap().auth(
+            "Aladdin",
+            "open sesame",
+            hpx::ProxyAuthMethod::Digest,
+        ))
+        .build()
+        .unwrap()
+        .get("https://hyper.rs.local/prox")
+        .send()
+        .await
+        .unwrap_err();
+
+    // The tunnel was established (the second CONNECT returned 200) and the
+    // TLS handshake then failed, because the proxy is not an origin server.
+    assert!(
+        err.is_connect() || err.is_request(),
+        "unexpected error: {err:?}"
+    );
+
+    // The first CONNECT carries no credentials, the second one carries the
+    // computed Digest response.
+    let received = state
+        .received
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .clone();
+    assert_eq!(
+        received.len(),
+        1,
+        "the challenge must be answered: {received:?}"
+    );
+    assert!(
+        received[0].starts_with("Digest "),
+        "unexpected authorization: {}",
+        received[0]
+    );
+    assert!(
+        received[0].contains("username=\"Aladdin\""),
+        "{}",
+        received[0]
+    );
+    assert!(received[0].contains("nonce=\"abc123\""), "{}", received[0]);
+    assert!(received[0].contains("response=\""), "{}", received[0]);
+}
+
+/// The client answers an NTLM challenge with the three-leg handshake.
+#[tokio::test]
+async fn tunnel_answers_an_ntlm_challenge() {
+    let state = Arc::new(ChallengeProxy::new());
+
+    // A minimal NTLM type-2 message: the signature, the message type, empty
+    // target name fields, the negotiate flags, the server challenge and the
+    // reserved and target info fields.
+    let mut type2 = Vec::new();
+    type2.extend_from_slice(b"NTLMSSP\0");
+    type2.extend_from_slice(&2u32.to_le_bytes());
+    type2.extend_from_slice(&0u16.to_le_bytes());
+    type2.extend_from_slice(&0u16.to_le_bytes());
+    type2.extend_from_slice(&48u32.to_le_bytes());
+    type2.extend_from_slice(&0x0800_0000u32.to_le_bytes());
+    type2.extend_from_slice(&[0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]);
+    type2.extend_from_slice(&[0u8; 8]);
+    type2.extend_from_slice(&0u16.to_le_bytes());
+    type2.extend_from_slice(&0u16.to_le_bytes());
+    type2.extend_from_slice(&48u32.to_le_bytes());
+    let token = base64_simd::STANDARD.encode_to_string(&type2);
+
+    let server = {
+        let state = state.clone();
+        server::http(move |req| {
+            let state = state.clone();
+            let token = token.clone();
+            async move {
+                state.record(&req);
+                let leg = state
+                    .connects
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut res = http::Response::default();
+                match leg {
+                    0 => {
+                        *res.status_mut() = http::StatusCode::PROXY_AUTHENTICATION_REQUIRED;
+                        res.headers_mut()
+                            .insert("proxy-authenticate", "NTLM".parse().unwrap());
+                    }
+                    1 => {
+                        *res.status_mut() = http::StatusCode::PROXY_AUTHENTICATION_REQUIRED;
+                        res.headers_mut().insert(
+                            "proxy-authenticate",
+                            format!("Negotiate {token}").parse().unwrap(),
+                        );
+                    }
+                    _ => {
+                        *res.status_mut() = http::StatusCode::OK;
+                    }
+                }
+                res.headers_mut()
+                    .insert("content-length", "0".parse().unwrap());
+                res
+            }
+        })
+    };
+
+    let proxy = format!("http://{}", server.addr());
+
+    let err = Client::builder()
+        .no_proxy()
+        .proxy(hpx::Proxy::https(&proxy).unwrap().auth(
+            "Aladdin",
+            "open sesame",
+            hpx::ProxyAuthMethod::Ntlm,
+        ))
+        .build()
+        .unwrap()
+        .get("https://hyper.rs.local/prox")
+        .send()
+        .await
+        .unwrap_err();
+
+    assert!(
+        err.is_connect() || err.is_request(),
+        "unexpected error: {err:?}"
+    );
+
+    // The first CONNECT carries no credentials, the second one the NTLM
+    // negotiate message and the third one the NTLMv2 response.
+    let received = state
+        .received
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .clone();
+    assert_eq!(received.len(), 2, "the NTLM handshake needs three legs");
+    assert!(received[0].starts_with("NTLM "), "{}", received[0]);
+    assert!(received[1].starts_with("Negotiate "), "{}", received[1]);
+    assert_eq!(
+        state.connects.load(std::sync::atomic::Ordering::SeqCst),
+        3,
+        "the handshake needs three CONNECT requests"
+    );
+}
+
+/// A `407` without matching credentials is reported as an error.
+#[tokio::test]
+async fn tunnel_reports_a_challenge_without_credentials() {
+    let server = server::http(move |_req| async {
+        let mut res = http::Response::default();
+        *res.status_mut() = http::StatusCode::PROXY_AUTHENTICATION_REQUIRED;
+        res.headers_mut().insert(
+            "proxy-authenticate",
+            "Basic realm=\"proxy\"".parse().unwrap(),
+        );
+        res.headers_mut()
+            .insert("content-length", "0".parse().unwrap());
+        res
+    });
+
+    let proxy = format!("http://{}", server.addr());
+
+    let err = Client::builder()
+        .no_proxy()
+        .proxy(hpx::Proxy::https(&proxy).unwrap())
+        .build()
+        .unwrap()
+        .get("https://hyper.rs.local/prox")
+        .send()
+        .await
+        .unwrap_err();
+
+    let err = support::error::inspect(err).pop().unwrap();
+    assert!(
+        err.contains("auth"),
+        "proxy auth error expected, got: {err:?}"
+    );
+}
+
+/// A plain HTTP request through a proxy that challenges is retried with the
+/// computed credentials.
+#[tokio::test]
+async fn plain_http_answers_a_digest_challenge() {
+    let state = Arc::new(ChallengeProxy::new());
+
+    let server = {
+        let state = state.clone();
+        server::http(move |req| {
+            let state = state.clone();
+            async move {
+                state.record(&req);
+                let leg = state
+                    .connects
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut res = http::Response::default();
+                if leg == 0 {
+                    *res.status_mut() = http::StatusCode::PROXY_AUTHENTICATION_REQUIRED;
+                    res.headers_mut().insert(
+                        "proxy-authenticate",
+                        "Digest realm=\"proxy\", nonce=\"abc123\", qop=\"auth\""
+                            .parse()
+                            .unwrap(),
+                    );
+                    res.headers_mut()
+                        .insert("content-length", "0".parse().unwrap());
+                } else {
+                    *res.status_mut() = http::StatusCode::OK;
+                }
+                res
+            }
+        })
+    };
+
+    let proxy = format!("http://{}", server.addr());
+
+    let res = Client::builder()
+        .no_proxy()
+        .proxy(hpx::Proxy::http(&proxy).unwrap().auth(
+            "Aladdin",
+            "open sesame",
+            hpx::ProxyAuthMethod::Digest,
+        ))
+        .build()
+        .unwrap()
+        .get("http://hyper.rs.local/prox")
+        .send()
+        .await
+        .expect("the request should be retried with the credentials");
+
+    assert_eq!(res.status(), hpx::StatusCode::OK);
+
+    let received = state
+        .received
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .clone();
+    assert_eq!(
+        received.len(),
+        1,
+        "the challenge must be answered: {received:?}"
+    );
+    assert!(received[0].starts_with("Digest "), "{}", received[0]);
+    assert!(
+        received[0].contains("username=\"Aladdin\""),
+        "{}",
+        received[0]
+    );
+}
+
+/// A plain HTTP request through a proxy that challenges is returned to the
+/// caller when the body cannot be replayed.
+#[tokio::test]
+async fn plain_http_challenge_without_replayable_body_is_returned() {
+    let server = server::http(move |_req| async {
+        let mut res = http::Response::default();
+        *res.status_mut() = http::StatusCode::PROXY_AUTHENTICATION_REQUIRED;
+        res.headers_mut().insert(
+            "proxy-authenticate",
+            "Digest realm=\"proxy\", nonce=\"abc123\", qop=\"auth\""
+                .parse()
+                .unwrap(),
+        );
+        res.headers_mut()
+            .insert("content-length", "0".parse().unwrap());
+        res
+    });
+
+    let proxy = format!("http://{}", server.addr());
+
+    let res = Client::builder()
+        .no_proxy()
+        .proxy(hpx::Proxy::http(&proxy).unwrap().auth(
+            "Aladdin",
+            "open sesame",
+            hpx::ProxyAuthMethod::Digest,
+        ))
+        .build()
+        .unwrap()
+        .get("http://hyper.rs.local/prox")
+        .send()
+        .await
+        .expect("the challenge is returned to the caller");
+
+    assert_eq!(res.status(), hpx::StatusCode::PROXY_AUTHENTICATION_REQUIRED);
+}
+
+/// A Proxy Auto-Config script selects the proxy for each request.
+#[cfg(feature = "pac")]
+#[tokio::test]
+async fn pac_script_selects_the_proxy() {
+    let url = "http://hyper.rs.local/prox";
+    let server = server::http(move |req| {
+        assert_eq!(req.uri(), url);
+        async { http::Response::default() }
+    });
+
+    let proxy = format!("http://{}", server.addr());
+
+    let script = format!(
+        r#"
+        function FindProxyForURL(url, host) {{
+            if (dnsDomainIs(host, "hyper.rs.local")) {{
+                return "PROXY {proxy}";
+            }}
+            return "DIRECT";
+        }}
+        "#
+    );
+
+    let res = Client::builder()
+        .no_proxy()
+        .proxy(hpx::Proxy::pac(&script).unwrap())
+        .build()
+        .unwrap()
+        .get(url)
+        .send()
+        .await
+        .expect("the PAC script should select the proxy");
+
+    assert_eq!(res.status(), hpx::StatusCode::OK);
+}
+
+/// A PAC script that selects `DIRECT` sends the request without a proxy.
+#[cfg(feature = "pac")]
+#[tokio::test]
+async fn pac_script_can_select_direct() {
+    let server = server::http(move |_req| async { http::Response::default() });
+
+    let origin = format!("http://{}", server.addr());
+
+    let script = r#"
+        function FindProxyForURL(url, host) {
+            return "DIRECT";
+        }
+    "#;
+
+    let res = Client::builder()
+        .no_proxy()
+        .proxy(hpx::Proxy::pac(script).unwrap())
+        .build()
+        .unwrap()
+        .get(&origin)
+        .send()
+        .await
+        .expect("the request should go directly to the origin");
+
+    assert_eq!(res.status(), hpx::StatusCode::OK);
+}
+
+/// A response whose header block exceeds the configured limit is rejected.
+#[tokio::test]
+async fn response_header_size_limit_is_enforced() {
+    let server = server::http(move |_req| async {
+        let mut res = http::Response::default();
+        // A single very large header value.
+        res.headers_mut().insert(
+            "x-large",
+            http::HeaderValue::from_str(&"a".repeat(4096)).unwrap(),
+        );
+        res
+    });
+
+    let res = Client::builder()
+        .no_proxy()
+        .max_response_header_size(Some(1024))
+        .build()
+        .unwrap()
+        .get(format!("http://{}", server.addr()))
+        .send()
+        .await;
+
+    assert!(
+        res.is_err(),
+        "a response with an oversized header block must be rejected"
+    );
+}
+
+/// The default limit still allows a normal response.
+#[tokio::test]
+async fn response_header_size_limit_allows_normal_responses() {
+    let server = server::http(move |_req| async { http::Response::default() });
+
+    let res = Client::builder()
+        .no_proxy()
+        .max_response_header_size(Some(64 * 1024))
+        .build()
+        .unwrap()
+        .get(format!("http://{}", server.addr()))
+        .send()
+        .await
+        .expect("a normal response must be accepted");
+
+    assert_eq!(res.status(), hpx::StatusCode::OK);
 }

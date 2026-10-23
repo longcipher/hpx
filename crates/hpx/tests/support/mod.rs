@@ -9,6 +9,8 @@ pub(crate) mod delay_server;
 pub(crate) mod error;
 pub(crate) mod layer;
 pub(crate) mod server;
+#[cfg(all(feature = "socks", feature = "http3"))]
+pub(crate) mod socks5_udp;
 
 // TODO: remove once done converting to new support server?
 #[allow(unused)]

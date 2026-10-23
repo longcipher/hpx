@@ -195,8 +195,8 @@
 //!
 //! ## Proxies
 //!
-//! **NOTE**: System proxies are **disabled** by default. Call
-//! [`ClientBuilder::system_proxy()`] to opt in to automatic detection.
+//! **NOTE**: System proxies are **enabled** by default. Call
+//! [`ClientBuilder::no_proxy()`] to opt out of automatic detection.
 //!
 //! When enabled, system proxies look in environment variables to set HTTP or
 //! HTTPS proxies.
@@ -207,9 +207,24 @@
 //! If both the all proxy and HTTP or HTTPS proxy variables are set the more specific
 //! HTTP or HTTPS proxies take precedence.
 //!
+//! `NO_PROXY` or `no_proxy` lists the destinations that bypass the proxy.
+//!
 //! These can be overwritten by adding a [`Proxy`] to `ClientBuilder`
 //! i.e. `let proxy = hpx::Proxy::http("https://secure.example")?;`
 //! or disabled by calling `ClientBuilder::no_proxy()`.
+//!
+//! The same environment variables can also be read explicitly:
+//!
+//! * [`Proxy::from_env()`] builds a single proxy rule from the environment.
+//! * [`ClientBuilder::proxies_from_env()`] configures a client with the full
+//!   set of environment rules, preserving the scheme-specific precedence.
+//!
+//! A proxy can also be chosen per request by a user-supplied function with
+//! [`Proxy::custom()`], or bypassed for a single request with
+//! [`RequestBuilder::no_proxy()`].
+//!
+//! With the `pac` feature a Proxy Auto-Config script can be used instead;
+//! see [`Proxy::pac()`].
 //!
 //! `socks` feature is required if you have configured socks proxy like this:
 //!
@@ -223,7 +238,44 @@
 //! * `socks4a://` is the scheme for socks4a proxy
 //! * `socks5://` is the scheme for socks5 proxy
 //! * `socks5h://` is the scheme for socks5h proxy
-//!  
+//!
+//! ### Proxy authentication
+//!
+//! A proxy that requires authentication answers with `407 Proxy
+//! Authentication Required` and a `Proxy-Authenticate` challenge. hpx answers
+//! the challenge and retries the request:
+//!
+//! * `Basic` (RFC 7617) is sent preemptively and needs no challenge.
+//! * `Digest` (RFC 7616) is computed from the nonce and the request URI.
+//! * `NTLM` uses the three-leg NTLMv2 handshake.
+//!
+//! ```no_run
+//! use hpx::{Client, Proxy, ProxyAuthMethod};
+//!
+//! # async fn run() -> Result<(), hpx::Error> {
+//! let client = Client::builder()
+//!     .proxy(Proxy::https("http://proxy.local:8080")?.auth(
+//!         "Aladdin",
+//!         "open sesame",
+//!         ProxyAuthMethod::Digest,
+//!     ))
+//!     .build()?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ### HTTP/3 and proxies
+//!
+//! QUIC runs over UDP, so it cannot be tunnelled through an HTTP `CONNECT`
+//! tunnel. The only proxy that can carry HTTP/3 is a SOCKS5 proxy that
+//! relays UDP, which hpx uses automatically when the client's proxy
+//! configuration resolves to exactly one such proxy.
+//!
+//! When the request would be proxied by a proxy the HTTP/3 path cannot use,
+//! the request is never upgraded to HTTP/3: it falls back to TCP, which
+//! honours the proxy. An explicit HTTP/3 request for such a destination
+//! fails with [`Error::is_request()`] instead of connecting directly.
+//!
 //! ## TLS
 //!
 //! By default, clients will utilize BoringSSL transport layer security to connect to HTTPS targets.
@@ -428,12 +480,13 @@ pub use self::client::ws;
 pub use self::{
     client::{
         AsSendBody, Body, BrowserProfile, Client, ClientBuilder, ClientResponseBody, Emulation,
-        EmulationBuilder, EmulationFactory, Request, RequestBuilder, Response, Upgraded,
+        EmulationBuilder, EmulationFactory, ReplayBody, Request, RequestBuilder, Response,
+        Upgraded,
     },
     error::{Error, Result},
     ext::{ResponseBuilderExt, ResponseExt},
     into_uri::IntoUri,
-    proxy::{NoProxy, Proxy},
+    proxy::{IntoProxy, NoProxy, Proxy, ProxyAuthMethod},
     proxy_pool::{ProxyPool, ProxyPoolBuilder, ProxyPoolStrategy},
 };
 pub mod tower_compat {

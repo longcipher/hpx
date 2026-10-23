@@ -26,7 +26,7 @@ use ipnet::IpNet;
 use percent_encoding::percent_decode_str;
 
 use self::builder::IntoValue;
-use super::{Extra, Intercepted};
+use super::{CustomProxy, Extra, Intercepted};
 use crate::ext::UriExt;
 
 /// A proxy matcher, usually built from environment variables.
@@ -37,6 +37,12 @@ pub(crate) struct Matcher {
     no: NoProxy,
     #[cfg(unix)]
     unix: Option<Arc<Path>>,
+    custom: Option<CustomProxy>,
+    /// A Proxy Auto-Config rule, evaluated for every request.
+    #[cfg(feature = "pac")]
+    pac: Option<crate::proxy::pac::PacRule>,
+    /// Extra headers/credentials applied to proxies selected by a custom rule.
+    extra: Extra,
 }
 
 /// A matched proxy,
@@ -61,6 +67,10 @@ pub(crate) struct Builder {
     pub(super) no: String,
     #[cfg(unix)]
     pub(super) unix: Option<Arc<Path>>,
+    pub(super) custom: Option<CustomProxy>,
+    /// A Proxy Auto-Config rule, evaluated for every request.
+    #[cfg(feature = "pac")]
+    pub(super) pac: Option<crate::proxy::pac::PacRule>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -113,6 +123,20 @@ impl Matcher {
         Builder::default()
     }
 
+    /// The SOCKS5 proxy endpoints this rule can select.
+    ///
+    /// A SOCKS5 proxy relays UDP, which is what QUIC needs, so the HTTP/3
+    /// path uses the endpoints this method reports.
+    pub(crate) fn socks5_endpoints(&self) -> Vec<&Uri> {
+        let mut endpoints = Vec::new();
+        for intercept in [&self.http, &self.https].into_iter().flatten() {
+            if is_socks5(intercept.uri()) {
+                endpoints.push(intercept.uri());
+            }
+        }
+        endpoints
+    }
+
     /// Check if the destination should be intercepted by a proxy.
     ///
     /// If the proxy rules match the destination, a new `Uri` will be returned
@@ -128,6 +152,22 @@ impl Matcher {
         if self.no.contains(dst.host()?) {
             return None;
         }
+
+        // A Proxy Auto-Config rule decides on its own which proxy to use, so
+        // it is evaluated before the scheme-specific rules.
+        #[cfg(feature = "pac")]
+        if let Some(pac) = &self.pac {
+            let selected = pac.select(dst)?;
+            return intercept_from_uri(&selected, &self.extra).map(Intercepted::Proxy);
+        }
+
+        // A custom rule decides on its own which scheme it applies to, so it
+        // is evaluated before the scheme-specific rules.
+        if let Some(custom) = &self.custom {
+            let selected = custom.select(dst)?;
+            return intercept_from_uri(&selected, &self.extra).map(Intercepted::Proxy);
+        }
+
         if dst.is_http() {
             return self.http.clone().map(Intercepted::Proxy);
         }
@@ -142,6 +182,11 @@ impl Matcher {
 
 // ===== impl Intercept =====
 
+/// Returns true when the proxy URI selects a SOCKS5 proxy.
+pub(crate) fn is_socks5(uri: &Uri) -> bool {
+    matches!(uri.scheme_str(), Some("socks5" | "socks5h"))
+}
+
 impl Intercept {
     #[inline]
     pub(crate) const fn uri(&self) -> &Uri {
@@ -151,6 +196,14 @@ impl Intercept {
     pub(crate) const fn basic_auth(&self) -> Option<&HeaderValue> {
         if let Some(ref val) = self.extra.auth {
             return Some(val);
+        }
+
+        // Explicit credentials for a challenge-based scheme replace the
+        // credentials that were embedded in the proxy URI: the scheme
+        // decides how they are used, so the URI credentials must not be
+        // turned into a preemptive `Basic` header.
+        if self.extra.credentials.is_some() {
+            return None;
         }
 
         if let Auth::Basic(ref val) = self.auth {
@@ -163,6 +216,11 @@ impl Intercept {
     #[inline]
     pub(crate) const fn custom_headers(&self) -> Option<&HeaderMap> {
         self.extra.misc.as_ref()
+    }
+
+    /// The credentials used to answer a proxy authentication challenge.
+    pub(crate) fn credentials(&self) -> Option<&crate::proxy::auth::ProxyCredentials> {
+        self.extra.credentials.as_ref()
     }
 
     #[cfg(feature = "socks")]
@@ -179,14 +237,22 @@ impl Intercept {
 
 impl Builder {
     fn from_env() -> Self {
+        Self::from_env_source(&super::ProcessEnv)
+    }
+
+    /// Build the environment-driven rules from an environment source.
+    pub(super) fn from_env_source(env: &dyn super::EnvSource) -> Self {
         Self {
             is_cgi: std::env::var_os("REQUEST_METHOD").is_some(),
-            all: get_first_env(&["ALL_PROXY", "all_proxy"]),
-            http: get_first_env(&["HTTP_PROXY", "http_proxy"]),
-            https: get_first_env(&["HTTPS_PROXY", "https_proxy"]),
-            no: get_first_env(&["NO_PROXY", "no_proxy"]),
+            all: env.get(&["ALL_PROXY", "all_proxy"]).unwrap_or_default(),
+            http: env.get(&["HTTP_PROXY", "http_proxy"]).unwrap_or_default(),
+            https: env.get(&["HTTPS_PROXY", "https_proxy"]).unwrap_or_default(),
+            no: env.get(&["NO_PROXY", "no_proxy"]).unwrap_or_default(),
             #[cfg(unix)]
             unix: None,
+            custom: None,
+            #[cfg(feature = "pac")]
+            pac: None,
         }
     }
 
@@ -279,6 +345,22 @@ impl Builder {
         self
     }
 
+    /// Set a custom proxy rule.
+    ///
+    /// The rule takes precedence over the scheme-specific `all`/`http`/`https`
+    /// rules: it decides on its own which requests are proxied.
+    pub(crate) fn custom(mut self, val: CustomProxy) -> Self {
+        self.custom = Some(val);
+        self
+    }
+
+    /// Set a Proxy Auto-Config rule.
+    #[cfg(feature = "pac")]
+    pub(crate) fn pac(mut self, rule: crate::proxy::pac::PacRule) -> Self {
+        self.pac = Some(rule);
+        self
+    }
+
     /// Construct a [`Matcher`] using the configured values.
     pub(super) fn build(self, extra: Extra) -> Matcher {
         if self.is_cgi {
@@ -288,6 +370,10 @@ impl Builder {
                 no: NoProxy::empty(),
                 #[cfg(unix)]
                 unix: None,
+                custom: None,
+                #[cfg(feature = "pac")]
+                pac: None,
+                extra: Extra::default(),
             };
         }
 
@@ -304,7 +390,7 @@ impl Builder {
         if (http.is_none() || https.is_none())
             && let Some(all) = all.as_mut()
         {
-            all.extra = extra;
+            all.extra = extra.clone();
         }
 
         Matcher {
@@ -313,22 +399,26 @@ impl Builder {
             no: NoProxy::from_string(&self.no),
             #[cfg(unix)]
             unix: self.unix,
+            custom: self.custom,
+            #[cfg(feature = "pac")]
+            pac: self.pac,
+            extra,
         }
     }
-}
-
-fn get_first_env(names: &[&str]) -> String {
-    for name in names {
-        if let Ok(val) = std::env::var(name) {
-            return val;
-        }
-    }
-
-    String::new()
 }
 
 fn parse_env_uri(val: &str) -> Option<Intercept> {
     let uri = val.parse::<Uri>().ok()?;
+    intercept_from_uri(&uri, &Extra::default())
+}
+
+/// Turn a proxy endpoint URI into an [`Intercept`].
+///
+/// The URI may carry `userinfo` (for example `http://user:pass@proxy:8080`);
+/// it is split off and turned into the appropriate authentication scheme for
+/// the proxy kind. SOCKS endpoints without an explicit port default to
+/// `1080`.
+fn intercept_from_uri(uri: &Uri, extra: &Extra) -> Option<Intercept> {
     let mut builder = Uri::builder();
     let mut is_httpish = false;
     let mut is_socks = false;
@@ -387,7 +477,7 @@ fn parse_env_uri(val: &str) -> Option<Intercept> {
 
     Some(Intercept {
         auth,
-        extra: Extra::default(),
+        extra: extra.clone(),
         uri: builder.build().ok()?,
     })
 }
@@ -490,6 +580,15 @@ impl DomainMatcher {
     fn contains(&self, domain: &str) -> bool {
         let domain_len = domain.len();
         for d in &self.0 {
+            // The `<local>` token (used by the Windows proxy override list)
+            // matches every hostname that does not contain a dot.
+            if d.eq_ignore_ascii_case("<local>") {
+                if !domain.contains('.') {
+                    return true;
+                }
+                continue;
+            }
+
             if d.eq_ignore_ascii_case(domain)
                 || d.strip_prefix('.')
                     .is_some_and(|s| s.eq_ignore_ascii_case(domain))
@@ -809,6 +908,161 @@ mod tests {
         );
         assert!(
             p.intercept(&"http://Www.Example.Com".parse().unwrap())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_no_proxy_local_token_matches_dotless_hostnames() {
+        let no_proxy = NoProxy::from_string("<local>");
+
+        assert!(no_proxy.contains("localhost"));
+        assert!(no_proxy.contains("myserver"));
+        assert!(no_proxy.contains("LOCALHOST"));
+
+        // Hostnames with a dot are not "local".
+        assert!(!no_proxy.contains("example.com"));
+        assert!(!no_proxy.contains("www.example.com"));
+    }
+
+    #[test]
+    fn test_no_proxy_local_token_in_matcher() {
+        let p = p! {
+            all = "http://proxy.local",
+            no = "<local>",
+        };
+
+        assert!(
+            p.intercept(&"http://localhost".parse().unwrap()).is_none(),
+            "dotless hostname should bypass the proxy"
+        );
+        assert!(
+            p.intercept(&"http://example.com".parse().unwrap())
+                .is_some(),
+            "hostname with a dot should still be proxied"
+        );
+    }
+
+    /// The credentials and custom headers configured on a proxy must reach
+    /// the rule that is actually used, including the catch-all rule.
+    #[test]
+    fn test_extra_is_applied_to_the_catch_all_rule() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-proxy-tag", HeaderValue::from_static("catch-all"));
+
+        let extra = Extra {
+            auth: Some(HeaderValue::from_static("Basic dXNlcjpwYXNz")),
+            credentials: None,
+            misc: Some(headers.clone()),
+        };
+
+        let mut builder = Matcher::builder();
+        builder.all = "http://all.proxy:3128".to_owned();
+        let m = builder.build(extra);
+
+        let got = intercept(&m, "https://example.local");
+        assert_eq!(got.basic_auth().unwrap(), "Basic dXNlcjpwYXNz");
+        assert_eq!(got.custom_headers().unwrap(), &headers);
+    }
+
+    /// A SOCKS proxy carries the credentials as raw user/password bytes
+    /// rather than a `Proxy-Authorization` header.
+    #[cfg(feature = "socks")]
+    #[test]
+    fn test_socks_proxy_keeps_raw_credentials() {
+        let m = p! {
+            all = "socks5://Aladdin:opensesame@proxy.local:1080",
+        };
+
+        let proxy = intercept(&m, "https://example.local");
+        let (user, pass) = proxy.raw_auth().expect("socks credentials");
+        assert_eq!(user.as_ref(), b"Aladdin");
+        assert_eq!(pass.as_ref(), b"opensesame");
+        // A SOCKS proxy does not use an HTTP authorization header.
+        assert!(proxy.basic_auth().is_none());
+    }
+
+    /// An HTTP proxy turns the userinfo into a `Proxy-Authorization` header.
+    #[cfg(feature = "socks")]
+    #[test]
+    fn test_http_proxy_uses_basic_auth() {
+        let m = p! {
+            all = "http://Aladdin:opensesame@proxy.local:8080",
+        };
+
+        let proxy = intercept(&m, "https://example.local");
+        assert!(proxy.basic_auth().is_some());
+        assert!(proxy.raw_auth().is_none());
+    }
+
+    /// The catch-all rule is the fallback for the schemes that have no
+    /// dedicated rule, so it must carry the credentials even when only one
+    /// of the two schemes has its own rule.
+    #[test]
+    fn test_extra_reaches_the_catch_all_rule_when_one_scheme_has_its_own() {
+        let extra = Extra {
+            auth: Some(HeaderValue::from_static("Basic dXNlcjpwYXNz")),
+            credentials: None,
+            misc: None,
+        };
+
+        let mut builder = Matcher::builder();
+        builder.http = "http://http.proxy:8080".to_owned();
+        builder.all = "http://all.proxy:3128".to_owned();
+        let m = builder.build(extra);
+
+        // HTTP uses its own rule.
+        let http = intercept(&m, "http://example.local");
+        assert_eq!(http.uri(), "http://http.proxy:8080/");
+        assert!(http.basic_auth().is_some());
+
+        // HTTPS falls back to the catch-all rule, which must carry the
+        // credentials as well.
+        let https = intercept(&m, "https://example.local");
+        assert_eq!(https.uri(), "http://all.proxy:3128/");
+        assert_eq!(https.basic_auth().unwrap(), "Basic dXNlcjpwYXNz");
+    }
+
+    /// The builder accepts the usual string types for the rule values.
+    #[test]
+    fn test_builder_accepts_string_types() {
+        let owned = String::from("http://owned.proxy:8080");
+        let m = Matcher::builder().all(&owned).build(Extra::default());
+
+        assert_eq!(
+            intercept(&m, "http://example.local").uri(),
+            "http://owned.proxy:8080/"
+        );
+    }
+
+    /// The environment-driven rules are read through the environment source.
+    #[test]
+    fn test_builder_reads_the_environment_source() {
+        struct TestEnv;
+
+        impl super::super::EnvSource for TestEnv {
+            fn get(&self, names: &[&str]) -> Option<String> {
+                match names {
+                    ["ALL_PROXY", ..] => Some("http://all.proxy:3128".to_owned()),
+                    ["NO_PROXY", ..] => Some("direct.local".to_owned()),
+                    _ => None,
+                }
+            }
+        }
+
+        let builder = Builder::from_env_source(&TestEnv);
+        assert_eq!(builder.all, "http://all.proxy:3128");
+        assert_eq!(builder.no, "direct.local");
+        assert!(builder.http.is_empty());
+        assert!(builder.https.is_empty());
+
+        let m = builder.build(Extra::default());
+        assert_eq!(
+            intercept(&m, "http://example.local").uri(),
+            "http://all.proxy:3128/"
+        );
+        assert!(
+            m.intercept(&"http://direct.local".parse().unwrap())
                 .is_none()
         );
     }

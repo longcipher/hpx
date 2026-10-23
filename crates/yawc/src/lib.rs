@@ -184,6 +184,24 @@ pub enum WebSocketError {
     #[cfg(not(target_arch = "wasm32"))]
     InvalidConnectionHeader,
 
+    /// The server did not advertise `SETTINGS_ENABLE_CONNECT_PROTOCOL`, so
+    /// the RFC 8441 extended CONNECT handshake cannot be used.
+    #[error("Extended CONNECT is not supported by the server")]
+    #[cfg(not(target_arch = "wasm32"))]
+    ExtendedConnectUnsupported,
+
+    /// The TLS handshake negotiated an ALPN protocol other than `h2`, so
+    /// the RFC 8441 handshake cannot run on the connection.
+    #[error("Unexpected ALPN protocol negotiated")]
+    #[cfg(not(target_arch = "wasm32"))]
+    AlpnMismatch,
+
+    /// The server selected a `Sec-WebSocket-Protocol` value that the client
+    /// did not offer (RFC 6455 §4.1).
+    #[error("Invalid Sec-WebSocket-Protocol header")]
+    #[cfg(not(target_arch = "wasm32"))]
+    InvalidSecWebSocketProtocol,
+
     /// Connection has been closed.
     #[error("Connection is closed")]
     ConnectionClosed,
@@ -313,6 +331,8 @@ impl WebSocketError {
                 | Self::InvalidSecWebsocketVersion
                 | Self::MissingSecWebSocketKey
                 | Self::InvalidHttpScheme
+                | Self::ExtendedConnectUnsupported
+                | Self::AlpnMismatch
         )
     }
 

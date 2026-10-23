@@ -10,7 +10,7 @@ use futures_util::future::{self, Either, Ready};
 use http::{HeaderMap, Request, Response};
 use tower::{Layer, Service};
 
-pub(crate) use self::options::{RequestOptions, TransportOptions};
+pub(crate) use self::options::{ProxySelection, RequestOptions, TransportOptions};
 use crate::{Error, config::RequestConfig, ext::UriExt, header::OrigHeaderMap};
 
 /// A marker type for the default headers configuration value.

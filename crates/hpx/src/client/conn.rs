@@ -158,6 +158,8 @@ struct ExtraChain<T>(Box<dyn ExtraInner>, T);
 struct ProxyIdentity {
     is_proxied: bool,
     auth: Option<HeaderValue>,
+    /// The credentials used to answer a proxy authentication challenge.
+    credentials: Option<crate::proxy::auth::ProxyCredentials>,
     headers: Option<HeaderMap>,
 }
 
@@ -248,6 +250,10 @@ impl Connected {
             self.proxy.auth.replace(auth.clone());
         }
 
+        if let Some(credentials) = proxy.credentials() {
+            self.proxy.credentials.replace(credentials.clone());
+        }
+
         if let Some(headers) = proxy.custom_headers() {
             self.proxy.headers.replace(headers.clone());
         }
@@ -265,6 +271,12 @@ impl Connected {
     #[inline]
     pub fn proxy_auth(&self) -> Option<&HeaderValue> {
         self.proxy.auth.as_ref()
+    }
+
+    /// Get the credentials used to answer a proxy authentication challenge.
+    #[inline]
+    pub(crate) fn proxy_credentials(&self) -> Option<&crate::proxy::auth::ProxyCredentials> {
+        self.proxy.credentials.as_ref()
     }
 
     /// Get the custom proxy headers for the connected transport.

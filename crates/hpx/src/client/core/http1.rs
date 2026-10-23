@@ -23,6 +23,12 @@ pub struct Http1Options {
     /// Maximum number of headers allowed in HTTP/1 responses.
     pub h1_max_headers: Option<usize>,
 
+    /// Maximum size of the HTTP/1 response header block, in bytes.
+    ///
+    /// A response whose header block exceeds the limit is rejected instead
+    /// of being buffered. `None` uses the default limit.
+    pub h1_max_header_size: Option<usize>,
+
     /// Exact size of the read buffer to use for HTTP/1 connections.
     pub h1_read_buf_exact_size: Option<usize>,
 
@@ -84,6 +90,19 @@ impl Http1OptionsBuilder {
     #[inline]
     pub const fn max_headers(mut self, max_headers: usize) -> Self {
         self.opts.h1_max_headers = Some(max_headers);
+        self
+    }
+
+    /// Sets the maximum size of the HTTP/1 response header block, in bytes.
+    ///
+    /// A response whose header block exceeds the limit is rejected with a
+    /// "message header too large" error instead of being buffered, which
+    /// bounds the memory a single response can consume.
+    ///
+    /// Default is the decoder's built-in limit.
+    #[inline]
+    pub const fn max_header_size(mut self, max_header_size: usize) -> Self {
+        self.opts.h1_max_header_size = Some(max_header_size);
         self
     }
 

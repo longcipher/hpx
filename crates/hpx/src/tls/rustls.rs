@@ -66,7 +66,19 @@ impl HandshakeConfigBuilder {
     }
 
     /// Sets hostname verification.
+    ///
+    /// rustls verifies the host name as part of the certificate check, and
+    /// the public API does not allow skipping only that step. Disabling the
+    /// hostname check therefore also disables the chain verification, which
+    /// is what `cert_verification(false)` does on this backend.
     pub(crate) fn verify_hostname(mut self, verify: bool) -> Self {
+        if !verify {
+            tracing::warn!(
+                "rustls backend: `verify_hostname` cannot be disabled on its own; \
+                 the host name is always checked. Use `cert_verification(false)` \
+                 to disable the whole certificate check."
+            );
+        }
         self.settings.verify_hostname = verify;
         self
     }
@@ -401,7 +413,13 @@ impl TlsConnectorBuilder {
             connector_h2,
             connector_http1,
             connector_no_alpn,
-            config: HandshakeConfig::default(), // TODO: populate from builder
+            // The handshake settings that were resolved for this connector.
+            // They are kept so that the connector can report them, and so
+            // that the ALPN variant selection stays in sync with them.
+            config: HandshakeConfig {
+                verify_hostname: self.verify_hostname,
+                alpn_protocols: alpn_protocols.clone(),
+            },
         })
     }
 }

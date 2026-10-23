@@ -13,10 +13,27 @@ use crate::{client::conn::TcpConnectOptions, proxy::Matcher, tls::TlsOptions};
 #[derive(Debug, Default, Clone, Hash, PartialEq, Eq)]
 #[non_exhaustive]
 pub(crate) struct RequestOptions {
-    proxy_matcher: Option<Arc<Matcher>>,
+    proxy: ProxySelection,
     enforced_version: Option<Version>,
     tcp_connect_opts: TcpConnectOptions,
     transport_opts: TransportOptions,
+}
+
+/// How a single request selects its proxy.
+///
+/// The client-level proxy configuration is used unless the request overrides
+/// it, which lets a caller send one request directly (bypassing every
+/// configured proxy) or through a different proxy than the rest of the
+/// client.
+#[derive(Debug, Default, Clone, Hash, PartialEq, Eq)]
+pub(crate) enum ProxySelection {
+    /// Use the client-level proxy configuration.
+    #[default]
+    Inherit,
+    /// Connect directly, bypassing every configured proxy.
+    Direct,
+    /// Use this proxy rule instead of the client-level configuration.
+    Rule(Arc<Matcher>),
 }
 
 /// Transport options for HTTP/1, HTTP/2, and TLS layers.
@@ -104,16 +121,16 @@ impl TransportOptions {
 // ===== impl RequestOptions =====
 
 impl RequestOptions {
-    /// Get a reference to the proxy matcher.
+    /// Get the proxy selection for this request.
     #[inline]
-    pub(crate) const fn proxy_matcher(&self) -> Option<&Arc<Matcher>> {
-        self.proxy_matcher.as_ref()
+    pub(crate) const fn proxy(&self) -> &ProxySelection {
+        &self.proxy
     }
 
-    /// Get a mutable reference to the proxy matcher.
+    /// Get a mutable reference to the proxy selection for this request.
     #[inline]
-    pub(crate) const fn proxy_matcher_mut(&mut self) -> &mut Option<Arc<Matcher>> {
-        &mut self.proxy_matcher
+    pub(crate) const fn proxy_mut(&mut self) -> &mut ProxySelection {
+        &mut self.proxy
     }
 
     /// Get the enforced HTTP version.

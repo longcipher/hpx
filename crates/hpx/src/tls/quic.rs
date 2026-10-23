@@ -260,6 +260,7 @@ pub fn default_quic_connector(
     h3_opts: &Http3Options,
     tls_settings: QuicTlsSettings,
     transport_override: Option<quinn::TransportConfig>,
+    #[cfg(all(feature = "socks", feature = "http3"))] socks5: Option<crate::http3::Socks5Proxy>,
 ) -> crate::Result<crate::http3::QuicConnector> {
     let tls_config = Arc::new(quic_rustls_client_config(&tls_settings, h3_opts)?);
 
@@ -269,12 +270,16 @@ pub fn default_quic_connector(
     });
 
     let endpoint = build_quinn_endpoint(std::net::SocketAddr::from(([0, 0, 0, 0], 0)))?;
-    Ok(crate::http3::QuicConnector::new(
-        endpoint,
-        transport_config,
-        tls_config,
-        h3_opts.clone(),
-    ))
+    let connector =
+        crate::http3::QuicConnector::new(endpoint, transport_config, tls_config, h3_opts.clone());
+
+    #[cfg(all(feature = "socks", feature = "http3"))]
+    let connector = match socks5 {
+        Some(proxy) => connector.with_socks5_proxy(proxy),
+        None => connector,
+    };
+
+    Ok(connector)
 }
 
 /// Build the rustls [`rustls::ClientConfig`] for QUIC from the client's TLS

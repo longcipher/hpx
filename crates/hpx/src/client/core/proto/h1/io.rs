@@ -36,6 +36,8 @@ pub(crate) struct Buffered<T, B> {
     read_blocked: bool,
     read_buf: BytesMut,
     read_buf_strategy: ReadStrategy,
+    /// The maximum size of the response header block, in bytes.
+    max_header_size: Option<usize>,
     write_buf: WriteBuf<B>,
 }
 
@@ -70,8 +72,14 @@ where
             read_blocked: false,
             read_buf: BytesMut::with_capacity(0),
             read_buf_strategy: ReadStrategy::default(),
+            max_header_size: None,
             write_buf,
         }
+    }
+
+    /// Limits the size of the response header block, in bytes.
+    pub(crate) const fn set_max_header_size(&mut self, max: Option<usize>) {
+        self.max_header_size = max;
     }
 
     pub(crate) fn set_max_buf_size(&mut self, max: usize) {
@@ -81,6 +89,14 @@ where
         );
         self.read_buf_strategy = ReadStrategy::with_max(max);
         self.write_buf.max_buf_size = max;
+    }
+
+    /// Limits the size of the read buffer.
+    ///
+    /// The read buffer holds the response head, so the limit also bounds
+    /// the size of the response header block.
+    pub(crate) fn set_read_buf_max_size(&mut self, max: usize) {
+        self.read_buf_strategy = ReadStrategy::with_max(max);
     }
 
     pub(crate) const fn set_read_buf_exact_size(&mut self, sz: usize) {
@@ -180,6 +196,19 @@ where
                 },
             )? {
                 debug!("parsed {} headers", msg.head.headers.len());
+                // The header block must not exceed the configured limit.
+                if let Some(max) = self.max_header_size {
+                    let size: usize = msg
+                        .head
+                        .headers
+                        .iter()
+                        .map(|(name, value)| name.as_str().len() + value.len())
+                        .sum();
+                    if size > max {
+                        debug!("header block of {size} bytes exceeds the limit of {max}");
+                        return Poll::Ready(Err(Error::new_too_large()));
+                    }
+                }
                 self.partial_len = None;
                 return Poll::Ready(Ok(msg));
             }

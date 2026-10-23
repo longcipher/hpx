@@ -26,7 +26,10 @@ use super::{
     verbose::Verbose,
 };
 use crate::{
-    client::http::{ConnectExtra, ConnectRequest},
+    client::{
+        http::{ConnectExtra, ConnectRequest},
+        layer::config::ProxySelection,
+    },
     dns::DynResolver,
     error::{BoxError, ProxyConnect, TimedOut, map_timeout_to_connector_error},
     ext::UriExt,
@@ -490,6 +493,12 @@ impl ConnectorService {
                             tunnel = tunnel.with_auth(auth.clone());
                         }
 
+                        // If the proxy has credentials that can answer a
+                        // challenge, add them to the tunnel.
+                        if let Some(credentials) = proxy.credentials() {
+                            tunnel = tunnel.with_credentials(credentials.clone());
+                        }
+
                         // If the proxy has custom headers, add them to the tunnel.
                         if let Some(headers) = proxy.custom_headers() {
                             tunnel = tunnel.with_headers(headers.clone());
@@ -561,16 +570,18 @@ impl ConnectorService {
 
         // Determine if a proxy should be used for this request.
         let fut = async {
-            let intercepted = req
-                .extra()
-                .proxy_matcher()
-                .and_then(|prox| prox.intercept(req.uri()))
-                .or_else(|| {
-                    self.config
-                        .proxies
-                        .iter()
-                        .find_map(|prox| prox.intercept(req.uri()))
-                });
+            // A per-request proxy selection is authoritative: when the
+            // request asks for a specific proxy, or asks to bypass every
+            // proxy, the client-level list is not consulted.
+            let intercepted = match req.extra().proxy_selection() {
+                ProxySelection::Inherit => self
+                    .config
+                    .proxies
+                    .iter()
+                    .find_map(|prox| prox.intercept(req.uri())),
+                ProxySelection::Direct => None,
+                ProxySelection::Rule(matcher) => matcher.intercept(req.uri()),
+            };
 
             // If a proxy is matched, connect via proxy; otherwise, connect directly.
             if let Some(intercepted) = intercepted {
