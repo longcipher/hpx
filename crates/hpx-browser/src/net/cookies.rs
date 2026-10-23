@@ -139,9 +139,16 @@ impl CookieJar {
 }
 
 /// True iff `request_domain` is the same as or a subdomain of `cookie_domain`.
+fn normalize_host(h: &str) -> String {
+    h.trim_start_matches('[')
+        .trim_end_matches(']')
+        .trim_start_matches('.')
+        .to_lowercase()
+}
+
 fn domain_matches(request_domain: &str, cookie_domain: &str) -> bool {
-    let r = request_domain.trim_start_matches('.').to_lowercase();
-    let c = cookie_domain.trim_start_matches('.').to_lowercase();
+    let r = normalize_host(request_domain);
+    let c = normalize_host(cookie_domain);
     r == c || r.ends_with(&format!(".{c}"))
 }
 

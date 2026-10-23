@@ -352,7 +352,7 @@ impl WebSocketRequestBuilder {
         let config = self.config;
         let deflate_request = self.deflate_request;
         let protocols = self.protocols;
-        let (client, request) = self.inner.build_split();
+        let (_, request) = self.inner.build_split();
         let request = request?;
         let mut uri = request.uri().clone();
 
@@ -370,65 +370,10 @@ impl WebSocketRequestBuilder {
             }
         }
 
-        // Resolve redirects before attempting WebSocket handshake.
-        // yawc doesn't follow redirects internally, so we must resolve them first.
-        // Skip redirect detection — HEAD requests to WebSocket endpoints can hang
-        // and WebSocket redirects are rare in practice.
-        if false {
-            let mut redirect_count = 0;
-            const MAX_REDIRECTS: usize = 20;
-
-            loop {
-                // Make a HEAD request to detect redirects without consuming the body
-                let head_request = crate::Request::new(http::Method::HEAD, uri.clone());
-
-                let response = client.execute(head_request).await;
-                match response {
-                    Ok(resp) => {
-                        let status = resp.status();
-                        if !status.is_redirection() {
-                            // Not a redirect, use the current URI
-                            break;
-                        }
-
-                        redirect_count += 1;
-                        if redirect_count > MAX_REDIRECTS {
-                            return Err(Error::upgrade(format!(
-                                "too many redirects (max {MAX_REDIRECTS})"
-                            )));
-                        }
-
-                        let location = resp
-                            .headers()
-                            .get(http::header::LOCATION)
-                            .and_then(|v| v.to_str().ok())
-                            .ok_or_else(|| {
-                                Error::upgrade("redirect response missing Location header")
-                            })?;
-
-                        // Parse the redirect URI
-                        uri = if location.starts_with("http://") || location.starts_with("https://")
-                        {
-                            Uri::try_from(location).map_err(Error::builder)?
-                        } else {
-                            // Relative URI - resolve against current URI
-                            let base = format!(
-                                "{}://{}",
-                                uri.scheme_str().unwrap_or("http"),
-                                uri.authority().map_or("", |a| a.as_str())
-                            );
-                            let full = format!("{base}{location}");
-                            Uri::try_from(full).map_err(Error::builder)?
-                        };
-                    }
-                    Err(_) => {
-                        // If the HEAD request fails (e.g., method not allowed),
-                        // proceed with the original URI
-                        break;
-                    }
-                }
-            }
-        }
+        // Note: WebSocket redirects are not followed. yawc does not follow
+        // redirects internally; resolving them via HEAD can hang on endpoints
+        // that reject HEAD. Callers needing redirect support should resolve
+        // the final URI themselves before calling.
 
         // Save http/https URI for proxy matching (matcher only recognizes http/https)
         let proxy_match_uri = uri.clone();

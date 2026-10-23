@@ -866,6 +866,7 @@ impl Matcher {
         self.inner.intercept(dst)
     }
 
+    #[cfg(all(feature = "http3", feature = "socks"))]
     /// The SOCKS5 proxy endpoints this rule can select.
     pub(crate) fn socks5_endpoints(&self) -> Vec<&Uri> {
         self.inner.socks5_endpoints()

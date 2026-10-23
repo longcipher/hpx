@@ -49,6 +49,16 @@ pub type ProxyStream = Box<dyn ProxyIo>;
 /// uses the `https` scheme, the connection to the proxy itself is secured
 /// with TLS first.
 /// For SOCKS proxies, uses the tokio-socks library.
+// Re-add brackets around a bare IPv6 literal returned by `Url::host_str()`,
+// which strips them (AGENTS.md rule). Idempotent.
+fn bracket_host(host: &str) -> String {
+    if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]")
+    } else {
+        host.to_owned()
+    }
+}
+
 pub async fn connect_through_proxy(
     proxy: &ProxyConfig,
     target_host: &str,
@@ -60,7 +70,7 @@ pub async fn connect_through_proxy(
                 io::Error::new(io::ErrorKind::InvalidInput, "proxy URL has no host")
             })?;
             let port = proxy_port(proxy_url);
-            let proxy_addr = format!("{host}:{port}");
+            let proxy_addr = format!("{}:{}", bracket_host(host), port);
             let tcp_stream = TcpStream::connect(&proxy_addr).await?;
             let auth_header = extract_proxy_auth(proxy_url);
 
@@ -91,7 +101,7 @@ pub async fn connect_through_proxy(
                 io::Error::new(io::ErrorKind::InvalidInput, "SOCKS5 proxy URL has no host")
             })?;
             let port = proxy_port(proxy_url);
-            let proxy_addr = format!("{host}:{port}");
+            let proxy_addr = format!("{}:{}", bracket_host(host), port);
             let target = format!("{target_host}:{target_port}");
 
             let stream = if !proxy_url.username().is_empty() {
@@ -121,7 +131,7 @@ pub async fn connect_through_proxy(
                 io::Error::new(io::ErrorKind::InvalidInput, "SOCKS4 proxy URL has no host")
             })?;
             let port = proxy_port(proxy_url);
-            let proxy_addr = format!("{host}:{port}");
+            let proxy_addr = format!("{}:{}", bracket_host(host), port);
             let target = format!("{target_host}:{target_port}");
 
             // SOCKS4 carries a `userid` field rather than a password. When

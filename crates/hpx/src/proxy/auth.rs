@@ -41,7 +41,7 @@ pub enum ProxyAuthMethod {
 }
 
 /// Credentials used to authenticate with a proxy.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ProxyCredentials {
     /// The scheme to use.
     pub method: ProxyAuthMethod,
@@ -49,6 +49,16 @@ pub(crate) struct ProxyCredentials {
     pub username: String,
     /// The password.
     pub password: String,
+}
+
+impl std::fmt::Debug for ProxyCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProxyCredentials")
+            .field("method", &self.method)
+            .field("username", &self.username)
+            .field("password", &"[REDACTED]")
+            .finish()
+    }
 }
 
 impl ProxyCredentials {

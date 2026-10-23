@@ -1,8 +1,6 @@
-use std::{
-    collections::HashMap,
-    sync::{Mutex, OnceLock},
-};
+use std::{collections::HashMap, sync::OnceLock};
 
+use parking_lot::Mutex;
 use parley::{
     Alignment, AlignmentOptions, FontContext, LayoutContext,
     fontique::Blob,
@@ -66,12 +64,12 @@ fn parley_state() -> &'static ParleyState {
 fn ensure_font_registered(state: &ParleyState, face_data: &[u8]) -> String {
     let key = face_data.as_ptr() as usize;
     {
-        let cache = state.family_cache.lock().unwrap_or_else(|e| e.into_inner());
+        let cache = state.family_cache.lock();
         if let Some(name) = cache.get(&key) {
             return name.clone();
         }
     }
-    let mut font_cx = state.font_cx.lock().unwrap_or_else(|e| e.into_inner());
+    let mut font_cx = state.font_cx.lock();
     let blob = Blob::from(face_data.to_vec());
     let results = font_cx.collection.register_fonts(blob, None);
     let name = results
@@ -80,7 +78,7 @@ fn ensure_font_registered(state: &ParleyState, face_data: &[u8]) -> String {
         .unwrap_or("sans-serif")
         .to_string();
     drop(font_cx);
-    let mut cache = state.family_cache.lock().unwrap_or_else(|e| e.into_inner());
+    let mut cache = state.family_cache.lock();
     cache.insert(key, name.clone());
     name
 }
@@ -93,8 +91,8 @@ pub fn shape(text: &str, face_data: &[u8], _face_index: u32, size_px: f32) -> Sh
     let state = parley_state();
     let family_name = ensure_font_registered(state, face_data);
 
-    let mut font_cx = state.font_cx.lock().unwrap_or_else(|e| e.into_inner());
-    let mut layout_cx = state.layout_cx.lock().unwrap_or_else(|e| e.into_inner());
+    let mut font_cx = state.font_cx.lock();
+    let mut layout_cx = state.layout_cx.lock();
 
     let mut builder = layout_cx.ranged_builder(&mut font_cx, text, 1.0, true);
     builder.push_default(StyleProperty::FontFamily(FontFamily::named(&family_name)));

@@ -123,6 +123,7 @@ impl Matcher {
         Builder::default()
     }
 
+    #[cfg(all(feature = "http3", feature = "socks"))]
     /// The SOCKS5 proxy endpoints this rule can select.
     ///
     /// A SOCKS5 proxy relays UDP, which is what QUIC needs, so the HTTP/3
@@ -182,6 +183,7 @@ impl Matcher {
 
 // ===== impl Intercept =====
 
+#[cfg(all(feature = "http3", feature = "socks"))]
 /// Returns true when the proxy URI selects a SOCKS5 proxy.
 pub(crate) fn is_socks5(uri: &Uri) -> bool {
     matches!(uri.scheme_str(), Some("socks5" | "socks5h"))

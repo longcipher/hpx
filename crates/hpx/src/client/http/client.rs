@@ -493,6 +493,11 @@ where
         let alt_svc_port = h3_entry.port;
         // Build the URI from parts via `Uri::builder` rather than allocating
         // and parsing a `format!("https://{}:{}", ...)` string.
+        let alt_svc_host = if alt_svc_host.contains(':') && !alt_svc_host.starts_with('[') {
+            format!("[{alt_svc_host}]")
+        } else {
+            alt_svc_host
+        };
         let alt_svc_authority = format!("{alt_svc_host}:{alt_svc_port}");
         if let Ok(new_uri) = Uri::builder()
             .scheme("https")
