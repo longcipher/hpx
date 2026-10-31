@@ -241,7 +241,7 @@ bytes = "1.12.1"
 clap = "4.6.7"
 const-oid = "0.10.2"
 cookie = "0.18.2"
-criterion = "0.8.2"
+criterion = { package = "codspeed-criterion-compat", version = "6.0.0" }
 crossbeam-channel = "0.5.17"
 csv = "1.4.0"
 deno_core = "0.412.0"

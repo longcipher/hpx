@@ -1,0 +1,64 @@
+name: CodSpeed
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  # `workflow_dispatch` allows CodSpeed to trigger backtest
+  # performance analysis in order to generate initial data.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # for OpenID Connect authentication with CodSpeed
+
+env:
+  CARGO_TERM_COLOR: always
+  # `.cargo/config.toml` points `rustc-wrapper` at a local cache binary that is
+  # not available on CI runners.
+  CARGO_BUILD_RUSTC_WRAPPER: ""
+  RUSTC_WRAPPER: ""
+
+jobs:
+  codspeed:
+    name: Run benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-codspeed
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y libfreetype-dev libfontconfig1-dev
+
+      # CPU-bound suites only. `contention` (multi-threaded lock contention) and
+      # `http3_throughput` (real network round-trips) are dominated by system
+      # calls and scheduling, which the simulation instrument does not measure.
+      - name: Build the benchmark targets
+        run: |
+          cargo codspeed build -m simulation \
+            -p hpx -p hpx-yawc -p hpx-browser \
+            -F hpx/json,hpx-browser/cdp-client \
+            --bench json_parsing \
+            --bench http_throughput \
+            --bench connection_pool \
+            --bench websocket_core \
+            --bench page_throughput \
+            --bench challenge_detection \
+            --bench tls_handshake \
+            --bench cdp_bench \
+            --bench memory \
+            --bench navigation
+
+      - name: Run the benchmarks
+        uses: CodSpeedHQ/action@v5
+        with:
+          mode: simulation
+          run: cargo codspeed run -p hpx -p hpx-yawc -p hpx-browser
