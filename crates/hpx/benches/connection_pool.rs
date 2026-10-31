@@ -8,7 +8,8 @@
     clippy::panic,
     clippy::print_stderr,
     clippy::print_stdout,
-    clippy::unwrap_used
+    clippy::unwrap_used,
+    missing_docs
 )]
 
 use std::{

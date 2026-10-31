@@ -4,6 +4,7 @@
 [![Context7](https://img.shields.io/badge/Website-context7.com-blue)](https://context7.com/longcipher/hpx)
 [![crates.io](https://img.shields.io/crates/v/hpx.svg)](https://crates.io/crates/hpx)
 [![docs.rs](https://docs.rs/hpx/badge.svg)](https://docs.rs/hpx)
+[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/longcipher/hpx?utm_source=badge)
 
 ![hpx](https://socialify.git.ci/longcipher/hpx/image?font=Source+Code+Pro&language=1&name=1&owner=1&pattern=Circuit+Board&theme=Auto)
 

@@ -95,7 +95,7 @@ fn bench_har_capture_overhead(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 let (tx, rx) = broadcast::channel::<CdpMessage>(64);
-                let mut capture = HarCapture::new(rx);
+                let mut capture = HarCapture::new(rx, None);
                 for i in 0..10 {
                     let _ = tx.send(CdpMessage {
                         id: None,
@@ -151,7 +151,7 @@ fn bench_har_capture_overhead(c: &mut Criterion) {
     group.bench_function("har_archive_serialization", |b| {
         let archive = rt.block_on(async {
             let (tx, rx) = broadcast::channel::<CdpMessage>(64);
-            let mut capture = HarCapture::new(rx);
+            let mut capture = HarCapture::new(rx, None);
             for i in 0..100 {
                 let _ = tx.send(CdpMessage {
                     id: None,
