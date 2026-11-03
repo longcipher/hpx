@@ -402,7 +402,7 @@ impl TlsConnectorBuilder {
             }
         };
 
-        let connector = create_config(alpn_protocols)?;
+        let connector = create_config(alpn_protocols.clone())?;
         let connector_no_alpn = create_config(None)?;
         let connector_h2 = create_config(Some(vec![AlpnProtocol::HTTP2.as_wire_bytes().to_vec()]))?;
         let connector_http1 =
@@ -418,7 +418,7 @@ impl TlsConnectorBuilder {
             // that the ALPN variant selection stays in sync with them.
             config: HandshakeConfig {
                 verify_hostname: self.verify_hostname,
-                alpn_protocols: alpn_protocols.clone(),
+                alpn_protocols,
             },
         })
     }

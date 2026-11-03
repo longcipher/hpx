@@ -15,7 +15,7 @@ exclude = [
 resolver = "3"
 
 [workspace.package]
-version = "2.5.33"
+version = "2.5.34"
 edition = "2024"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license = "Apache-2.0"
@@ -213,12 +213,12 @@ all = "warn"
 # kept together in one place. On a version bump, update [workspace.package]
 # below and these eight lines (single find/replace). Each crate's own version
 # still uses `version.workspace = true` in its manifest.
-hpx = { path = "crates/hpx", version = "2.5.33" }
-hpx-browser = { path = "crates/hpx-browser", version = "2.5.33" }
-hpx-dl = { path = "crates/hpx-dl", version = "2.5.33" }
-hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.33" }
-hpx-h3 = { path = "crates/hpx-h3", version = "2.5.33" }
-hpx-yawc = { path = "crates/yawc", version = "2.5.33" }
+hpx = { path = "crates/hpx", version = "2.5.34" }
+hpx-browser = { path = "crates/hpx-browser", version = "2.5.34" }
+hpx-dl = { path = "crates/hpx-dl", version = "2.5.34" }
+hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.34" }
+hpx-h3 = { path = "crates/hpx-h3", version = "2.5.34" }
+hpx-yawc = { path = "crates/yawc", version = "2.5.34" }
 
 # external crates
 ahash = "0.8.12"
