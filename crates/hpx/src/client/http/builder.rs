@@ -335,12 +335,25 @@ impl ClientBuilder {
                     // SOCKS5 proxy that relays UDP. When the client's proxy
                     // configuration resolves to exactly one such proxy, the
                     // QUIC endpoint is built on top of its UDP relay.
+                    #[cfg(all(feature = "socks", feature = "http3"))]
                     let socks5 = socks5_quic_proxy(&config.proxy.proxies);
+                    #[cfg(all(feature = "socks", feature = "http3"))]
                     match crate::tls::quic::default_quic_connector(
                         &h3_opts,
                         quic_tls_settings,
                         transport_override,
                         socks5,
+                    ) {
+                        Ok(conn) => builder = builder.h3_connector(conn),
+                        Err(err) => {
+                            tracing::warn!("failed to build QuicConnector: {err}");
+                        }
+                    }
+                    #[cfg(all(feature = "http3", not(feature = "socks")))]
+                    match crate::tls::quic::default_quic_connector(
+                        &h3_opts,
+                        quic_tls_settings,
+                        transport_override,
                     ) {
                         Ok(conn) => builder = builder.h3_connector(conn),
                         Err(err) => {

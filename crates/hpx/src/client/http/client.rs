@@ -1282,13 +1282,21 @@ impl<C, B> HttpClient<C, B> {
             return false;
         };
 
+        #[cfg(all(feature = "socks", feature = "http3"))]
         let crate::proxy::Intercepted::Proxy(intercept) = proxy else {
+            // A Unix socket proxy cannot carry QUIC either.
+            return true;
+        };
+        #[cfg(not(all(feature = "socks", feature = "http3")))]
+        let crate::proxy::Intercepted::Proxy(_) = proxy else {
             // A Unix socket proxy cannot carry QUIC either.
             return true;
         };
 
         // The QUIC endpoint tunnels through this very SOCKS5 proxy, so the
-        // traffic is proxied as well.
+        // traffic is proxied as well. Without the `socks` feature no proxy
+        // can carry QUIC, so any proxied request bypasses the HTTP/3 path.
+        #[cfg(all(feature = "socks", feature = "http3"))]
         if let Some(relay) = self
             .h3_connector
             .as_ref()
