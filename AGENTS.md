@@ -33,10 +33,13 @@ just format
 just lint
 just test
 just test-all
+just test-rustls
 just mutate
 ```
 
 `just test` runs `cargo nextest`, which skips doctests. Doctests are part of the contract: run `cargo test --workspace --all-features --doc` as well.
+
+`--all-features` enables `boring-tls`, which compiles the rustls backend (`tls/rustls.rs`) out; `just test-rustls` is the only gate that runs it.
 
 ## Workspace rules
 

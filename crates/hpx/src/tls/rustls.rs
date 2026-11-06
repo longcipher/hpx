@@ -887,12 +887,11 @@ impl ServerCertVerifier for NoVerifier {
 
 #[cfg(test)]
 mod tests {
+    use std::{convert::Infallible, io::Cursor, sync::Arc, time::Duration};
+    #[cfg(feature = "keylog")]
     use std::{
-        convert::Infallible,
         fs,
-        io::Cursor,
-        sync::Arc,
-        time::{Duration, SystemTime, UNIX_EPOCH},
+        time::{SystemTime, UNIX_EPOCH},
     };
 
     use base64_simd::STANDARD;
@@ -900,13 +899,16 @@ mod tests {
     use http_body_util::Full;
     use hyper::{Response, server::conn::http1, service::service_fn};
     use hyper_util::rt::TokioIo;
+    #[cfg(feature = "keylog")]
     use rustls::KeyLog as RustlsKeyLog;
     use tokio::net::TcpListener;
     use tokio_rustls::{TlsAcceptor, rustls};
 
+    #[cfg(feature = "keylog")]
+    use crate::tls::KeyLog;
     use crate::{
         Client,
-        tls::{CertStore, Identity, KeyLog, TlsVersion},
+        tls::{CertStore, Identity, TlsVersion},
     };
 
     const CA_CERT_PEM: &[u8] = include_bytes!(concat!(
@@ -946,6 +948,7 @@ mod tests {
             .unwrap()
     }
 
+    #[cfg(feature = "keylog")]
     fn unique_keylog_path() -> std::path::PathBuf {
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1038,6 +1041,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "keylog")]
     fn rustls_keylog_bridge_writes_keylog_lines() {
         let path = unique_keylog_path();
         let keylog = KeyLog::from_file(&path);
