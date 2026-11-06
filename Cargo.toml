@@ -250,7 +250,6 @@ deno_core = "0.413.0"
 # pin once both land in one dependency graph.
 deno_error = "=0.7.1"
 der = "0.8.3"
-dhat = "0.3.3"
 digest = "0.11.3"
 encoding_rs = "0.8.44"
 eyre = "0.6.14"
