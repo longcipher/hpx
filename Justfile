@@ -9,21 +9,21 @@ default:
 format:
   rumdl fmt .
   cargo sort -w -g
-  cargo +nightly fmt --all
+  cargo fmt --all
 
 # Auto-fix linting issues
 fix:
   rumdl check --fix .
-  RUSTC_WRAPPER= cargo +nightly clippy --fix --all --all-targets --allow-dirty
+  RUSTC_WRAPPER= cargo clippy --fix --all --all-targets --allow-dirty
 
 # Run all lints
 lint:
   rumdl check .
   cargo sort -w -g -c
-  cargo +nightly fmt --all -- --check
-  RUSTC_WRAPPER= cargo +nightly clippy --all --all-targets -- -D warnings
+  cargo fmt --all -- --check
+  RUSTC_WRAPPER= cargo clippy --all --all-targets -- -D warnings
   cargo shear
-  cargo +nightly workspace-inheritance-check
+  cargo workspace-inheritance-check
   just check-agents-md
 
 # Check that AGENTS.md documents every workspace crate
@@ -218,7 +218,7 @@ outdated:
 
 # Run clippy with all lints
 clippy-all:
-  RUSTC_WRAPPER= cargo +nightly clippy --all --all-targets --all-features -- -W clippy::pedantic -W clippy::nursery -W clippy::cargo
+  RUSTC_WRAPPER= cargo clippy --all --all-targets --all-features -- -W clippy::pedantic -W clippy::nursery -W clippy::cargo
 
 # Run tests with nextest
 test-nextest:
@@ -226,7 +226,7 @@ test-nextest:
 
 # Run miri on unsafe code
 miri:
-  cargo +nightly miri test --all-features
+  cargo miri test --all-features
 
 # Check for unused dependencies
 unused-deps:
