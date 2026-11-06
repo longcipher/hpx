@@ -42,7 +42,7 @@ just mutate
 
 - Never hand-type dependency versions. Add per-crate deps with `cargo add <crate> -p <crate>`. Shared deps go into root `[workspace.dependencies]` — numeric versions only, no features — and are referenced with `dep = { workspace = true }`.
 - The local crates in `[workspace.dependencies]` must keep literal `version` fields: Cargo cannot inherit `[workspace.package].version` there. On a version bump, update `[workspace.package]` and those lines together.
-- The toolchain is pinned to nightly in `rust-toolchain.toml`. Use `cargo +nightly fmt` / `cargo +nightly clippy` as the Justfile does.
+- The toolchain is a dated nightly pinned in `rust-toolchain.toml`; CI installs that toolchain and the Justfile runs plain `cargo`, so local runs, CI and the CodSpeed baseline use the same compiler. Never add `+nightly`, which bypasses the pin. Bump the date on purpose, in its own change.
 - `.cargo/config.toml` sets `rustc-wrapper = "kache"` and `-Zpolonius=next`. Unset the compiler wrapper when invoking clippy manually (`RUSTC_WRAPPER=`), exactly as the Justfile does; CI also clears `RUSTC_WRAPPER` and `CARGO_BUILD_RUSTC_WRAPPER`.
 - On aarch64 macOS the config pins `clang` plus `ld64.lld`; do not switch the linker without re-measuring link times.
 - Workspace lints deny `unwrap_used`, `expect_used`, `panic`, `allow_attributes`, `todo`, `unimplemented`, `dbg_macro`, `print_stdout`, and `print_stderr`. The only escape hatch is `#[expect(lint, reason = "...")]`; the binaries use it for stdout output.

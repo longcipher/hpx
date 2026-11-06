@@ -11,6 +11,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   CARGO_BUILD_RUSTC_WRAPPER: ""
+  CARGO_INCREMENTAL: 0
 
 jobs:
   ci:
@@ -26,9 +27,8 @@ jobs:
         with:
           node-version: 24
 
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt, clippy
+      - name: Install the pinned toolchain
+        run: rustup toolchain install "$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" --profile minimal --component rustfmt,clippy
 
       # Only tools actually invoked by the Justfile recipes below.
       - uses: taiki-e/install-action@v2
@@ -60,9 +60,8 @@ jobs:
         with:
           node-version: 24
 
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt, clippy
+      - name: Install the pinned toolchain
+        run: rustup toolchain install "$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" --profile minimal --component rustfmt,clippy
 
       - uses: taiki-e/install-action@v2
         with:
@@ -104,9 +103,8 @@ jobs:
         with:
           node-version: 24
 
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt, clippy
+      - name: Install the pinned toolchain
+        run: rustup toolchain install "$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" --profile minimal --component rustfmt,clippy
 
       - uses: taiki-e/install-action@v2
         with:
