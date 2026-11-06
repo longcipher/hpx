@@ -15,6 +15,10 @@ use crate::{client::conn::TcpConnectOptions, proxy::Matcher, tls::TlsOptions};
 pub(crate) struct RequestOptions {
     proxy: ProxySelection,
     enforced_version: Option<Version>,
+    /// Whether an HTTP proxy must tunnel the connection with `CONNECT` even
+    /// for an `http://` target, which it would otherwise forward. WebSocket
+    /// handshakes need the tunnel (RFC 6455 §4.1).
+    force_tunnel: bool,
     tcp_connect_opts: TcpConnectOptions,
     transport_opts: TransportOptions,
 }
@@ -143,6 +147,18 @@ impl RequestOptions {
     #[inline]
     pub(crate) const fn enforced_version_mut(&mut self) -> &mut Option<Version> {
         &mut self.enforced_version
+    }
+
+    /// Whether an HTTP proxy must tunnel an `http://` target with `CONNECT`.
+    #[inline]
+    pub(crate) const fn force_tunnel(&self) -> bool {
+        self.force_tunnel
+    }
+
+    /// Get a mutable reference to the `CONNECT` tunnel requirement.
+    #[inline]
+    pub(crate) const fn force_tunnel_mut(&mut self) -> &mut bool {
+        &mut self.force_tunnel
     }
 
     /// Get a reference to the TCP connection options.

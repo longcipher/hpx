@@ -100,6 +100,15 @@ impl ConnectExtra {
             .map_or(&ProxySelection::Inherit, RequestOptions::proxy)
     }
 
+    /// Whether an HTTP proxy must tunnel the connection with `CONNECT`, even
+    /// for an `http://` target.
+    #[inline]
+    pub(crate) fn force_tunnel(&self) -> bool {
+        self.extra
+            .as_ref()
+            .is_some_and(RequestOptions::force_tunnel)
+    }
+
     /// Return a reference to the [`TlsOptions`].
     #[inline]
     pub(crate) fn tls_options(&self) -> Option<&TlsOptions> {

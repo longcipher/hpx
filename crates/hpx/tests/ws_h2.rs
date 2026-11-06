@@ -499,10 +499,15 @@ async fn h2_requires_extended_connect_support() {
         .await
         .expect_err("the handshake must fail without the server setting");
 
-    let message = err.to_string();
-    assert!(
-        message.contains("Extended CONNECT"),
-        "unexpected error: {message}"
+    // RFC 8441 §3: a server that has not sent SETTINGS_ENABLE_CONNECT_PROTOCOL
+    // treats `:protocol` as a malformed request and resets the stream.
+    let reason = std::iter::successors(Some(&err as &dyn std::error::Error), |e| e.source())
+        .find_map(|e| e.downcast_ref::<http2::Error>())
+        .and_then(http2::Error::reason);
+    assert_eq!(
+        reason,
+        Some(http2::Reason::PROTOCOL_ERROR),
+        "unexpected error: {err:?}"
     );
 }
 
@@ -586,6 +591,45 @@ async fn h2_through_http_proxy() {
         .expect("message expected")
         .expect("no error");
     assert_eq!(message.into_text().expect("text"), "proxied h2");
+}
+
+/// A client-level proxy carries the RFC 8441 handshake as well; the
+/// per-request `.proxy()` is not needed.
+#[tokio::test]
+async fn h2_through_client_level_http_proxy() {
+    let server = H2WsServer::start(ServerConfig::default()).await;
+    let proxy = ConnectProxy::start(server.addr).await;
+    let client = hpx::Client::builder()
+        .proxy(hpx::Proxy::all(format!("http://{}", proxy.addr)).unwrap())
+        .build()
+        .unwrap();
+
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        client
+            .websocket("ws://hyper.rs.local/chat")
+            .force_http2()
+            .send(),
+    )
+    .await
+    .expect("the handshake must not hang")
+    .expect("RFC 8441 handshake through the client's proxy should succeed");
+
+    assert_eq!(response.version(), http::Version::HTTP_2);
+
+    let mut ws = response
+        .into_websocket()
+        .await
+        .expect("websocket should upgrade cleanly");
+    ws.send(hpx::ws::Message::text("client proxy h2"))
+        .await
+        .expect("send should succeed");
+    let message = ws
+        .recv()
+        .await
+        .expect("message expected")
+        .expect("no error");
+    assert_eq!(message.into_text().expect("text"), "client proxy h2");
 }
 
 /// WebSocket over TLS + HTTP/2, with a client trust store for the

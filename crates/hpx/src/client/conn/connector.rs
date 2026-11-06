@@ -470,8 +470,10 @@ impl ConnectorService {
                     }
                 }
 
-                // Handle HTTPS proxy tunneling connection
-                if uri.is_https() {
+                // Tunnel HTTPS targets through the proxy with CONNECT, and
+                // plain-HTTP targets whose request asks for a tunnel
+                // (WebSocket handshakes).
+                if uri.is_https() || req.extra().force_tunnel() {
                     trace!(
                         "tunneling over HTTP(s) proxy: {}",
                         redact_proxy_uri(&proxy_uri)

@@ -145,7 +145,7 @@ use futures::{SinkExt, task::AtomicWaker};
 #[cfg(feature = "h2")]
 pub use h2::{H2Stream, H2WebSocket, H2WebSocketBuilder};
 use http_body_util::Empty;
-use hyper::{Request, Response, StatusCode, body::Incoming, header, upgrade::Upgraded};
+use hyper::{Request, Response, StatusCode, header, upgrade::Upgraded};
 use hyper_util::rt::TokioIo;
 pub use options::{CompressionLevel, DeflateOptions, Fragmentation, Options};
 #[cfg(feature = "proxy")]
@@ -1080,7 +1080,7 @@ where
         .detach();
 
         let mut response = sender.send_request(req).await?;
-        let negotiated = verify(&response, options, &ws_key)?;
+        let negotiated = verify(response.status(), response.headers(), options, &ws_key)?;
 
         let upgraded = hyper::upgrade::on(&mut response).await?;
         let parts = upgraded.downcast::<TokioIo<S>>().map_err(|_| {
@@ -1093,6 +1093,163 @@ where
 
         Ok(WebSocket::new(Role::Client, stream, read_buf, negotiated))
     }
+}
+
+/// The client half of an opening handshake whose HTTP exchange another HTTP
+/// client carries.
+///
+/// [`WebSocket::connect`] dials its own connection and sends the upgrade
+/// request itself. An HTTP client with its own transport (proxies, TLS
+/// settings, DNS, timeouts) can send the handshake request instead: it adds
+/// [`ClientHandshake::http1_headers`] to a `GET` request (or, for RFC 8441,
+/// [`ClientHandshake::http2_headers`] to an extended `CONNECT`), checks the
+/// response head with [`ClientHandshake::verify_http1`] (or
+/// [`ClientHandshake::verify_http2`]), and wraps the upgraded stream with
+/// [`VerifiedHandshake::into_websocket`]. The checks are the ones
+/// [`WebSocket::connect`] applies.
+#[derive(Clone)]
+pub struct ClientHandshake {
+    /// The `Sec-WebSocket-Key` of an HTTP/1.1 upgrade request.
+    key: String,
+    options: Options,
+}
+
+impl std::fmt::Debug for ClientHandshake {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClientHandshake").finish_non_exhaustive()
+    }
+}
+
+impl ClientHandshake {
+    /// Starts a handshake with a fresh `Sec-WebSocket-Key`.
+    pub fn new(options: Options) -> Self {
+        Self {
+            key: generate_key(),
+            options,
+        }
+    }
+
+    /// Returns the headers of an HTTP/1.1 upgrade request (RFC 6455 §4.1).
+    ///
+    /// They are `Upgrade`, `Connection`, `Sec-WebSocket-Key` and
+    /// `Sec-WebSocket-Version`, plus `Sec-WebSocket-Extensions` and
+    /// `Sec-WebSocket-Protocol` when the options offer compression or
+    /// subprotocols. The request method must be `GET`.
+    pub fn http1_headers(&self) -> Result<hyper::HeaderMap> {
+        let mut headers = offer_headers(&self.options)?;
+        headers.insert(
+            header::UPGRADE,
+            header::HeaderValue::from_static("websocket"),
+        );
+        headers.insert(
+            header::CONNECTION,
+            header::HeaderValue::from_static("upgrade"),
+        );
+        let key = self.key.parse().map_err(|e: header::InvalidHeaderValue| {
+            io::Error::new(io::ErrorKind::InvalidInput, e.to_string())
+        })?;
+        headers.insert(header::SEC_WEBSOCKET_KEY, key);
+        Ok(headers)
+    }
+
+    /// Returns the headers of an RFC 8441 extended `CONNECT` request.
+    ///
+    /// They are `Sec-WebSocket-Version`, plus `Sec-WebSocket-Extensions` and
+    /// `Sec-WebSocket-Protocol` when the options offer compression or
+    /// subprotocols. The caller sends them with `:method = CONNECT` and
+    /// `:protocol = websocket`.
+    #[cfg(feature = "h2")]
+    pub fn http2_headers(&self) -> Result<hyper::HeaderMap> {
+        offer_headers(&self.options)
+    }
+
+    /// Checks the response head of an HTTP/1.1 upgrade request.
+    ///
+    /// The status must be `101 Switching Protocols`, with `Upgrade:
+    /// websocket`, `Connection: Upgrade` and the `Sec-WebSocket-Accept` value
+    /// of this handshake's key. A selected subprotocol must be one that was
+    /// offered.
+    pub fn verify_http1(
+        self,
+        status: StatusCode,
+        headers: &hyper::HeaderMap,
+    ) -> Result<VerifiedHandshake> {
+        verify(status, headers, self.options, &self.key)
+            .map(|negotiation| VerifiedHandshake { negotiation })
+    }
+
+    /// Checks the response head of an RFC 8441 extended `CONNECT` request.
+    ///
+    /// Any `2xx` status establishes the stream. A selected subprotocol must
+    /// be one that was offered.
+    #[cfg(feature = "h2")]
+    pub fn verify_http2(
+        self,
+        status: StatusCode,
+        headers: &hyper::HeaderMap,
+    ) -> Result<VerifiedHandshake> {
+        let (protocol, extensions) = h2::verify_connect_response(status, headers, &self.options)?;
+        Ok(VerifiedHandshake {
+            negotiation: h2::connect_negotiation(self.options, protocol, extensions),
+        })
+    }
+}
+
+/// A client handshake whose response passed verification.
+pub struct VerifiedHandshake {
+    negotiation: Negotiation,
+}
+
+impl std::fmt::Debug for VerifiedHandshake {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VerifiedHandshake").finish_non_exhaustive()
+    }
+}
+
+impl VerifiedHandshake {
+    /// Wraps the upgraded stream as a client WebSocket.
+    ///
+    /// `io` must start at the first byte after the response head.
+    pub fn into_websocket<S>(self, io: S) -> WebSocket<S>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        WebSocket::new(Role::Client, io, Bytes::new(), self.negotiation)
+    }
+}
+
+/// The headers that offer the protocol version, the compression extension
+/// and the subprotocols; both handshake flavours send them.
+fn offer_headers(options: &Options) -> Result<hyper::HeaderMap> {
+    let mut headers = hyper::HeaderMap::new();
+    headers.insert(
+        header::SEC_WEBSOCKET_VERSION,
+        header::HeaderValue::from_static("13"),
+    );
+
+    if let Some(compression) = options.compression.as_ref() {
+        let value = WebSocketExtensions::from(compression)
+            .to_string()
+            .parse()
+            .map_err(|e: header::InvalidHeaderValue| {
+                io::Error::new(io::ErrorKind::InvalidInput, e.to_string())
+            })?;
+        headers.insert(header::SEC_WEBSOCKET_EXTENSIONS, value);
+    }
+
+    if !options.protocols.is_empty() {
+        let value =
+            options
+                .protocols
+                .join(", ")
+                .parse()
+                .map_err(|e: header::InvalidHeaderValue| {
+                    io::Error::new(io::ErrorKind::InvalidInput, e.to_string())
+                })?;
+        headers.insert(header::SEC_WEBSOCKET_PROTOCOL, value);
+    }
+
+    Ok(headers)
 }
 
 impl WebSocket<HttpStream> {
@@ -1468,15 +1625,17 @@ fn expected_accept(key: &str) -> String {
     upgrade::sec_websocket_protocol(key.as_bytes())
 }
 
-fn verify(response: &Response<Incoming>, options: Options, key: &str) -> Result<Negotiation> {
-    if response.status() != StatusCode::SWITCHING_PROTOCOLS {
-        return Err(WebSocketError::InvalidStatusCode(
-            response.status().as_u16(),
-        ));
+fn verify(
+    status: StatusCode,
+    headers: &hyper::HeaderMap,
+    options: Options,
+    key: &str,
+) -> Result<Negotiation> {
+    if status != StatusCode::SWITCHING_PROTOCOLS {
+        return Err(WebSocketError::InvalidStatusCode(status.as_u16()));
     }
 
     let compression_level = options.compression.as_ref().map(|opts| opts.level);
-    let headers = response.headers();
 
     if !headers
         .get(header::UPGRADE)
@@ -1691,6 +1850,18 @@ mod tests {
 
     use super::*;
     use crate::close::{self, CloseCode};
+
+    /// The handshake types print without their key or negotiated state.
+    #[test]
+    fn handshake_types_debug_without_their_state() {
+        let handshake = ClientHandshake::new(Options::default());
+        assert_eq!(format!("{handshake:?}"), "ClientHandshake { .. }");
+
+        let verified = VerifiedHandshake {
+            negotiation: Negotiation::default(),
+        };
+        assert_eq!(format!("{verified:?}"), "VerifiedHandshake { .. }");
+    }
 
     /// RFC 6455 §4.1: the server selects one of the subprotocols the client
     /// offered.

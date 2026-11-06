@@ -10,13 +10,21 @@ use std::{
 };
 
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
-use http::{HeaderMap, HeaderName, HeaderValue, Uri, Version};
+use http::{HeaderMap, HeaderName, HeaderValue, Uri, Version, uri::Scheme};
 
 use super::{
     deflate::WebSocketExtensions,
     message::{CloseCode, CloseFrame, Message, Utf8Bytes},
 };
-use crate::{EmulationFactory, Error, RequestBuilder, header::OrigHeaderMap, proxy::Proxy};
+use crate::{
+    EmulationFactory, Error, Request, RequestBuilder, Upgraded,
+    client::layer::{config::RequestOptions, timeout::TimeoutOptions},
+    header::OrigHeaderMap,
+    proxy::Proxy,
+};
+
+/// A yawc WebSocket over the connection the client upgraded.
+type ClientWs = hpx_yawc::WebSocket<Upgraded>;
 
 /// Default maximum WebSocket message size for the yawc backend.
 pub const DEFAULT_MAX_MESSAGE_SIZE: usize = 1024 * 1024;
@@ -47,7 +55,6 @@ impl Default for WebSocketConfig {
 #[derive(Debug)]
 pub struct WebSocketRequestBuilder {
     inner: RequestBuilder,
-    proxy: Option<Proxy>,
     unsupported: UnsupportedSettings,
     config: WebSocketConfig,
     #[expect(dead_code)]
@@ -65,7 +72,6 @@ impl WebSocketRequestBuilder {
     pub fn new(inner: RequestBuilder) -> Self {
         Self {
             inner: inner.version(Version::HTTP_11),
-            proxy: None,
             unsupported: UnsupportedSettings::default(),
             config: WebSocketConfig::default(),
             custom_headers: Vec::new(),
@@ -248,7 +254,7 @@ impl WebSocketRequestBuilder {
     /// Set the proxy for this request.
     #[inline]
     pub fn proxy(mut self, proxy: Proxy) -> Self {
-        self.proxy = Some(proxy);
+        self.inner = self.inner.proxy(proxy);
         self
     }
 
@@ -323,23 +329,16 @@ impl WebSocketRequestBuilder {
         self
     }
 
-    /// Creates a [`hpx_yawc::ProxyConfig`] from a proxy URL, selecting the
-    /// appropriate variant based on the URL scheme.
-    fn make_proxy_config(proxy_url: url::Url) -> hpx_yawc::ProxyConfig {
-        #[cfg(feature = "socks")]
-        {
-            let scheme = proxy_url.scheme();
-            if scheme == "socks5" || scheme == "socks5h" {
-                return hpx_yawc::ProxyConfig::Socks5(proxy_url);
-            }
-            if scheme == "socks4" || scheme == "socks4a" {
-                return hpx_yawc::ProxyConfig::Socks4(proxy_url);
-            }
-        }
-        hpx_yawc::ProxyConfig::Http(proxy_url)
-    }
-
     /// Sends the request and returns a [`WebSocketResponse`].
+    ///
+    /// The handshake runs through the [`Client`](crate::Client) that created
+    /// this builder, so the client's proxies, TLS settings, DNS resolver,
+    /// default headers, cookies and timeouts apply to it, exactly as to any
+    /// other request. A WebSocket is connected once the server accepts the
+    /// upgrade, so the client's connect timeout bounds the whole opening
+    /// handshake: connection, proxy tunnel, TLS, and the server's answer.
+    /// Through an HTTP proxy the connection is always tunnelled with
+    /// `CONNECT`, for `ws://` as well as `wss://` (RFC 6455 §4.1).
     ///
     /// Measured as the WebSocket handshake phase when the `hotpath` feature
     /// is enabled.
@@ -348,62 +347,26 @@ impl WebSocketRequestBuilder {
         self.unsupported.check()?;
 
         let force_http2 = self.force_http2;
-        let proxy = self.proxy;
         let config = self.config;
         let deflate_request = self.deflate_request;
         let protocols = self.protocols;
-        let (_, request) = self.inner.build_split();
-        let request = request?;
-        let mut uri = request.uri().clone();
+        let (client, request) = self.inner.build_split();
+        let mut request = request?;
 
-        // Convert ws:// to http:// and wss:// to https:// for redirect resolution
-        {
-            let scheme = match uri.scheme_str() {
-                Some("ws") => Some("http"),
-                Some("wss") => Some("https"),
-                _ => None,
-            };
-            if let Some(scheme) = scheme {
-                let mut parts = uri.clone().into_parts();
-                parts.scheme = Some(scheme.parse().map_err(Error::builder)?);
-                uri = Uri::from_parts(parts).map_err(Error::builder)?;
-            }
+        // The client speaks HTTP: map ws:// to http:// and wss:// to https://.
+        let scheme = match request.uri().scheme_str() {
+            Some("ws") => Some(Scheme::HTTP),
+            Some("wss") => Some(Scheme::HTTPS),
+            _ => None,
+        };
+        if let Some(scheme) = scheme {
+            let mut parts = request.uri().clone().into_parts();
+            parts.scheme = Some(scheme);
+            *request.uri_mut() = Uri::from_parts(parts).map_err(Error::builder)?;
         }
 
-        // Note: WebSocket redirects are not followed. yawc does not follow
-        // redirects internally; resolving them via HEAD can hang on endpoints
-        // that reject HEAD. Callers needing redirect support should resolve
-        // the final URI themselves before calling.
-
-        // Save http/https URI for proxy matching (matcher only recognizes http/https)
-        let proxy_match_uri = uri.clone();
-
-        // Convert back to ws:// or wss:// if the final URI is http/https
-        {
-            let scheme = match uri.scheme_str() {
-                Some("http") => Some("ws"),
-                Some("https") => Some("wss"),
-                _ => None,
-            };
-            if let Some(scheme) = scheme {
-                let mut parts = uri.clone().into_parts();
-                parts.scheme = Some(scheme.parse().map_err(Error::builder)?);
-                uri = Uri::from_parts(parts).map_err(Error::builder)?;
-            }
-        }
-
-        let url: url::Url = uri
-            .to_string()
-            .parse()
-            .map_err(|e: url::ParseError| Error::builder(e))?;
-
-        let mut http_builder = hpx_yawc::HttpRequest::builder();
-        for (name, value) in request.headers() {
-            let value = value.to_str().map_err(|_| {
-                Error::upgrade(format!("unsupported non-UTF-8 header value for {name}"))
-            })?;
-            http_builder = http_builder.header(name.as_str(), value);
-        }
+        // Redirects follow the client's redirect policy, which is `none`
+        // unless the caller configured one.
 
         // Configure yawc options
         let mut options = hpx_yawc::Options::default();
@@ -428,115 +391,63 @@ impl WebSocketRequestBuilder {
             options = options.with_protocols(protocols);
         }
 
-        // Bootstrap over HTTP/2 (RFC 8441) when requested.
-        if force_http2 {
-            return Self::send_h2(url, options, http_builder, proxy_match_uri, proxy, config).await;
+        let handshake = hpx_yawc::ClientHandshake::new(options);
+        let headers = if force_http2 {
+            // Bootstrap over HTTP/2 (RFC 8441).
+            Self::extended_connect(&mut request);
+            handshake.http2_headers()
+        } else {
+            handshake.http1_headers()
         }
+        .map_err(Error::upgrade)?;
+        request.headers_mut().extend(headers);
 
-        let mut ws_builder = hpx_yawc::WebSocket::connect(url)
-            .with_options(options)
-            .with_request(http_builder);
+        // Through an HTTP proxy a WebSocket runs in a CONNECT tunnel even for
+        // ws:// (RFC 6455 §4.1); a forwarding proxy may not relay the upgrade.
+        *request
+            .config_mut::<RequestOptions>()
+            .get_or_insert_default()
+            .force_tunnel_mut() = true;
 
-        // Extract proxy configuration if a proxy was set
-        if let Some(proxy_config) = Self::proxy_config(&proxy, &proxy_match_uri)? {
-            ws_builder = ws_builder.with_proxy(proxy_config);
+        // A WebSocket is connected once the server accepts the upgrade, so
+        // the client's connect timeout bounds the wait for that answer too.
+        request
+            .config_mut::<TimeoutOptions>()
+            .get_or_insert_default()
+            .bound_response_by_connect();
+
+        let response = client.execute(request).await?;
+        let version = response.version();
+        let status = response.status();
+        let verified = if force_http2 {
+            handshake.verify_http2(status, response.headers())
+        } else {
+            handshake.verify_http1(status, response.headers())
         }
-
-        let ws = ws_builder
-            .await
-            .map_err(|e| Error::upgrade(e.to_string()))?;
-
-        let compression_accepted = ws.compression_accepted();
-        let protocol = ws.protocol().map(ToOwned::to_owned);
+        .map_err(Error::upgrade)?;
+        let ws = verified.into_websocket(response.upgrade().await?);
 
         Ok(WebSocketResponse {
-            ws: Some(InnerWs::H1(Box::new(ws))),
-            version: Version::HTTP_11,
-            status: http::StatusCode::SWITCHING_PROTOCOLS,
+            compression_accepted: ws.compression_accepted(),
+            protocol: ws.protocol().map(ToOwned::to_owned),
+            ws: Some(Box::new(ws)),
+            version,
+            status,
             config,
-            compression_accepted,
-            protocol,
         })
     }
 
-    /// Sends the request over HTTP/2 (RFC 8441) and returns a [`WebSocketResponse`].
-    async fn send_h2(
-        url: url::Url,
-        options: hpx_yawc::Options,
-        http_builder: hpx_yawc::HttpRequestBuilder,
-        proxy_match_uri: Uri,
-        proxy: Option<Proxy>,
-        config: WebSocketConfig,
-    ) -> Result<WebSocketResponse, Error> {
-        let mut ws_builder = hpx_yawc::WebSocket::connect_h2(url)
-            .with_options(options)
-            .with_request(http_builder);
-
-        // Extract proxy configuration if a proxy was set. Following RFC 8441
-        // §7, the proxy is tunnelled with a traditional CONNECT (or SOCKS
-        // handshake) first; HTTP/2 runs inside the tunnel.
-        if let Some(proxy_config) = Self::proxy_config(&proxy, &proxy_match_uri)? {
-            ws_builder = ws_builder.with_proxy(proxy_config);
-        }
-
-        let ws = ws_builder
-            .await
-            .map_err(|e| Error::upgrade(e.to_string()))?;
-
-        let compression_accepted = ws.compression_accepted();
-        let protocol = ws.protocol().map(ToOwned::to_owned);
-
-        Ok(WebSocketResponse {
-            ws: Some(InnerWs::H2(Box::new(ws))),
-            version: Version::HTTP_2,
-            status: http::StatusCode::OK,
-            config,
-            compression_accepted,
-            protocol,
-        })
+    /// Turns the request into an RFC 8441 extended CONNECT: one HTTP/2
+    /// stream with `:protocol = websocket`. Without the `http2` feature the
+    /// client rejects the HTTP/2 request.
+    fn extended_connect(request: &mut Request) {
+        *request.method_mut() = http::Method::CONNECT;
+        *request.version_mut() = Some(Version::HTTP_2);
+        #[cfg(feature = "http2")]
+        request
+            .extensions_mut()
+            .insert(http2::ext::Protocol::from_static("websocket"));
     }
-
-    /// Resolves the proxy configuration for a request, if a proxy was set
-    /// and matches the destination.
-    fn proxy_config(
-        proxy: &Option<Proxy>,
-        proxy_match_uri: &Uri,
-    ) -> Result<Option<hpx_yawc::ProxyConfig>, Error> {
-        let Some(proxy) = proxy else {
-            return Ok(None);
-        };
-        let matcher = proxy.clone().into_matcher();
-        if let Some(crate::proxy::Intercepted::Proxy(intercept)) =
-            matcher.intercept(proxy_match_uri)
-        {
-            let proxy_uri = intercept.uri();
-            let mut proxy_url: url::Url = proxy_uri
-                .to_string()
-                .parse()
-                .map_err(|e: url::ParseError| Error::builder(e))?;
-            // Recover credentials from the intercept auth header
-            if let Some(auth) = intercept.basic_auth()
-                && let Ok(auth_str) = auth.to_str()
-                && let Some(encoded) = auth_str.strip_prefix("Basic ")
-                && let Ok(decoded) = base64_simd::STANDARD.decode_to_vec(encoded.as_bytes())
-                && let Ok(cred) = String::from_utf8(decoded)
-                && let Some((user, pass)) = cred.split_once(':')
-            {
-                let _ = proxy_url.set_username(user);
-                let _ = proxy_url.set_password(Some(pass));
-            }
-            return Ok(Some(Self::make_proxy_config(proxy_url)));
-        }
-        Ok(None)
-    }
-}
-
-/// A WebSocket connection from either transport.
-enum InnerWs {
-    /// HTTP/1 upgrade flow.
-    H1(Box<hpx_yawc::TcpWebSocket>),
-    /// HTTP/2 extended CONNECT flow (RFC 8441).
-    H2(Box<hpx_yawc::H2WebSocket>),
 }
 
 /// The server's response to the websocket upgrade request.
@@ -549,7 +460,7 @@ enum InnerWs {
 /// accepts the extension, yawc applies compression transparently; if not,
 /// the connection proceeds uncompressed.
 pub struct WebSocketResponse {
-    ws: Option<InnerWs>,
+    ws: Option<Box<ClientWs>>,
     /// The HTTP version of the transport that carried the handshake.
     version: Version,
     /// The handshake status: `101 Switching Protocols` over HTTP/1,
@@ -708,7 +619,7 @@ fn message_to_frame(msg: Message) -> hpx_yawc::Frame {
 /// Compression (permessage-deflate) is handled transparently by the underlying
 /// yawc layer when negotiated with the server.
 pub struct WebSocket {
-    inner: InnerWs,
+    inner: Box<ClientWs>,
     /// The subprotocol negotiated during the handshake, if any.
     protocol: Option<String>,
     /// Whether the server accepted permessage-deflate compression.
@@ -760,10 +671,7 @@ impl WebSocket {
     pub async fn recv(&mut self) -> Option<Result<Message, Error>> {
         // `next_frame`, not yawc's `Stream` impl, which maps every error to
         // `None`.
-        let read = match &mut self.inner {
-            InnerWs::H1(ws) => ws.next_frame().await,
-            InnerWs::H2(ws) => ws.next_frame().await,
-        };
+        let read = self.inner.next_frame().await;
         let msg = read_to_message(read);
         if let Some(Ok(message)) = &msg {
             crate::hotpath::record_ws_bytes_recv(message.len());
@@ -778,11 +686,10 @@ impl WebSocket {
         let bytes = msg.len();
         let frame = message_to_frame(msg);
         crate::hotpath::record_ws_bytes_sent(bytes);
-        match &mut self.inner {
-            InnerWs::H1(ws) => ws.send(frame).await,
-            InnerWs::H2(ws) => ws.send(frame).await,
-        }
-        .map_err(|e| Error::upgrade(e.to_string()))
+        self.inner
+            .send(frame)
+            .await
+            .map_err(|e| Error::upgrade(e.to_string()))
     }
 
     /// Closes the connection with a given code and (optional) reason.
@@ -796,43 +703,25 @@ impl WebSocket {
         let reason = reason.into();
         let yawc_code: hpx_yawc::close::CloseCode = code.0.into();
         let frame = hpx_yawc::Frame::close(yawc_code, reason.as_bytes());
-        match &mut self.inner {
-            InnerWs::H1(ws) => ws.send(frame).await,
-            InnerWs::H2(ws) => ws.send(frame).await,
-        }
-        .map_err(|e| Error::upgrade(e.to_string()))
+        self.inner
+            .send(frame)
+            .await
+            .map_err(|e| Error::upgrade(e.to_string()))
     }
 
     /// Split the WebSocket into a reader and a writer.
     pub fn split(self) -> (WebSocketWrite, WebSocketRead) {
-        match self.inner {
-            InnerWs::H1(ws) => {
-                let (sink, stream) = FallibleWs(*ws).split();
-                (
-                    WebSocketWrite {
-                        inner: WriteHalf::H1(sink),
-                        compression_accepted: self.compression_accepted,
-                    },
-                    WebSocketRead {
-                        inner: ReadHalf::H1(stream),
-                        compression_accepted: self.compression_accepted,
-                    },
-                )
-            }
-            InnerWs::H2(ws) => {
-                let (sink, stream) = FallibleWs(*ws).split();
-                (
-                    WebSocketWrite {
-                        inner: WriteHalf::H2(sink),
-                        compression_accepted: self.compression_accepted,
-                    },
-                    WebSocketRead {
-                        inner: ReadHalf::H2(stream),
-                        compression_accepted: self.compression_accepted,
-                    },
-                )
-            }
-        }
+        let (sink, stream) = FallibleWs(*self.inner).split();
+        (
+            WebSocketWrite {
+                inner: sink,
+                compression_accepted: self.compression_accepted,
+            },
+            WebSocketRead {
+                inner: stream,
+                compression_accepted: self.compression_accepted,
+            },
+        )
     }
 }
 
@@ -878,34 +767,10 @@ where
 }
 
 /// The read half of a split WebSocket connection.
-enum ReadHalf {
-    H1(futures_util::stream::SplitStream<FallibleWs<hpx_yawc::TcpWebSocket>>),
-    H2(futures_util::stream::SplitStream<FallibleWs<hpx_yawc::H2WebSocket>>),
-}
+type ReadHalf = futures_util::stream::SplitStream<FallibleWs<ClientWs>>;
 
 /// The write half of a split WebSocket connection.
-enum WriteHalf {
-    H1(futures_util::stream::SplitSink<FallibleWs<hpx_yawc::TcpWebSocket>, hpx_yawc::Frame>),
-    H2(futures_util::stream::SplitSink<FallibleWs<hpx_yawc::H2WebSocket>, hpx_yawc::Frame>),
-}
-
-impl fmt::Debug for InnerWs {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("InnerWs").finish_non_exhaustive()
-    }
-}
-
-impl fmt::Debug for ReadHalf {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ReadHalf").finish_non_exhaustive()
-    }
-}
-
-impl fmt::Debug for WriteHalf {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("WriteHalf").finish_non_exhaustive()
-    }
-}
+type WriteHalf = futures_util::stream::SplitSink<FallibleWs<ClientWs>, hpx_yawc::Frame>;
 
 /// A WebSocket reader using the yawc backend.
 pub struct WebSocketRead {
@@ -926,11 +791,7 @@ impl Stream for WebSocketRead {
     type Item = Result<Message, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let polled = match &mut self.inner {
-            ReadHalf::H1(stream) => Pin::new(stream).poll_next(cx),
-            ReadHalf::H2(stream) => Pin::new(stream).poll_next(cx),
-        };
-        match polled {
+        match Pin::new(&mut self.inner).poll_next(cx) {
             Poll::Ready(Some(read)) => {
                 let msg = read_to_message(read);
                 if let Some(Ok(message)) = &msg {
@@ -957,11 +818,7 @@ impl WebSocketRead {
     /// closed, `Some(Err(_))` for a failed read.
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub async fn recv(&mut self) -> Option<Result<Message, Error>> {
-        let msg = match &mut self.inner {
-            ReadHalf::H1(stream) => stream.next().await,
-            ReadHalf::H2(stream) => stream.next().await,
-        }
-        .and_then(read_to_message);
+        let msg = self.inner.next().await.and_then(read_to_message);
         if let Some(Ok(message)) = &msg {
             crate::hotpath::record_ws_bytes_recv(message.len());
         }
@@ -997,11 +854,10 @@ impl WebSocketWrite {
         let bytes = msg.len();
         let frame = message_to_frame(msg);
         crate::hotpath::record_ws_bytes_sent(bytes);
-        match &mut self.inner {
-            WriteHalf::H1(sink) => sink.send(frame).await,
-            WriteHalf::H2(sink) => sink.send(frame).await,
-        }
-        .map_err(|e| Error::upgrade(e.to_string()))
+        self.inner
+            .send(frame)
+            .await
+            .map_err(|e| Error::upgrade(e.to_string()))
     }
 
     /// Closes the connection with a given code and (optional) reason.
@@ -1015,11 +871,10 @@ impl WebSocketWrite {
         let reason = reason.into();
         let yawc_code: hpx_yawc::close::CloseCode = code.0.into();
         let frame = hpx_yawc::Frame::close(yawc_code, reason.as_bytes());
-        match &mut self.inner {
-            WriteHalf::H1(sink) => sink.send(frame).await,
-            WriteHalf::H2(sink) => sink.send(frame).await,
-        }
-        .map_err(|e| Error::upgrade(e.to_string()))
+        self.inner
+            .send(frame)
+            .await
+            .map_err(|e| Error::upgrade(e.to_string()))
     }
 }
 
