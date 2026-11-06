@@ -9,7 +9,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures_util::{SinkExt, Stream, StreamExt};
+use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use http::{HeaderMap, HeaderName, HeaderValue, Uri, Version};
 
 use super::{
@@ -408,7 +408,11 @@ impl WebSocketRequestBuilder {
         // Configure yawc options
         let mut options = hpx_yawc::Options::default();
         if let Some(max_size) = config.max_message_size {
-            options = options.with_max_payload_read(max_size);
+            // `max_payload_read` alone caps a single frame. yawc caps a
+            // message reassembled from fragments, and permessage-deflate
+            // output, with `max_read_buffer`, which otherwise defaults to
+            // twice the frame limit.
+            options = options.with_limits(max_size, max_size);
         }
 
         // Configure compression through yawc's native negotiation.
@@ -637,41 +641,48 @@ impl WebSocketResponse {
 }
 
 /// Convert a yawc Frame to our Message type.
-fn frame_to_message(frame: hpx_yawc::Frame) -> Message {
+fn frame_to_message(frame: hpx_yawc::Frame) -> Result<Message, hpx_yawc::WebSocketError> {
     let (opcode, _is_fin, payload) = frame.into_parts();
     match opcode {
         hpx_yawc::OpCode::Text => {
-            // Zero-copy fast path: yawc already validated UTF-8 on the read
-            // path, so a uniquely-owned `Bytes` (refcount 1, the common case
-            // for freshly decoded frames) converts to a `String` with no copy.
-            let s = match payload.try_into_mut() {
-                Ok(bytes_mut) => {
-                    let vec: Vec<u8> = Vec::from(bytes_mut);
-                    match String::from_utf8(vec) {
-                        Ok(s) => s,
-                        Err(err) => String::from_utf8_lossy(err.as_bytes()).into_owned(),
-                    }
-                }
-                Err(shared) => String::from_utf8_lossy(&shared).into_owned(),
+            // yawc's `check_utf8` is left off, so this conversion is the only
+            // UTF-8 validation of a text message, and invalid UTF-8 fails the
+            // read (RFC 6455 §8.1). A uniquely-owned `Bytes` (refcount 1)
+            // converts to a `String` with no copy.
+            let text = match payload.try_into_mut() {
+                Ok(unique) => Utf8Bytes::try_from(Vec::from(unique)),
+                Err(shared) => Utf8Bytes::try_from(shared),
             };
-            Message::Text(Utf8Bytes::from(s))
+            text.map(Message::Text)
+                .map_err(|_| hpx_yawc::WebSocketError::InvalidUTF8)
         }
-        hpx_yawc::OpCode::Binary => Message::Binary(payload),
-        hpx_yawc::OpCode::Ping => Message::Ping(payload),
-        hpx_yawc::OpCode::Pong => Message::Pong(payload),
+        hpx_yawc::OpCode::Binary => Ok(Message::Binary(payload)),
+        hpx_yawc::OpCode::Ping => Ok(Message::Ping(payload)),
+        hpx_yawc::OpCode::Pong => Ok(Message::Pong(payload)),
         hpx_yawc::OpCode::Close => {
             if payload.len() >= 2 {
                 let code = u16::from_be_bytes([payload[0], payload[1]]);
                 let reason = String::from_utf8_lossy(&payload[2..]).to_string();
-                Message::Close(Some(CloseFrame {
+                Ok(Message::Close(Some(CloseFrame {
                     code: CloseCode(code),
                     reason: Utf8Bytes::from(reason),
-                }))
+                })))
             } else {
-                Message::Close(None)
+                Ok(Message::Close(None))
             }
         }
-        hpx_yawc::OpCode::Continuation => Message::Binary(payload),
+        hpx_yawc::OpCode::Continuation => Ok(Message::Binary(payload)),
+    }
+}
+
+/// Maps one yawc read to the `recv` contract: `None` for a clean end of
+/// stream, `Some(Err(_))` for a failed read.
+fn read_to_message(read: hpx_yawc::Result<hpx_yawc::Frame>) -> Option<Result<Message, Error>> {
+    match read.and_then(frame_to_message) {
+        Ok(message) => Some(Ok(message)),
+        // yawc reports both a received close frame and EOF this way.
+        Err(hpx_yawc::WebSocketError::ConnectionClosed) => None,
+        Err(err) => Some(Err(Error::upgrade(err))),
     }
 }
 
@@ -740,14 +751,20 @@ impl WebSocket {
 
     /// Receive another message.
     ///
-    /// Returns `None` if the stream has closed.
+    /// Returns `None` once the stream has closed: after the peer's close
+    /// frame has been returned, or at EOF. A failed read (a protocol
+    /// violation, a message over the size limit, a text message that is not
+    /// valid UTF-8, or an I/O error) returns `Some(Err(_))`.
     #[inline]
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub async fn recv(&mut self) -> Option<Result<Message, Error>> {
-        let msg = match &mut self.inner {
-            InnerWs::H1(ws) => ws.next().await.map(|frame| Ok(frame_to_message(frame))),
-            InnerWs::H2(ws) => ws.next().await.map(|frame| Ok(frame_to_message(frame))),
+        // `next_frame`, not yawc's `Stream` impl, which maps every error to
+        // `None`.
+        let read = match &mut self.inner {
+            InnerWs::H1(ws) => ws.next_frame().await,
+            InnerWs::H2(ws) => ws.next_frame().await,
         };
+        let msg = read_to_message(read);
         if let Some(Ok(message)) = &msg {
             crate::hotpath::record_ws_bytes_recv(message.len());
         }
@@ -790,7 +807,7 @@ impl WebSocket {
     pub fn split(self) -> (WebSocketWrite, WebSocketRead) {
         match self.inner {
             InnerWs::H1(ws) => {
-                let (sink, stream) = (*ws).split();
+                let (sink, stream) = FallibleWs(*ws).split();
                 (
                     WebSocketWrite {
                         inner: WriteHalf::H1(sink),
@@ -803,7 +820,7 @@ impl WebSocket {
                 )
             }
             InnerWs::H2(ws) => {
-                let (sink, stream) = (*ws).split();
+                let (sink, stream) = FallibleWs(*ws).split();
                 (
                     WebSocketWrite {
                         inner: WriteHalf::H2(sink),
@@ -819,16 +836,57 @@ impl WebSocket {
     }
 }
 
+/// A yawc WebSocket whose `Stream` impl keeps read errors.
+///
+/// yawc's own `Stream` impl maps every read error to `None`, so a failed
+/// connection would look like a clean end of stream after a split. This
+/// wrapper streams `poll_next_frame` results instead and forwards `Sink`.
+struct FallibleWs<W>(W);
+
+impl<S> Stream for FallibleWs<hpx_yawc::WebSocket<S>>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    type Item = hpx_yawc::Result<hpx_yawc::Frame>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.get_mut().0.poll_next_frame(cx).map(Some)
+    }
+}
+
+impl<S> Sink<hpx_yawc::Frame> for FallibleWs<hpx_yawc::WebSocket<S>>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    type Error = hpx_yawc::WebSocketError;
+
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Pin::new(&mut self.get_mut().0).poll_ready(cx)
+    }
+
+    fn start_send(self: Pin<&mut Self>, item: hpx_yawc::Frame) -> Result<(), Self::Error> {
+        Pin::new(&mut self.get_mut().0).start_send(item)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Pin::new(&mut self.get_mut().0).poll_flush(cx)
+    }
+
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Pin::new(&mut self.get_mut().0).poll_close(cx)
+    }
+}
+
 /// The read half of a split WebSocket connection.
 enum ReadHalf {
-    H1(futures_util::stream::SplitStream<hpx_yawc::TcpWebSocket>),
-    H2(futures_util::stream::SplitStream<hpx_yawc::H2WebSocket>),
+    H1(futures_util::stream::SplitStream<FallibleWs<hpx_yawc::TcpWebSocket>>),
+    H2(futures_util::stream::SplitStream<FallibleWs<hpx_yawc::H2WebSocket>>),
 }
 
 /// The write half of a split WebSocket connection.
 enum WriteHalf {
-    H1(futures_util::stream::SplitSink<hpx_yawc::TcpWebSocket, hpx_yawc::Frame>),
-    H2(futures_util::stream::SplitSink<hpx_yawc::H2WebSocket, hpx_yawc::Frame>),
+    H1(futures_util::stream::SplitSink<FallibleWs<hpx_yawc::TcpWebSocket>, hpx_yawc::Frame>),
+    H2(futures_util::stream::SplitSink<FallibleWs<hpx_yawc::H2WebSocket>, hpx_yawc::Frame>),
 }
 
 impl fmt::Debug for InnerWs {
@@ -873,10 +931,12 @@ impl Stream for WebSocketRead {
             ReadHalf::H2(stream) => Pin::new(stream).poll_next(cx),
         };
         match polled {
-            Poll::Ready(Some(frame)) => {
-                let msg = frame_to_message(frame);
-                crate::hotpath::record_ws_bytes_recv(msg.len());
-                Poll::Ready(Some(Ok(msg)))
+            Poll::Ready(Some(read)) => {
+                let msg = read_to_message(read);
+                if let Some(Ok(message)) = &msg {
+                    crate::hotpath::record_ws_bytes_recv(message.len());
+                }
+                Poll::Ready(msg)
             }
             Poll::Ready(None) => Poll::Ready(None),
             Poll::Pending => Poll::Pending,
@@ -892,12 +952,16 @@ impl WebSocketRead {
     }
 
     /// Receive another message.
+    ///
+    /// Same contract as [`WebSocket::recv`]: `None` once the stream has
+    /// closed, `Some(Err(_))` for a failed read.
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub async fn recv(&mut self) -> Option<Result<Message, Error>> {
         let msg = match &mut self.inner {
-            ReadHalf::H1(stream) => stream.next().await.map(|frame| Ok(frame_to_message(frame))),
-            ReadHalf::H2(stream) => stream.next().await.map(|frame| Ok(frame_to_message(frame))),
-        };
+            ReadHalf::H1(stream) => stream.next().await,
+            ReadHalf::H2(stream) => stream.next().await,
+        }
+        .and_then(read_to_message);
         if let Some(Ok(message)) = &msg {
             crate::hotpath::record_ws_bytes_recv(message.len());
         }
@@ -1008,6 +1072,57 @@ mod tests {
         assert_eq!(
             WebSocketConfig::default().max_message_size,
             Some(DEFAULT_MAX_MESSAGE_SIZE)
+        );
+    }
+
+    /// Text payloads are validated on both conversion paths: a uniquely
+    /// owned `Bytes` (converted in place) and a shared one (copied).
+    #[test]
+    fn frame_to_message_validates_text_utf8() {
+        let valid = b"caf\xC3\xA9";
+        for payload in [
+            bytes::Bytes::from(valid.to_vec()),
+            bytes::Bytes::from_static(valid),
+        ] {
+            let message = frame_to_message(hpx_yawc::Frame::text(payload));
+            assert!(
+                matches!(&message, Ok(Message::Text(text)) if text.as_str() == "caf\u{e9}"),
+                "unexpected conversion: {message:?}"
+            );
+        }
+
+        // 0xC3 0x28 is an invalid two-byte sequence.
+        let invalid = b"\xC3\x28";
+        for payload in [
+            bytes::Bytes::from(invalid.to_vec()),
+            bytes::Bytes::from_static(invalid),
+        ] {
+            let message = frame_to_message(hpx_yawc::Frame::text(payload));
+            assert!(
+                matches!(message, Err(hpx_yawc::WebSocketError::InvalidUTF8)),
+                "invalid UTF-8 must fail the read: {message:?}"
+            );
+        }
+    }
+
+    /// `ConnectionClosed` is a clean end of stream; every other read error,
+    /// including invalid UTF-8, must reach the caller.
+    #[test]
+    fn read_to_message_keeps_errors() {
+        let closed = read_to_message(Err(hpx_yawc::WebSocketError::ConnectionClosed));
+        assert!(closed.is_none(), "{closed:?}");
+
+        let too_large = read_to_message(Err(hpx_yawc::WebSocketError::FrameTooLarge));
+        assert!(
+            matches!(&too_large, Some(Err(err)) if err.is_upgrade()),
+            "{too_large:?}"
+        );
+
+        let frame = hpx_yawc::Frame::text(bytes::Bytes::from_static(b"\xC3\x28"));
+        let invalid = read_to_message(Ok(frame));
+        assert!(
+            matches!(&invalid, Some(Err(err)) if err.is_upgrade()),
+            "{invalid:?}"
         );
     }
 }
