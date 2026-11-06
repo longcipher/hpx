@@ -15,7 +15,7 @@ exclude = [
 resolver = "3"
 
 [workspace.package]
-version = "2.5.35"
+version = "2.6.0"
 edition = "2024"
 authors = ["Akagi201 <akagi201@gmail.com>"]
 license = "Apache-2.0"
@@ -213,12 +213,12 @@ all = "warn"
 # kept together in one place. On a version bump, update [workspace.package]
 # below and these eight lines (single find/replace). Each crate's own version
 # still uses `version.workspace = true` in its manifest.
-hpx = { path = "crates/hpx", version = "2.5.35" }
-hpx-browser = { path = "crates/hpx-browser", version = "2.5.35" }
-hpx-dl = { path = "crates/hpx-dl", version = "2.5.35" }
-hpx-emulation = { path = "crates/hpx-emulation", version = "2.5.35" }
-hpx-h3 = { path = "crates/hpx-h3", version = "2.5.35" }
-hpx-yawc = { path = "crates/yawc", version = "2.5.35" }
+hpx = { path = "crates/hpx", version = "2.6.0" }
+hpx-browser = { path = "crates/hpx-browser", version = "2.6.0" }
+hpx-dl = { path = "crates/hpx-dl", version = "2.6.0" }
+hpx-emulation = { path = "crates/hpx-emulation", version = "2.6.0" }
+hpx-h3 = { path = "crates/hpx-h3", version = "2.6.0" }
+hpx-yawc = { path = "crates/yawc", version = "2.6.0" }
 
 # external crates
 ahash = "0.8.12"
@@ -255,7 +255,7 @@ encoding_rs = "0.8.44"
 eyre = "0.6.14"
 faster-hex = "1.0.0"
 fastrand = "2.5.0"
-flate2 = "1.1.10"
+flate2 = "1.1.11"
 fontdb = "0.24.0"
 futures = "0.3.34"
 futures-channel = "0.3.34"
@@ -328,7 +328,7 @@ taffy = { version = "0.15.1", default-features = false }
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 tokio = "1.54.1"
-tokio-boring = "5.3.0"
+tokio-boring = "5.4.0"
 tokio-openssl = "0.6.5"
 tokio-rustls = "0.26.6"
 tokio-socks = "0.5.3"
