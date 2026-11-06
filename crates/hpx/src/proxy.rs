@@ -3,7 +3,7 @@ pub(crate) mod auth;
 mod mac;
 #[cfg(feature = "pac")]
 pub(crate) mod pac;
-#[cfg(any(windows, target_os = "macos", test))]
+#[cfg(any(all(any(windows, target_os = "macos"), feature = "system-proxy"), test))]
 mod sysproxy;
 #[cfg(unix)]
 mod uds;

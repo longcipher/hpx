@@ -8,6 +8,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   CARGO_BUILD_RUSTC_WRAPPER: ""
+  CARGO_INCREMENTAL: 0
 
 permissions:
   contents: write
@@ -24,8 +25,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Install the pinned toolchain
+        run: rustup toolchain install "$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" --profile minimal
 
       - uses: taiki-e/install-action@v2
         with:
