@@ -103,7 +103,8 @@ impl SegmentRange {
 ///
 /// # Errors
 ///
-/// Returns [`DownloadError::Http`] if the HEAD request fails.
+/// Returns [`DownloadError::Http`] if the HEAD request fails, or
+/// [`DownloadError::UnexpectedStatus`] if the response status is not 2xx.
 pub async fn probe_remote(client: &hpx::Client, url: &str) -> Result<RemoteInfo, DownloadError> {
     probe_remote_with_headers(client, url, &HashMap::new()).await
 }
@@ -121,6 +122,14 @@ pub async fn probe_remote_with_headers(
         request = request.header(name, value);
     }
     let response = request.send().await?;
+
+    // A 404, a 5xx or an unfollowed redirect describes an error page, not the
+    // file: its Content-Length (usually 0) would be "downloaded" as an empty
+    // file and reported as Completed.
+    let status = response.status();
+    if !status.is_success() {
+        return Err(DownloadError::UnexpectedStatus(status.as_u16()));
+    }
     let headers = response.headers();
 
     let content_length = headers
@@ -164,6 +173,7 @@ pub async fn probe_remote_with_headers(
 ///
 /// Returns an empty vec for a 0-byte file, or a single segment when
 /// `max_connections == 1` or the file is smaller than `min_segment_size`.
+/// A `min_segment_size` of 0 is treated as 1.
 #[must_use]
 pub fn calculate_segments(
     file_size: u64,
@@ -173,6 +183,10 @@ pub fn calculate_segments(
     if file_size == 0 {
         return Vec::new();
     }
+
+    // `EngineConfig::min_segment_size` is a public, unvalidated field; 0 would
+    // divide by zero below. A 1-byte minimum is the same "no minimum" intent.
+    let min_segment_size = min_segment_size.max(1);
 
     if max_connections == 0 || max_connections == 1 || file_size <= min_segment_size {
         return vec![SegmentRange::new(0, file_size - 1)];
@@ -1065,6 +1079,16 @@ mod tests {
         assert_eq!(segs.len(), 2);
         assert_eq!(segs[0], SegmentRange::new(0, 4_999));
         assert_eq!(segs[1], SegmentRange::new(5_000, 9_999));
+    }
+
+    #[test]
+    fn zero_min_segment_size_is_treated_as_one() {
+        // Regression: 0 divided `file_size` by zero and panicked.
+        let segs = calculate_segments(10, 4, 0);
+        assert_eq!(segs, calculate_segments(10, 4, 1));
+        assert_eq!(segs.len(), 4);
+        assert_eq!(segs[0].start, 0);
+        assert_eq!(segs[3].end, 9);
     }
 
     // --- Property tests ---

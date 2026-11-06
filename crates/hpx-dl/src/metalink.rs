@@ -6,7 +6,11 @@
 
 use std::path::PathBuf;
 
-use quick_xml::{Reader, events::Event};
+use quick_xml::{
+    Reader, XmlVersion,
+    escape::resolve_xml_entity,
+    events::{BytesRef, Event},
+};
 use tracing::warn;
 
 use crate::{
@@ -64,6 +68,9 @@ pub fn parse_metalink(xml: &[u8]) -> Result<Vec<MetalinkFile>, DownloadError> {
     let mut current_element: ElementKind = ElementKind::Other;
     let mut current_hash_type: Option<String> = None;
     let mut current_url_priority: Option<u32> = None;
+    // quick-xml 0.42 splits element text at every `&...;` reference (and at
+    // comments), so the value is accumulated and committed on the end tag.
+    let mut current_text = String::new();
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -72,7 +79,7 @@ pub fn parse_metalink(xml: &[u8]) -> Result<Vec<MetalinkFile>, DownloadError> {
                 match local_name.as_str() {
                     "file" => {
                         in_file = true;
-                        current_name = extract_attr(e, "name").unwrap_or_default();
+                        current_name = extract_attr(e, "name")?.unwrap_or_default();
                         current_size = None;
                         current_urls.clear();
                         current_hashes.clear();
@@ -80,14 +87,17 @@ pub fn parse_metalink(xml: &[u8]) -> Result<Vec<MetalinkFile>, DownloadError> {
                     "url" if in_file => {
                         current_element = ElementKind::Url;
                         current_url_priority =
-                            extract_attr(e, "priority").and_then(|v| v.parse().ok());
+                            extract_attr(e, "priority")?.and_then(|v| v.parse().ok());
+                        current_text.clear();
                     }
                     "hash" if in_file => {
                         current_element = ElementKind::Hash;
-                        current_hash_type = extract_attr(e, "type");
+                        current_hash_type = extract_attr(e, "type")?;
+                        current_text.clear();
                     }
                     "size" if in_file => {
                         current_element = ElementKind::Size;
+                        current_text.clear();
                     }
                     _ => {}
                 }
@@ -95,7 +105,7 @@ pub fn parse_metalink(xml: &[u8]) -> Result<Vec<MetalinkFile>, DownloadError> {
             Ok(Event::Empty(ref e)) => {
                 let local_name = resolve_local_name(e.name());
                 if local_name.as_str() == "file" {
-                    let name = extract_attr(e, "name").unwrap_or_default();
+                    let name = extract_attr(e, "name")?.unwrap_or_default();
                     // Self-closing <file/> — push immediately
                     files.push(MetalinkFile {
                         name,
@@ -118,6 +128,35 @@ pub fn parse_metalink(xml: &[u8]) -> Result<Vec<MetalinkFile>, DownloadError> {
                         in_file = false;
                     }
                     "url" | "hash" | "size" => {
+                        let text = std::mem::take(&mut current_text);
+                        // An empty element never produced a Text event, so it
+                        // still adds no URL or hash.
+                        if in_file && !text.is_empty() {
+                            match current_element {
+                                ElementKind::Url => {
+                                    current_urls.push(MetalinkUrl {
+                                        url: text,
+                                        priority: current_url_priority,
+                                    });
+                                }
+                                ElementKind::Hash => {
+                                    if let Some(ref hash_type) = current_hash_type {
+                                        if let Some(algorithm) = map_hash_algorithm(hash_type) {
+                                            current_hashes.push(ChecksumSpec {
+                                                algorithm,
+                                                expected: text,
+                                            });
+                                        } else {
+                                            warn!(hash_type = %hash_type, "unsupported hash algorithm in metalink");
+                                        }
+                                    }
+                                }
+                                ElementKind::Size => {
+                                    current_size = text.parse().ok();
+                                }
+                                ElementKind::Other => {}
+                            }
+                        }
                         current_element = ElementKind::Other;
                         current_hash_type = None;
                         current_url_priority = None;
@@ -129,29 +168,13 @@ pub fn parse_metalink(xml: &[u8]) -> Result<Vec<MetalinkFile>, DownloadError> {
                 // quick-xml 0.42 stores text as validated UTF-8, so it
                 // derefs to `&str` directly (no `decode()` round-trip).
                 let text: &str = e;
-                match current_element {
-                    ElementKind::Url if in_file => {
-                        current_urls.push(MetalinkUrl {
-                            url: text.to_string(),
-                            priority: current_url_priority,
-                        });
-                    }
-                    ElementKind::Hash if in_file => {
-                        if let Some(ref hash_type) = current_hash_type {
-                            if let Some(algorithm) = map_hash_algorithm(hash_type) {
-                                current_hashes.push(ChecksumSpec {
-                                    algorithm,
-                                    expected: text.to_string(),
-                                });
-                            } else {
-                                warn!(hash_type = %hash_type, "unsupported hash algorithm in metalink");
-                            }
-                        }
-                    }
-                    ElementKind::Size if in_file => {
-                        current_size = text.parse().ok();
-                    }
-                    _ => {}
+                if in_file && current_element != ElementKind::Other {
+                    current_text.push_str(text);
+                }
+            }
+            Ok(Event::GeneralRef(ref e)) => {
+                if in_file && current_element != ElementKind::Other {
+                    push_general_ref(&mut current_text, e)?;
                 }
             }
             Ok(Event::Eof) => break,
@@ -231,7 +254,13 @@ fn resolve_local_name(name: quick_xml::name::QName<'_>) -> String {
 }
 
 /// Extract an attribute value by its local name, ignoring namespace prefixes.
-fn extract_attr(event: &quick_xml::events::BytesStart<'_>, attr_name: &str) -> Option<String> {
+///
+/// `attr.value` is the raw, still-escaped text, so the value is normalized
+/// to resolve `&amp;` and character references (`name="a&amp;b.iso"`).
+fn extract_attr(
+    event: &quick_xml::events::BytesStart<'_>,
+    attr_name: &str,
+) -> Result<Option<String>, DownloadError> {
     for attr in event.attributes().flatten() {
         let key: &str = attr.key.into_inner();
         let local = if let Some(pos) = key.rfind(':') {
@@ -240,11 +269,35 @@ fn extract_attr(event: &quick_xml::events::BytesStart<'_>, attr_name: &str) -> O
             key
         };
         if local == attr_name {
-            // `attr.value` is now `Cow<'_, str>` in quick-xml 0.42.
-            return Some(attr.value.into_owned());
+            let value = attr
+                .normalized_value(XmlVersion::Implicit1_0)
+                .map_err(|e| {
+                    DownloadError::MetalinkParse(format!("invalid `{attr_name}` attribute: {e}"))
+                })?;
+            return Ok(Some(value.into_owned()));
         }
     }
-    None
+    Ok(None)
+}
+
+/// Append the text a `&...;` reference stands for: a character reference or
+/// one of the five predefined XML entities. Metalink has no DTD, so any other
+/// entity is undefined and the document is not well-formed.
+fn push_general_ref(text: &mut String, reference: &BytesRef<'_>) -> Result<(), DownloadError> {
+    let invalid = |detail: String| {
+        DownloadError::MetalinkParse(format!("invalid reference `&{};`: {detail}", &**reference))
+    };
+    if let Some(ch) = reference
+        .resolve_char_ref()
+        .map_err(|e| invalid(e.to_string()))?
+    {
+        text.push(ch);
+        return Ok(());
+    }
+    let resolved =
+        resolve_xml_entity(reference).ok_or_else(|| invalid("undefined entity".to_string()))?;
+    text.push_str(resolved);
+    Ok(())
 }
 
 /// Map a Metalink hash type string to our `HashAlgorithm`.
@@ -617,6 +670,48 @@ mod tests {
 
         let files = parse_metalink(xml.as_bytes()).expect("parse");
         assert_eq!(files[0].size, None);
+    }
+
+    #[test]
+    fn parse_resolves_references_in_text_and_attributes() {
+        // quick-xml reports each `&...;` as its own event; a signed mirror URL
+        // must stay one URL with its `&` restored, not split in two.
+        let xml = r#"<?xml version="1.0"?>
+<metalink xmlns="urn:ietf:params:xml:ns:metalink">
+  <file name="a&amp;b.iso">
+    <size>1&#48;</size>
+    <hash type="sha-256">ab&#x63;d</hash>
+    <url priority="1">https://m.example.com/f.iso?exp=1&amp;sig=abc</url>
+    <url>https://n.example.com/f.iso?q=&lt;&gt;&quot;&apos;&#38;</url>
+  </file>
+</metalink>"#;
+
+        let files = parse_metalink(xml.as_bytes()).expect("parse");
+        assert_eq!(files.len(), 1);
+        let f = &files[0];
+        assert_eq!(f.name, "a&b.iso");
+        assert_eq!(f.size, Some(10));
+        assert_eq!(f.hashes.len(), 1);
+        assert_eq!(f.hashes[0].expected, "abcd");
+        assert_eq!(f.urls.len(), 2);
+        assert_eq!(f.urls[0].url, "https://m.example.com/f.iso?exp=1&sig=abc");
+        assert_eq!(f.urls[0].priority, Some(1));
+        assert_eq!(f.urls[1].url, "https://n.example.com/f.iso?q=<>\"'&");
+    }
+
+    #[test]
+    fn parse_rejects_undefined_entity() {
+        let xml = r#"<metalink>
+  <file name="x.bin">
+    <url>https://example.com/x.bin?a=1&nbsp;b=2</url>
+  </file>
+</metalink>"#;
+
+        let err = parse_metalink(xml.as_bytes()).expect_err("undefined entity must be rejected");
+        assert!(
+            matches!(err, DownloadError::MetalinkParse(ref msg) if msg.contains("&nbsp;")),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

@@ -13,6 +13,25 @@ pub(crate) const fn use_color(mode: ColorMode, is_terminal: bool) -> bool {
     }
 }
 
+/// Mask the password in a URL's userinfo (`user:pass@host` becomes
+/// `user:***@host`) so a proxy URL can be printed without leaking it.
+///
+/// This works on the raw string, not through `url::Url`: the input may be
+/// scheme-less or invalid (the invalid-proxy error prints it), and the
+/// password must be masked then too. A proxy URL has no path or query, so the
+/// last `@` ends the userinfo, as URL parsers also split it.
+pub(crate) fn redact_url_password(raw: &str) -> String {
+    let (scheme, rest) = match raw.find("://") {
+        Some(index) => raw.split_at(index + "://".len()),
+        None => ("", raw),
+    };
+    let masked = rest.rsplit_once('@').and_then(|(userinfo, host)| {
+        let (user, _password) = userinfo.split_once(':')?;
+        Some(format!("{scheme}{user}:***@{host}"))
+    });
+    masked.unwrap_or_else(|| raw.to_owned())
+}
+
 pub(crate) fn print_status_line(status: u16, version: &str, color: bool) {
     let mut stderr = io::stderr().lock();
     let _ = if color {
@@ -293,5 +312,41 @@ mod tests {
     fn timing_waterfall_print_no_phases_does_not_panic() {
         let waterfall = TimingWaterfall::new();
         waterfall.print(false);
+    }
+
+    #[test]
+    fn redact_url_password_masks_password() {
+        assert_eq!(
+            redact_url_password("http://user:s3cret@proxy:8080"),
+            "http://user:***@proxy:8080"
+        );
+        assert_eq!(
+            redact_url_password("socks5h://user:s3cret@proxy:1080"),
+            "socks5h://user:***@proxy:1080"
+        );
+    }
+
+    #[test]
+    fn redact_url_password_masks_scheme_less_and_at_sign_passwords() {
+        assert_eq!(
+            redact_url_password("user:s3cret@proxy:8080"),
+            "user:***@proxy:8080"
+        );
+        assert_eq!(
+            redact_url_password("http://user:p@ss/w@proxy:8080"),
+            "http://user:***@proxy:8080"
+        );
+    }
+
+    #[test]
+    fn redact_url_password_keeps_urls_without_password() {
+        for raw in [
+            "http://proxy:8080",
+            "proxy:8080",
+            "http://user@proxy:8080",
+            "",
+        ] {
+            assert_eq!(redact_url_password(raw), raw);
+        }
     }
 }

@@ -98,7 +98,7 @@ pub(crate) async fn handle_fetch(config: FetchConfig) -> eyre::Result<()> {
 
     // Page is !Send, so spawn a dedicated std::thread with its own runtime.
     let url_clone = url.clone();
-    let (tx, rx) = std::sync::mpsc::channel::<eyre::Result<String>>();
+    let (tx, rx) = tokio::sync::oneshot::channel::<eyre::Result<String>>();
 
     std::thread::spawn(move || {
         let rt = match tokio::runtime::Builder::new_current_thread()
@@ -160,12 +160,12 @@ pub(crate) async fn handle_fetch(config: FetchConfig) -> eyre::Result<()> {
         let _ = tx.send(result);
     });
 
-        // Use spawn_blocking so the blocking recv() doesn't stall the async
-        // runtime, and so tokio::time::timeout can actually fire.
-        let content = tokio::task::spawn_blocking(move || rx.recv())
-            .await
-            .wrap_err("page worker task join")?
-            .wrap_err("page worker thread panicked")??;
+        // Await a tokio oneshot rather than a blocking `recv()` on the
+        // blocking pool: when the timeout fires, a blocking-pool task would
+        // keep waiting on the stuck worker thread and runtime shutdown would
+        // wait for it forever. Dropping this receiver leaves nothing behind,
+        // and the detached worker thread dies with the process.
+        let content = rx.await.wrap_err("page worker thread panicked")??;
 
         write_output(&output, content.as_bytes())?;
         Ok(())
@@ -304,7 +304,7 @@ pub(crate) async fn handle_scrape(config: ScrapeConfig) -> eyre::Result<()> {
 async fn scrape_single_url(
     url: &str,
     eval: Option<&str>,
-    _timeout: u64,
+    timeout: u64,
     allow_private_network: bool,
 ) -> ScrapeResult {
     let t0 = Instant::now();
@@ -312,7 +312,7 @@ async fn scrape_single_url(
     let eval_owned = eval.map(|e| e.to_string());
     let url_for_err = url_owned.clone();
 
-    let (tx, rx) = std::sync::mpsc::channel::<eyre::Result<ScrapeResult>>();
+    let (tx, rx) = tokio::sync::oneshot::channel::<eyre::Result<ScrapeResult>>();
 
     std::thread::spawn(move || {
         let rt = match tokio::runtime::Builder::new_current_thread()
@@ -361,26 +361,24 @@ async fn scrape_single_url(
         let _ = tx.send(result);
     });
 
-    match rx.recv() {
-        Ok(Ok(r)) => r,
-        Ok(Err(e)) => ScrapeResult {
-            url: url_for_err,
-            title: None,
-            html: None,
-            text: None,
-            eval: None,
-            time_ms: t0.elapsed().as_millis() as u64,
-            error: Some(e.to_string()),
-        },
-        Err(_) => ScrapeResult {
-            url: url_for_err,
-            title: None,
-            html: None,
-            text: None,
-            eval: None,
-            time_ms: t0.elapsed().as_millis() as u64,
-            error: Some("worker thread panicked".to_string()),
-        },
+    // Await a tokio oneshot under the per-URL timeout: a blocking `recv()`
+    // parked a runtime worker thread and could never time out. On timeout the
+    // receiver is dropped and the stuck worker thread is abandoned; it dies
+    // with the process.
+    let error = match tokio::time::timeout(Duration::from_secs(timeout), rx).await {
+        Ok(Ok(Ok(r))) => return r,
+        Ok(Ok(Err(e))) => e.to_string(),
+        Ok(Err(_)) => "worker thread panicked".to_string(),
+        Err(_) => format!("timed out after {timeout}s"),
+    };
+    ScrapeResult {
+        url: url_for_err,
+        title: None,
+        html: None,
+        text: None,
+        eval: None,
+        time_ms: t0.elapsed().as_millis() as u64,
+        error: Some(error),
     }
 }
 

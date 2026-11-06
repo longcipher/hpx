@@ -316,3 +316,79 @@ async fn fetch_rejects_private_network_without_flag() {
         "expected SSRF error, got: {err}"
     );
 }
+
+/// A listener that never accepts: connects complete in the kernel backlog,
+/// but no response ever arrives, so a navigation to it never finishes.
+/// Keep the listener alive for the whole test.
+fn tarpit() -> (std::net::TcpListener, String) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/", listener.local_addr().unwrap());
+    (listener, url)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fetch_timeout_exits_on_unresponsive_server() {
+    let (_tarpit, url) = tarpit();
+    // The fetch deadline is `timeout + wait + 10` = 10 s. The CLI must report
+    // it and exit, not hang in runtime shutdown on the stuck page worker.
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(40),
+        cmd()
+            .args([
+                "fetch",
+                &url,
+                "--dump",
+                "html",
+                "--allow-private-network",
+                "--quiet",
+                "--wait",
+                "0",
+                "--timeout",
+                "0",
+            ])
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .expect("hpx fetch did not exit after its deadline")
+    .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "expected a timeout error");
+    assert!(
+        stderr.contains("fetch timed out after 10s"),
+        "expected timeout error, got: {stderr}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn scrape_honors_per_url_timeout() {
+    let (_tarpit, url) = tarpit();
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        cmd()
+            .args([
+                "scrape",
+                &url,
+                "--format",
+                "json",
+                "--allow-private-network",
+                "--quiet",
+                "--timeout",
+                "1",
+            ])
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .expect("hpx scrape ignored its per-URL timeout")
+    .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "scrape failed: stdout={stdout} stderr={stderr}"
+    );
+    let results: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(results[0]["url"], url.as_str());
+    assert_eq!(results[0]["error"], "timed out after 1s");
+}

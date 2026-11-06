@@ -270,3 +270,150 @@ async fn test_download_to_file() {
     let content = std::fs::read_to_string(&output_path).unwrap();
     assert_eq!(content, "file content here");
 }
+
+const DL_FILE_LEN: usize = 1000;
+
+fn dl_payload() -> Vec<u8> {
+    (0..DL_FILE_LEN).map(|i| (i % 251) as u8).collect()
+}
+
+/// Serve `/file.bin` like a static file server: HEAD reports the length and
+/// range support, GET honors `Range` with 206.
+async fn start_dl_server() -> String {
+    use axum::{
+        http::{HeaderValue, StatusCode, header},
+        response::{IntoResponse, Response},
+    };
+
+    async fn head_file() -> Response {
+        let mut resp = StatusCode::OK.into_response();
+        let headers = resp.headers_mut();
+        headers.insert(header::CONTENT_LENGTH, HeaderValue::from(DL_FILE_LEN));
+        headers.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+        resp
+    }
+
+    async fn get_file(headers: HeaderMap) -> Response {
+        let data = dl_payload();
+        let range = headers
+            .get(header::RANGE)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("bytes="))
+            .and_then(|v| v.split_once('-'))
+            .and_then(|(start, end)| {
+                Some((start.parse::<usize>().ok()?, end.parse::<usize>().ok()?))
+            });
+        match range {
+            Some((start, end)) => {
+                let mut resp =
+                    (StatusCode::PARTIAL_CONTENT, data[start..=end].to_vec()).into_response();
+                resp.headers_mut().insert(
+                    header::CONTENT_RANGE,
+                    HeaderValue::from_str(&format!("bytes {start}-{end}/{DL_FILE_LEN}")).unwrap(),
+                );
+                resp
+            }
+            None => (StatusCode::OK, data).into_response(),
+        }
+    }
+
+    let app = Router::new().route("/file.bin", get(get_file).head(head_file));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    format!("http://{addr}")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dl_add_exits_after_download_completes() {
+    let base = start_dl_server().await;
+    let temp_dir = tempfile::tempdir().unwrap();
+    let storage = temp_dir.path().join("downloads.db");
+    let output_path = temp_dir.path().join("file.bin");
+
+    // A successful download emits `Completed`; `dl add` must stop waiting on
+    // it instead of blocking forever.
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        tokio::process::Command::new(env!("CARGO_BIN_EXE_hpx"))
+            .args([
+                "--storage-path",
+                storage.to_str().unwrap(),
+                "dl",
+                "add",
+                &format!("{base}/file.bin"),
+                "-o",
+                output_path.to_str().unwrap(),
+            ])
+            .env_remove("http_proxy")
+            .env_remove("https_proxy")
+            .env_remove("all_proxy")
+            .env_remove("HTTP_PROXY")
+            .env_remove("HTTPS_PROXY")
+            .env_remove("ALL_PROXY")
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .expect("hpx dl add did not exit after the download completed")
+    .unwrap();
+
+    assert!(
+        output.status.success(),
+        "dl add failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(std::fs::read(&output_path).unwrap(), dl_payload());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dry_run_redacts_proxy_password() {
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_hpx"))
+        .args([
+            "--dry-run",
+            "--proxy",
+            "http://user:s3cret@127.0.0.1:9",
+            "http://127.0.0.1:9/",
+        ])
+        .output()
+        .await
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "dry run failed: {stderr}");
+    assert!(
+        stderr.contains("[proxy] http://user:***@127.0.0.1:9"),
+        "expected redacted proxy, got: {stderr}"
+    );
+    assert!(
+        !stdout.contains("s3cret") && !stderr.contains("s3cret"),
+        "proxy password leaked:\nstdout={stdout}\nstderr={stderr}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn invalid_proxy_error_redacts_password() {
+    // Scheme-less, so hpx rejects it with an error that embeds the URI.
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_hpx"))
+        .args(["--proxy", "user:s3cret@proxy:8080", "http://127.0.0.1:9/"])
+        .env("RUST_LOG", "error")
+        .output()
+        .await
+        .unwrap();
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!output.status.success(), "expected an invalid proxy error");
+    assert!(
+        combined.contains("invalid proxy URL: user:***@proxy:8080"),
+        "expected redacted proxy error, got: {combined}"
+    );
+    assert!(
+        !combined.contains("s3cret"),
+        "proxy password leaked: {combined}"
+    );
+}
