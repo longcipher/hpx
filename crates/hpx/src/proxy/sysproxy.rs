@@ -14,6 +14,7 @@ use super::matcher::Builder;
 /// Windows stores the value either as a single `host:port` pair that applies
 /// to every protocol, or as a `;`-separated list of `scheme=host:port`
 /// entries.
+#[cfg(any(windows, test))]
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(super) struct WindowsProxyServer {
     /// Endpoint used for plain HTTP requests.
@@ -33,6 +34,7 @@ pub(super) struct WindowsProxyServer {
 /// * `proxy.example.com:8080` — a single endpoint for every protocol.
 /// * `http=proxy:8080;https=proxy:8443;socks=proxy:1080` — one endpoint per
 ///   protocol. Unknown protocol keys are ignored.
+#[cfg(any(windows, test))]
 pub(super) fn parse_windows_proxy_server(value: &str) -> WindowsProxyServer {
     let mut parsed = WindowsProxyServer::default();
 
@@ -78,6 +80,7 @@ pub(super) fn parse_windows_proxy_server(value: &str) -> WindowsProxyServer {
 /// form maps `http=`/`https=` to the matching matcher slot and `socks=` to
 /// the catch-all slot, which the matcher uses as the fallback for protocols
 /// without a dedicated entry.
+#[cfg(any(windows, test))]
 pub(super) fn apply_windows_proxy_server(builder: &mut Builder, value: &str) {
     let parsed = parse_windows_proxy_server(value);
 
@@ -117,6 +120,7 @@ pub(super) fn apply_windows_proxy_server(builder: &mut Builder, value: &str) {
 /// without a dot) is preserved: the matcher understands it. A leading `*.`
 /// wildcard is rewritten to the leading-dot domain form, which matches the
 /// domain and all of its subdomains.
+#[cfg(any(windows, test))]
 pub(super) fn parse_windows_proxy_override(value: &str) -> String {
     value
         .split(';')
@@ -144,6 +148,7 @@ pub(super) fn socks_endpoint(host: &str) -> String {
 /// proxies, and uses it for the protocols that have no dedicated proxy. The
 /// matcher uses the catch-all slot the same way, so the SOCKS endpoint is
 /// stored there and only applies to the protocols without their own entry.
+#[cfg(any(target_os = "macos", test))]
 pub(super) fn apply_macos_socks_proxy(builder: &mut Builder, endpoint: Option<&str>) {
     if let Some(endpoint) = endpoint
         && builder.all.is_empty()
@@ -156,6 +161,7 @@ pub(super) fn apply_macos_socks_proxy(builder: &mut Builder, endpoint: Option<&s
 ///
 /// Windows stores bare `host:port` endpoints, but a user may have typed a
 /// scheme into the registry value by hand.
+#[cfg(any(windows, test))]
 fn strip_endpoint_scheme(endpoint: &str) -> &str {
     match endpoint.find("://") {
         Some(index) => &endpoint[index + 3..],
