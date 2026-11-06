@@ -297,6 +297,7 @@ webpki-root-certs = { workspace = true, optional = true }
 axum = { workspace = true, features = ["ws"] }
 base64-simd = { workspace = true }
 criterion = { workspace = true }
+dhat = { workspace = true }
 futures = { workspace = true, features = ["std"] }
 hyper = { workspace = true, features = ["http1", "http2", "server"] }
 hyper-util = { workspace = true, features = [

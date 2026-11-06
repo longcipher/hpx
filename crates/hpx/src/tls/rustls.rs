@@ -4,6 +4,7 @@ use std::{
     collections::HashMap,
     fmt::{self, Debug, Write as _},
     future::Future,
+    hash::{DefaultHasher, Hash, Hasher},
     io,
     pin::Pin,
     sync::{Arc, OnceLock},
@@ -168,18 +169,60 @@ pub(crate) struct TlsConnectorBuilder {
 ///
 /// Covers everything that affects the built `ClientConfig` on the cacheable
 /// path (no client identity, no keylog): ALPN bytes, min/max TLS versions,
-/// verifier mode, and the root-store identity (pointer for custom stores,
-/// marker for the default webpki roots). Builders with an identity or keylog
-/// bypass the cache to preserve exact behavior.
+/// verifier mode, and the root store (its trust anchors for a configured
+/// store, `None` for the built-in webpki roots). Builders with an identity or
+/// keylog bypass the cache to preserve exact behavior.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 struct CachedConnectorKey {
     alpn: Option<Vec<Vec<u8>>>,
     min_version: Option<TlsVersion>,
     max_version: Option<TlsVersion>,
     cert_verification: bool,
-    store_ptr: usize,
-    store_is_default: bool,
+    roots: Option<RootsKey>,
 }
+
+/// The root-store part of a [`CachedConnectorKey`], compared by trust anchors.
+///
+/// A store's address is not its identity. Every `CertStore::default()` is a
+/// fresh allocation holding the same webpki roots, so an address key never
+/// hits for it and every client adds a connector set that is never evicted.
+/// And a freed store's address can be reused by a store with other roots,
+/// which would then be served connectors that trust the old ones.
+///
+/// The digest is computed once per build so that lookups hash a `u64` rather
+/// than every anchor; equality still compares the anchors, so a digest
+/// collision can never alias two different stores.
+#[derive(Clone, Debug)]
+struct RootsKey {
+    digest: u64,
+    store: Arc<rustls::RootCertStore>,
+}
+
+impl RootsKey {
+    fn new(store: &Arc<rustls::RootCertStore>) -> Self {
+        let mut hasher = DefaultHasher::new();
+        store.roots.hash(&mut hasher);
+        Self {
+            digest: hasher.finish(),
+            store: store.clone(),
+        }
+    }
+}
+
+impl Hash for RootsKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.digest.hash(state);
+    }
+}
+
+impl PartialEq for RootsKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.digest == other.digest
+            && (Arc::ptr_eq(&self.store, &other.store) || self.store.roots == other.store.roots)
+    }
+}
+
+impl Eq for RootsKey {}
 
 static CONNECTOR_CACHE: OnceLock<
     parking_lot::Mutex<HashMap<CachedConnectorKey, Arc<RustlsConnector>>>,
@@ -267,7 +310,7 @@ impl TlsConnectorBuilder {
     ///
     /// The common path (no client identity, no keylog) is served from a
     /// global cache keyed by ALPN, min/max TLS versions, verifier mode, and
-    /// root-store identity. Cache hits return cloned `Arc`s without rebuilding
+    /// root-store contents. Cache hits return cloned `Arc`s without rebuilding
     /// `ClientConfig`; identity/keylog builds bypass the cache to keep
     /// behavior exact. This also covers the per-request rebuilds issued from
     /// the connector proxy-tunnel and `tls_options` paths.
@@ -287,12 +330,7 @@ impl TlsConnectorBuilder {
 
         // Only the common path is cached; identity/keylog builds stay uncached.
         let cacheable = self.identity.is_none() && self.keylog.is_none();
-        let store_ptr = self
-            .cert_store
-            .as_ref()
-            .map(|s| Arc::as_ptr(&s.store) as usize)
-            .unwrap_or(0);
-        let store_is_default = self.cert_store.is_none();
+        let roots = self.cert_store.as_ref().map(|s| RootsKey::new(&s.store));
 
         // Fast path: all four ALPN variants already cached — return cloned
         // Arcs without touching root stores or `ClientConfig` construction.
@@ -307,8 +345,7 @@ impl TlsConnectorBuilder {
                     min_version: self.min_version,
                     max_version: self.max_version,
                     cert_verification: self.cert_verification,
-                    store_ptr,
-                    store_is_default,
+                    roots: roots.clone(),
                 };
                 connector_cache().lock().get(&key).cloned()
             };
@@ -388,8 +425,7 @@ impl TlsConnectorBuilder {
                     min_version: self.min_version,
                     max_version: self.max_version,
                     cert_verification: self.cert_verification,
-                    store_ptr,
-                    store_is_default,
+                    roots: roots.clone(),
                 };
                 if let Some(hit) = connector_cache().lock().get(&key).cloned() {
                     return Ok(hit);
@@ -1035,6 +1071,153 @@ mod tests {
             .build(&opts)
             .unwrap();
         assert!(!Arc::ptr_eq(&h2.connector, &http1.connector));
+    }
+
+    #[test]
+    fn rustls_connector_cache_shares_entries_between_stores_with_the_same_roots() {
+        use crate::tls::TlsOptions;
+
+        // Every `CertStore::default()` is a fresh allocation holding the same
+        // webpki roots; both stay alive so their addresses differ.
+        let opts = TlsOptions::default();
+        let a = CertStore::default();
+        let b = CertStore::default();
+        let first = super::TlsConnector::builder()
+            .cert_store(a.clone())
+            .build(&opts)
+            .unwrap();
+        let second = super::TlsConnector::builder()
+            .cert_store(b.clone())
+            .build(&opts)
+            .unwrap();
+
+        assert!(Arc::ptr_eq(&first.connector, &second.connector));
+        assert!(Arc::ptr_eq(
+            &first.connector_no_alpn,
+            &second.connector_no_alpn
+        ));
+        assert!(Arc::ptr_eq(&first.connector_h2, &second.connector_h2));
+        assert!(Arc::ptr_eq(&first.connector_http1, &second.connector_http1));
+    }
+
+    #[test]
+    fn rustls_connector_cache_isolates_stores_with_different_roots() {
+        use crate::tls::TlsOptions;
+
+        let opts = TlsOptions::default();
+        let ca = CertStore::builder()
+            .add_pem_cert(CA_CERT_PEM)
+            .build()
+            .unwrap();
+        let server = CertStore::builder()
+            .add_pem_cert(SERVER_CERT_PEM)
+            .build()
+            .unwrap();
+        let first = super::TlsConnector::builder()
+            .cert_store(ca.clone())
+            .build(&opts)
+            .unwrap();
+        let second = super::TlsConnector::builder()
+            .cert_store(server.clone())
+            .build(&opts)
+            .unwrap();
+
+        assert!(!Arc::ptr_eq(&first.connector, &second.connector));
+        assert!(!Arc::ptr_eq(
+            &first.connector_no_alpn,
+            &second.connector_no_alpn
+        ));
+        assert!(!Arc::ptr_eq(&first.connector_h2, &second.connector_h2));
+        assert!(!Arc::ptr_eq(
+            &first.connector_http1,
+            &second.connector_http1
+        ));
+    }
+
+    #[test]
+    fn rustls_roots_key_compares_anchors_not_only_the_digest() {
+        use std::hash::{BuildHasher, RandomState};
+
+        let ca = CertStore::builder()
+            .add_pem_cert(CA_CERT_PEM)
+            .build()
+            .unwrap();
+        let same_ca = CertStore::builder()
+            .add_pem_cert(CA_CERT_PEM)
+            .build()
+            .unwrap();
+        let server = CertStore::builder()
+            .add_pem_cert(SERVER_CERT_PEM)
+            .build()
+            .unwrap();
+        let state = RandomState::new();
+
+        let key = |store: &CertStore| super::RootsKey::new(&store.store);
+        assert_eq!(key(&ca), key(&same_ca));
+        assert_eq!(state.hash_one(key(&ca)), state.hash_one(key(&same_ca)));
+        assert_ne!(key(&ca), key(&server));
+        assert_ne!(state.hash_one(key(&ca)), state.hash_one(key(&server)));
+
+        // A digest collision must not alias stores with different anchors.
+        let colliding = |store: &CertStore| super::RootsKey {
+            digest: 0,
+            store: store.store.clone(),
+        };
+        assert_ne!(colliding(&ca), colliding(&server));
+    }
+
+    #[test]
+    fn rustls_connector_cache_skips_builds_with_an_identity() {
+        use crate::tls::TlsOptions;
+
+        let opts = TlsOptions::default();
+        let identity = Identity::from_pkcs8_pem(CLIENT_CERT_PEM, CLIENT_KEY_PEM).unwrap();
+        let plain = super::TlsConnector::builder().build(&opts).unwrap();
+        let with_identity = super::TlsConnector::builder()
+            .identity(Some(identity))
+            .build(&opts)
+            .unwrap();
+
+        assert!(!Arc::ptr_eq(&plain.connector, &with_identity.connector));
+    }
+
+    #[test]
+    fn rustls_connector_cache_never_serves_a_connector_built_for_other_roots() {
+        use crate::tls::TlsOptions;
+
+        let opts = TlsOptions::default();
+        let mut store = CertStore::builder()
+            .add_pem_cert(CA_CERT_PEM)
+            .build()
+            .unwrap();
+        let first = super::TlsConnector::builder()
+            .cert_store(store.clone())
+            .build(&opts)
+            .unwrap();
+
+        // When nothing else holds the store, its allocation can be freed and
+        // handed to a new store with different roots. Reproduce that address
+        // reuse by rewriting the roots in place: the next build must not get
+        // the connectors that were built for the old roots.
+        if let Some(roots) = Arc::get_mut(&mut store.store) {
+            *roots = rustls::RootCertStore::empty();
+            roots.add_parsable_certificates(parse_certs(SERVER_CERT_PEM));
+
+            let second = super::TlsConnector::builder()
+                .cert_store(store.clone())
+                .build(&opts)
+                .unwrap();
+            assert!(!Arc::ptr_eq(&first.connector, &second.connector));
+            assert!(!Arc::ptr_eq(
+                &first.connector_no_alpn,
+                &second.connector_no_alpn
+            ));
+            assert!(!Arc::ptr_eq(&first.connector_h2, &second.connector_h2));
+            assert!(!Arc::ptr_eq(
+                &first.connector_http1,
+                &second.connector_http1
+            ));
+        }
     }
 
     #[test]
