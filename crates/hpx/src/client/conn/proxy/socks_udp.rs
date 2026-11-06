@@ -78,12 +78,15 @@ impl Socks5UdpSocket {
     ) -> io::Result<Self> {
         let mut control = TcpStream::connect(proxy).await?;
 
-        // Greeting: the methods the client supports.
-        control.write_all(&[SOCKS5_VERSION, 1, METHOD_NONE]).await?;
-        // When credentials are available, offer the password method too.
-        if credentials.is_some() {
-            control.write_all(&[METHOD_USER_PASSWORD]).await?;
-        }
+        // Greeting: the methods the client supports. When credentials are
+        // available, the password method is offered too, and NMETHODS has to
+        // count it: otherwise the proxy reads it as the next message.
+        let offer: &[u8] = if credentials.is_some() {
+            &[SOCKS5_VERSION, 2, METHOD_NONE, METHOD_USER_PASSWORD]
+        } else {
+            &[SOCKS5_VERSION, 1, METHOD_NONE]
+        };
+        control.write_all(offer).await?;
         control.flush().await?;
 
         let mut greeting = [0u8; 2];
@@ -463,5 +466,53 @@ mod tests {
     fn rejects_an_unknown_address_type() {
         let buf = [0x00, 0x00, 0x00, 0x09];
         assert!(decode_udp_header(&buf).is_err());
+    }
+
+    /// Runs a proxy that answers the greeting with `method` and returns the
+    /// methods the client offered plus the first byte it sent afterwards.
+    async fn greeting_seen_by_proxy(
+        credentials: Option<(String, String)>,
+        method: u8,
+    ) -> (Vec<u8>, u8) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut head = [0u8; 2];
+            stream.read_exact(&mut head).await.unwrap();
+            assert_eq!(head[0], SOCKS5_VERSION);
+            let mut methods = vec![0u8; usize::from(head[1])];
+            stream.read_exact(&mut methods).await.unwrap();
+            stream.write_all(&[SOCKS5_VERSION, method]).await.unwrap();
+            let mut next = [0u8; 1];
+            stream.read_exact(&mut next).await.unwrap();
+            (methods, next[0])
+        });
+
+        // The proxy hangs up after the first message, so the relay itself
+        // is never established; only what the proxy saw matters here.
+        let _ = Socks5UdpSocket::connect(proxy, credentials).await;
+
+        server.await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn greeting_counts_the_password_method() {
+        let credentials = Some(("user".to_owned(), "pass".to_owned()));
+        let (methods, next) = greeting_seen_by_proxy(credentials, METHOD_USER_PASSWORD).await;
+
+        assert_eq!(methods, [METHOD_NONE, METHOD_USER_PASSWORD]);
+        // RFC 1929: the sub-negotiation starts with version 0x01.
+        assert_eq!(next, 0x01);
+    }
+
+    #[tokio::test]
+    async fn greeting_without_credentials_offers_no_authentication() {
+        let (methods, next) = greeting_seen_by_proxy(None, METHOD_NONE).await;
+
+        assert_eq!(methods, [METHOD_NONE]);
+        // The UDP ASSOCIATE request follows the greeting directly.
+        assert_eq!(next, SOCKS5_VERSION);
     }
 }

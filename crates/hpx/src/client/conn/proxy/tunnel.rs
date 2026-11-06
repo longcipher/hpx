@@ -445,7 +445,11 @@ where
         // Consume the size line, the chunk data and the trailing CRLF.
         let mut consumed = index + 2;
         if size == 0 {
-            return Ok(());
+            // The last chunk is followed by optional trailer fields and the
+            // empty line that ends the message. Left unread, they would be
+            // parsed as the start of the next response head.
+            pending.drain(..consumed);
+            return skip_trailer_section(conn, pending).await;
         }
 
         while pending.len() < consumed + size + 2 {
@@ -458,6 +462,36 @@ where
 
         consumed += size + 2;
         pending.drain(..consumed);
+    }
+}
+
+/// Skips the trailer section of a chunked body, up to and including the
+/// empty line that ends it. `pending` holds the bytes already read.
+async fn skip_trailer_section<T>(conn: &mut T, mut pending: Vec<u8>) -> Result<(), TunnelError>
+where
+    T: AsyncRead + Unpin,
+{
+    let mut chunk = [0u8; 1024];
+
+    loop {
+        match pending.windows(2).position(|window| window == b"\r\n") {
+            // The empty line ends the message.
+            Some(0) => return Ok(()),
+            // A trailer field: skip it.
+            Some(index) => {
+                pending.drain(..index + 2);
+            }
+            None => {
+                if pending.len() > MAX_HEAD_SIZE {
+                    return Err(TunnelError::ProxyHeadersTooLong);
+                }
+                let n = read(conn, &mut chunk).await.map_err(TunnelError::Io)?;
+                if n == 0 {
+                    return Err(TunnelError::TunnelUnexpectedEof);
+                }
+                pending.extend_from_slice(&chunk[..n]);
+            }
+        }
     }
 }
 
@@ -527,5 +561,121 @@ impl HeadersExt for Headers {
             Self::Extra(extra) => Some(extra),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+
+    use super::*;
+    use crate::proxy::auth::ProxyAuthMethod;
+
+    /// An in-memory proxy connection that returns one scripted segment per
+    /// read, the way separate TCP segments arrive, and accepts every write.
+    struct ScriptedConn {
+        reads: VecDeque<&'static [u8]>,
+    }
+
+    impl AsyncRead for ScriptedConn {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            _cx: &mut task::Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            if let Some(segment) = self.reads.pop_front() {
+                let n = segment.len().min(buf.remaining());
+                buf.put_slice(&segment[..n]);
+                if n < segment.len() {
+                    self.reads.push_front(&segment[n..]);
+                }
+            }
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    impl AsyncWrite for ScriptedConn {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            _cx: &mut task::Context<'_>,
+            buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            Poll::Ready(Ok(buf.len()))
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _cx: &mut task::Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(
+            self: Pin<&mut Self>,
+            _cx: &mut task::Context<'_>,
+        ) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    const CHALLENGE: &[u8] = b"HTTP/1.1 407 Proxy Authentication Required\r\n\
+        Proxy-Authenticate: Basic realm=\"proxy\"\r\n\
+        Transfer-Encoding: chunked\r\n\r\n";
+    const ESTABLISHED: &[u8] = b"HTTP/1.1 200 Connection established\r\n\r\n";
+
+    /// Opens a tunnel with Basic credentials over the scripted segments.
+    async fn tunnel_over(segments: &[&'static [u8]]) -> Result<ScriptedConn, TunnelError> {
+        let conn = ScriptedConn {
+            reads: segments.iter().copied().collect(),
+        };
+        let credentials = ProxyCredentials::new(ProxyAuthMethod::Basic, "user", "pass");
+        tunnel(
+            conn,
+            "example.com",
+            443,
+            &Headers::Empty,
+            Some(&credentials),
+        )
+        .await
+    }
+
+    /// The CRLF that ends a chunked challenge body may arrive after the
+    /// last chunk; it must not be read as the next response's status line.
+    #[tokio::test]
+    async fn chunked_challenge_consumes_the_final_crlf() {
+        let conn = tunnel_over(&[CHALLENGE, b"5\r\nhello\r\n0\r\n", b"\r\n", ESTABLISHED])
+            .await
+            .unwrap();
+        assert!(conn.reads.is_empty());
+    }
+
+    #[tokio::test]
+    async fn chunked_challenge_consumes_the_trailers() {
+        let conn = tunnel_over(&[
+            CHALLENGE,
+            b"5\r\nhello\r\n0\r\n",
+            b"X-Trailer: one\r\nX-Other",
+            b": two\r",
+            b"\n\r\n",
+            ESTABLISHED,
+        ])
+        .await
+        .unwrap();
+        assert!(conn.reads.is_empty());
+    }
+
+    #[tokio::test]
+    async fn chunked_challenge_read_in_one_segment() {
+        let conn = tunnel_over(&[
+            CHALLENGE,
+            b"5\r\nhello\r\n0\r\nX-Trailer: one\r\n\r\n",
+            ESTABLISHED,
+        ])
+        .await
+        .unwrap();
+        assert!(conn.reads.is_empty());
+    }
+
+    #[tokio::test]
+    async fn chunked_challenge_without_the_final_crlf_is_an_eof() {
+        let result = tunnel_over(&[CHALLENGE, b"5\r\nhello\r\n0\r\n"]).await;
+        assert!(matches!(result, Err(TunnelError::TunnelUnexpectedEof)));
     }
 }

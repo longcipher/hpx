@@ -96,7 +96,7 @@ pub(crate) struct Matcher {
     inner: Box<matcher::Matcher>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 enum ProxyScheme {
     All(Uri),
     Http(Uri),
@@ -107,6 +107,68 @@ enum ProxyScheme {
     /// A Proxy Auto-Config script, evaluated for every request.
     #[cfg(feature = "pac")]
     Pac(Arc<pac::PacRule>),
+}
+
+// The URI keeps its userinfo (`Proxy::auth` even writes the password into
+// it), so a derived `Debug` would print the proxy credentials.
+impl std::fmt::Debug for ProxyScheme {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::All(uri) => f.debug_tuple("All").field(&RedactedUri(uri)).finish(),
+            Self::Http(uri) => f.debug_tuple("Http").field(&RedactedUri(uri)).finish(),
+            Self::Https(uri) => f.debug_tuple("Https").field(&RedactedUri(uri)).finish(),
+            #[cfg(unix)]
+            Self::Unix(path) => f.debug_tuple("Unix").field(path).finish(),
+            Self::Custom(custom) => f.debug_tuple("Custom").field(custom).finish(),
+            #[cfg(feature = "pac")]
+            Self::Pac(rule) => f.debug_tuple("Pac").field(rule).finish(),
+        }
+    }
+}
+
+/// The placeholder printed instead of a credential.
+const REDACTED: &str = "[REDACTED]";
+
+/// Formats a proxy URI as `scheme://host:port` when it carries userinfo,
+/// and unchanged otherwise.
+struct RedactedUri<'a>(&'a Uri);
+
+impl std::fmt::Debug for RedactedUri<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self
+            .0
+            .authority()
+            .and_then(|authority| authority.as_str().rsplit_once('@'))
+        {
+            // `Authority::as_str` keeps the brackets of an IPv6 literal, so
+            // the part after `@` is a valid `host:port` as is.
+            Some((_, host_port)) => {
+                if let Some(scheme) = self.0.scheme_str() {
+                    write!(f, "{scheme}://")?;
+                }
+                f.write_str(host_port)
+            }
+            None => std::fmt::Debug::fmt(self.0, f),
+        }
+    }
+}
+
+/// Formats custom proxy headers with the credential-bearing values redacted.
+struct RedactedHeaders<'a>(&'a HeaderMap);
+
+impl std::fmt::Debug for RedactedHeaders<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut map = f.debug_map();
+        for (name, value) in self.0 {
+            if name == http::header::PROXY_AUTHORIZATION || name == http::header::AUTHORIZATION {
+                map.entry(name, &REDACTED);
+            } else {
+                // `HeaderValue`'s own `Debug` already hides sensitive values.
+                map.entry(name, value);
+            }
+        }
+        map.finish()
+    }
 }
 
 /// The type of a user-supplied proxy selector.
@@ -233,13 +295,26 @@ impl IntoProxySealed for &Uri {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 struct Extra {
     /// The preemptive `Proxy-Authorization` header value, if any.
     auth: Option<HeaderValue>,
     /// The credentials used to answer a proxy authentication challenge.
     credentials: Option<ProxyCredentials>,
     misc: Option<HeaderMap>,
+}
+
+// `auth` holds a `Proxy-Authorization` value, and a value passed to
+// `Proxy::custom_http_auth` is not marked sensitive, so a derived `Debug`
+// could print it. `ProxyCredentials` redacts its own password.
+impl std::fmt::Debug for Extra {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Extra")
+            .field("auth", &self.auth.as_ref().map(|_| REDACTED))
+            .field("credentials", &self.credentials)
+            .field("misc", &self.misc.as_ref().map(RedactedHeaders))
+            .finish()
+    }
 }
 
 // ===== impl Proxy =====
@@ -1545,6 +1620,83 @@ mod tests {
         assert_ne!(hash_of(&plain), hash_of(&with_auth));
         assert_ne!(hash_of(&plain), hash_of(&with_headers));
         assert_ne!(hash_of(&with_auth), hash_of(&with_headers));
+    }
+
+    /// `Debug` output reaches logs (the connection pool logs its key, which
+    /// contains the proxy matcher), so it must never print a credential.
+    #[test]
+    fn test_debug_redacts_proxy_credentials() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::PROXY_AUTHORIZATION,
+            HeaderValue::from_static("Bearer secret"),
+        );
+        headers.insert("x-proxy-tag", HeaderValue::from_static("visible"));
+
+        let proxies = [
+            Proxy::all("http://user:secret@proxy.local:8080").unwrap(),
+            Proxy::all("http://proxy.local:8080")
+                .unwrap()
+                .basic_auth("user", "secret"),
+            Proxy::https("http://proxy.local:8080").unwrap().auth(
+                "user",
+                "secret",
+                ProxyAuthMethod::Digest,
+            ),
+            Proxy::all("socks5://user:secret@proxy.local:1080").unwrap(),
+            Proxy::all("http://[::1]:8080")
+                .unwrap()
+                .basic_auth("user", "secret"),
+            Proxy::all("http://proxy.local:8080")
+                .unwrap()
+                .custom_http_auth(HeaderValue::from_static("Bearer secret")),
+            Proxy::all("http://proxy.local:8080")
+                .unwrap()
+                .custom_http_headers(headers),
+        ];
+
+        // `user:secret` in base64, as sent in a `Basic` header.
+        let encoded = "dXNlcjpzZWNyZXQ=";
+
+        for proxy in proxies {
+            let rendered = format!("{proxy:?}");
+            assert!(!rendered.contains("secret"), "leaked: {rendered}");
+            assert!(!rendered.contains(encoded), "leaked: {rendered}");
+            assert!(
+                rendered.contains("proxy.local") || rendered.contains("[::1]:8080"),
+                "the proxy host should stay visible: {rendered}"
+            );
+
+            let matcher = proxy.into_matcher();
+            let rendered = format!("{matcher:?}");
+            assert!(!rendered.contains("secret"), "leaked: {rendered}");
+            assert!(!rendered.contains(encoded), "leaked: {rendered}");
+
+            let intercepted = intercept(&matcher, &uri("https://example.local"));
+            let rendered = format!("{intercepted:?}");
+            assert!(!rendered.contains("secret"), "leaked: {rendered}");
+            assert!(!rendered.contains(encoded), "leaked: {rendered}");
+        }
+    }
+
+    /// The redacted form keeps the scheme, host and port of the proxy.
+    #[test]
+    fn test_debug_keeps_the_proxy_endpoint() {
+        let proxy = Proxy::all("http://user:secret@proxy.local:8080").unwrap();
+        assert!(format!("{proxy:?}").contains("All(http://proxy.local:8080)"));
+
+        let proxy = Proxy::all("http://user:secret@[::1]:8080").unwrap();
+        assert!(format!("{proxy:?}").contains("All(http://[::1]:8080)"));
+
+        let proxy = Proxy::all("http://proxy.local:8080").unwrap();
+        assert!(format!("{proxy:?}").contains("All(http://proxy.local:8080/)"));
+
+        let mut headers = HeaderMap::new();
+        headers.insert("x-proxy-tag", HeaderValue::from_static("visible"));
+        let proxy = Proxy::all("http://proxy.local:8080")
+            .unwrap()
+            .custom_http_headers(headers);
+        assert!(format!("{proxy:?}").contains("visible"));
     }
 
     /// An endpoint without a scheme is treated as a plain HTTP proxy.
