@@ -316,7 +316,7 @@ impl Connected {
     }
 
     /// Create a [`PoisonPillHandle`] from this connection's poison pill.
-    fn poison_pill_handle(&self) -> PoisonPillHandle {
+    pub(crate) fn poison_pill_handle(&self) -> PoisonPillHandle {
         PoisonPillHandle {
             poisoned: Arc::clone(&self.poisoned.poisoned),
         }

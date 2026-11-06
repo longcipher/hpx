@@ -788,6 +788,34 @@ async fn http2_only() {
     assert_eq!(resp.version(), hpx::Version::HTTP_2);
 }
 
+/// Cancelling an HTTP/2 request resets only its stream. The connection is
+/// shared with other requests and must stay in the pool.
+#[tokio::test]
+async fn http2_cancelled_request_keeps_the_connection() {
+    let server = server::http(move |req| async move {
+        if req.uri().path() == "/slow" {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+        http::Response::default()
+    });
+    let client = Client::builder().no_proxy().http2_only().build().unwrap();
+    let url = |path: &str| format!("http://{}{path}", server.addr());
+
+    let first = client.get(url("/fast")).send().await.unwrap();
+    let local_addr = first.local_addr();
+    assert!(local_addr.is_some());
+
+    let slow = client.get(url("/slow")).send();
+    let cancelled = tokio::time::timeout(std::time::Duration::from_millis(100), slow).await;
+    assert!(
+        cancelled.is_err(),
+        "the slow request should still be in flight"
+    );
+
+    let second = client.get(url("/fast")).send().await.unwrap();
+    assert_eq!(second.local_addr(), local_addr);
+}
+
 #[tokio::test]
 async fn connection_pool_cache() {
     let client = Client::builder()
