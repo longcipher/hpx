@@ -330,7 +330,11 @@ impl TlsConnectorBuilder {
 
         // Only the common path is cached; identity/keylog builds stay uncached.
         let cacheable = self.identity.is_none() && self.keylog.is_none();
-        let roots = self.cert_store.as_ref().map(|s| RootsKey::new(&s.store));
+        let roots = self
+            .cert_store
+            .as_ref()
+            .filter(|_| cacheable)
+            .map(|s| RootsKey::new(&s.store));
 
         // Fast path: all four ALPN variants already cached — return cloned
         // Arcs without touching root stores or `ClientConfig` construction.
@@ -1182,42 +1186,25 @@ mod tests {
     }
 
     #[test]
-    fn rustls_connector_cache_never_serves_a_connector_built_for_other_roots() {
+    fn rustls_connector_cache_pins_the_root_store_it_is_keyed_by() {
         use crate::tls::TlsOptions;
 
-        let opts = TlsOptions::default();
+        // Roots no other test uses, so this build inserts the cache entry
+        // whichever tests ran before it in the same process.
         let mut store = CertStore::builder()
             .add_pem_cert(CA_CERT_PEM)
+            .add_pem_cert(SERVER_CERT_PEM)
             .build()
             .unwrap();
-        let first = super::TlsConnector::builder()
+        super::TlsConnector::builder()
             .cert_store(store.clone())
-            .build(&opts)
+            .build(&TlsOptions::default())
             .unwrap();
 
-        // When nothing else holds the store, its allocation can be freed and
-        // handed to a new store with different roots. Reproduce that address
-        // reuse by rewriting the roots in place: the next build must not get
-        // the connectors that were built for the old roots.
-        if let Some(roots) = Arc::get_mut(&mut store.store) {
-            *roots = rustls::RootCertStore::empty();
-            roots.add_parsable_certificates(parse_certs(SERVER_CERT_PEM));
-
-            let second = super::TlsConnector::builder()
-                .cert_store(store.clone())
-                .build(&opts)
-                .unwrap();
-            assert!(!Arc::ptr_eq(&first.connector, &second.connector));
-            assert!(!Arc::ptr_eq(
-                &first.connector_no_alpn,
-                &second.connector_no_alpn
-            ));
-            assert!(!Arc::ptr_eq(&first.connector_h2, &second.connector_h2));
-            assert!(!Arc::ptr_eq(
-                &first.connector_http1,
-                &second.connector_http1
-            ));
-        }
+        // If the cache did not hold the store, its allocation could be freed
+        // and reused by a store with different roots, which would then be
+        // served the connectors built for these roots.
+        assert!(Arc::get_mut(&mut store.store).is_none());
     }
 
     #[test]

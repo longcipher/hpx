@@ -2,6 +2,10 @@
 //!
 //! Lives in its own test binary because it installs `dhat` as the global
 //! allocator and `dhat` allows only one profiler per process.
+//!
+//! It checks whichever TLS backend the feature set compiles in: BoringSSL under
+//! `--all-features`, the rustls connector cache under
+//! `--no-default-features --features rustls-tls,...`.
 
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
