@@ -38,6 +38,13 @@ use crate::{
 
 const SCHEDULER_IDLE_COALESCE_DELAY: Duration = Duration::from_millis(50);
 
+/// Redirect limit for the clients the engine builds itself.
+///
+/// hpx clients follow no redirects by default, but download links commonly
+/// redirect to a CDN (GitHub release assets answer with a 302), so the probe
+/// and the segment requests must follow them to reach the file.
+const MAX_REDIRECTS: usize = 10;
+
 /// Configuration for the download engine.
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
@@ -208,9 +215,15 @@ impl EngineBuilder {
 
     /// Build the [`DownloadEngine`].
     ///
-    /// If no client was provided, a default `hpx::Client` is constructed.
+    /// If no client was provided, a default `hpx::Client` that follows up to
+    /// 10 redirects is constructed. A provided client is used as is.
     pub fn build(self) -> Result<DownloadEngine, DownloadError> {
-        let client = self.client.unwrap_or_default();
+        let client = match self.client {
+            Some(client) => client,
+            None => hpx::Client::builder()
+                .redirect(hpx::redirect::Policy::limited(MAX_REDIRECTS))
+                .build()?,
+        };
         let events = Arc::new(EventBroadcaster::new(256));
         let downloads = Arc::new(HashMap::new());
         let config = self.config;
@@ -564,6 +577,25 @@ impl EngineInner {
             if let Some(segment) = entry.segments.get_mut(index as usize) {
                 segment.state = SegmentStatus::Failed;
                 entry.last_error = Some(error.to_string());
+            }
+        })
+        .await?;
+        Ok(())
+    }
+
+    /// Forget all segment progress after the assembled file failed its checksum.
+    ///
+    /// Segments are persisted as `Completed` as they finish, before the whole
+    /// file can be verified. Keeping them would make every resume and mirror
+    /// failover skip all segments and fail the same checksum again, forever;
+    /// with no completed segment left, the next attempt starts fresh and
+    /// truncates the file.
+    async fn reset_segments(&self, id: DownloadId) -> Result<(), DownloadError> {
+        self.update_entry(id, |entry| {
+            entry.bytes_downloaded = 0;
+            for segment in &mut entry.segments {
+                segment.state = SegmentStatus::Pending;
+                segment.bytes_downloaded = 0;
             }
         })
         .await?;
@@ -993,21 +1025,14 @@ impl EngineInner {
             request.speed_limit.map(SpeedLimiter::depleted),
         );
 
-        let mut downloader = if let Some(proxy) = request.proxy.as_ref() {
-            SegmentDownloader::with_proxy(
-                candidate_url.to_string(),
-                segments.clone(),
-                request.destination.clone(),
-                proxy,
-            )?
-        } else {
-            SegmentDownloader::new(
-                client,
-                candidate_url.to_string(),
-                segments.clone(),
-                request.destination.clone(),
-            )
-        };
+        // `client` already carries the request's proxy, and it is the client
+        // the probe used: segment requests must follow the same redirects.
+        let mut downloader = SegmentDownloader::new(
+            client,
+            candidate_url.to_string(),
+            segments.clone(),
+            request.destination.clone(),
+        );
 
         downloader = downloader
             .with_retry_config(
@@ -1033,8 +1058,14 @@ impl EngineInner {
 
                     match result {
                         Ok(bytes) => {
-                            if let Some(checksum) = &request.checksum {
-                                verify_checksum(checksum, &request.destination).await?;
+                            if let Some(checksum) = &request.checksum
+                                && let Err(error) =
+                                    verify_checksum(checksum, &request.destination).await
+                            {
+                                if matches!(error, DownloadError::ChecksumMismatch { .. }) {
+                                    self.reset_segments(id).await?;
+                                }
+                                return Err(error);
                             }
                             self.complete_download(id, bytes_completed.saturating_add(bytes))
                                 .await?;
@@ -1489,6 +1520,7 @@ fn build_client(
         let proxy = hpx::Proxy::try_from(proxy.clone())?;
         hpx::Client::builder()
             .proxy(proxy)
+            .redirect(hpx::redirect::Policy::limited(MAX_REDIRECTS))
             .build()
             .map_err(Into::into)
     } else {

@@ -435,9 +435,18 @@ impl Frame {
             }
         }
 
+        // Control frames must not be fragmented (RFC 6455 §5.5). A zero
+        // partition would split off empty chunks forever, so each fragment
+        // carries at least one byte.
+        let max_size = if self.opcode.is_control() {
+            usize::MAX
+        } else {
+            partition.max(1)
+        };
+
         Split {
             index: 0,
-            max_size: partition,
+            max_size,
             frame: Some(self),
         }
     }
@@ -972,6 +981,42 @@ mod tests {
 
             assert!(last.is_fin());
             assert_eq!(last.opcode(), OpCode::Continuation);
+        }
+
+        #[test]
+        fn control_frames_are_never_fragmented() {
+            for frame in [
+                Frame::ping(vec![7u8; 100]),
+                Frame::pong(vec![7u8; 100]),
+                Frame::close(CloseCode::Normal, vec![b'a'; 98]),
+            ] {
+                let opcode = frame.opcode();
+                let fragments: Vec<Frame> = frame.into_fragments(10).take(20).collect();
+                assert_eq!(fragments.len(), 1, "{opcode:?}");
+                assert_eq!(fragments[0].opcode(), opcode);
+                assert!(fragments[0].is_fin());
+                assert_eq!(fragments[0].payload().len(), 100);
+            }
+        }
+
+        #[test]
+        fn zero_partition_terminates() {
+            // `take` bounds the old behavior, which yielded empty fragments
+            // forever.
+            let fragments: Vec<Frame> = Frame::binary(vec![1u8, 2, 3])
+                .into_fragments(0)
+                .take(10)
+                .collect();
+            assert_eq!(fragments.len(), 3);
+            assert_eq!(fragments[0].opcode(), OpCode::Binary);
+            assert!(!fragments[0].is_fin());
+            assert_eq!(fragments[2].opcode(), OpCode::Continuation);
+            assert!(fragments[2].is_fin());
+            let payload: Vec<u8> = fragments
+                .iter()
+                .flat_map(|fragment| fragment.payload().to_vec())
+                .collect();
+            assert_eq!(payload, [1u8, 2, 3]);
         }
 
         #[test]

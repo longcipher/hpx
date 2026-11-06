@@ -59,9 +59,10 @@ pub(crate) trait UriExt {
     /// Returns the port of the URI, or the default port for the scheme if none is specified.
     fn port_or_default(&self) -> u16;
 
-    /// Sets the query component of the URI, replacing any existing query.
+    /// Appends `query` to the URI's query component, joined with `&` when a
+    /// query is already present.
     #[cfg(feature = "query")]
-    fn set_query(&mut self, query: String);
+    fn append_query(&mut self, query: String);
 
     /// Returns the username and password from the URI's userinfo, if present.
     fn userinfo(&self) -> (Option<&str>, Option<&str>);
@@ -108,7 +109,7 @@ impl UriExt for Uri {
     }
 
     #[cfg(feature = "query")]
-    fn set_query(&mut self, query: String) {
+    fn append_query(&mut self, query: String) {
         use http::uri::PathAndQuery;
 
         if query.is_empty() {
@@ -116,11 +117,19 @@ impl UriExt for Uri {
         }
 
         let path = self.path();
+        // Keep the query already on the URI (e.g. an API key in the base
+        // URL): `RequestBuilder::query` documents that it appends.
+        let existing = self.query().filter(|existing| !existing.is_empty());
+        let existing_len = existing.map_or(0, |existing| existing.len() + 1);
         // Single allocation: reserve path + '?' + query up front instead of
         // `format!` (String alloc) followed by `Bytes::from` (second alloc).
-        let mut buf = BytesMut::with_capacity(path.len() + 1 + query.len());
+        let mut buf = BytesMut::with_capacity(path.len() + 1 + existing_len + query.len());
         buf.extend_from_slice(path.as_bytes());
         buf.extend_from_slice(b"?");
+        if let Some(existing) = existing {
+            buf.extend_from_slice(existing.as_bytes());
+            buf.extend_from_slice(b"&");
+        }
         buf.extend_from_slice(query.as_bytes());
         let parts = match PathAndQuery::from_maybe_shared(buf.freeze()) {
             Ok(path_and_query) => {
@@ -362,28 +371,36 @@ mod tests {
 
     #[cfg(feature = "query")]
     #[test]
-    fn test_set_query() {
+    fn test_append_query() {
         let mut uri: Uri = "http://example.com/path".parse().unwrap();
-        uri.set_query("key=value&foo=bar".to_string());
+        uri.append_query("key=value&foo=bar".to_string());
 
         assert_eq!(uri.to_string(), "http://example.com/path?key=value&foo=bar");
 
         let mut uri: Uri = "http://example.com/path?existing=param".parse().unwrap();
-        uri.set_query("newkey=newvalue".to_string());
+        uri.append_query("newkey=newvalue".to_string());
+
+        assert_eq!(
+            uri.to_string(),
+            "http://example.com/path?existing=param&newkey=newvalue"
+        );
+
+        let mut uri: Uri = "http://example.com/path?".parse().unwrap();
+        uri.append_query("newkey=newvalue".to_string());
 
         assert_eq!(uri.to_string(), "http://example.com/path?newkey=newvalue");
 
         let mut uri: Uri = "http://example.com/path".parse().unwrap();
-        uri.set_query("".to_string());
+        uri.append_query("".to_string());
 
         assert_eq!(uri.to_string(), "http://example.com/path");
     }
 
     #[cfg(feature = "query")]
     #[test]
-    fn test_set_query_with_special_chars() {
+    fn test_append_query_with_special_chars() {
         let mut uri: Uri = "http://example.com/search".parse().unwrap();
-        uri.set_query("q=hello%20world&tag=a%2Bb".to_string());
+        uri.append_query("q=hello%20world&tag=a%2Bb".to_string());
 
         assert_eq!(
             uri.to_string(),
@@ -394,22 +411,22 @@ mod tests {
 
     #[cfg(feature = "query")]
     #[test]
-    fn test_set_query_replaces_existing_with_special_chars() {
+    fn test_append_query_keeps_existing_with_special_chars() {
         let mut uri: Uri = "http://example.com/search?old=%2F".parse().unwrap();
-        uri.set_query("q=%E4%B8%AD%E6%96%87&lang=zh-CN".to_string());
+        uri.append_query("q=%E4%B8%AD%E6%96%87&lang=zh-CN".to_string());
 
         assert_eq!(
             uri.to_string(),
-            "http://example.com/search?q=%E4%B8%AD%E6%96%87&lang=zh-CN"
+            "http://example.com/search?old=%2F&q=%E4%B8%AD%E6%96%87&lang=zh-CN"
         );
-        assert_eq!(uri.query(), Some("q=%E4%B8%AD%E6%96%87&lang=zh-CN"));
+        assert_eq!(uri.query(), Some("old=%2F&q=%E4%B8%AD%E6%96%87&lang=zh-CN"));
     }
 
     #[cfg(feature = "query")]
     #[test]
-    fn test_set_query_empty_keeps_original_query() {
+    fn test_append_query_empty_keeps_original_query() {
         let mut uri: Uri = "http://example.com/path?keep=me".parse().unwrap();
-        uri.set_query(String::new());
+        uri.append_query(String::new());
 
         assert_eq!(uri.to_string(), "http://example.com/path?keep=me");
     }

@@ -86,8 +86,7 @@ impl HandshakeConfigBuilder {
 
     /// Sets TLS SNI.
     ///
-    /// rustls sends SNI automatically from the server name; explicit control
-    /// is not available on this backend.
+    /// Ignored here: SNI is applied by `TlsConnectorBuilder::tls_sni`.
     pub(crate) fn tls_sni(self, _sni: bool) -> Self {
         tracing::warn!("rustls backend: `tls_sni` override is not supported and was ignored");
         self
@@ -168,7 +167,8 @@ pub(crate) struct TlsConnectorBuilder {
 /// Cache key for a single `Arc<RustlsConnector>`.
 ///
 /// Covers everything that affects the built `ClientConfig` on the cacheable
-/// path (no client identity, no keylog): ALPN bytes, min/max TLS versions,
+/// path (no client identity, no keylog): ALPN bytes, the effective min/max
+/// TLS versions (request `TlsOptions` over the builder's), the SNI flag,
 /// verifier mode, and the root store (its trust anchors for a configured
 /// store, `None` for the built-in webpki roots). Builders with an identity or
 /// keylog bypass the cache to preserve exact behavior.
@@ -177,6 +177,7 @@ struct CachedConnectorKey {
     alpn: Option<Vec<Vec<u8>>>,
     min_version: Option<TlsVersion>,
     max_version: Option<TlsVersion>,
+    tls_sni: bool,
     cert_verification: bool,
     roots: Option<RootsKey>,
 }
@@ -309,13 +310,24 @@ impl TlsConnectorBuilder {
     /// Build the `TlsConnector` with the provided configuration.
     ///
     /// The common path (no client identity, no keylog) is served from a
-    /// global cache keyed by ALPN, min/max TLS versions, verifier mode, and
-    /// root-store contents. Cache hits return cloned `Arc`s without rebuilding
-    /// `ClientConfig`; identity/keylog builds bypass the cache to keep
-    /// behavior exact. This also covers the per-request rebuilds issued from
-    /// the connector proxy-tunnel and `tls_options` paths.
+    /// global cache keyed by ALPN, min/max TLS versions, SNI, verifier mode,
+    /// and root-store contents. Cache hits return cloned `Arc`s without
+    /// rebuilding `ClientConfig`; identity/keylog builds bypass the cache to
+    /// keep behavior exact. This also covers the per-request rebuilds issued
+    /// from the connector proxy-tunnel and `tls_options` paths.
     pub(crate) fn build(&self, opts: &TlsOptions) -> crate::Result<TlsConnector> {
-        let protocol_versions = protocol_versions(self.min_version, self.max_version)?;
+        // Request-level `TlsOptions` take precedence over the client's
+        // bounds, as on the BoringSSL and OpenSSL backends. A `TlsOptions`
+        // floor below TLS 1.2 (browser profiles such as Safari set 1.0) is
+        // already met, since rustls offers nothing older, so it is raised to
+        // 1.2 rather than rejected.
+        let min_tls_version = match opts.min_tls_version {
+            Some(TlsVersion::TLS_1_0 | TlsVersion::TLS_1_1) => Some(TlsVersion::TLS_1_2),
+            other => other,
+        }
+        .or(self.min_version);
+        let max_tls_version = opts.max_tls_version.or(self.max_version);
+        let protocol_versions = protocol_versions(min_tls_version, max_tls_version)?;
 
         // ALPN — use raw protocol name bytes for rustls (not wire-format
         // length-prefixed encoding which is only correct for BoringSSL).
@@ -346,8 +358,9 @@ impl TlsConnectorBuilder {
             let lookup = |alpn: &Option<Vec<Vec<u8>>>| {
                 let key = CachedConnectorKey {
                     alpn: alpn.clone(),
-                    min_version: self.min_version,
-                    max_version: self.max_version,
+                    min_version: min_tls_version,
+                    max_version: max_tls_version,
+                    tls_sni: self.tls_sni,
                     cert_verification: self.cert_verification,
                     roots: roots.clone(),
                 };
@@ -415,6 +428,7 @@ impl TlsConnectorBuilder {
             if let Some(protos) = alpn {
                 config.alpn_protocols = protos;
             }
+            config.enable_sni = self.tls_sni;
             if let Some(ref key_log) = key_log {
                 config.key_log = key_log.clone();
             }
@@ -426,8 +440,9 @@ impl TlsConnectorBuilder {
             if cacheable {
                 let key = CachedConnectorKey {
                     alpn: alpn.clone(),
-                    min_version: self.min_version,
-                    max_version: self.max_version,
+                    min_version: min_tls_version,
+                    max_version: max_tls_version,
+                    tls_sni: self.tls_sni,
                     cert_verification: self.cert_verification,
                     roots: roots.clone(),
                 };
@@ -531,7 +546,11 @@ where
         self.forced_no_alpn = true;
         self
     }
+}
 
+// Unbounded so that the `EstablishedConn` service, whose inner service has
+// no IO bounds, can select a connector too.
+impl<S> HttpsConnector<S> {
     /// Select the cached connector matching the requested ALPN protocol.
     #[inline]
     fn select_connector(&self, alpn: Option<AlpnProtocol>) -> Arc<RustlsConnector> {
@@ -577,6 +596,8 @@ where
 
             // Perform TLS handshake
             let domain = uri.host().ok_or("URI missing host")?;
+            // `Uri::host` keeps IPv6 brackets, which `ServerName` rejects.
+            let domain = super::normalize_host(domain);
             let server_name = rustls_pki_types::ServerName::try_from(domain)
                 .map_err(|e| Box::new(e) as BoxError)?;
 
@@ -626,6 +647,8 @@ where
 
             // Perform TLS handshake
             let domain = uri.host().ok_or("URI missing host")?;
+            // `Uri::host` keeps IPv6 brackets, which `ServerName` rejects.
+            let domain = super::normalize_host(domain);
             let server_name = rustls_pki_types::ServerName::try_from(domain)
                 .map_err(|e| Box::new(e) as BoxError)?;
 
@@ -856,10 +879,14 @@ where
     fn call(&mut self, req: EstablishedConn<T>) -> Self::Future {
         let (conn, connect_req) = req.into_parts();
         let uri = connect_req.uri().clone();
-        let connector = self.connector.clone();
+        // SOCKS and CONNECT tunnels end up here, so the request's ALPN must
+        // be honored just as on the direct `ConnectRequest` path.
+        let connector = self.select_connector(connect_req.extra().alpn_protocol());
 
         Box::pin(async move {
             let domain = uri.host().ok_or("URI missing host")?;
+            // `Uri::host` keeps IPv6 brackets, which `ServerName` rejects.
+            let domain = super::normalize_host(domain);
             let server_name = rustls_pki_types::ServerName::try_from(domain)
                 .map_err(|e| Box::new(e) as BoxError)?;
 
@@ -927,7 +954,7 @@ impl ServerCertVerifier for NoVerifier {
 
 #[cfg(test)]
 mod tests {
-    use std::{convert::Infallible, io::Cursor, sync::Arc, time::Duration};
+    use std::{convert::Infallible, io::Cursor, net::SocketAddr, sync::Arc, time::Duration};
     #[cfg(feature = "keylog")]
     use std::{
         fs,
@@ -936,18 +963,21 @@ mod tests {
 
     use base64_simd::STANDARD;
     use bytes::Bytes;
+    use http::Uri;
     use http_body_util::Full;
     use hyper::{Response, server::conn::http1, service::service_fn};
     use hyper_util::rt::TokioIo;
     #[cfg(feature = "keylog")]
     use rustls::KeyLog as RustlsKeyLog;
-    use tokio::net::TcpListener;
+    use tokio::net::{TcpListener, TcpStream};
     use tokio_rustls::{TlsAcceptor, rustls};
+    use tower::ServiceExt;
 
     #[cfg(feature = "keylog")]
     use crate::tls::KeyLog;
     use crate::{
         Client,
+        client::{ConnectRequest, layer::config::RequestOptions},
         tls::{CertStore, Identity, TlsVersion},
     };
 
@@ -998,6 +1028,57 @@ mod tests {
             "hpx-rustls-keylog-{stamp}-{}.log",
             std::process::id()
         ))
+    }
+
+    /// The future of the [`dial`] connector.
+    type DialFuture =
+        std::pin::Pin<Box<dyn std::future::Future<Output = std::io::Result<TcpStream>> + Send>>;
+
+    /// An inner connector that dials `addr` whatever host the URI names, so a
+    /// test can put any host in the URI without resolving it.
+    fn dial(
+        addr: SocketAddr,
+    ) -> impl tower::Service<Uri, Response = TcpStream, Error = std::io::Error, Future = DialFuture> + Send
+    {
+        tower::service_fn(move |_: Uri| -> DialFuture { Box::pin(TcpStream::connect(addr)) })
+    }
+
+    /// What a [`probe_server`] saw: the SNI the client sent and the ALPN
+    /// protocol it negotiated, or `None` when the handshake failed.
+    type Probe = Option<(Option<String>, Option<Vec<u8>>)>;
+
+    /// A one-shot TLS server on 127.0.0.1 that speaks `versions` and prefers
+    /// h2 over http/1.1.
+    async fn probe_server(
+        versions: &[&'static rustls::SupportedProtocolVersion],
+    ) -> (SocketAddr, tokio::task::JoinHandle<Probe>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut config = rustls::ServerConfig::builder_with_provider(super::rustls_provider())
+            .with_protocol_versions(versions)
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(parse_certs(SERVER_CERT_PEM), parse_key(SERVER_KEY_PEM))
+            .unwrap();
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+        let acceptor = TlsAcceptor::from(Arc::new(config));
+
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let stream = acceptor.accept(stream).await.ok()?;
+            let (_, session) = stream.get_ref();
+            Some((
+                session.server_name().map(str::to_owned),
+                session.alpn_protocol().map(<[u8]>::to_vec),
+            ))
+        });
+        (addr, server)
+    }
+
+    fn localhost_uri(addr: SocketAddr) -> Uri {
+        format!("https://localhost:{}/", addr.port())
+            .parse()
+            .unwrap()
     }
 
     #[test]
@@ -1355,5 +1436,143 @@ mod tests {
 
         assert_eq!(response.text().await.unwrap(), "mtls-ok");
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn ipv6_literal_hosts_handshake_on_every_path() {
+        use crate::tls::TlsOptions;
+
+        // The test certificate has no `::1` SAN; the bug fails before any
+        // certificate is looked at, so verification is off.
+        let tls = || {
+            super::TlsConnector::builder()
+                .cert_verification(false)
+                .build(&TlsOptions::default())
+                .unwrap()
+        };
+        // `dial` connects to 127.0.0.1 whatever the URI says.
+        let ipv6_uri = |addr: SocketAddr| -> Uri {
+            format!("https://[::1]:{}/", addr.port()).parse().unwrap()
+        };
+
+        // Direct `Uri` path.
+        let (addr, server) = probe_server(rustls::DEFAULT_VERSIONS).await;
+        let https = super::HttpsConnector::with_connector(dial(addr), tls());
+        let _stream = https.oneshot(ipv6_uri(addr)).await.unwrap();
+        assert!(server.await.unwrap().is_some());
+
+        // `ConnectRequest` path.
+        let (addr, server) = probe_server(rustls::DEFAULT_VERSIONS).await;
+        let https = super::HttpsConnector::with_connector(dial(addr), tls());
+        let req = ConnectRequest::new(ipv6_uri(addr), None::<RequestOptions>);
+        let _stream = https.oneshot(req).await.unwrap();
+        assert!(server.await.unwrap().is_some());
+
+        // `EstablishedConn` path, used by SOCKS and CONNECT tunnels.
+        let (addr, server) = probe_server(rustls::DEFAULT_VERSIONS).await;
+        let https = super::HttpsConnector::with_connector(dial(addr), tls());
+        let io = TcpStream::connect(addr).await.unwrap();
+        let req = ConnectRequest::new(ipv6_uri(addr), None::<RequestOptions>);
+        let _stream = https
+            .oneshot(super::EstablishedConn::new(io, req))
+            .await
+            .unwrap();
+        assert!(server.await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn tls_sni_false_omits_the_server_name() {
+        use crate::tls::TlsOptions;
+
+        let build = |sni: bool| {
+            super::TlsConnector::builder()
+                .tls_sni(sni)
+                .cert_verification(false)
+                .build(&TlsOptions::default())
+                .unwrap()
+        };
+        let with_sni = build(true);
+        let without_sni = build(false);
+        assert!(!Arc::ptr_eq(&with_sni.connector, &without_sni.connector));
+
+        for (tls, expected) in [(with_sni, Some("localhost")), (without_sni, None)] {
+            let (addr, server) = probe_server(rustls::DEFAULT_VERSIONS).await;
+            let https = super::HttpsConnector::with_connector(dial(addr), tls);
+            let req = ConnectRequest::new(localhost_uri(addr), None::<RequestOptions>);
+            let _stream = https.oneshot(req).await.unwrap();
+
+            let (sni, _) = server.await.unwrap().unwrap();
+            assert_eq!(sni.as_deref(), expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn tls_options_version_bounds_override_the_builder() {
+        use crate::tls::TlsOptions;
+
+        // Handshakes with a TLS 1.2-only server; returns whether it worked.
+        async fn handshake(tls: super::TlsConnector) -> bool {
+            let (addr, server) = probe_server(super::TLS12_ONLY).await;
+            let https = super::HttpsConnector::with_connector(dial(addr), tls);
+            let req = ConnectRequest::new(localhost_uri(addr), None::<RequestOptions>);
+            let connected = https.oneshot(req).await.is_ok();
+            assert_eq!(server.await.unwrap().is_some(), connected);
+            connected
+        }
+
+        let builder = || super::TlsConnector::builder().cert_verification(false);
+        let tls12_floor = TlsOptions::builder()
+            .min_tls_version(TlsVersion::TLS_1_2)
+            .build();
+        let tls13_floor = TlsOptions::builder()
+            .min_tls_version(TlsVersion::TLS_1_3)
+            .build();
+
+        let default = builder().build(&TlsOptions::default()).unwrap();
+        let from_options = builder().build(&tls13_floor).unwrap();
+        assert!(!Arc::ptr_eq(&default.connector, &from_options.connector));
+        assert!(handshake(default).await);
+        assert!(!handshake(from_options).await);
+
+        // A request-level bound replaces the client's, as on BoringSSL.
+        let overridden = builder()
+            .min_version(TlsVersion::TLS_1_3)
+            .build(&tls12_floor)
+            .unwrap();
+        assert!(handshake(overridden).await);
+
+        // A browser profile's TLS 1.0 floor is met by rustls, not an error.
+        let tls10_floor = TlsOptions::builder()
+            .min_tls_version(TlsVersion::TLS_1_0)
+            .build();
+        assert!(handshake(builder().build(&tls10_floor).unwrap()).await);
+    }
+
+    #[tokio::test]
+    async fn established_conn_honors_the_request_alpn() {
+        use crate::tls::TlsOptions;
+
+        // The client-level connector offers h2 and http/1.1 (the default
+        // `TlsOptions`), and the server prefers h2.
+        let (addr, server) = probe_server(rustls::DEFAULT_VERSIONS).await;
+        let tls = super::TlsConnector::builder()
+            .cert_verification(false)
+            .build(&TlsOptions::default())
+            .unwrap();
+        let https = super::HttpsConnector::with_connector(dial(addr), tls);
+
+        // A request pinned to HTTP/1.1, over a pre-established stream the
+        // way SOCKS and CONNECT tunnels hand it over.
+        let mut options = RequestOptions::default();
+        *options.enforced_version_mut() = Some(http::Version::HTTP_11);
+        let req = ConnectRequest::new(localhost_uri(addr), Some(options));
+        let io = TcpStream::connect(addr).await.unwrap();
+        let _stream = https
+            .oneshot(super::EstablishedConn::new(io, req))
+            .await
+            .unwrap();
+
+        let (_, alpn) = server.await.unwrap().unwrap();
+        assert_eq!(alpn.as_deref(), Some(&b"http/1.1"[..]));
     }
 }

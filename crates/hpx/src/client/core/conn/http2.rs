@@ -5,7 +5,10 @@ use std::{
     future::Future,
     marker::PhantomData,
     pin::Pin,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     task::{Context, Poll, ready},
     time::Duration,
 };
@@ -18,7 +21,7 @@ use crate::{
     client::core::{
         Result,
         body::Incoming as IncomingBody,
-        dispatch::{self, TrySendError},
+        dispatch::{self, RetryPromise, TrySendError},
         error::{BoxError, Error},
         proto::{self, h2::ping},
         rt::{ArcTimer, Time, Timer, bounds::Http2ClientConnExec},
@@ -30,26 +33,26 @@ use crate::{
 /// connection with a stable `conn_id` for trace correlation.
 static CONN_SEQ: AtomicU64 = AtomicU64::new(1);
 
-/// Upper bound on how long a request may wait for the connection's dispatch
-/// task to produce a response before we treat the connection as stalled.
+/// How long a request may wait on the connection's dispatch task without
+/// that task being polled before we treat the connection as stalled.
 ///
-/// The dispatch oneshot resolves when response headers arrive. It must NOT be
-/// a tight per-request deadline: a healthy server that is simply slow — e.g.
-/// one that delays the connection preface or limits `max_concurrent_streams`
-/// to 1, forcing queued requests to wait behind earlier ones — legitimately
-/// resolves its oneshot well past 1 s. A tight timeout (1 s) therefore kills
-/// requests to such servers and misclassifies normal backpressure as a stall.
+/// The dispatch oneshot resolves when response headers arrive, so this must
+/// NOT bound the wait itself: a healthy server that is simply slow — a long
+/// poll, a slow upload, a time-to-first-byte over the bound, or queued
+/// requests waiting behind `max_concurrent_streams` — legitimately resolves
+/// its oneshot after any fixed deadline, and only the caller's own request
+/// timeout may cut that short.
 ///
 /// If the `ClientTask` ever parks permanently (a stall observed in production
 /// where a connection's watchdog timer and mpsc wakeups both stop being
 /// delivered), an unbounded `rx.await` here would pin the request until the
-/// outer request `Timeout` fires (~15 s). The `ClientTask` dispatch watchdog
-/// (5 s interval) provides the primary fast-path detection; this timeout is a
-/// final safety net that converts a never-resolving dispatch into a retryable
-/// failure. 30 s leaves ample headroom for slow but healthy servers, at the
-/// cost of a longer worst-case recovery for genuinely stalled connections
-/// (previously ~1.3 s). Prefer keeping the user-facing request `Timeout` tight
-/// so stalled connections are bounded by it in practice.
+/// outer request `Timeout` fires (~15 s), or forever without one. A live
+/// `ClientTask` is re-polled by its dispatch watchdog at least once a second
+/// and counts every poll in `dispatch_polls`, so a whole window without a
+/// single poll converts the never-resolving dispatch into a retryable
+/// failure, while any poll starts a new window. The watchdog stays the
+/// primary defence against lost wake-ups; this only bounds a task that is no
+/// longer polled at all.
 const DISPATCH_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The sender side of an established connection.
@@ -63,6 +66,9 @@ pub(crate) struct SendRequest<B> {
     /// connection created on one runtime can stall if a request is later sent
     /// from a different runtime whose executor does not drive this task.
     created_on_thread: String,
+    /// Poll count of the connection's `ClientTask`, read while waiting for a
+    /// response to tell a parked task from a slow server.
+    dispatch_polls: Arc<AtomicU64>,
 }
 
 impl<B> Clone for SendRequest<B> {
@@ -71,6 +77,7 @@ impl<B> Clone for SendRequest<B> {
             dispatch: self.dispatch.clone(),
             conn_id: self.conn_id,
             created_on_thread: self.created_on_thread.clone(),
+            dispatch_polls: self.dispatch_polls.clone(),
         }
     }
 }
@@ -169,40 +176,19 @@ where
         }
         let conn_id = self.conn_id;
         let created_on_thread = self.created_on_thread.clone();
+        let dispatch_polls = self.dispatch_polls.clone();
         async move {
             match sent {
-                Ok(rx) => match tokio::time::timeout(DISPATCH_RESPONSE_TIMEOUT, rx).await {
-                    Ok(Ok(Ok(res))) => Ok(res),
-                    Ok(Ok(Err(err))) => Err(err),
-                    // The dispatch task dropped its callback sender without
-                    // returning a result. This indicates a bug in the
-                    // connection lifecycle; surface it as a closed-connection
-                    // error rather than panicking.
-                    Ok(Err(_)) => Err(TrySendError {
-                        error: Error::new_closed().with("dispatch dropped without result"),
-                        message: None,
-                    }),
-                    // The connection's dispatch task never answered within the
-                    // bound. The request was queued but may never be written
-                    // (stalled ClientTask), so surface a transport timeout with
-                    // no message: the retry layer will retry idempotent methods
-                    // on a fresh connection and the pool poisons this one.
-                    Err(_) => {
-                        warn!(
-                            "h2 dispatch response timed out conn_id={}; connection stalled (created on {:?}, requested from {:?})",
-                            conn_id,
-                            created_on_thread,
-                            std::thread::current().name().unwrap_or("<unnamed>")
-                        );
-                        Err(TrySendError {
-                            error: Error::new_io(std::io::Error::new(
-                                std::io::ErrorKind::TimedOut,
-                                "dispatch wait timed out",
-                            )),
-                            message: None,
-                        })
-                    }
-                },
+                Ok(rx) => {
+                    await_dispatch(
+                        rx,
+                        &dispatch_polls,
+                        DISPATCH_RESPONSE_TIMEOUT,
+                        conn_id,
+                        &created_on_thread,
+                    )
+                    .await
+                }
                 Err(req) => {
                     debug!("connection was not ready");
                     let error = Error::new_canceled().with("connection was not ready");
@@ -211,6 +197,64 @@ where
                         message: Some(req),
                     })
                 }
+            }
+        }
+    }
+}
+
+/// Waits for the dispatch task's answer to a queued request.
+///
+/// Fails only after a whole `window` in which the connection's `ClientTask`
+/// was never polled (see `DISPATCH_RESPONSE_TIMEOUT`); on a live connection a
+/// slow response is awaited for as long as the caller lets it.
+#[expect(
+    clippy::result_large_err,
+    reason = "TrySendError hands an unsent request back to the caller, as in try_send_request"
+)]
+async fn await_dispatch<B>(
+    mut rx: RetryPromise<Request<B>, Response<IncomingBody>>,
+    dispatch_polls: &AtomicU64,
+    window: Duration,
+    conn_id: u64,
+    created_on_thread: &str,
+) -> std::result::Result<Response<IncomingBody>, TrySendError<Request<B>>> {
+    loop {
+        let polls_before = dispatch_polls.load(Ordering::Relaxed);
+        match tokio::time::timeout(window, &mut rx).await {
+            Ok(Ok(Ok(res))) => return Ok(res),
+            Ok(Ok(Err(err))) => return Err(err),
+            // The dispatch task dropped its callback sender without
+            // returning a result. This indicates a bug in the
+            // connection lifecycle; surface it as a closed-connection
+            // error rather than panicking.
+            Ok(Err(_)) => {
+                return Err(TrySendError {
+                    error: Error::new_closed().with("dispatch dropped without result"),
+                    message: None,
+                });
+            }
+            // The dispatch task was polled during the window: it is alive and
+            // the server is merely slow, so keep waiting.
+            Err(_) if dispatch_polls.load(Ordering::Relaxed) != polls_before => {}
+            // The connection's dispatch task was not polled once in the
+            // window. The request was queued but may never be written
+            // (stalled ClientTask), so surface a transport timeout with
+            // no message: the retry layer will retry idempotent methods
+            // on a fresh connection and the pool poisons this one.
+            Err(_) => {
+                warn!(
+                    "h2 dispatch response timed out conn_id={}; connection stalled (created on {:?}, requested from {:?})",
+                    conn_id,
+                    created_on_thread,
+                    std::thread::current().name().unwrap_or("<unnamed>")
+                );
+                return Err(TrySendError {
+                    error: Error::new_io(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "dispatch wait timed out",
+                    )),
+                    message: None,
+                });
             }
         }
     }
@@ -388,15 +432,236 @@ where
             conn_id,
         )
         .await?;
+        let dispatch_polls = h2.dispatch_polls();
         Ok((
             SendRequest {
                 dispatch: tx.unbound(),
                 conn_id,
                 created_on_thread,
+                dispatch_polls,
             },
             Connection {
                 inner: (PhantomData, h2),
             },
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use bytes::Bytes;
+    use http::StatusCode;
+    use http_body_util::Empty;
+    use tokio::{
+        io::{DuplexStream, duplex},
+        sync::oneshot,
+        task::JoinHandle,
+    };
+
+    use super::*;
+    use crate::client::core::{
+        proto::h2::client::H2ClientFuture,
+        rt::{Executor, Sleep, TokioTimer},
+    };
+
+    /// Spawns connection tasks on the test's own runtime.
+    #[derive(Clone)]
+    struct TestExec;
+
+    impl<F> Executor<F> for TestExec
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        fn execute(&self, fut: F) {
+            tokio::spawn(fut);
+        }
+    }
+
+    type ParkedTask = Pin<Box<dyn Future<Output = ()> + Send>>;
+
+    /// Spawns every connection future except the h2 connection task, which
+    /// it keeps alive but never polls: a new stream then stays pending open
+    /// forever although its stream slot is free, i.e. a wedged connection.
+    #[derive(Clone, Default)]
+    struct WedgedConnExec(Arc<parking_lot::Mutex<Vec<ParkedTask>>>);
+
+    impl<B, T> Executor<H2ClientFuture<B, T>> for WedgedConnExec
+    where
+        B: Body + 'static,
+        B::Error: Into<BoxError>,
+        T: AsyncRead + AsyncWrite + Unpin,
+        H2ClientFuture<B, T>: Future<Output = ()> + Send + 'static,
+    {
+        fn execute(&self, fut: H2ClientFuture<B, T>) {
+            if matches!(fut, H2ClientFuture::Task { .. }) {
+                self.0.lock().push(Box::pin(fut));
+            } else {
+                tokio::spawn(fut);
+            }
+        }
+    }
+
+    /// Divides every relative sleep the connection asks for, so the dispatch
+    /// watchdog (1 s) and `POLL_READY_TIMEOUT` (3 s) elapse in milliseconds.
+    const TIME_SCALE: u32 = 20;
+
+    struct FastTimer;
+
+    impl Timer for FastTimer {
+        fn sleep(&self, duration: Duration) -> Pin<Box<dyn Sleep>> {
+            TokioTimer::new().sleep(duration / TIME_SCALE)
+        }
+
+        fn sleep_until(&self, deadline: Instant) -> Pin<Box<dyn Sleep>> {
+            TokioTimer::new().sleep_until(deadline)
+        }
+    }
+
+    /// Serves h2 on `io`, answering the n-th request after `delays[n]` (and
+    /// any later one at once).
+    fn serve(
+        io: DuplexStream,
+        max_concurrent_streams: Option<u32>,
+        delays: Vec<Duration>,
+    ) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut builder = http2::server::Builder::new();
+            if let Some(max) = max_concurrent_streams {
+                builder.max_concurrent_streams(max);
+            }
+            let mut conn = builder
+                .handshake::<_, Bytes>(io)
+                .await
+                .expect("server handshake");
+            let mut delays = delays.into_iter();
+            while let Some(accepted) = conn.accept().await {
+                let Ok((_req, mut respond)) = accepted else {
+                    break;
+                };
+                let delay = delays.next().unwrap_or_default();
+                tokio::spawn(async move {
+                    tokio::time::sleep(delay).await;
+                    let _ = respond.send_response(Response::new(()), true);
+                });
+            }
+        })
+    }
+
+    /// Opens a client connection with keep-alive pings off, so only the
+    /// timers under test run, and spawns its dispatch task.
+    async fn connect(io: DuplexStream, mut opts: Http2Options) -> SendRequest<Empty<Bytes>> {
+        opts.keep_alive_interval = None;
+        let mut builder = Builder::new(TestExec);
+        builder.timer(FastTimer);
+        builder.options(opts);
+        let (sender, conn) = builder
+            .handshake::<_, Empty<Bytes>>(io)
+            .await
+            .expect("client handshake");
+        tokio::spawn(conn);
+        sender
+    }
+
+    /// A response slower than the dispatch window still arrives while the
+    /// connection's dispatch task is alive: the window bounds a stalled
+    /// task, not the server's time to response headers.
+    #[tokio::test]
+    async fn slow_response_on_live_connection_outlasts_dispatch_window() {
+        // Five scaled watchdog intervals per window; the response takes four
+        // windows.
+        let window = Duration::from_millis(250);
+        let (client_io, server_io) = duplex(64 * 1024);
+        let _server = serve(server_io, None, vec![window * 4]);
+        let sender = connect(client_io, Http2Options::default()).await;
+
+        let rx = sender
+            .dispatch
+            .try_send(Request::new(Empty::new()))
+            .expect("dispatch channel open");
+        let res = await_dispatch(rx, &sender.dispatch_polls, window, sender.conn_id, "test")
+            .await
+            .expect("slow response");
+
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    /// A dispatch task that is never polled again (lost wake-ups, or a
+    /// runtime that stopped driving it) still fails the waiting request after
+    /// one window, as a transport timeout the retry layer and pool act on.
+    #[tokio::test]
+    async fn stalled_dispatch_task_fails_request_after_one_window() {
+        let (_tx, rx) = oneshot::channel::<
+            std::result::Result<Response<IncomingBody>, TrySendError<Request<()>>>,
+        >();
+        let polls = AtomicU64::new(0);
+
+        let err = await_dispatch(rx, &polls, Duration::from_millis(20), 0, "test")
+            .await
+            .expect_err("a stalled dispatch task must time out");
+
+        assert!(err.message.is_none());
+        let io = err
+            .error
+            .find_source::<std::io::Error>()
+            .expect("io error source");
+        assert_eq!(io.kind(), std::io::ErrorKind::TimedOut);
+    }
+
+    /// A request queued behind SETTINGS_MAX_CONCURRENT_STREAMS waits for a
+    /// free stream slot instead of being failed as a wedged connection.
+    #[tokio::test]
+    async fn request_queued_behind_stream_limit_is_not_failed() {
+        // Four times `POLL_READY_TIMEOUT` once `FastTimer` scales it.
+        let slow = Duration::from_millis(600);
+        let (client_io, server_io) = duplex(64 * 1024);
+        let _server = serve(server_io, Some(1), vec![slow]);
+        // Match the server's limit before its SETTINGS arrive, so the second
+        // request waits for a slot instead of being refused.
+        let opts = Http2Options {
+            initial_max_send_streams: 1,
+            ..Http2Options::default()
+        };
+        let sender = connect(client_io, opts).await;
+
+        let first = sender.try_send_request(Request::new(Empty::new()));
+        let second = sender.try_send_request(Request::new(Empty::new()));
+        let (first, second) = tokio::join!(first, second);
+
+        assert_eq!(first.expect("first response").status(), StatusCode::OK);
+        assert_eq!(second.expect("second response").status(), StatusCode::OK);
+    }
+
+    /// A stream that stays pending open while its stream slot is free still
+    /// marks the connection as wedged and fails the request fast.
+    #[tokio::test]
+    async fn pending_stream_with_free_slot_still_fails_fast() {
+        let (client_io, _server_io) = duplex(64 * 1024);
+        let mut builder = Builder::new(WedgedConnExec::default());
+        builder.timer(FastTimer);
+        builder.options(Http2Options {
+            // A single slot, which the pending stream alone does not fill.
+            initial_max_send_streams: 1,
+            keep_alive_interval: None,
+            ..Http2Options::default()
+        });
+        let (sender, conn) = builder
+            .handshake::<_, Empty<Bytes>>(client_io)
+            .await
+            .expect("client handshake");
+        tokio::spawn(conn);
+
+        // Far past the scaled `POLL_READY_TIMEOUT` (150 ms), far below
+        // `DISPATCH_RESPONSE_TIMEOUT`.
+        let res = tokio::time::timeout(
+            Duration::from_secs(2),
+            sender.try_send_request(Request::new(Empty::new())),
+        )
+        .await
+        .expect("a wedged connection must fail the request fast");
+
+        assert!(res.is_err());
     }
 }

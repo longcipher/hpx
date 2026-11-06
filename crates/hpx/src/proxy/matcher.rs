@@ -73,11 +73,27 @@ pub(crate) struct Builder {
     pub(super) pac: Option<crate::proxy::pac::PacRule>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Auth {
     Empty,
     Basic(HeaderValue),
     Raw(Bytes, Bytes),
+}
+
+// `Raw` holds the SOCKS user name and password in clear, and this type is
+// part of the connection-pool key that the pool logs with `{:?}`.
+impl std::fmt::Debug for Auth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Empty => f.write_str("Empty"),
+            Self::Basic(_) => f.debug_tuple("Basic").field(&super::REDACTED).finish(),
+            Self::Raw(_, _) => f
+                .debug_tuple("Raw")
+                .field(&super::REDACTED)
+                .field(&super::REDACTED)
+                .finish(),
+        }
+    }
 }
 
 /// A filter for proxy matchers.

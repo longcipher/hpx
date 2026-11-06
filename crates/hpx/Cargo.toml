@@ -77,7 +77,7 @@ pac = ["dep:boa_engine"]
 ws = ["ws-yawc", "dep:flate2", "hpx-yawc/h2"]
 
 # Enable WebSocket support via yawc backend.
-ws-yawc = ["dep:hpx-yawc", "hpx-yawc/proxy"]
+ws-yawc = ["dep:hpx-yawc", "hpx-yawc/proxy", "hpx-yawc/h2", "dep:flate2"]
 
 # Enable webpki-root-certs for TLS certificate validation.
 webpki-roots = ["dep:webpki-root-certs"]

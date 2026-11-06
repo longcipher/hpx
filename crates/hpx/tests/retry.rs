@@ -62,6 +62,92 @@ async fn retries_apply_in_scope() {
     assert_eq!(resp.status(), 200);
 }
 
+/// A request outside the policy's scope is never retried, not even once.
+#[tokio::test]
+async fn retries_do_not_apply_out_of_scope() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+
+    let cnt = Arc::new(AtomicUsize::new(0));
+    let attempts = cnt.clone();
+    let server = server::http(move |_req| {
+        let cnt = cnt.clone();
+        async move {
+            cnt.fetch_add(1, Ordering::Relaxed);
+            http::Response::builder()
+                .status(http::StatusCode::SERVICE_UNAVAILABLE)
+                .body(Default::default())
+                .unwrap()
+        }
+    });
+
+    let policy = hpx::retry::Policy::for_host("out-of-scope.invalid").classify_fn(|req_rep| {
+        if req_rep.status() == Some(http::StatusCode::SERVICE_UNAVAILABLE) {
+            req_rep.retryable()
+        } else {
+            req_rep.success()
+        }
+    });
+
+    let url = format!("http://{}", server.addr());
+    let resp = Client::builder()
+        .no_proxy()
+        .retry(policy)
+        .build()
+        .unwrap()
+        .post(url)
+        .body("payload")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), http::StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(attempts.load(Ordering::Relaxed), 1);
+}
+
+/// Successful requests must not drain the retry budget. With a budget of 0.2
+/// a retry costs 5 units against a reserve of 500 and a success earns 1, so
+/// charging every request would leave nothing to retry with after 125 of them.
+#[tokio::test]
+async fn retry_budget_survives_successful_requests() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+
+    let flaky = Arc::new(AtomicUsize::new(0));
+    let server = server::http(move |req| {
+        let flaky = flaky.clone();
+        async move {
+            if req.uri().path() == "/flaky" && flaky.fetch_add(1, Ordering::Relaxed) == 0 {
+                http::Response::builder()
+                    .status(http::StatusCode::SERVICE_UNAVAILABLE)
+                    .body(Default::default())
+                    .unwrap()
+            } else {
+                http::Response::default()
+            }
+        }
+    });
+
+    let policy = hpx::retry::Policy::default()
+        .max_extra_load(0.2)
+        .classify_fn(|req_rep| {
+            if req_rep.status() == Some(http::StatusCode::SERVICE_UNAVAILABLE) {
+                req_rep.retryable()
+            } else {
+                req_rep.success()
+            }
+        });
+    let client = Client::builder().no_proxy().retry(policy).build().unwrap();
+
+    let ok_url = format!("http://{}/ok", server.addr());
+    for _ in 0..200 {
+        let resp = client.get(&ok_url).send().await.unwrap();
+        assert_eq!(resp.status(), http::StatusCode::OK);
+    }
+
+    let flaky_url = format!("http://{}/flaky", server.addr());
+    let resp = client.get(&flaky_url).send().await.unwrap();
+    assert_eq!(resp.status(), http::StatusCode::OK);
+}
+
 #[tokio::test]
 async fn status_recovery_retries_payment_required_once() {
     let _ = tracing_subscriber::fmt().with_test_writer().try_init();

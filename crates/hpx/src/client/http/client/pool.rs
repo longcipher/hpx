@@ -883,8 +883,12 @@ impl<T: Poolable, K: Key> Checkout<T, K> {
                     .or_insert_with(VecDeque::new)
                     .push_back(tx);
 
-                // register the waker with this oneshot
-                debug_assert!(Pin::new(&mut rx).poll(cx).is_pending());
+                // register the waker with this oneshot. The poll must run in
+                // release builds too: it is the only registration before this
+                // checkout returns `Pending`, so inside `debug_assert!` an idle
+                // connection handed to this waiter would never wake it.
+                let registered = Pin::new(&mut rx).poll(cx).is_pending();
+                debug_assert!(registered);
                 self.waiter = Some(rx);
             }
 

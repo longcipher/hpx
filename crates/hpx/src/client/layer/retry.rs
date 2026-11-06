@@ -77,6 +77,19 @@ impl Policy<Req, Res, BoxError> for RetryPolicy {
                 None
             }
             Action::Retryable => {
+                // Charge the budget here, once a retry is actually decided.
+                // tower calls `clone_request` before every attempt, the first
+                // one included, so charging there would bill every request.
+                if !self.budget.as_ref().is_none_or(|b| b.withdraw()) {
+                    debug!(
+                        "Request is retryable but retry budget exhausted: {} {}",
+                        req.method(),
+                        req.uri()
+                    );
+                    return None;
+                }
+
+                self.retry_cnt += 1;
                 trace!(
                     "Retrying request ({} attempts so far): {} {} - {}",
                     self.retry_cnt,
@@ -93,8 +106,13 @@ impl Policy<Req, Res, BoxError> for RetryPolicy {
         }
     }
 
+    // tower calls this before every attempt, the first one included, and
+    // consults `retry` only when it returns `Some`. Keep it free of side
+    // effects: the budget and the retry count are charged in `retry`.
     fn clone_request(&mut self, req: &Req) -> Option<Req> {
-        if self.retry_cnt > 0 && !self.scope.applies_to(req) {
+        // Checked before the first attempt too, so a request out of scope is
+        // never retried, not even once.
+        if !self.scope.applies_to(req) {
             trace!("not in scope, not retrying");
             return None;
         }
@@ -104,26 +122,7 @@ impl Policy<Req, Res, BoxError> for RetryPolicy {
             return None;
         }
 
-        // Withdraw budget token only when we're about to actually retry.
-        if !self.budget.as_ref().is_none_or(|b| b.withdraw()) {
-            debug!(
-                "Request is retryable but retry budget exhausted: {} {}",
-                req.method(),
-                req.uri()
-            );
-            return None;
-        }
-
-        self.retry_cnt += 1;
-        if let Some(cloned) = clone_http_request(req) {
-            Some(cloned)
-        } else {
-            // Clone failed — deposit the token back.
-            if let Some(ref budget) = self.budget {
-                budget.deposit();
-            }
-            None
-        }
+        clone_http_request(req)
     }
 }
 
@@ -234,12 +233,12 @@ fn is_connection_reset_error(err: &(dyn StdError + 'static)) -> bool {
 mod tests {
     use std::error::Error as StdError;
 
-    use http::Request;
+    use http::{Request, Response, StatusCode};
     use http_body_util::BodyExt;
     use tower::retry::Policy as _;
 
-    use super::{RetryPolicy, is_retryable_error};
-    use crate::{Body, retry};
+    use super::{Action, ReqRep, RetryPolicy, is_retryable_error};
+    use crate::{Body, ClientResponseBody, retry};
 
     fn make_retry_policy(max_retries: u32) -> RetryPolicy {
         let policy = retry::Policy {
@@ -272,6 +271,83 @@ mod tests {
             result2.is_some(),
             "budget should still have tokens after failed clone"
         );
+    }
+
+    fn retry_on_503(req_rep: ReqRep<'_>) -> Action {
+        if req_rep.status() == Some(StatusCode::SERVICE_UNAVAILABLE) {
+            req_rep.retryable()
+        } else {
+            req_rep.success()
+        }
+    }
+
+    /// Drives one request session through a clone of `template` in tower's
+    /// order: `Retry::call` clones the request before the first attempt, and
+    /// `retry` sees an attempt's result only when that clone exists.
+    /// `statuses` are the responses to successive attempts. Returns how many
+    /// attempts were sent.
+    fn attempts(template: &RetryPolicy, uri: &str, statuses: &[StatusCode]) -> usize {
+        let mut policy = template.clone();
+        let req = Request::builder()
+            .uri(uri)
+            .body(Body::from("payload"))
+            .unwrap();
+        let mut backup = policy.clone_request(&req);
+        let mut sent = 0;
+        for &status in statuses {
+            sent += 1;
+            let Some(mut req) = backup.take() else {
+                break;
+            };
+            let mut result = Ok(Response::builder()
+                .status(status)
+                .body(ClientResponseBody::from(""))
+                .unwrap());
+            if policy.retry(&mut req, &mut result).is_none() {
+                break;
+            }
+            backup = policy.clone_request(&req);
+        }
+        sent
+    }
+
+    #[test]
+    fn retry_budget_is_charged_only_for_retries() {
+        let template = RetryPolicy::new(
+            retry::Policy::default()
+                .max_extra_load(0.2)
+                .classify_fn(retry_on_503),
+        );
+
+        // A budget of 0.2 charges 5 units per retry against a reserve of 500
+        // and earns 1 per success. Charging every first attempt as well would
+        // drain it after 125 successful requests.
+        for _ in 0..200 {
+            assert_eq!(attempts(&template, "http://a.com/", &[StatusCode::OK]), 1);
+        }
+
+        assert_eq!(
+            attempts(
+                &template,
+                "http://a.com/",
+                &[StatusCode::SERVICE_UNAVAILABLE, StatusCode::OK]
+            ),
+            2,
+            "successful requests must not drain the retry budget"
+        );
+    }
+
+    #[test]
+    fn retry_scope_applies_to_the_first_retry() {
+        let template = RetryPolicy::new(retry::Policy::for_host("a.com").classify_fn(retry_on_503));
+        let unavailable = [StatusCode::SERVICE_UNAVAILABLE; 3];
+
+        assert_eq!(
+            attempts(&template, "http://b.com/", &unavailable),
+            1,
+            "a request out of scope must not be retried at all"
+        );
+        assert_eq!(attempts(&template, "http://a.com/", &unavailable), 3);
     }
 
     // -----------------------------------------------------------------------

@@ -87,20 +87,22 @@ where
     }
 
     fn call(&mut self, mut req: Request<ReqBody>) -> Self::Future {
-        let uri = req.uri().clone();
+        let uri = req.uri();
 
         // check if the request URI scheme is valid.
         if !(uri.is_http() || uri.is_https()) || (self.config.https_only && !uri.is_https()) {
-            return Either::Right(future::err(Error::uri_bad_scheme(uri).into()));
+            return Either::Right(future::err(Error::uri_bad_scheme(uri.clone()).into()));
         }
 
-        // check if the request ignores the default headers.
-        if self
-            .config
-            .default_headers
-            .fetch(req.extensions())
-            .copied()
-            .unwrap_or_default()
+        // check if the request ignores the default headers. Without default
+        // headers the merge would only rebuild the request's own map.
+        if !self.config.headers.is_empty()
+            && self
+                .config
+                .default_headers
+                .fetch(req.extensions())
+                .copied()
+                .unwrap_or_default()
         {
             // insert default headers in the request headers
             // without overwriting already appended headers.
@@ -109,8 +111,12 @@ where
             std::mem::swap(req.headers_mut(), &mut dest);
         }
 
-        // store the original headers in request extensions
-        self.config.orig_headers.store(req.extensions_mut());
+        // store the original headers in request extensions. Readers treat an
+        // empty entry like a missing one, so a client without original headers
+        // skips the insert (and the extensions map it would allocate).
+        if self.config.orig_headers.as_ref().is_some() {
+            self.config.orig_headers.store(req.extensions_mut());
+        }
 
         Either::Left(self.inner.call(req))
     }

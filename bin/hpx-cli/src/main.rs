@@ -288,11 +288,15 @@ async fn handle_dl_command(
                 builder = builder.proxy(config);
             }
             let request = builder.build()?;
+            // Subscribe before `add`: `add` starts the scheduler, and a fast
+            // download (or an immediate failure) can emit its final event
+            // before a later subscription exists, leaving the wait loop
+            // blocked forever.
+            let mut rx = engine.subscribe();
             let id = engine.add(request).await?;
             println!("Added download {id}");
 
-            // Subscribe to events and display progress
-            let mut rx = engine.subscribe();
+            // Display progress
             let is_terminal = crate::output::is_terminal();
             let mut display = crate::progress::ProgressDisplay::new(is_terminal);
 
@@ -300,14 +304,7 @@ async fn handle_dl_command(
             loop {
                 match rx.recv().await {
                     Ok(event) => {
-                        let is_terminal_event = matches!(
-                            event,
-                            hpx_dl::DownloadEvent::StateChanged {
-                                state: hpx_dl::DownloadState::Completed
-                                    | hpx_dl::DownloadState::Failed,
-                                ..
-                            } | hpx_dl::DownloadEvent::Failed { .. }
-                        );
+                        let is_terminal_event = is_final_event(&event, id);
                         display.handle_event(event);
                         if is_terminal_event {
                             break;
@@ -385,6 +382,23 @@ async fn handle_dl_command(
     Ok(())
 }
 
+/// Whether `event` ends the `dl add` wait for download `id`.
+///
+/// The engine reports success with `Completed`, not with a `StateChanged`
+/// into `Completed`, so that variant must end the wait. Events of other
+/// downloads on the shared broadcast channel must not.
+fn is_final_event(event: &hpx_dl::DownloadEvent, id: hpx_dl::DownloadId) -> bool {
+    match event {
+        hpx_dl::DownloadEvent::Completed { id: event_id }
+        | hpx_dl::DownloadEvent::Failed { id: event_id, .. }
+        | hpx_dl::DownloadEvent::StateChanged {
+            id: event_id,
+            state: hpx_dl::DownloadState::Completed | hpx_dl::DownloadState::Failed,
+        } => *event_id == id,
+        _ => false,
+    }
+}
+
 fn parse_priority(s: &str) -> eyre::Result<hpx_dl::DownloadPriority> {
     match s.to_lowercase().as_str() {
         "low" => Ok(hpx_dl::DownloadPriority::Low),
@@ -394,5 +408,67 @@ fn parse_priority(s: &str) -> eyre::Result<hpx_dl::DownloadPriority> {
         other => Err(eyre::eyre!(
             "unknown priority '{other}', expected one of: low, normal, high, critical"
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use hpx_dl::{DownloadEvent, DownloadId, DownloadState};
+
+    use super::is_final_event;
+
+    #[test]
+    fn completed_event_ends_dl_add_wait() {
+        let id = DownloadId::new();
+        assert!(is_final_event(&DownloadEvent::Completed { id }, id));
+    }
+
+    #[test]
+    fn failed_events_end_dl_add_wait() {
+        let id = DownloadId::new();
+        let failed = DownloadEvent::Failed {
+            id,
+            error: "boom".to_string(),
+        };
+        assert!(is_final_event(&failed, id));
+        let state_failed = DownloadEvent::StateChanged {
+            id,
+            state: DownloadState::Failed,
+        };
+        assert!(is_final_event(&state_failed, id));
+    }
+
+    #[test]
+    fn other_download_events_do_not_end_dl_add_wait() {
+        let id = DownloadId::new();
+        let other = DownloadId::new();
+        assert!(!is_final_event(&DownloadEvent::Completed { id: other }, id));
+        let other_failed = DownloadEvent::Failed {
+            id: other,
+            error: "boom".to_string(),
+        };
+        assert!(!is_final_event(&other_failed, id));
+        let other_state = DownloadEvent::StateChanged {
+            id: other,
+            state: DownloadState::Completed,
+        };
+        assert!(!is_final_event(&other_state, id));
+    }
+
+    #[test]
+    fn non_final_events_do_not_end_dl_add_wait() {
+        let id = DownloadId::new();
+        assert!(!is_final_event(&DownloadEvent::Started { id }, id));
+        let progress = DownloadEvent::Progress {
+            id,
+            downloaded: 1,
+            total: Some(2),
+        };
+        assert!(!is_final_event(&progress, id));
+        let paused = DownloadEvent::StateChanged {
+            id,
+            state: DownloadState::Paused,
+        };
+        assert!(!is_final_event(&paused, id));
     }
 }

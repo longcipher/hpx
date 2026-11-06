@@ -225,6 +225,31 @@ async fn cookie_store_expires() {
 }
 
 #[tokio::test]
+async fn cookie_store_rejects_foreign_domain() {
+    let server = server::http(move |_req| async move {
+        http::Response::builder()
+            .header("Set-Cookie", "sid=evil; Domain=bank.example")
+            .body(Default::default())
+            .unwrap()
+    });
+
+    let jar = Arc::new(Jar::default());
+    let client = Client::builder()
+        .no_proxy()
+        .cookie_provider(jar.clone())
+        .build()
+        .unwrap();
+
+    let url = format!("http://{}/", server.addr());
+    client.get(&url).send().await.unwrap();
+
+    assert!(
+        jar.get_all().is_empty(),
+        "a response from 127.0.0.1 must not set cookies for bank.example"
+    );
+}
+
+#[tokio::test]
 async fn cookie_store_path() {
     let server = server::http(move |req| async move {
         if req.uri() == "/" {

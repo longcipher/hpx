@@ -81,6 +81,19 @@ where
                         }
                     };
 
+                    // The policy validated only the `Pending` itself; its
+                    // resolution needs the same checks. `parts.uri` is still
+                    // the URI that answered with this redirect.
+                    let action = policy.on_pending_resolved(
+                        Attempt {
+                            status: state.res.status(),
+                            headers: state.res.headers(),
+                            location: &state.location,
+                            previous: &parts.uri,
+                        },
+                        action,
+                    )?;
+
                     return handle_action(
                         cx,
                         RedirectAction {

@@ -49,8 +49,16 @@ fn configure_client(cli: &Cli) -> Result<Client> {
 
     // Proxy
     if let Some(ref proxy_url) = cli.proxy {
+        // The hpx error can carry the raw URI (credentials included) in its
+        // message, so drop it and print only the redacted form.
         let proxy = hpx::Proxy::all(proxy_url)
-            .wrap_err_with(|| format!("invalid proxy URL: {proxy_url}"))?;
+            .map_err(hpx::Error::without_uri)
+            .wrap_err_with(|| {
+                format!(
+                    "invalid proxy URL: {}",
+                    crate::output::redact_url_password(proxy_url)
+                )
+            })?;
         client_builder = client_builder.proxy(proxy);
     }
 
@@ -237,7 +245,7 @@ fn print_dry_run(cli: &Cli, method_str: &str, url: &str) {
         eprintln!("[multipart] {count} fields");
     }
     if let Some(ref proxy) = cli.proxy {
-        eprintln!("[proxy] {proxy}");
+        eprintln!("[proxy] {}", crate::output::redact_url_password(proxy));
     }
     if cli.retry > 0 {
         eprintln!("[retry] {} attempts", cli.retry);

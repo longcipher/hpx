@@ -346,6 +346,28 @@ mod tests {
         assert!(!ProxyPool::is_failure_status(StatusCode::OK));
     }
 
+    /// Both the pool and its builder are `Debug`, and they hold the proxies'
+    /// credentials, so their output must redact them.
+    #[test]
+    fn debug_redacts_proxy_credentials() {
+        let proxies = || {
+            vec![
+                Proxy::all("http://user:secret@proxy-a:8080").expect("proxy a should parse"),
+                Proxy::all("socks5://user:secret@proxy-b:1080").expect("proxy b should parse"),
+            ]
+        };
+
+        let builder = ProxyPool::builder().proxies(proxies());
+        let rendered = format!("{builder:?}");
+        assert!(!rendered.contains("secret"), "leaked: {rendered}");
+        assert!(rendered.contains("proxy-a"), "unexpected: {rendered}");
+
+        let pool = ProxyPool::new(proxies()).expect("pool should be non-empty");
+        let rendered = format!("{pool:?}");
+        assert!(!rendered.contains("secret"), "leaked: {rendered}");
+        assert!(rendered.contains("proxy-b"), "unexpected: {rendered}");
+    }
+
     #[test]
     fn empty_pool_is_rejected() {
         let result = ProxyPool::with_strategy(Vec::new(), ProxyPoolStrategy::StickyFailover);

@@ -71,8 +71,8 @@ use axum::{
 };
 use futures_util::stream;
 use hpx_dl::{
-    DownloadEngine, DownloadError, DownloadRecord, DownloadRequest, SegmentDownloader,
-    SegmentRange, Storage,
+    ChecksumSpec, DownloadEngine, DownloadError, DownloadRecord, DownloadRequest, DownloadState,
+    HashAlgorithm, SegmentDownloader, SegmentRange, Storage, compute_checksum,
 };
 use tokio::sync::Mutex;
 
@@ -100,6 +100,9 @@ enum Mode {
     /// First request aborts mid-stream after half the bytes; later requests
     /// succeed normally.
     Flaky,
+    /// First request answers a well-formed 206 with corrupted bytes; later
+    /// requests succeed normally.
+    CorruptOnce,
 }
 
 #[derive(Clone)]
@@ -172,7 +175,21 @@ async fn get_file(State(state): State<MockState>, headers: HeaderMap) -> Respons
                 full_206(&data, start, end)
             }
         }
+        Mode::CorruptOnce => {
+            let (start, end) = requested.unwrap_or((0, FILE_LEN - 1));
+            if state.hits.fetch_add(1, Ordering::SeqCst) == 0 {
+                let corrupt = data[start..=end].iter().map(|byte| !byte).collect();
+                partial_response(&data, start, end, corrupt)
+            } else {
+                full_206(&data, start, end)
+            }
+        }
     }
+}
+
+/// Redirect to the file the way GitHub release asset links do (302).
+async fn redirect_to_file() -> Response {
+    (StatusCode::FOUND, [(header::LOCATION, "/file.bin")]).into_response()
 }
 
 async fn head_file() -> Response {
@@ -191,6 +208,7 @@ async fn spawn_server(mode: Mode) -> SocketAddr {
     };
     let app = Router::new()
         .route("/file.bin", get(get_file).head(head_file))
+        .route("/release", get(redirect_to_file))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -217,6 +235,37 @@ fn root_cause(err: DownloadError) -> DownloadError {
     match err {
         DownloadError::SegmentRetryExhausted { source, .. } => *source,
         other => other,
+    }
+}
+
+/// SHA-256 checksum spec of the mock server's file.
+async fn file_sha256(dir: &std::path::Path) -> ChecksumSpec {
+    let path = dir.join("expected.bin");
+    tokio::fs::write(&path, file_bytes())
+        .await
+        .expect("write expected file");
+    let expected = compute_checksum(&path, HashAlgorithm::Sha256)
+        .await
+        .expect("compute checksum");
+    ChecksumSpec {
+        algorithm: HashAlgorithm::Sha256,
+        expected,
+    }
+}
+
+/// Poll until the download is `Completed` or `Failed` and return that state.
+async fn wait_for_terminal(engine: &DownloadEngine, id: hpx_dl::DownloadId) -> DownloadState {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let state = engine.status(id).expect("status").state;
+        if matches!(state, DownloadState::Completed | DownloadState::Failed) {
+            return state;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "download never finished; state: {state:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
 
@@ -574,4 +623,153 @@ async fn pause_then_resume_completes_download() {
         file_bytes(),
         "content must be intact after pause/resume"
     );
+}
+
+#[tokio::test]
+async fn probe_rejects_non_success_status() {
+    let addr = spawn_server(Mode::Ok).await;
+    // A client that follows no redirects sees the 302 itself.
+    let client = hpx::Client::builder()
+        .redirect(hpx::redirect::Policy::none())
+        .build()
+        .expect("build client");
+
+    let err = hpx_dl::probe_remote(&client, &format!("http://{addr}/missing.bin"))
+        .await
+        .expect_err("a 404 must fail the probe");
+    assert!(
+        matches!(err, DownloadError::UnexpectedStatus(404)),
+        "unexpected error: {err:?}"
+    );
+
+    let err = hpx_dl::probe_remote(&client, &format!("http://{addr}/release"))
+        .await
+        .expect_err("an unfollowed redirect must fail the probe");
+    assert!(
+        matches!(err, DownloadError::UnexpectedStatus(302)),
+        "unexpected error: {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn engine_fails_on_missing_file_instead_of_completing_empty() {
+    // Regression: the 404's `content-length: 0` was taken as the file size,
+    // so the engine wrote an empty file and reported Completed.
+    let addr = spawn_server(Mode::Ok).await;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dest = tmp.path().join("out.bin");
+
+    let engine = DownloadEngine::builder()
+        .client(hpx::Client::new())
+        .storage(Arc::new(TestStorage::default()))
+        .build()
+        .expect("build engine");
+
+    let request = DownloadRequest::builder(format!("http://{addr}/missing.bin"), &dest)
+        .build()
+        .expect("build request");
+    let id = engine.add(request).await.expect("add download");
+
+    assert_eq!(wait_for_terminal(&engine, id).await, DownloadState::Failed);
+    assert!(!dest.exists(), "a 404 must not create the destination file");
+}
+
+#[tokio::test]
+async fn engine_default_client_follows_redirects() {
+    // Regression: the engine's own client followed no redirects, so a
+    // redirecting link (GitHub release assets) completed as an empty file.
+    let addr = spawn_server(Mode::Ok).await;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dest = tmp.path().join("out.bin");
+
+    // No `.client(..)`: the engine builds its default client.
+    let engine = DownloadEngine::builder()
+        .storage(Arc::new(TestStorage::default()))
+        .build()
+        .expect("build engine");
+
+    let request = DownloadRequest::builder(format!("http://{addr}/release"), &dest)
+        .build()
+        .expect("build request");
+    let id = engine.add(request).await.expect("add download");
+
+    assert_eq!(
+        wait_for_terminal(&engine, id).await,
+        DownloadState::Completed
+    );
+    let written = tokio::fs::read(&dest).await.expect("read destination");
+    assert_eq!(
+        written,
+        file_bytes(),
+        "the redirect target must be downloaded"
+    );
+}
+
+#[tokio::test]
+async fn checksum_mismatch_redownloads_on_resume() {
+    // Regression: segments were persisted as Completed before the checksum
+    // ran, so after a mismatch every resume skipped all of them and failed
+    // the same checksum again, forever.
+    let addr = spawn_server(Mode::CorruptOnce).await;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dest = tmp.path().join("out.bin");
+
+    let engine = DownloadEngine::builder()
+        .client(hpx::Client::new())
+        .storage(Arc::new(TestStorage::default()))
+        .retry_max_attempts(0)
+        .build()
+        .expect("build engine");
+
+    let request = DownloadRequest::builder(format!("http://{addr}/file.bin"), &dest)
+        .checksum(file_sha256(tmp.path()).await)
+        .build()
+        .expect("build request");
+    let id = engine.add(request).await.expect("add download");
+
+    assert_eq!(
+        wait_for_terminal(&engine, id).await,
+        DownloadState::Failed,
+        "the corrupt first download must fail its checksum"
+    );
+
+    engine.resume(id).await.expect("resume download");
+    assert_eq!(
+        wait_for_terminal(&engine, id).await,
+        DownloadState::Completed,
+        "the resumed download must fetch the file again"
+    );
+    let written = tokio::fs::read(&dest).await.expect("read destination");
+    assert_eq!(written, file_bytes());
+}
+
+#[tokio::test]
+async fn checksum_mismatch_fails_over_to_mirror_with_fresh_download() {
+    // Same root cause as above, through mirror failover: the mirror attempt
+    // must not reuse the primary's corrupt "completed" segments.
+    let primary = spawn_server(Mode::CorruptOnce).await;
+    let mirror = spawn_server(Mode::Ok).await;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dest = tmp.path().join("out.bin");
+
+    let engine = DownloadEngine::builder()
+        .client(hpx::Client::new())
+        .storage(Arc::new(TestStorage::default()))
+        .retry_max_attempts(0)
+        .build()
+        .expect("build engine");
+
+    let request = DownloadRequest::builder(format!("http://{primary}/file.bin"), &dest)
+        .mirror(format!("http://{mirror}/file.bin"))
+        .checksum(file_sha256(tmp.path()).await)
+        .build()
+        .expect("build request");
+    let id = engine.add(request).await.expect("add download");
+
+    assert_eq!(
+        wait_for_terminal(&engine, id).await,
+        DownloadState::Completed
+    );
+    let written = tokio::fs::read(&dest).await.expect("read destination");
+    assert_eq!(written, file_bytes());
 }

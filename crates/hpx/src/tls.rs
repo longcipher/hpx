@@ -67,8 +67,14 @@ use bytes::{BufMut, BytesMut};
 /// it (otherwise, the TLS backend will fail to parse the host as an IP address,
 /// eventually causing the handshake to fail due a hostname verification error).
 ///
-/// Shared by the BoringSSL and OpenSSL backends to avoid duplicated logic.
-#[cfg(any(feature = "boring-tls", feature = "openssl-tls"))]
+/// Shared by the BoringSSL, OpenSSL and rustls backends to avoid duplicated
+/// logic. rustls is stricter: its `ServerName` rejects a bracketed host
+/// outright, so every IPv6-literal request fails before the handshake.
+#[cfg(any(
+    feature = "boring-tls",
+    feature = "openssl-tls",
+    feature = "rustls-tls"
+))]
 pub(crate) fn normalize_host(host: &str) -> &str {
     if host.is_empty() {
         return host;

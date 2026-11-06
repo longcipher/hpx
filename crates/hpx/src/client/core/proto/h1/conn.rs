@@ -100,9 +100,13 @@ where
         self.state.h1_max_headers = Some(val);
     }
 
-    /// Limits the size of the response header block.
+    /// Limits the size of the response header block, and of the trailer
+    /// block of a chunked response.
     pub(crate) const fn set_http1_max_header_size_limit(&mut self, val: Option<usize>) {
         self.io.set_max_header_size(val);
+        // Trailers are parsed by the body `Decoder`, which takes its limit
+        // from the state rather than from `io`.
+        self.state.h1_max_header_size = val;
     }
 
     /// Limits the size of the read buffer, which also bounds the response
@@ -296,7 +300,11 @@ where
     ///
     /// Deliberately refuses the `Reading::Continue` state, so an in-flight
     /// `100 Continue` handshake is never skipped.
-    pub(super) fn take_buffered_body(&mut self, len: DecodedLength) -> Option<Bytes> {
+    pub(super) fn take_buffered_body(
+        &mut self,
+        cx: &mut Context<'_>,
+        len: DecodedLength,
+    ) -> Option<Bytes> {
         if !matches!(self.state.reading, Reading::Body(_)) {
             return None;
         }
@@ -312,6 +320,11 @@ where
         // The decoder sets this when it drains the final body frame; going
         // straight there is what makes the connection immediately reusable.
         self.state.reading = Reading::KeepAlive;
+        // Like the decoder path, settle keep-alive now: go idle, or close
+        // when the response disabled it (`Connection: close`, HTTP/1.0).
+        // Otherwise the dispatcher waits on a mid-message read and reports
+        // the server's expected EOF as an IncompleteMessage error.
+        self.try_keep_alive(cx);
         Some(bytes)
     }
 

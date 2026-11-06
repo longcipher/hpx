@@ -293,6 +293,14 @@ impl codec::Decoder for Decoder {
         }
 
         let opcode = frame::OpCode::try_from(src[0] & 0b00001111)?;
+
+        // RSV1 marks the first frame of a compressed message (RFC 7692 §6.1).
+        // On a control or continuation frame no negotiated extension gives it
+        // a meaning, so the connection must fail (RFC 6455 §5.2).
+        if rsv1 && (opcode.is_control() || opcode == OpCode::Continuation) {
+            return Err(WebSocketError::ReservedBitsNotZero);
+        }
+
         let masked = src[1] & 0b10000000 != 0;
         let length_code = src[1] & 0x7F;
 
@@ -801,6 +809,23 @@ mod tests {
         assert!(result.is_some());
         let decoded = result.unwrap();
         assert!(decoded.is_compressed);
+    }
+
+    #[test]
+    fn rsv1_on_control_or_continuation_frame_is_rejected() {
+        // FIN/RSV1 set on Close, Ping, Pong and Continuation, plus a non-final
+        // Continuation with RSV1; all unmasked with an empty payload.
+        for first_byte in [0xC8u8, 0xC9, 0xCA, 0xC0, 0x40] {
+            let mut buf = BytesMut::from(&[first_byte, 0x00][..]);
+            let mut decoder = Decoder::new(Role::Client, 1 << 20);
+            assert!(
+                matches!(
+                    decoder.decode(&mut buf),
+                    Err(WebSocketError::ReservedBitsNotZero)
+                ),
+                "first byte {first_byte:#04x}"
+            );
+        }
     }
 
     #[test]

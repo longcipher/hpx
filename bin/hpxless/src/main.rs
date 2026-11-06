@@ -97,7 +97,7 @@ fn main() -> eyre::Result<()> {
     println!("  stealth: {}", cli.stealth);
     println!("  profile: {:?}", cli.profile);
     if let Some(proxy) = &cli.proxy {
-        println!("  proxy:   {proxy}");
+        println!("  proxy:   {}", cli::redact_proxy_url(proxy));
     }
     if !cli.block.is_empty() {
         println!("  block:   {}", cli.block.join(", "));

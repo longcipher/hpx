@@ -7,7 +7,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use cookie::{Cookie as RawCookie, CookieJar, Expiration, SameSite};
+use cookie::{Cookie as RawCookie, CookieJar, Expiration, SameSite, time::OffsetDateTime};
 use http::Uri;
 use publicsuffix::{List as PslList, Psl};
 use scc::HashMap as SccHashMap;
@@ -361,7 +361,8 @@ impl Jar {
     /// Add a cookie to this jar.
     ///
     /// The cookie's domain and path attributes are used if present, otherwise
-    /// the domain and path are derived from the provided Uri.
+    /// the domain and path are derived from the provided Uri. A cookie whose
+    /// `Domain` attribute the Uri's host does not domain-match is ignored.
     ///
     /// # Example
     /// ```
@@ -377,7 +378,6 @@ impl Jar {
     /// // You can also use a string directly
     /// jar.add("foo=bar; Domain=example.com; Path=/", "http://example.com");
     /// ```
-    #[expect(clippy::unwrap_or_default)]
     pub fn add<C, U>(&self, cookie: C, uri: U)
     where
         C: IntoCookie,
@@ -386,64 +386,16 @@ impl Jar {
         let Some(cookie) = cookie.into_cookie() else {
             return;
         };
-        let cookie: RawCookie<'static> = cookie.into();
-        let Ok(uri) = uri.into_uri() else { return };
-        let host = uri.host();
-        let cookie_domain = cookie.domain().map(normalize_domain);
-        // Public Suffix List check (RFC 6265 Section 5.3 step 6): reject
-        // cookies whose `Domain` attribute is itself a public suffix (e.g.
-        // `co.uk`, `github.io`) to prevent cross-registrable-domain cookie
-        // leakage.
-        let domain: &str = match cookie_domain {
-            Some(d) => {
-                if is_public_suffix(&self.psl, d) {
-                    // Exception: when the cookie's domain equals the request
-                    // host AND the host is itself a public suffix, allow the
-                    // cookie but treat it as host-only by storing under the
-                    // request host.
-                    if host == Some(d) {
-                        host.unwrap_or_default()
-                    } else {
-                        return;
-                    }
-                } else {
-                    d
-                }
-            }
-            None => host.unwrap_or_default(),
-        };
-        let path = cookie.path().unwrap_or_else(|| normalize_path(&uri));
-
-        let expired = cookie
-            .expires_datetime()
-            .is_some_and(|dt| dt <= SystemTime::now())
-            || cookie.max_age().is_some_and(|age| age.is_zero());
-
-        self.store
-            .entry_sync(domain.to_owned())
-            .or_insert_with(SccHashMap::new)
-            .get()
-            .entry_sync(path.to_owned())
-            .or_insert_with(CookieJar::default)
-            .get_mut()
-            .remove(cookie.name().to_owned());
-
-        if !expired {
-            self.store
-                .entry_sync(domain.to_owned())
-                .or_insert_with(SccHashMap::new)
-                .get()
-                .entry_sync(path.to_owned())
-                .or_insert_with(CookieJar::default)
-                .get_mut()
-                .add(cookie);
-        }
+        // Single storage path, so the domain and expiry rules in
+        // `add_cookie` cannot drift between the two entry points.
+        self.add_cookie(cookie, uri);
     }
 
     /// Add a cookie to this jar (legacy API).
     ///
     /// The cookie's domain and path attributes are used if present, otherwise
-    /// the domain and path are derived from the provided Uri.
+    /// the domain and path are derived from the provided Uri. A cookie whose
+    /// `Domain` attribute the Uri's host does not domain-match is ignored.
     ///
     /// # Example
     /// ```
@@ -462,38 +414,52 @@ impl Jar {
         C: Into<RawCookie<'static>>,
         U: IntoUri,
     {
-        let cookie: RawCookie<'static> = cookie.into();
+        let mut cookie: RawCookie<'static> = cookie.into();
         let Ok(uri) = uri.into_uri() else { return };
         let host = uri.host();
-        let cookie_domain = cookie.domain().map(normalize_domain);
-        // Public Suffix List check (RFC 6265 Section 5.3 step 6): reject
+
+        // RFC 6265 Section 5.3 step 3: Max-Age takes precedence over Expires.
+        // Store it as an absolute Expires, because the read path only checks
+        // Expires; a Max-Age-only cookie would otherwise never expire.
+        let expired = match cookie.max_age() {
+            Some(max_age) if max_age.is_positive() => {
+                cookie.set_expires(OffsetDateTime::now_utc().saturating_add(max_age));
+                false
+            }
+            Some(_) => true,
+            None => cookie
+                .expires_datetime()
+                .is_some_and(|dt| dt <= SystemTime::now()),
+        };
+
+        // Public Suffix List check (RFC 6265 Section 5.3 step 5): reject
         // cookies whose `Domain` attribute is itself a public suffix (e.g.
         // `co.uk`, `github.io`) to prevent cross-registrable-domain cookie
         // leakage.
-        let domain: &str = match cookie_domain {
-            Some(d) => {
-                if is_public_suffix(&self.psl, d) {
-                    // Exception: when the cookie's domain equals the request
-                    // host AND the host is itself a public suffix, allow the
-                    // cookie but treat it as host-only by storing under the
-                    // request host.
-                    if host == Some(d) {
-                        host.unwrap_or_default()
-                    } else {
-                        return;
-                    }
-                } else {
-                    d
-                }
+        if let Some(d) = cookie.domain().map(normalize_domain)
+            && is_public_suffix(&self.psl, d)
+        {
+            if host != Some(d) {
+                return;
             }
+            // Exception: when the cookie's domain equals the request host AND
+            // the host is itself a public suffix, allow the cookie but make it
+            // host-only by dropping the attribute.
+            cookie.unset_domain();
+        }
+
+        let domain: &str = match cookie.domain().map(normalize_domain) {
+            // RFC 6265 Section 5.3 step 6: a `Domain` attribute is honoured
+            // only when the request host domain-matches it. Otherwise any site
+            // could plant cookies for another one (`Domain=bank.com` sent by
+            // attacker.com).
+            Some(d) if host.is_some_and(|h| domain_match(h, d)) => d,
+            Some(_) => return,
+            // No `Domain` attribute: a host-only cookie. It keeps
+            // `domain() == None`, which `cookies()` uses as the host-only flag.
             None => host.unwrap_or_default(),
         };
         let path = cookie.path().unwrap_or_else(|| normalize_path(&uri));
-
-        let expired = cookie
-            .expires_datetime()
-            .is_some_and(|dt| dt <= SystemTime::now())
-            || cookie.max_age().is_some_and(|age| age.is_zero());
 
         self.store
             .entry_sync(domain.to_owned())
@@ -596,11 +562,18 @@ impl CookieStore for Jar {
                 if !domain_match(host, domain) {
                     return true;
                 }
+                // Host-only cookies (stored without a `Domain` attribute) go
+                // to the exact host that set them, never to its subdomains
+                // (RFC 6265 Section 5.4 step 1).
+                let exact_host = host == domain.as_str();
                 path_map.iter_sync(|path, cookie_jar| {
                     if !path_match(uri.path(), path) {
                         return true;
                     }
                     for cookie in cookie_jar.iter() {
+                        if cookie.domain().is_none() && !exact_host {
+                            continue;
+                        }
                         if cookie.secure() == Some(true) && uri.is_http() {
                             continue;
                         }
@@ -634,11 +607,16 @@ impl CookieStore for Jar {
                 if !domain_match(host, domain) {
                     return true;
                 }
+                // Host-only cookies match the exact host only; see above.
+                let exact_host = host == domain.as_str();
                 path_map.iter_sync(|path, cookie_jar| {
                     if !path_match(uri.path(), path) {
                         return true;
                     }
                     for cookie in cookie_jar.iter() {
+                        if cookie.domain().is_none() && !exact_host {
+                            continue;
+                        }
                         if cookie.secure() == Some(true) && uri.is_http() {
                             continue;
                         }
@@ -903,6 +881,126 @@ mod tests {
             }
             other => panic!("expected Cookies::Compressed with two cookies, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn domain_attribute_not_matching_request_host_is_rejected() {
+        let jar = Jar::default();
+        let attacker: Uri = "http://attacker.com/".parse().unwrap();
+        let bank: Uri = "http://bank.com/".parse().unwrap();
+
+        let set_cookie = HeaderValue::from_static("sid=evil; Domain=bank.com");
+        jar.set_cookies(&mut header_values(&[set_cookie]), &attacker);
+
+        assert!(
+            matches!(jar.cookies(&bank), Cookies::Empty),
+            "attacker.com must not set cookies for bank.com"
+        );
+
+        // `add` shares the same storage path.
+        jar.add("sid=evil; Domain=bank.com", "http://attacker.com/");
+        assert!(jar.get_all().is_empty());
+    }
+
+    #[test]
+    fn domain_attribute_for_parent_domain_reaches_subdomains() {
+        let jar = Jar::default();
+        let www: Uri = "http://www.example.com/".parse().unwrap();
+        let api: Uri = "http://api.example.com/".parse().unwrap();
+
+        let set_cookie = HeaderValue::from_static("sid=ok; Domain=example.com");
+        jar.set_cookies(&mut header_values(&[set_cookie]), &www);
+
+        assert!(
+            !matches!(jar.cookies(&api), Cookies::Empty),
+            "a Domain cookie for a parent domain should reach sibling subdomains"
+        );
+    }
+
+    #[test]
+    fn host_only_cookie_not_sent_to_subdomain() {
+        let jar = Arc::new(Jar::default());
+        let host: Uri = "http://example.com/".parse().unwrap();
+        let sub: Uri = "http://sub.example.com/".parse().unwrap();
+
+        let set_cookie = HeaderValue::from_static("sid=abc");
+        jar.set_cookies(&mut header_values(&[set_cookie]), &host);
+
+        assert!(!matches!(jar.cookies(&host), Cookies::Empty));
+        assert!(
+            matches!(jar.cookies(&sub), Cookies::Empty),
+            "a host-only cookie must not reach subdomains"
+        );
+
+        let uncompressed = jar.uncompressed();
+        assert!(matches!(uncompressed.cookies(&host), Cookies::Uncompressed(v) if v.len() == 1));
+        assert!(matches!(uncompressed.cookies(&sub), Cookies::Uncompressed(v) if v.is_empty()));
+    }
+
+    #[test]
+    fn public_suffix_domain_equal_to_host_is_host_only() {
+        let jar = Jar::default();
+        let suffix_host: Uri = "http://co.uk/".parse().unwrap();
+        let below: Uri = "http://example.co.uk/".parse().unwrap();
+
+        let set_cookie = HeaderValue::from_static("sid=abc; Domain=co.uk");
+        jar.set_cookies(&mut header_values(&[set_cookie]), &suffix_host);
+
+        assert!(!matches!(jar.cookies(&suffix_host), Cookies::Empty));
+        assert!(
+            matches!(jar.cookies(&below), Cookies::Empty),
+            "a public-suffix Domain cookie must stay host-only"
+        );
+    }
+
+    #[test]
+    fn max_age_takes_precedence_over_past_expires() {
+        let jar = Jar::default();
+        let uri: Uri = "http://example.com/".parse().unwrap();
+
+        let set_cookie = HeaderValue::from_static(
+            "sid=abc; Expires=Wed, 21 Oct 2015 07:28:00 GMT; Max-Age=3600",
+        );
+        jar.set_cookies(&mut header_values(&[set_cookie]), &uri);
+
+        assert!(
+            !matches!(jar.cookies(&uri), Cookies::Empty),
+            "a positive Max-Age overrides a past Expires"
+        );
+    }
+
+    #[test]
+    fn zero_max_age_deletes_stored_cookie() {
+        let jar = Jar::default();
+        let uri: Uri = "http://example.com/".parse().unwrap();
+
+        let set_cookie = HeaderValue::from_static("sid=abc");
+        jar.set_cookies(&mut header_values(&[set_cookie]), &uri);
+        assert_eq!(jar.get_all().len(), 1);
+
+        let delete = HeaderValue::from_static("sid=abc; Max-Age=0");
+        jar.set_cookies(&mut header_values(&[delete]), &uri);
+        assert!(jar.get_all().is_empty());
+    }
+
+    #[test]
+    fn max_age_is_stored_as_absolute_expiry() {
+        use std::time::{Duration, SystemTime};
+
+        let jar = Jar::default();
+        let uri: Uri = "http://example.com/".parse().unwrap();
+
+        let before = SystemTime::now();
+        let set_cookie = HeaderValue::from_static("sid=abc; Max-Age=100");
+        jar.set_cookies(&mut header_values(&[set_cookie]), &uri);
+        let after = SystemTime::now();
+
+        let expires = jar
+            .get("sid", "http://example.com/")
+            .and_then(|cookie| cookie.expires())
+            .expect("Max-Age should be stored as an absolute expiry");
+        assert!(expires >= before + Duration::from_secs(100));
+        assert!(expires <= after + Duration::from_secs(100));
     }
 
     #[test]

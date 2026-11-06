@@ -346,10 +346,27 @@ impl SseDecoder {
                         }
                     }
 
+                    // A field line without a colon has an empty value
+                    // (WHATWG HTML, "process the field").
                     match mode {
-                        ValueMode::Data => self.data_buf.push(b'\n'),
-                        ValueMode::Id => self.last_event_id_buf.clear(),
-                        ValueMode::Event | ValueMode::Retry => {}
+                        ValueMode::Data => {
+                            // Same limit as the `data:` path; otherwise an
+                            // endless run of bare `data` lines grows
+                            // `data_buf` without bound.
+                            if self.max_payload_size.get() < self.data_buf.len() {
+                                self.mark_corrupted();
+                                return Some(Err(PayloadTooLargeError));
+                            }
+                            self.data_buf.push(b'\n');
+                        }
+                        ValueMode::Id => {
+                            self.last_event_id_buf.clear();
+                            // An empty id resets the last event ID, exactly
+                            // like `id:` with an empty value does.
+                            self.staged_last_event_id = None;
+                        }
+                        ValueMode::Event => self.event_buf.clear(),
+                        ValueMode::Retry => {}
                     }
                 }
                 Mode::Value(ValueMode::Retry) => {
@@ -699,5 +716,71 @@ data
             })))
         );
         assert!(stream.is_empty());
+    }
+
+    #[test]
+    fn bare_data_lines_respect_payload_limit() {
+        let lines = "data\n".repeat(32);
+        let mut stream = lines.as_bytes();
+
+        let mut decoder = SseDecoder::with_limit(NonZeroUsize::new(10).unwrap());
+
+        assert_eq!(decoder.next(&mut stream), Some(Err(PayloadTooLargeError)));
+        // Eleven lines fill `data_buf` past the limit; the twelfth is rejected.
+        assert_eq!(stream.len(), "data\n".len() * 20);
+
+        // Like the `data:` path, the oversized event is dropped up to the
+        // next blank line and the decoder then recovers.
+        assert_eq!(decoder.next(&mut stream), None);
+        let mut tail: &[u8] = b"\ndata: ok\n\n";
+        assert_eq!(
+            decoder.next(&mut tail),
+            Some(Ok(SseEvent::Message(MessageEvent {
+                event: "message".into(),
+                data: "ok".into(),
+                last_event_id: None,
+            })))
+        );
+    }
+
+    #[test]
+    fn bare_id_line_resets_last_event_id() {
+        let mut stream: &[u8] = b"id: first\ndata: a\n\nid\ndata: b\n\n";
+
+        let mut decoder = SseDecoder::new();
+
+        assert_eq!(
+            decoder.next(&mut stream),
+            Some(Ok(SseEvent::Message(MessageEvent {
+                event: "message".into(),
+                data: "a".into(),
+                last_event_id: Some("first".into()),
+            })))
+        );
+        assert_eq!(
+            decoder.next(&mut stream),
+            Some(Ok(SseEvent::Message(MessageEvent {
+                event: "message".into(),
+                data: "b".into(),
+                last_event_id: None,
+            })))
+        );
+        assert_eq!(decoder.last_event_id(), None);
+    }
+
+    #[test]
+    fn bare_event_line_resets_event_type() {
+        let mut stream: &[u8] = b"event: custom\nevent\ndata: x\n\n";
+
+        let mut decoder = SseDecoder::new();
+
+        assert_eq!(
+            decoder.next(&mut stream),
+            Some(Ok(SseEvent::Message(MessageEvent {
+                event: "message".into(),
+                data: "x".into(),
+                last_event_id: None,
+            })))
+        );
     }
 }

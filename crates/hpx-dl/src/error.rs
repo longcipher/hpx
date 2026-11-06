@@ -87,11 +87,14 @@ pub enum DownloadError {
     #[error("Request timed out after {0:?}")]
     Timeout(std::time::Duration),
 
-    /// Server answered a range request with an unexpected status code.
+    /// Server answered the HEAD probe or a range request with an unexpected
+    /// status code.
     ///
-    /// Any non-success status (403, 404, 500, ...) means the response body is
-    /// not segment data; writing it into the destination file would corrupt it.
-    #[error("unexpected HTTP status {0} for range request")]
+    /// Any non-success status (302, 403, 404, 500, ...) means the response
+    /// describes something other than the file: its headers are not the file's
+    /// metadata, and its body is not segment data; writing it into the
+    /// destination file would corrupt it.
+    #[error("unexpected HTTP status {0}")]
     UnexpectedStatus(u16),
 
     /// Segment body length did not match the requested byte range.

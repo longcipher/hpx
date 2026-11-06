@@ -177,13 +177,80 @@ where
                 ret.push(component.as_os_str());
             }
             Component::CurDir => {}
-            Component::ParentDir => {
-                ret.pop();
-            }
+            // `..` cancels the previous normal component. With none to
+            // cancel it must stay, or `../keys.log` would silently become
+            // `keys.log`; at the root it is a no-op, as `/..` is `/`.
+            Component::ParentDir => match ret.components().next_back() {
+                Some(Component::Normal(_)) => {
+                    ret.pop();
+                }
+                Some(Component::RootDir) => {}
+                _ => ret.push(component.as_os_str()),
+            },
             Component::Normal(c) => {
                 ret.push(c);
             }
         }
     }
     ret
+}
+
+#[cfg(all(test, feature = "keylog"))]
+mod tests {
+    use std::path::Path;
+
+    use super::normalize_path;
+
+    #[test]
+    fn normalize_path_keeps_parent_dirs_it_cannot_resolve() {
+        assert_eq!(
+            normalize_path(Path::new("../keys.log")),
+            Path::new("../keys.log")
+        );
+        assert_eq!(
+            normalize_path(Path::new("a/../../keys.log")),
+            Path::new("../keys.log")
+        );
+        assert_eq!(
+            normalize_path(Path::new("../../keys.log")),
+            Path::new("../../keys.log")
+        );
+        assert_eq!(
+            normalize_path(Path::new("a/b/../keys.log")),
+            Path::new("a/keys.log")
+        );
+        assert_eq!(
+            normalize_path(Path::new("./keys.log")),
+            Path::new("keys.log")
+        );
+        assert_eq!(
+            normalize_path(Path::new("/../keys.log")),
+            Path::new("/keys.log")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn keylog_file_is_readable_only_by_its_owner() {
+        use std::{
+            os::unix::fs::PermissionsExt,
+            sync::Arc,
+            time::{SystemTime, UNIX_EPOCH},
+        };
+
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "hpx-keylog-mode-{stamp}-{}.log",
+            std::process::id()
+        ));
+
+        let _handle = super::Handle::new(Arc::from(path.as_path())).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(mode & 0o777, 0o600);
+    }
 }

@@ -219,6 +219,42 @@ fn bad_request(msg: &str) -> hyper::Response<String> {
         .unwrap_or_else(|_| hyper::Response::new(String::new()))
 }
 
+fn forbidden(msg: &str) -> hyper::Response<String> {
+    let mut response = hyper::Response::new(msg.to_string());
+    *response.status_mut() = hyper::StatusCode::FORBIDDEN;
+    response
+}
+
+/// Whether a `Host` header value names the loopback interface: `localhost`,
+/// an IPv4 loopback address or a bracketed IPv6 loopback address, each with
+/// an optional port.
+///
+/// The server binds `127.0.0.1`, yet any web page the user visits can still
+/// reach it through DNS rebinding: an attacker-controlled name is pointed at
+/// `127.0.0.1`, and the browser then sends that name in `Host`.
+fn is_loopback_host(host: &str) -> bool {
+    // Split off an optional port. A `]` after the last colon means that
+    // colon sits inside a bracketed IPv6 literal, not before a port.
+    let name = match host.rsplit_once(':') {
+        Some((name, port)) if !port.contains(']') => {
+            if port.parse::<u16>().is_err() {
+                return false;
+            }
+            name
+        }
+        _ => host,
+    };
+    if let Some(ipv6) = name.strip_prefix('[').and_then(|n| n.strip_suffix(']')) {
+        return ipv6
+            .parse::<std::net::Ipv6Addr>()
+            .is_ok_and(|ip| ip.is_loopback());
+    }
+    name.eq_ignore_ascii_case("localhost")
+        || name
+            .parse::<std::net::Ipv4Addr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
 async fn handle_connection(
     stream: tokio::net::TcpStream,
     html: &str,
@@ -252,6 +288,25 @@ async fn handle_connection(
             // `Arc` handle; the inner `async move` block takes ownership of it).
             let v8_serialize = v8_serialize.clone();
             async move {
+                // Refuse handshakes a web page could have sent. Browsers put
+                // `Origin` on every WebSocket handshake while CDP clients such
+                // as Puppeteer and Playwright send none (Chrome refuses such
+                // handshakes too unless `--remote-allow-origins` lists the
+                // origin), and a DNS-rebound page arrives with its own `Host`.
+                if req.headers().contains_key(hyper::header::ORIGIN) {
+                    return Ok::<_, std::convert::Infallible>(forbidden(
+                        "WebSocket handshakes with an Origin header are not allowed",
+                    ));
+                }
+                if !req
+                    .headers()
+                    .get(hyper::header::HOST)
+                    .and_then(|host| host.to_str().ok())
+                    .is_some_and(is_loopback_host)
+                {
+                    return Ok(forbidden("Host must name a loopback address"));
+                }
+
                 if req
                     .headers()
                     .get(hyper::header::SEC_WEBSOCKET_KEY)
@@ -385,6 +440,23 @@ async fn handle_http(stream: tokio::net::TcpStream) -> Result<(), Box<dyn std::e
         .nth(1)
         .unwrap_or("/");
 
+    // `/json/version` and `/json` hand out the WebSocket URL, so a DNS-rebound
+    // page must not read them either (see `is_loopback_host`). A missing `Host`
+    // is refused as well: HTTP/1.1 requires it and every browser sends it.
+    let host = request
+        .lines()
+        .skip(1)
+        .take_while(|line| !line.is_empty())
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("host").then_some(value.trim())
+        });
+    if !host.is_some_and(is_loopback_host) {
+        let resp = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        stream.write_all(resp.as_bytes()).await?;
+        return Ok(());
+    }
+
     let addr = stream.local_addr()?;
     let ws_url = format!("ws://127.0.0.1:{}", addr.port());
 
@@ -451,6 +523,96 @@ mod tests {
         let server = CdpServer::start("<html></html>", 0, true, None).expect("should start");
         assert!(server.port() > 0);
         drop(server);
+    }
+
+    #[test]
+    fn loopback_host_accepts_only_loopback_names() {
+        for host in [
+            "localhost",
+            "LocalHost:9222",
+            "127.0.0.1",
+            "127.0.0.1:9222",
+            "127.1.2.3",
+            "[::1]",
+            "[::1]:9222",
+        ] {
+            assert!(is_loopback_host(host), "{host} should be accepted");
+        }
+        for host in [
+            "",
+            "evil.example",
+            "evil.example:9222",
+            "localhost.evil.example",
+            "127.0.0.1.nip.io",
+            "192.168.1.10:9222",
+            "::1",
+            "[::2]:9222",
+            "[::1]x",
+            "localhost:",
+            "localhost:http",
+        ] {
+            assert!(!is_loopback_host(host), "{host} should be refused");
+        }
+    }
+
+    /// Send one raw request and return what the server answers first.
+    async fn raw_response(port: u16, request: &str) -> String {
+        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        stream.write_all(request.as_bytes()).await.unwrap();
+        let mut buf = vec![0u8; 4096];
+        let n = stream.read(&mut buf).await.unwrap();
+        String::from_utf8_lossy(&buf[..n]).into_owned()
+    }
+
+    fn ws_upgrade_request(host: &str, origin: Option<&str>) -> String {
+        let origin = origin.map_or_else(String::new, |o| format!("Origin: {o}\r\n"));
+        format!(
+            "GET / HTTP/1.1\r\nHost: {host}\r\n{origin}Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        )
+    }
+
+    #[tokio::test]
+    async fn ws_upgrade_from_a_web_page_is_forbidden() {
+        // Regression: the upgrade never looked at `Origin` or `Host`, so any
+        // page the user visited could drive the browser over CDP.
+        let server = CdpServer::start_ephemeral("<html></html>").unwrap();
+        let port = server.port();
+
+        let cross_origin =
+            ws_upgrade_request(&format!("127.0.0.1:{port}"), Some("https://evil.example"));
+        let response = raw_response(port, &cross_origin).await;
+        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+
+        let rebound = ws_upgrade_request(&format!("evil.example:{port}"), None);
+        let response = raw_response(port, &rebound).await;
+        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+
+        let local = ws_upgrade_request(&format!("localhost:{port}"), None);
+        let response = raw_response(port, &local).await;
+        assert!(response.starts_with("HTTP/1.1 101"), "{response}");
+    }
+
+    #[tokio::test]
+    async fn json_endpoints_refuse_a_non_loopback_host() {
+        // Regression: a DNS-rebound page could read `webSocketDebuggerUrl`.
+        let server = CdpServer::start_ephemeral("<html></html>").unwrap();
+        let port = server.port();
+        let request = |host: &str| {
+            format!("GET /json/version HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n")
+        };
+
+        let response = raw_response(port, &request(&format!("rebind.example:{port}"))).await;
+        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+        assert!(!response.contains("webSocketDebuggerUrl"), "{response}");
+
+        let no_host = "GET /json/version HTTP/1.1\r\nConnection: close\r\n\r\n";
+        let response = raw_response(port, no_host).await;
+        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+
+        let response = raw_response(port, &request(&format!("[::1]:{port}"))).await;
+        assert!(response.contains("webSocketDebuggerUrl"), "{response}");
     }
 
     async fn ws_handshake(

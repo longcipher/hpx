@@ -3,7 +3,8 @@ use futures::{SinkExt, StreamExt};
 use hpx_yawc::{Frame, WebSocket, close::CloseCode, proxy::ProxyConfig};
 
 pub(crate) async fn run(proxy_url: &str) -> Result<()> {
-    println!("=== HTTP Proxy Tests (proxy={proxy_url}) ===\n");
+    let shown_proxy = crate::output::redact_url_password(proxy_url);
+    println!("=== HTTP Proxy Tests (proxy={shown_proxy}) ===\n");
 
     test_http_proxy(proxy_url).await?;
     println!("[PASS] HTTP proxy (plain HTTP)\n");
@@ -11,7 +12,7 @@ pub(crate) async fn run(proxy_url: &str) -> Result<()> {
     test_https_proxy(proxy_url).await?;
     println!("[PASS] HTTPS proxy (CONNECT tunnel)\n");
 
-    println!("=== WebSocket Proxy Tests (proxy={proxy_url}) ===\n");
+    println!("=== WebSocket Proxy Tests (proxy={shown_proxy}) ===\n");
 
     test_ws_proxy(proxy_url).await?;
     println!("[PASS] WebSocket proxy (ws://echo)\n");
@@ -24,7 +25,8 @@ pub(crate) async fn run(proxy_url: &str) -> Result<()> {
 }
 
 async fn test_http_proxy(proxy_url: &str) -> Result<()> {
-    let proxy = hpx::Proxy::http(proxy_url)?;
+    // Drop the raw URI (credentials included) from the hpx error message.
+    let proxy = hpx::Proxy::http(proxy_url).map_err(hpx::Error::without_uri)?;
     let client = hpx::Client::builder().proxy(proxy).build()?;
 
     let resp = client
@@ -48,7 +50,8 @@ async fn test_http_proxy(proxy_url: &str) -> Result<()> {
 }
 
 async fn test_https_proxy(proxy_url: &str) -> Result<()> {
-    let proxy = hpx::Proxy::all(proxy_url)?;
+    // Drop the raw URI (credentials included) from the hpx error message.
+    let proxy = hpx::Proxy::all(proxy_url).map_err(hpx::Error::without_uri)?;
     let client = hpx::Client::builder()
         .proxy(proxy)
         .cert_verification(false)

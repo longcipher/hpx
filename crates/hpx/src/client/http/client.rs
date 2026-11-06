@@ -11,10 +11,7 @@ use std::{
     future::Future,
     num::NonZeroU32,
     pin::Pin,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::Arc,
     task::{self, Poll},
     time::Duration,
 };
@@ -37,7 +34,7 @@ use self::{
     lazy::{Started as Lazy, lazy},
 };
 #[cfg(feature = "http3")]
-use crate::client::conn::alt_svc::{AltSvcCache, H3FailureTracker, parse_alt_svc};
+use crate::client::conn::alt_svc::{AltSvcCache, H3FailureTracker, origin_key, parse_alt_svc};
 #[cfg(feature = "http3")]
 use crate::client::conn::quic::H3Connection;
 #[cfg(feature = "http1")]
@@ -47,7 +44,7 @@ use crate::client::core::http2::Http2Options;
 use crate::{
     client::{
         body::ReplayBody,
-        conn::{Connected, Connection},
+        conn::{Connected, Connection, PoisonPillHandle},
         core::{
             body::Incoming,
             conn::{self, TrySendError as ConnTrySendError},
@@ -102,15 +99,27 @@ fn connection_is_dead(err: &crate::client::core::Error) -> bool {
 /// `Timeout` fires and drops this future. Poisoning on cancel makes the pool
 /// discard the stale connection instead of reusing it — which would otherwise
 /// hang the next request for the full timeout again.
+///
+/// It holds only the connection's poison pill and a plain flag: the guard is
+/// created for every request, and a `Connected` clone costs two boxed copies.
 struct PoisonOnCancel {
-    conn: Connected,
-    completed: Arc<AtomicBool>,
+    pill: PoisonPillHandle,
+    completed: bool,
+}
+
+impl PoisonOnCancel {
+    /// Marks the request as finished, so dropping the guard leaves the
+    /// connection reusable.
+    fn complete(&mut self) {
+        self.completed = true;
+    }
 }
 
 impl Drop for PoisonOnCancel {
     fn drop(&mut self) {
-        if !self.completed.load(Ordering::Relaxed) {
-            self.conn.poison();
+        if !self.completed {
+            self.pill.poison();
+            debug!("request canceled mid-flight; its connection will not be reused");
         }
     }
 }
@@ -189,7 +198,13 @@ impl ConnectRequest {
 #[must_use]
 pub struct HttpClient<C, B> {
     config: Config,
-    connector: C,
+    /// The connector, shared through an `Arc`.
+    ///
+    /// `request` clones the client and `connect_to` clones the connector into
+    /// its lazy connect closure for *every* request, including the ones a
+    /// pooled connection serves. Behind the `Arc` both are one refcount bump;
+    /// the connector itself is cloned only when a new connection is opened.
+    connector: Arc<C>,
     exec: Exec,
     /// HTTP/1 and HTTP/2 connection builders, shared through an `Arc`.
     ///
@@ -388,15 +403,14 @@ where
                     // Capture Alt-Svc headers for HTTP/3 upgrade discovery.
                     #[cfg(feature = "http3")]
                     {
-                        if let Some(host) = connect_req.uri().host() {
-                            let port = connect_req.uri().port_u16().unwrap_or(443);
-                            if let Some(alt_svc_value) = resp
+                        // Keyed by scheme too: see `origin_key`.
+                        if let Some(origin) = origin_key(connect_req.uri())
+                            && let Some(alt_svc_value) = resp
                                 .headers()
                                 .get(http::header::HeaderName::from_static("alt-svc"))
-                                && let Some(entries) = parse_alt_svc(alt_svc_value)
-                            {
-                                self.alt_svc_cache.insert((host.to_string(), port), entries);
-                            }
+                            && let Some(entries) = parse_alt_svc(alt_svc_value)
+                        {
+                            self.alt_svc_cache.insert(origin, entries);
                         }
                     }
                     return Ok(resp);
@@ -458,11 +472,13 @@ where
         let Some(host) = connect_req.uri().host() else {
             return H3UpgradeOutcome::FallThrough(req);
         };
-        let port = connect_req.uri().port_u16().unwrap_or(443);
-        // Compute the origin authority once and reuse it for cache lookups,
-        // circuit-breaker checks, and failure recording. This avoids
-        // re-allocating `host.to_string()` at each call site.
-        let authority = (host.to_string(), port);
+        // Compute the origin key once and reuse it for cache lookups,
+        // circuit-breaker checks, and failure recording. It includes the
+        // scheme, so a plaintext origin's alternatives never apply here to
+        // an https request (see `origin_key`).
+        let Some(authority) = origin_key(connect_req.uri()) else {
+            return H3UpgradeOutcome::FallThrough(req);
+        };
 
         // Circuit breaker: skip h3 if this authority had a recent QUIC
         // failure (still in cooldown).
@@ -586,18 +602,19 @@ where
                 ));
             }
 
-            if self.config.set_host {
-                let uri = req.uri().clone();
-                req.headers_mut().entry(HOST).or_insert_with(|| {
-                    let hostname = uri.host().expect("authority implies host");
-                    if let Some(port) = util::get_non_default_port(&uri) {
-                        let s = format!("{hostname}:{port}");
-                        HeaderValue::from_maybe_shared(Bytes::from(s))
-                    } else {
-                        HeaderValue::from_str(hostname)
-                    }
-                    .expect("uri host is valid header value")
-                });
+            // Checked before building the value so the URI is borrowed, not
+            // cloned, on every HTTP/1 request.
+            if self.config.set_host && !req.headers().contains_key(HOST) {
+                let uri = req.uri();
+                let hostname = uri.host().expect("authority implies host");
+                let host = if let Some(port) = util::get_non_default_port(uri) {
+                    let s = format!("{hostname}:{port}");
+                    HeaderValue::from_maybe_shared(Bytes::from(s))
+                } else {
+                    HeaderValue::from_str(hostname)
+                }
+                .expect("uri host is valid header value");
+                req.headers_mut().insert(HOST, host);
             }
 
             // CONNECT always sends authority-form, so check it first...
@@ -627,24 +644,34 @@ where
         // silently dropped by a NAT idle timeout while the local socket still
         // looks open. `PoisonOnCancel` poisons it so the pool discards the
         // stale socket instead of reusing it on the next request.
-        let request_completed = Arc::new(AtomicBool::new(false));
-        let _poison_guard = PoisonOnCancel {
-            conn: pooled.conn_info.clone(),
-            completed: Arc::clone(&request_completed),
+        //
+        // Only an HTTP/1 connection is left mid-message by a cancelled request.
+        // On HTTP/2 and HTTP/3 the drop resets just this request's stream, and
+        // the connection is shared with every other request to the origin, so
+        // the guard starts disarmed there.
+        let mut poison_guard = PoisonOnCancel {
+            pill: pooled.conn_info.poison_pill_handle(),
+            completed: !pooled.is_http1(),
         };
 
         // A proxy that requires authentication answers with `407`. When the
         // body can be replayed, the request is sent again with the computed
-        // `Proxy-Authorization` header.
-        let replay = req.body().try_replay().map(|body| {
-            let mut replay = http::Request::new(body);
-            *replay.method_mut() = req.method().clone();
-            *replay.uri_mut() = req.uri().clone();
-            *replay.version_mut() = req.version();
-            *replay.headers_mut() = req.headers().clone();
-            *replay.extensions_mut() = req.extensions().clone();
-            replay
-        });
+        // `Proxy-Authorization` header. Only a connection that carries proxy
+        // credentials can answer the challenge, so the copy of the request
+        // (its headers and extensions) is made for those connections only.
+        let replay = pooled
+            .conn_info
+            .proxy_credentials()
+            .and_then(|_| req.body().try_replay())
+            .map(|body| {
+                let mut replay = http::Request::new(body);
+                *replay.method_mut() = req.method().clone();
+                *replay.uri_mut() = req.uri().clone();
+                *replay.version_mut() = req.version();
+                *replay.headers_mut() = req.headers().clone();
+                *replay.extensions_mut() = req.extensions().clone();
+                replay
+            });
 
         let mut res = match pooled.try_send_request(req).await {
             Ok(res) => res,
@@ -657,7 +684,7 @@ where
                 if connection_is_dead(&err.error) {
                     pooled.conn_info.poison();
                 }
-                request_completed.store(true, Ordering::Relaxed);
+                poison_guard.complete();
                 return if let Some(req) = err.take_message() {
                     Err(TrySendError::Retryable {
                         connection_reused: pooled.is_reused(),
@@ -704,7 +731,7 @@ where
                                 if connection_is_dead(&err.error) {
                                     pooled.conn_info.poison();
                                 }
-                                request_completed.store(true, Ordering::Relaxed);
+                                poison_guard.complete();
                                 return if let Some(req) = err.take_message() {
                                     Err(TrySendError::Retryable {
                                         connection_reused: pooled.is_reused(),
@@ -722,7 +749,7 @@ where
                         }
                     }
                     Err(err) => {
-                        request_completed.store(true, Ordering::Relaxed);
+                        poison_guard.complete();
                         return Err(TrySendError::Nope(
                             Error::new(ErrorKind::SendRequest, err)
                                 .with_connect_info(pooled.conn_info.clone()),
@@ -732,7 +759,7 @@ where
             }
         }
 
-        request_completed.store(true, Ordering::Relaxed);
+        poison_guard.complete();
 
         // If the Connector included 'extra' info, add to Response...
         pooled.conn_info.set_extras(res.extensions_mut());
@@ -894,7 +921,7 @@ where
             _ => self.config.ver,
         };
         let is_ver_h2 = ver == Ver::Http2;
-        let connector = self.connector.clone();
+        let connector = Arc::clone(&self.connector);
         // Capture the optional `QuicConnector` for the Ver::Http3 branch.
         // When `None` (no connector wired in) and `ver == Ver::Http3`, the
         // request fails with `ErrorKind::UserUnsupportedVersion` from the
@@ -972,7 +999,7 @@ where
             // satisfiable locally, but read-ready events are dispatched only
             // by the dormant creating runtime's I/O driver.
             let establish = async move {
-                let io = Oneshot::new(connector, req)
+                let io = Oneshot::new(C::clone(&connector), req)
                     .await
                     .map_err(|src| Error::new(ErrorKind::Connect, src))?;
 
@@ -1316,8 +1343,13 @@ impl<C, B> HttpClient<C, B> {
     /// (`crates/hpx/tests/http3.rs`). Not part of the stable public API.
     #[cfg(feature = "http3")]
     #[doc(hidden)]
+    /// Cache keys include the scheme; this checks both `http` and `https`.
     pub fn __test_alt_svc_cache_has_entry(&self, host: &str, port: u16) -> bool {
-        self.alt_svc_cache.get(&(host.to_string(), port)).is_some()
+        ["http", "https"].iter().any(|scheme| {
+            self.alt_svc_cache
+                .get(&(format!("{scheme}://{host}"), port))
+                .is_some()
+        })
     }
 
     /// Test helper: checks whether the H3 failure tracker has blocked
@@ -1327,9 +1359,12 @@ impl<C, B> HttpClient<C, B> {
     /// (`crates/hpx/tests/http3.rs`). Not part of the stable public API.
     #[cfg(feature = "http3")]
     #[doc(hidden)]
+    /// Tracker keys include the scheme; this checks both `http` and `https`.
     pub fn __test_h3_failure_tracker_is_blocked(&self, host: &str, port: u16) -> bool {
-        self.h3_failure_tracker
-            .is_blocked(&(host.to_string(), port))
+        ["http", "https"].iter().any(|scheme| {
+            self.h3_failure_tracker
+                .is_blocked(&(format!("{scheme}://{host}"), port))
+        })
     }
 }
 
@@ -1392,7 +1427,7 @@ impl<C: Clone, B> Clone for HttpClient<C, B> {
             h1_builder: self.h1_builder.clone(),
             #[cfg(feature = "http2")]
             h2_builder: self.h2_builder.clone(),
-            connector: self.connector.clone(),
+            connector: Arc::clone(&self.connector),
             #[cfg(feature = "http3")]
             h3_connector: self.h3_connector.clone(),
             #[cfg(feature = "http3")]
@@ -2109,8 +2144,33 @@ impl Builder {
                 .unwrap_or_else(|| Arc::new(H3FailureTracker::new(Duration::from_secs(60)))),
             #[cfg(feature = "http3")]
             proxies: self.proxies,
-            connector,
+            connector: Arc::new(connector),
             pool: pool::Pool::new(self.pool_config, exec, timer),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PoisonOnCancel;
+    use crate::client::conn::Connected;
+
+    #[test]
+    fn poison_on_cancel_poisons_only_unfinished_requests() {
+        let cancelled = Connected::new();
+        drop(PoisonOnCancel {
+            pill: cancelled.poison_pill_handle(),
+            completed: false,
+        });
+        assert!(cancelled.poisoned());
+
+        let finished = Connected::new();
+        let mut guard = PoisonOnCancel {
+            pill: finished.poison_pill_handle(),
+            completed: false,
+        };
+        guard.complete();
+        drop(guard);
+        assert!(!finished.poisoned());
     }
 }

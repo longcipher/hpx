@@ -555,6 +555,100 @@ mod tests {
         Ok(())
     }
 
+    /// Parses a `sec-ch-ua` brand list (`"brand";v="N", ...`) into
+    /// `(brand, version)` pairs; `None` if any quote is unbalanced or a
+    /// separator is malformed.
+    fn parse_sec_ch_ua(value: &str) -> Option<Vec<(&str, &str)>> {
+        let mut brands = Vec::new();
+        let mut rest = value;
+        loop {
+            let (brand, after_brand) = rest.strip_prefix('"')?.split_once('"')?;
+            let (version, after_version) = after_brand.strip_prefix(";v=\"")?.split_once('"')?;
+            if brand.is_empty() || version.is_empty() {
+                return None;
+            }
+            brands.push((brand, version));
+            if after_version.is_empty() {
+                return Some(brands);
+            }
+            rest = after_version.strip_prefix(", ")?;
+        }
+    }
+
+    /// Every Edge profile, on every OS, must emit a well-formed `sec-ch-ua`
+    /// and a User-Agent carrying the Edge token whose major version matches
+    /// the `"Microsoft Edge"` brand.
+    #[test]
+    fn every_edge_profile_has_valid_sec_ch_ua_and_edge_user_agent()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let edges = [
+            Emulation::Edge96,
+            Emulation::Edge101,
+            Emulation::Edge122,
+            Emulation::Edge127,
+            Emulation::Edge131,
+            Emulation::Edge134,
+            Emulation::Edge135,
+            Emulation::Edge136,
+            Emulation::Edge137,
+            Emulation::Edge138,
+            Emulation::Edge139,
+            Emulation::Edge140,
+            Emulation::Edge141,
+            Emulation::Edge142,
+            Emulation::Edge143,
+            Emulation::Edge144,
+            Emulation::Edge145,
+            Emulation::Edge146,
+            Emulation::Edge147,
+            Emulation::Edge148,
+        ];
+        let oses = [
+            EmulationOS::Windows,
+            EmulationOS::MacOS,
+            EmulationOS::Linux,
+            EmulationOS::Android,
+            EmulationOS::IOS,
+        ];
+        for edge in edges {
+            for os in oses {
+                let mut emu = EmulationOption::builder()
+                    .emulation(edge)
+                    .emulation_os(os)
+                    .build()
+                    .emulation();
+                let headers = emu.headers_mut();
+                let ch = headers
+                    .get("sec-ch-ua")
+                    .ok_or_else(|| format!("{edge:?}/{os:?}: sec-ch-ua missing"))?
+                    .to_str()?;
+                let brands = parse_sec_ch_ua(ch)
+                    .ok_or_else(|| format!("{edge:?}/{os:?}: malformed sec-ch-ua: {ch}"))?;
+                let edge_version = brands
+                    .iter()
+                    .find(|(brand, _)| *brand == "Microsoft Edge")
+                    .map(|(_, version)| *version)
+                    .ok_or_else(|| format!("{edge:?}/{os:?}: no Microsoft Edge brand: {ch}"))?;
+                let ua = headers
+                    .get(http::header::USER_AGENT)
+                    .ok_or_else(|| format!("{edge:?}/{os:?}: User-Agent missing"))?
+                    .to_str()?;
+                // Desktop and iOS Edge send `Edg/`; Edge for Android may send `EdgA/`.
+                let token_version = ua
+                    .split_once(" Edg/")
+                    .or_else(|| ua.split_once(" EdgA/"))
+                    .map(|(_, version)| version)
+                    .ok_or_else(|| format!("{edge:?}/{os:?}: no Edge token in UA: {ua}"))?;
+                assert_eq!(
+                    token_version.split('.').next(),
+                    Some(edge_version),
+                    "{edge:?}/{os:?}: UA Edge version disagrees with sec-ch-ua: {ua}"
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// Chrome 147 profile must emit User-Agent and `sec-ch-ua` brand headers.
     #[test]
     fn chrome147_sets_user_agent_and_sec_ch_ua() -> Result<(), Box<dyn std::error::Error>> {

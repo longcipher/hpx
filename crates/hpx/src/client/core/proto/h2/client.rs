@@ -3,6 +3,10 @@ use std::{
     future::Future,
     marker::PhantomData,
     pin::Pin,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     task::{Context, Poll, ready},
     time::Duration,
 };
@@ -119,6 +123,7 @@ where
         poll_ready_deadline: None,
         dispatch_watchdog: None,
         conn_id,
+        dispatch_polls: Arc::new(AtomicU64::new(0)),
         marker: PhantomData,
     })
 }
@@ -373,11 +378,12 @@ where
     /// `poll_ready` so a dead connection wakes this task instead of parking it
     /// forever waiting for stream capacity that never comes.
     closed: Option<Pin<Box<dyn Future<Output = ()> + Send>>>,
-    /// Armed when `poll_ready` first parks. If the h2 channel stays unready
-    /// past `POLL_READY_TIMEOUT`, the connection is stuck (pending stream can
-    /// never open even though keep-alive pings still flow); fail the pending
-    /// request fast so the pool can rebuild the connection instead of the
-    /// request hanging until the caller's request timeout.
+    /// Armed when `poll_ready` parks while a stream slot is free. If the h2
+    /// channel stays unready past `POLL_READY_TIMEOUT`, the connection is
+    /// stuck (pending stream can never open even though keep-alive pings
+    /// still flow); fail the pending request fast so the pool can rebuild the
+    /// connection instead of the request hanging until the caller's request
+    /// timeout. Cleared while the connection is at its stream limit.
     poll_ready_deadline: Option<Pin<Box<dyn Sleep>>>,
     /// Watchdog that forces a periodic re-poll while this task is parked
     /// waiting for the next request. If the dispatch mpsc wake-up is ever lost
@@ -393,13 +399,17 @@ where
     /// pool and connector logs when multiple connections to the same host
     /// are alive.
     conn_id: u64,
+    /// Bumped on every poll. Requests waiting for a response read it to tell
+    /// a parked task from a slow server (see `conn::http2::await_dispatch`).
+    dispatch_polls: Arc<AtomicU64>,
     marker: PhantomData<T>,
 }
 
-/// How long `poll_ready` may stay parked before the dispatch task gives up on
-/// the h2 channel and lets the connection be torn down. Normal capacity
-/// waits finish in milliseconds; anything near this bound means the
-/// connection is wedged.
+/// How long `poll_ready` may stay parked while a stream slot is free before
+/// the dispatch task gives up on the h2 channel and lets the connection be
+/// torn down. Opening a stream into a free slot takes milliseconds; anything
+/// near this bound means the connection is wedged. Waiting for a slot under
+/// SETTINGS_MAX_CONCURRENT_STREAMS is not bounded here.
 const POLL_READY_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// How often the dispatch watchdog re-arms while the task is parked waiting
@@ -559,6 +569,41 @@ where
             false
         }
     }
+
+    /// Reports whether the h2 channel has stayed unready for
+    /// `POLL_READY_TIMEOUT` while a stream slot was free, i.e. the pending
+    /// stream should have opened long ago and the connection is wedged.
+    ///
+    /// `poll_ready` is also Pending while the server's
+    /// SETTINGS_MAX_CONCURRENT_STREAMS is reached. That is normal
+    /// backpressure, which lasts as long as the earlier streams do (slow
+    /// responses, long polls, uploads), so it never counts toward the
+    /// deadline.
+    fn poll_ready_wedged(&mut self, cx: &mut Context<'_>) -> bool {
+        // `num_active_streams` includes the stream that is pending open, so
+        // the limit is reached once the other streams fill every slot.
+        if self.h2_tx.num_active_streams() > self.h2_tx.current_max_send_streams() {
+            self.poll_ready_deadline = None;
+            return false;
+        }
+        if self.poll_ready_deadline.is_none() {
+            self.poll_ready_deadline = Some(self.timer.sleep(POLL_READY_TIMEOUT));
+        }
+        self.poll_ready_deadline
+            .as_mut()
+            .is_some_and(|sleep| sleep.as_mut().poll(cx).is_ready())
+    }
+}
+
+impl<B, E, T> ClientTask<B, E, T>
+where
+    B: Body,
+    E: Unpin,
+{
+    /// The counter this task bumps on every poll; see `dispatch_polls`.
+    pub(crate) fn dispatch_polls(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.dispatch_polls)
+    }
 }
 
 pin_project! {
@@ -591,23 +636,31 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
 
-        // Fail fast once the underlying h2 connection has ended: without this
-        // the response future parks until the caller's request timeout (e.g.
-        // 15s) even though the connection task is gone for good.
-        if let Some(ref ping) = *this.ping
-            && (ping.is_conn_closed()
-                || this
-                    .closed
-                    .as_mut()
-                    .is_some_and(|closed| closed.as_mut().poll(cx).is_ready()))
-        {
-            return Poll::Ready(Err((
-                Error::new_h2(::http2::Reason::NO_ERROR.into()),
-                None::<Request<B>>,
-            )));
-        }
-
-        let result = ready!(this.fut.poll(cx));
+        let result = match this.fut.poll(cx) {
+            Poll::Ready(result) => result,
+            Poll::Pending => {
+                // Fail fast once the underlying h2 connection has ended:
+                // without this the response future parks until the caller's
+                // request timeout (e.g. 15s) even though the connection task
+                // is gone for good. Checked only once `fut` is Pending: a
+                // response that arrived right before the close (HEADERS,
+                // END_STREAM, GOAWAY and FIN in one read) is already buffered
+                // in the stream and must be returned, not dropped.
+                if let Some(ref ping) = *this.ping
+                    && (ping.is_conn_closed()
+                        || this
+                            .closed
+                            .as_mut()
+                            .is_some_and(|closed| closed.as_mut().poll(cx).is_ready()))
+                {
+                    return Poll::Ready(Err((
+                        Error::new_h2(::http2::Reason::NO_ERROR.into()),
+                        None::<Request<B>>,
+                    )));
+                }
+                return Poll::Pending;
+            }
+        };
 
         let ping = this.ping.take().expect("Future polled twice");
         let send_stream = this.send_stream.take().expect("Future polled twice");
@@ -673,6 +726,8 @@ where
     type Output = core::Result<Dispatched>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // Proof of life for requests waiting on a response from this task.
+        self.dispatch_polls.fetch_add(1, Ordering::Relaxed);
         loop {
             trace!(
                 "client dispatch poll conn_id={}; fut_ctx={}; wd={}; prd={}; thread={:?}",
@@ -733,19 +788,13 @@ where
                         );
                         return Poll::Ready(Ok(Dispatched::Shutdown));
                     }
-                    // Last-resort guard: the h2 channel must accept a request
-                    // within a bounded time. If it stays parked past the
-                    // deadline the connection is wedged (pending stream can
-                    // never open) even though keep-alive pings still flow;
-                    // tear the connection down so the pool rebuilds it.
-                    if self.poll_ready_deadline.is_none() {
-                        self.poll_ready_deadline = Some(self.timer.sleep(POLL_READY_TIMEOUT));
-                    }
-                    if self
-                        .poll_ready_deadline
-                        .as_mut()
-                        .is_some_and(|sleep| sleep.as_mut().poll(cx).is_ready())
-                    {
+                    // Last-resort guard: with a stream slot free, the h2
+                    // channel must accept a request within a bounded time. If
+                    // it stays parked past the deadline the connection is
+                    // wedged (pending stream can never open) even though
+                    // keep-alive pings still flow; tear the connection down
+                    // so the pool rebuilds it.
+                    if self.poll_ready_wedged(cx) {
                         trace!("h2 channel unready for too long; closing dispatch task");
                         return Poll::Ready(Ok(Dispatched::Shutdown));
                     }
@@ -876,17 +925,10 @@ where
                             // Last-resort guard for a wedged h2 channel: even
                             // when keep-alive pings still flow, a pending
                             // stream may never open (observed in the wild).
-                            // Bounded wait, then fail the pending request and
-                            // let the pool rebuild the connection.
-                            if self.poll_ready_deadline.is_none() {
-                                self.poll_ready_deadline =
-                                    Some(self.timer.sleep(POLL_READY_TIMEOUT));
-                            }
-                            if self
-                                .poll_ready_deadline
-                                .as_mut()
-                                .is_some_and(|sleep| sleep.as_mut().poll(cx).is_ready())
-                            {
+                            // Bounded wait while a stream slot is free, then
+                            // fail the pending request and let the pool
+                            // rebuild the connection.
+                            if self.poll_ready_wedged(cx) {
                                 trace!(
                                     "h2 stream pending open for too long; failing pending request"
                                 );
@@ -958,5 +1000,114 @@ where
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use http_body_util::Empty;
+    use tokio::io::{DuplexStream, duplex};
+
+    use super::*;
+    use crate::client::core::rt::{ArcTimer, TokioTimer};
+
+    /// Takes `conn`'s ping handle and returns the recorder that request
+    /// futures watch, plus the ponger that records the connection's close.
+    fn ping_channel(conn: &mut Connection<DuplexStream, SendBuf<Bytes>>) -> (Recorder, Ponger) {
+        ping::channel(
+            conn.ping_pong().expect("ping_pong"),
+            ping::Config::new(
+                false,
+                0,
+                Some(Duration::from_secs(60)),
+                Duration::from_secs(5),
+                true,
+            ),
+            Time::Timer(ArcTimer::new(TokioTimer::new())),
+        )
+    }
+
+    /// A response still outstanding when the connection is recorded closed
+    /// fails at once instead of waiting for the caller's request timeout.
+    #[tokio::test]
+    async fn pending_response_on_closed_connection_fails_fast() {
+        let (client_io, _server_io) = duplex(64 * 1024);
+        let builder = Builder::new();
+        let (mut h2_tx, mut conn) = builder
+            .handshake::<_, SendBuf<Bytes>>(client_io)
+            .await
+            .expect("client handshake");
+        let (recorder, ponger) = ping_channel(&mut conn);
+        // Kept alive but never polled: dropping it would itself fail the
+        // stream, and nothing ever answers it.
+        let _conn = conn;
+        let (fut, _body_tx) = h2_tx
+            .send_request(Request::new(()), true)
+            .expect("send request");
+        ponger.mark_conn_closed();
+
+        let res = tokio::time::timeout(
+            Duration::from_secs(2),
+            ResponseFutMap::<Empty<Bytes>> {
+                fut,
+                ping: Some(recorder.clone()),
+                send_stream: Some(None),
+                closed: recorder.closed_notified(),
+            },
+        )
+        .await
+        .expect("a closed connection must fail the pending response at once");
+        assert!(res.is_err());
+    }
+
+    /// A response the server completed right before closing the connection
+    /// must reach the caller even though the close is already recorded when
+    /// the response future is first polled.
+    #[tokio::test]
+    async fn response_buffered_before_close_is_returned() {
+        let (client_io, server_io) = duplex(64 * 1024);
+
+        let server = tokio::spawn(async move {
+            let mut conn = http2::server::handshake(server_io)
+                .await
+                .expect("server handshake");
+            let (_req, mut respond) = conn.accept().await.expect("request").expect("request ok");
+            respond
+                .send_response(Response::new(()), true)
+                .expect("send response");
+            // GOAWAY, then drive the connection until it is done (or fails);
+            // dropping it closes the transport, so the client reads the
+            // response, the GOAWAY and EOF back to back.
+            conn.graceful_shutdown();
+            while let Some(Ok(_)) = conn.accept().await {}
+        });
+
+        let builder = Builder::new();
+        let (mut h2_tx, mut conn) = builder
+            .handshake::<_, SendBuf<Bytes>>(client_io)
+            .await
+            .expect("client handshake");
+        let (recorder, ponger) = ping_channel(&mut conn);
+        let client = tokio::spawn(conn);
+        let (fut, _body_tx) = h2_tx
+            .send_request(Request::new(()), true)
+            .expect("send request");
+
+        // Let the client connection consume everything up to EOF, then
+        // record the close the way `Conn::poll` does once it completes.
+        let _ = client.await;
+        server.await.expect("server task");
+        ponger.mark_conn_closed();
+
+        let res = ResponseFutMap::<Empty<Bytes>> {
+            fut,
+            ping: Some(recorder.clone()),
+            send_stream: Some(None),
+            closed: recorder.closed_notified(),
+        }
+        .await
+        .map_err(|(err, _)| err)
+        .expect("response that arrived before the close");
+        assert_eq!(res.status(), StatusCode::OK);
     }
 }

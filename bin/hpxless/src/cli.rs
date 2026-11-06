@@ -89,6 +89,30 @@ impl Cli {
     }
 }
 
+/// Mask the userinfo of a proxy URL for display, so the startup banner never
+/// prints a credential: `http://user:secret@host:8080` becomes
+/// `http://***@host:8080`.
+///
+/// The whole userinfo is masked, not only the password, because some proxy
+/// services put the API key in the username.
+pub(crate) fn redact_proxy_url(raw: &str) -> String {
+    // The authority starts after `scheme://` and ends at the first `/`, `?`,
+    // `#` or `\`; its userinfo ends at the last `@` inside it. That matches
+    // the WHATWG URL parser `hpx::Proxy::all` falls back to, so a password
+    // with a raw `@` is masked whole.
+    let authority_start = raw.find("://").map_or(0, |i| i + "://".len());
+    let (scheme_prefix, rest) = raw.split_at(authority_start);
+    let authority_len = rest.find(['/', '?', '#', '\\']).unwrap_or(rest.len());
+    match rest[..authority_len].rfind('@') {
+        Some(at) => {
+            // `host_onwards` keeps the `@`.
+            let host_onwards = &rest[at..];
+            format!("{scheme_prefix}***{host_onwards}")
+        }
+        None => raw.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use clap::Parser;
@@ -114,6 +138,36 @@ mod tests {
         let cli = Cli::parse_from(["hpxless", "--proxy", "https://127.0.0.1:8443"]);
         let proxy = cli.proxy_config().unwrap().expect("proxy should be set");
         drop(proxy);
+    }
+
+    #[test]
+    fn redact_proxy_url_masks_userinfo() {
+        // Regression: the startup banner printed `--proxy` verbatim,
+        // password included.
+        assert_eq!(
+            redact_proxy_url("http://user:secret@127.0.0.1:8080"),
+            "http://***@127.0.0.1:8080"
+        );
+        assert_eq!(
+            redact_proxy_url("socks5://user:secret@[::1]:1080/"),
+            "socks5://***@[::1]:1080/"
+        );
+        assert_eq!(
+            redact_proxy_url("http://user:se@cret@proxy.local:8080"),
+            "http://***@proxy.local:8080"
+        );
+        assert_eq!(
+            redact_proxy_url("http://apikey@proxy.local:8080"),
+            "http://***@proxy.local:8080"
+        );
+        assert_eq!(
+            redact_proxy_url("http://127.0.0.1:8080"),
+            "http://127.0.0.1:8080"
+        );
+        assert_eq!(
+            redact_proxy_url("http://proxy.local:8080/a@b"),
+            "http://proxy.local:8080/a@b"
+        );
     }
 
     #[test]

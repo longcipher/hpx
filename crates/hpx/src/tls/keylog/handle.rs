@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::{
     fs::OpenOptions,
     io::{Result, Write},
@@ -22,10 +24,13 @@ impl Handle {
             std::fs::create_dir_all(parent)?;
         }
 
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&filepath)?;
+        let mut options = OpenOptions::new();
+        options.create(true).append(true);
+        // The file holds TLS session secrets, so other local users must not
+        // be able to read it. The mode only applies when the file is created.
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut file = options.open(&filepath)?;
 
         let (sender, receiver) = mpsc::channel::<String>();
 

@@ -290,7 +290,7 @@ where
                         // no trailers oneshot, no want-watch, and no dispatcher
                         // round-trip for the frame — which is the common shape
                         // for every small response.
-                        if let Some(bytes) = self.conn.take_buffered_body(other) {
+                        if let Some(bytes) = self.conn.take_buffered_body(cx, other) {
                             IncomingBody::full(bytes, other)
                         } else {
                             let (tx, rx) =
@@ -754,6 +754,79 @@ mod tests {
         assert!(
             body.frame().await.is_none(),
             "channel body must end after its Content-Length is consumed"
+        );
+    }
+
+    #[tokio::test]
+    async fn fully_buffered_close_response_shuts_down_cleanly() {
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+
+        // The whole response arrives in one read, then the server closes the
+        // connection as its `Connection: close` announced (no handle, so the
+        // next read is EOF).
+        let io = tokio_test::io::Builder::new()
+            .write(b"GET / HTTP/1.1\r\n\r\n")
+            .read(b"HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-length: 5\r\n\r\nhello")
+            .build();
+
+        let (mut tx, rx) = dispatch::channel();
+        let dispatcher = tokio::spawn(Dispatcher::new(
+            Client::new(rx),
+            Conn::<_, bytes::Bytes, ClientTransaction>::new(io),
+        ));
+
+        let res = tx
+            .try_send(http::Request::new(IncomingBody::empty()))
+            .unwrap()
+            .await
+            .expect("response");
+        let body = res.expect("response ok").into_body();
+        assert!(format!("{body:?}").contains("Buffered"), "{body:?}");
+
+        // The buffered-body fast path must leave the connection closing, so
+        // the server's EOF ends it cleanly instead of as IncompleteMessage.
+        let dispatched = dispatcher.await.expect("dispatcher task");
+        assert!(
+            matches!(dispatched, Ok(Dispatched::Shutdown)),
+            "{:?}",
+            dispatched.err()
+        );
+    }
+
+    #[tokio::test]
+    async fn max_header_size_limits_chunked_trailers() {
+        use http_body_util::BodyExt as _;
+
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+
+        // A 2 KiB trailer block: within the decoder's built-in 16 KiB trailer
+        // limit, but over the 1 KiB header size limit configured below.
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n\
+             5\r\nhello\r\n0\r\nx-trailer: {}\r\n\r\n",
+            "x".repeat(2048)
+        );
+        let (io, _handle) = tokio_test::io::Builder::new()
+            .write(b"GET / HTTP/1.1\r\n\r\n")
+            .read(response.as_bytes())
+            .wait(Duration::from_secs(2))
+            .build_with_handle();
+
+        let mut conn = Conn::<_, bytes::Bytes, ClientTransaction>::new(io);
+        conn.set_http1_max_header_size_limit(Some(1024));
+        let (mut tx, rx) = dispatch::channel();
+        let _dispatcher = tokio::spawn(Dispatcher::new(Client::new(rx), conn));
+
+        let res = tx
+            .try_send(http::Request::new(IncomingBody::empty()))
+            .unwrap()
+            .await
+            .expect("response");
+        let body = res.expect("response ok").into_body();
+
+        assert!(
+            body.collect().await.is_err(),
+            "trailers over the configured header size limit must be rejected"
         );
     }
 
