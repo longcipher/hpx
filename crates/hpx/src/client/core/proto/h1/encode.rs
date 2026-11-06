@@ -154,9 +154,10 @@ impl Encoder {
                     }
                     let name = cur_name.as_ref().expect("current header name");
 
-                    if allowed_trailer_field_map.contains(name.as_str()) {
+                    if allowed_trailer_field_map.contains(name) {
                         if is_valid_trailer_field(name) {
-                            allowed_trailers.insert(name, value);
+                            // `append`: a trailer field may carry several values.
+                            allowed_trailers.append(name, value);
                         } else {
                             debug!("trailer field is not valid: {}", &name);
                         }
@@ -244,7 +245,7 @@ const fn is_valid_trailer_field(name: &HeaderName) -> bool {
     )
 }
 
-fn allowed_trailer_field_map(allowed_trailer_fields: &Vec<HeaderValue>) -> HashSet<String> {
+fn allowed_trailer_field_map(allowed_trailer_fields: &Vec<HeaderValue>) -> HashSet<HeaderName> {
     let mut trailer_set = HashSet::new();
 
     for header_value in allowed_trailer_fields {
@@ -252,7 +253,11 @@ fn allowed_trailer_field_map(allowed_trailer_fields: &Vec<HeaderValue>) -> HashS
             let items: Vec<&str> = header_str.split(',').map(|item| item.trim()).collect();
 
             for item in items {
-                trailer_set.insert(item.to_string());
+                // Field names are case-insensitive: `HeaderName` lowercases the
+                // token, so `Trailer: X-Checksum` matches `x-checksum`.
+                if let Ok(name) = HeaderName::from_bytes(item.as_bytes()) {
+                    trailer_set.insert(name);
+                }
             }
         }
     }
@@ -574,5 +579,46 @@ mod tests {
         headers.insert(TE, HeaderValue::from_static("header data"));
 
         assert!(encoder.encode_trailers::<&[u8]>(headers).is_none());
+    }
+
+    #[test]
+    fn chunked_trailers_match_trailer_header_case_insensitively() {
+        let encoder = Encoder::chunked()
+            .into_chunked_with_trailing_fields(vec![HeaderValue::from_static("Chunky-Trailer")]);
+
+        let headers = HeaderMap::from_iter(vec![(
+            HeaderName::from_static("chunky-trailer"),
+            HeaderValue::from_static("header data"),
+        )]);
+
+        let buf = encoder
+            .encode_trailers::<&[u8]>(headers)
+            .expect("a trailer declared in any case is sent");
+
+        let mut dst = Vec::new();
+        dst.put(buf);
+        assert_eq!(dst, b"0\r\nchunky-trailer: header data\r\n\r\n");
+    }
+
+    #[test]
+    fn chunked_trailers_keep_repeated_values() {
+        let encoder = Encoder::chunked()
+            .into_chunked_with_trailing_fields(vec![HeaderValue::from_static("chunky-trailer")]);
+
+        let name = HeaderName::from_static("chunky-trailer");
+        let mut headers = HeaderMap::new();
+        headers.append(&name, HeaderValue::from_static("first"));
+        headers.append(&name, HeaderValue::from_static("second"));
+
+        let buf = encoder
+            .encode_trailers::<&[u8]>(headers)
+            .expect("declared trailer is sent");
+
+        let mut dst = Vec::new();
+        dst.put(buf);
+        assert_eq!(
+            dst,
+            b"0\r\nchunky-trailer: first\r\nchunky-trailer: second\r\n\r\n"
+        );
     }
 }
