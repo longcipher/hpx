@@ -579,7 +579,7 @@ impl RequestBuilder {
             match serde_urlencoded::to_string(query) {
                 Ok(serializer) => {
                     let uri = req.uri_mut();
-                    uri.set_query(serializer);
+                    uri.append_query(serializer);
                 }
                 Err(err) => error = Some(Error::builder(err)),
             }
@@ -1046,5 +1046,23 @@ mod tests {
         let bytes = http_request.into_body().collect().await.unwrap().to_bytes();
 
         assert_eq!(bytes, Bytes::from_static(b"payload"));
+    }
+
+    #[cfg(feature = "query")]
+    #[test]
+    fn query_appends_to_existing_query() {
+        let client = crate::Client::builder().build().unwrap();
+
+        let request = client
+            .get("https://api.example/x?api_key=K")
+            .query(&[("page", 2)])
+            .query(&[("sort", "asc")])
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            request.uri().to_string(),
+            "https://api.example/x?api_key=K&page=2&sort=asc"
+        );
     }
 }

@@ -500,9 +500,10 @@ impl PercentEncoding {
 
         match self.percent_encode(name) {
             Cow::Borrowed(value) => {
-                // nothing has been percent encoded
+                // nothing has been percent encoded; only `NoOp` can still
+                // carry `"`, CR or LF here.
                 buf.extend_from_slice(b"name=\"");
-                buf.extend_from_slice(value.as_bytes());
+                extend_quoted_escaped(&mut buf, value);
                 buf.extend_from_slice(b"\"");
             }
             Cow::Owned(value) => {
@@ -516,12 +517,8 @@ impl PercentEncoding {
         // See https://github.com/seanmonstar/reqwest/issues/419.
         if let Some(filename) = &field.file_name {
             buf.extend_from_slice(b"; filename=\"");
-            let legal_filename = filename
-                .replace('\\', "\\\\")
-                .replace('"', "\\\"")
-                .replace('\r', "\\\r")
-                .replace('\n', "\\\n");
-            buf.extend_from_slice(legal_filename.as_bytes());
+            let legal_filename = filename.replace('\\', "\\\\");
+            extend_quoted_escaped(&mut buf, &legal_filename);
             buf.extend_from_slice(b"\"");
         }
 
@@ -546,6 +543,24 @@ impl PercentEncoding {
             Self::PathSegment => percent_encode(value, PATH_SEGMENT_ENCODE_SET).into(),
             Self::AttrChar => percent_encode(value, ATTR_CHAR_ENCODE_SET).into(),
             Self::NoOp => value.into(),
+        }
+    }
+}
+
+/// Appends `value` for use inside a quoted `Content-Disposition` parameter,
+/// escaping it the way browsers do for multipart/form-data names and
+/// filenames (WHATWG HTML): `"` becomes `%22`, CR `%0D` and LF `%0A`. A raw
+/// CR or LF would end the header line and let the value inject headers into
+/// the part; a backslash escape does not help because the line break stays.
+fn extend_quoted_escaped(buf: &mut Vec<u8>, value: &str) {
+    // Byte-wise is UTF-8 safe: these are ASCII and never occur inside a
+    // multi-byte sequence.
+    for &byte in value.as_bytes() {
+        match byte {
+            b'"' => buf.extend_from_slice(b"%22"),
+            b'\r' => buf.extend_from_slice(b"%0D"),
+            b'\n' => buf.extend_from_slice(b"%0A"),
+            _ => buf.push(byte),
         }
     }
 }
@@ -710,6 +725,30 @@ mod tests {
         assert_eq!(
             PercentEncoding::AttrChar.encode_headers(name, &field.meta),
             &b"Content-Disposition: form-data; name*=utf-8''start%25%27%22%0D%0A%C3%9Fend"[..]
+        );
+    }
+
+    #[test]
+    fn filename_escapes_quote_and_line_breaks() {
+        let field = Part::text("").file_name("a\"b\r\nX-Injected: 1\\.txt");
+
+        assert_eq!(
+            std::str::from_utf8(&PercentEncoding::PathSegment.encode_headers("f", &field.meta))
+                .unwrap(),
+            "Content-Disposition: form-data; name=\"f\"; filename=\"a%22b%0D%0AX-Injected: 1\\\\.txt\""
+        );
+    }
+
+    #[test]
+    fn noop_name_escapes_quote_and_line_breaks() {
+        let field = Part::text("");
+
+        assert_eq!(
+            std::str::from_utf8(
+                &PercentEncoding::NoOp.encode_headers("a\"b\r\nX-Injected: 1", &field.meta)
+            )
+            .unwrap(),
+            "Content-Disposition: form-data; name=\"a%22b%0D%0AX-Injected: 1\""
         );
     }
 }

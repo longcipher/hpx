@@ -498,7 +498,14 @@ impl Response {
                     // content is identical either way while the common single-owner
                     // case saves one copy of the head chunk.
                     let mut buf = BytesMut::from(data);
-                    buf.reserve(body.size_hint().lower() as usize);
+                    // The lower bound is the peer's remaining Content-Length,
+                    // which can be anything up to u64::MAX - 2; reserving it
+                    // verbatim lets one header abort the process on allocation.
+                    // 1 MiB covers typical API bodies in one allocation, larger
+                    // ones grow by doubling as bytes actually arrive.
+                    const MAX_PRE_RESERVE: usize = 1024 * 1024;
+                    let hint = usize::try_from(body.size_hint().lower()).unwrap_or(usize::MAX);
+                    buf.reserve(hint.min(MAX_PRE_RESERVE));
                     if let Ok(chunk) = next?.into_data() {
                         buf.extend_from_slice(&chunk);
                     }
@@ -978,6 +985,40 @@ mod tests {
         let response = response_with_body(body);
         let bytes = response.bytes().await.unwrap();
         assert_eq!(&bytes[..], b"one-two-three");
+    }
+
+    /// Yields its frames while advertising `Content-Length: 2^62`, like a
+    /// peer that lies about the body size.
+    struct HugeLengthBody(std::collections::VecDeque<Bytes>);
+
+    impl http_body::Body for HugeLengthBody {
+        type Data = Bytes;
+        type Error = std::convert::Infallible;
+
+        fn poll_frame(
+            mut self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Result<http_body::Frame<Bytes>, Self::Error>>> {
+            std::task::Poll::Ready(
+                self.0
+                    .pop_front()
+                    .map(|data| Ok(http_body::Frame::data(data))),
+            )
+        }
+
+        fn size_hint(&self) -> http_body::SizeHint {
+            http_body::SizeHint::with_exact(4_611_686_018_427_387_904)
+        }
+    }
+
+    #[tokio::test]
+    async fn response_bytes_ignores_huge_declared_length() {
+        let body = Body::wrap(HugeLengthBody(
+            [Bytes::from_static(b"hello "), Bytes::from_static(b"world")].into(),
+        ));
+        let response = response_with_body(body);
+        let bytes = response.bytes().await.unwrap();
+        assert_eq!(&bytes[..], b"hello world");
     }
 
     #[tokio::test]
