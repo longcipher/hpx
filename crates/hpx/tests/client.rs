@@ -816,6 +816,70 @@ async fn http2_cancelled_request_keeps_the_connection() {
     assert_eq!(second.local_addr(), local_addr);
 }
 
+/// Cancelling an HTTP/1 request leaves its connection mid-message, possibly
+/// silently dropped by a NAT, so it must not go back to the pool even after
+/// the late response has been read.
+#[tokio::test]
+async fn http1_cancelled_request_discards_the_connection() {
+    let server = server::http(move |req| async move {
+        if req.uri().path() == "/slow" {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        }
+        http::Response::default()
+    });
+    let client = Client::builder().no_proxy().http1_only().build().unwrap();
+    let url = |path: &str| format!("http://{}{path}", server.addr());
+
+    let first = client.get(url("/fast")).send().await.unwrap();
+    let local_addr = first.local_addr();
+    assert!(local_addr.is_some());
+    drop(first);
+
+    let slow = client.get(url("/slow")).send();
+    let cancelled = tokio::time::timeout(std::time::Duration::from_millis(100), slow).await;
+    assert!(
+        cancelled.is_err(),
+        "the slow request should still be in flight"
+    );
+
+    // Let the late response arrive, which would make the connection idle again.
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+
+    let next = client.get(url("/fast")).send().await.unwrap();
+    assert_ne!(next.local_addr(), local_addr);
+}
+
+/// A caller-supplied `Host` header is sent as is, not replaced by the URI's.
+#[tokio::test]
+async fn explicit_host_header_is_kept() {
+    let server = server::http(move |req| async move {
+        let host = req
+            .headers()
+            .get(header::HOST)
+            .map_or_else(Vec::new, |value| value.as_bytes().to_vec());
+        http::Response::new(hpx::Body::from(host))
+    });
+
+    let host = Client::new()
+        .get(format!("http://{}/", server.addr()))
+        .header(header::HOST, "custom.example")
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(host, "custom.example");
+}
+
+/// `https_only` rejects an `http` URL before any connection is attempted.
+#[tokio::test]
+async fn https_only_rejects_http_urls() {
+    let client = Client::builder().https_only(true).build().unwrap();
+    let err = client.get("http://127.0.0.1:1/").send().await.unwrap_err();
+    assert!(err.is_builder(), "expected a builder error, got {err:?}");
+}
+
 #[tokio::test]
 async fn connection_pool_cache() {
     let client = Client::builder()

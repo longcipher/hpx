@@ -2149,3 +2149,28 @@ impl Builder {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::PoisonOnCancel;
+    use crate::client::conn::Connected;
+
+    #[test]
+    fn poison_on_cancel_poisons_only_unfinished_requests() {
+        let cancelled = Connected::new();
+        drop(PoisonOnCancel {
+            pill: cancelled.poison_pill_handle(),
+            completed: false,
+        });
+        assert!(cancelled.poisoned());
+
+        let finished = Connected::new();
+        let mut guard = PoisonOnCancel {
+            pill: finished.poison_pill_handle(),
+            completed: false,
+        };
+        guard.complete();
+        drop(guard);
+        assert!(!finished.poisoned());
+    }
+}
