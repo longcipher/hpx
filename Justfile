@@ -99,6 +99,36 @@ check-feature:
     cargo check --workspace --all-features
   fi
 
+# Check each publishable crate against its *own* declared feature set.
+#
+# `cargo check --workspace --all-features` unifies features across the whole
+# workspace, so a cfg pair that only holds when one crate enables a feature and
+# another does not is invisible to it. `cargo publish --verify` instead builds
+# each packaged crate in isolation against registry dependencies, which is where
+# those combinations surface: releases v2.5.33 and v2.5.34 both failed at
+# `hpx-cli` because `hpx/http3` without `hpx/socks` was never compiled by CI.
+#
+# Do not add `--all-targets` here: dev-dependencies enable extra features and
+# would mask the very combinations this gate exists to catch.
+check-publish-features:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  crates=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name' | sort)
+  failures=0
+  for crate in $crates; do
+    if RUSTC_WRAPPER= cargo check -p "$crate" --locked; then
+      echo "  OK: $crate"
+    else
+      echo "  FAIL: $crate" >&2
+      failures=$((failures + 1))
+    fi
+  done
+  if [ "$failures" -ne 0 ]; then
+    echo "FAIL: $failures crate(s) do not compile in isolation; fix before publishing" >&2
+    exit 1
+  fi
+  echo "OK: every publishable crate compiles with its own feature set"
+
 # Check all targets compile
 check:
   cargo check --all-targets --all-features
@@ -112,7 +142,7 @@ publish-check:
   cargo package --workspace --allow-dirty
 
 # Publish all crates to crates.io in dependency order
-publish:
+publish: check-publish-features
   #!/usr/bin/env bash
   set -euo pipefail
   VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
@@ -150,7 +180,7 @@ check-cn:
   fi
 
 # Full CI check
-ci: lint test-all build-docs
+ci: lint test-all build-docs check-publish-features
 
 # ============================================================
 # Maintenance & Tools
