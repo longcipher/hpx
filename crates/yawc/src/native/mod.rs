@@ -457,11 +457,18 @@ impl AsyncWrite for HttpStream {
 
 // ================== FragmentLayer ====================
 
+/// Bytes charged against `max_read_buffer` for every received fragment on top
+/// of its payload, roughly the `Bytes` handle kept in `parts`. Without it a
+/// flood of zero-length continuation frames never reaches the limit.
+const FRAGMENT_OVERHEAD: usize = std::mem::size_of::<Bytes>();
+
 pub(super) struct FragmentationState {
     started: Instant,
     opcode: OpCode,
     is_compressed: bool,
     bytes_read: usize,
+    /// Number of fragments received so far, each charged `FRAGMENT_OVERHEAD`.
+    fragments: usize,
     parts: VecDeque<Bytes>,
 }
 
@@ -575,6 +582,7 @@ impl FragmentLayer {
                         opcode: frame.opcode,
                         is_compressed: frame.is_compressed,
                         bytes_read: frame.payload.len(),
+                        fragments: 1,
                         parts: VecDeque::from([frame.payload]),
                     };
                     self.incoming_fragment = Some(fragmentation);
@@ -592,9 +600,14 @@ impl FragmentLayer {
                     .ok_or_else(|| WebSocketError::InvalidFragment)?;
 
                 fragment.bytes_read += frame.payload.len();
+                fragment.fragments += 1;
 
-                // Check buffer size
-                if fragment.bytes_read >= self.max_read_buffer {
+                // Check buffer size. The per-fragment overhead also bounds the
+                // fragment count, which payload bytes alone do not.
+                let charged = fragment
+                    .bytes_read
+                    .saturating_add(fragment.fragments.saturating_mul(FRAGMENT_OVERHEAD));
+                if charged >= self.max_read_buffer {
                     return Err(WebSocketError::FrameTooLarge);
                 }
 
@@ -605,7 +618,11 @@ impl FragmentLayer {
                     return Err(WebSocketError::FragmentTimeout);
                 }
 
-                fragment.parts.push_back(frame.payload);
+                // An empty fragment carries no data; keeping its `Bytes` would
+                // only pin a read-buffer chunk.
+                if !frame.payload.is_empty() {
+                    fragment.parts.push_back(frame.payload);
+                }
 
                 if frame.fin {
                     // Assemble complete message
@@ -823,9 +840,7 @@ impl WebSocket<MaybeTlsStream<TcpStream>> {
                         Some(connector) => connector,
                         None => tls_connector()?.clone(),
                     };
-                    let domain = ServerName::try_from(host).map_err(|_| {
-                        io::Error::new(io::ErrorKind::InvalidInput, "invalid dnsname")
-                    })?;
+                    let domain = tls_server_name(&host)?;
                     MaybeTlsStream::Tls(connector.connect(domain, tcp_stream).await?)
                 }
                 _ => return Err(WebSocketError::InvalidHttpScheme),
@@ -862,8 +877,7 @@ impl WebSocket<MaybeTlsStream<TcpStream>> {
                     Some(connector) => connector,
                     None => tls_connector()?.clone(),
                 };
-                let domain = ServerName::try_from(host)
-                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid dnsname"))?;
+                let domain = tls_server_name(&host)?;
 
                 MaybeTlsStream::Tls(connector.connect(domain, tcp_stream).await?)
             }
@@ -1338,6 +1352,20 @@ where
         self.negotiated_protocol.as_deref()
     }
 
+    /// Moves every queued outgoing fragment into the streaming layer.
+    fn poll_send_fragments(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
+        while self.fragment_layer.has_outgoing_fragments() {
+            // We need to call `poll_ready` before calling `start_send` since the user
+            // might be under certain backpressure constraints
+            ready!(self.streaming.poll_ready_unpin(cx))?;
+            let Some(fragment) = self.fragment_layer.pop_outgoing_fragment() else {
+                break;
+            };
+            self.streaming.start_send_unpin(fragment)?;
+        }
+        Poll::Ready(Ok(()))
+    }
+
     #[cfg_attr(feature = "hotpath", hotpath::measure(impl_type = "WebSocket"))]
     fn on_frame(&mut self, frame: Frame) -> Result<Option<Frame>> {
         let frame = match self.fragment_layer.assemble_incoming(frame)? {
@@ -1392,6 +1420,9 @@ where
         cx: &mut Context<'_>,
     ) -> Poll<std::result::Result<(), Self::Error>> {
         let this = self.get_mut();
+        // Hand the previous message's fragments down first: otherwise every
+        // `start_send` only grows the queue and backpressure never applies.
+        ready!(this.poll_send_fragments(cx))?;
         this.streaming.poll_ready_unpin(cx)
     }
 
@@ -1408,15 +1439,7 @@ where
         let this = self.get_mut();
 
         // First, send all queued fragments to WriteHalf
-        while this.fragment_layer.has_outgoing_fragments() {
-            // We need to call `poll_ready` before calling `start_send` since the user
-            // might be under certain backpressure constraints
-            ready!(this.streaming.poll_ready_unpin(cx))?;
-            let Some(fragment) = this.fragment_layer.pop_outgoing_fragment() else {
-                break;
-            };
-            this.streaming.start_send_unpin(fragment)?;
-        }
+        ready!(this.poll_send_fragments(cx))?;
 
         // Then flush WriteHalf
         this.streaming.poll_flush_unpin(cx)
@@ -1427,6 +1450,8 @@ where
         cx: &mut Context<'_>,
     ) -> Poll<std::result::Result<(), Self::Error>> {
         let this = self.get_mut();
+        // Queued frames go out before the Close frame, which ends the stream.
+        ready!(this.poll_send_fragments(cx))?;
         this.streaming.poll_close_unpin(cx)
     }
 }
@@ -1530,6 +1555,20 @@ fn verify(response: &Response<Incoming>, options: Options, key: &str) -> Result<
 fn generate_key() -> String {
     let input: [u8; 16] = rand::random();
     base64_simd::STANDARD.encode_to_string(&input[..])
+}
+
+/// Returns the TLS server name for a URL host.
+///
+/// Both `Url::host_str` and `url::Host`'s `Display` keep the brackets around
+/// an IPv6 literal, which `ServerName` rejects; they belong only in a
+/// `host:port` authority.
+fn tls_server_name(host: &str) -> io::Result<ServerName<'static>> {
+    let bare = host
+        .strip_prefix('[')
+        .and_then(|inner| inner.strip_suffix(']'))
+        .unwrap_or(host);
+    ServerName::try_from(bare.to_owned())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid dnsname"))
 }
 
 /// Selects the WebSocket subprotocol to use for a handshake (RFC 6455 §4.1).
@@ -1744,6 +1783,26 @@ mod tests {
             layer.incoming_fragment.is_none(),
             "buffered fragment must be cleared after overflow error"
         );
+    }
+
+    /// Zero-length continuation frames carry no payload, so payload bytes
+    /// alone never reach `max_read_buffer`; each fragment is charged too.
+    #[test]
+    fn zero_length_continuation_flood_hits_the_read_buffer_limit() {
+        let mut layer = FragmentLayer::new(None, 1024, None);
+        let first = Frame::text("a").with_fin(false);
+        assert!(layer.assemble_incoming(first).expect("first").is_none());
+
+        let mut result = Ok(None);
+        for _ in 0..1024 {
+            let empty = Frame::continuation(Bytes::new()).with_fin(false);
+            result = layer.assemble_incoming(empty);
+            if result.is_err() {
+                break;
+            }
+        }
+        assert!(matches!(result, Err(WebSocketError::FrameTooLarge)));
+        assert!(layer.incoming_fragment.is_none());
     }
 
     /// A mock duplex stream that wraps tokio's DuplexStream for testing.
@@ -2121,6 +2180,45 @@ mod tests {
             .await
             .expect("Failed to receive message");
         assert_eq!(frame.payload(), b"Sink message" as &[u8]);
+    }
+
+    #[tokio::test]
+    async fn sink_close_sends_queued_frames_first() {
+        use futures::{StreamExt, stream};
+
+        let (mut client, mut server) = create_websocket_pair(4096);
+
+        // `forward` never flushes a stream that is always ready: it calls
+        // `poll_ready`/`start_send` per item and then `poll_close`.
+        stream::iter([Frame::text("one"), Frame::text("two")])
+            .map(Ok::<_, WebSocketError>)
+            .forward(&mut client)
+            .await
+            .expect("forward");
+
+        let first = server.next_frame().await.expect("first");
+        assert_eq!(first.payload(), b"one" as &[u8]);
+        let second = server.next_frame().await.expect("second");
+        assert_eq!(second.payload(), b"two" as &[u8]);
+        let close = server.next_frame().await.expect("close");
+        assert_eq!(close.opcode(), OpCode::Close);
+    }
+
+    #[tokio::test]
+    async fn sink_poll_ready_drains_queued_fragments() {
+        let (mut client, _server) = create_websocket_pair_with_config(4096, Some(10), None);
+
+        // `feed` is `poll_ready` + `start_send` without a flush; each
+        // 100-byte message is queued as ten fragments.
+        for _ in 0..3 {
+            client
+                .feed(Frame::binary(vec![0u8; 100]))
+                .await
+                .expect("feed");
+        }
+
+        // Only the last message may still be queued.
+        assert_eq!(client.fragment_layer.outgoing_fragments.len(), 10);
     }
 
     #[tokio::test]
@@ -2660,6 +2758,108 @@ mod tests {
             assert!(neg.decompressor(role).is_some(), "decompressor for {role}");
             assert!(neg.compressor(role).is_some(), "compressor for {role}");
         }
+    }
+
+    /// RFC 7692 lets a peer offer or answer `*_max_window_bits=8`, which
+    /// flate2 rejects with a panic; the codecs must clamp it to 9.
+    #[cfg(feature = "zlib")]
+    #[test]
+    fn negotiated_window_bits_8_builds_codecs_without_panicking() {
+        let extensions = WebSocketExtensions::from_str(
+            "permessage-deflate; server_max_window_bits=8; client_max_window_bits=8",
+        )
+        .expect("RFC 7692 allows 8");
+        let neg = Negotiation {
+            extensions: Some(extensions),
+            compression_level: Some(CompressionLevel::default()),
+            ..Default::default()
+        };
+        for (sender, receiver) in [(Role::Server, Role::Client), (Role::Client, Role::Server)] {
+            let mut compressor = neg.compressor(sender).expect("compressor");
+            let mut decompressor = neg.decompressor(receiver).expect("decompressor");
+            let compressed = compressor.compress(b"window", true).expect("compress");
+            let out = decompressor
+                .decompress(&compressed, true)
+                .expect("decompress");
+            assert_eq!(&out[..], b"window");
+        }
+    }
+
+    /// `url::Host`'s `Display` keeps the IPv6 brackets, which `ServerName`
+    /// rejects; the TLS handshake must still start.
+    #[tokio::test]
+    async fn wss_connect_to_ipv6_literal_sends_client_hello() {
+        use tokio::io::AsyncReadExt;
+
+        if tls_connector().is_err() {
+            return; // no crypto provider configured in this build
+        }
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut first = [0u8; 1];
+            let n = stream.read(&mut first).await.expect("read");
+            first[..n].to_vec()
+        });
+
+        // `tcp_address` dials the IPv4 listener; the URL host drives SNI.
+        let url: Url = "wss://[::1]:8443/".parse().expect("url");
+        let result = WebSocket::connect_priv(
+            url,
+            Some(addr),
+            None,
+            Options::default(),
+            HttpRequest::builder(),
+            #[cfg(feature = "proxy")]
+            None,
+        )
+        .await;
+        assert!(result.is_err(), "the stub server never answers");
+
+        // 0x16 starts a TLS handshake record (the ClientHello).
+        assert_eq!(server.await.expect("server task"), vec![0x16]);
+    }
+
+    /// The HTTP/1 proxy path used to send `CONNECT [[::1]]:9000`.
+    #[cfg(feature = "proxy")]
+    #[tokio::test]
+    async fn proxy_connect_brackets_ipv6_literal_once() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        let proxy = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut buf = vec![0u8; 1024];
+            let n = stream.read(&mut buf).await.expect("read");
+            let _ = stream.write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n").await;
+            String::from_utf8_lossy(&buf[..n]).into_owned()
+        });
+
+        let url: Url = "ws://[::1]:9000/".parse().expect("url");
+        let proxy_url: Url = format!("http://{addr}").parse().expect("proxy url");
+        let result = WebSocket::connect_priv(
+            url,
+            None,
+            None,
+            Options::default(),
+            HttpRequest::builder(),
+            Some(ProxyConfig::Http(proxy_url)),
+        )
+        .await;
+        assert!(result.is_err(), "the stub proxy refuses the tunnel");
+
+        let request = proxy.await.expect("proxy task");
+        assert!(
+            request.starts_with("CONNECT [::1]:9000 HTTP/1.1\r\n"),
+            "{request}"
+        );
     }
 
     #[tokio::test]

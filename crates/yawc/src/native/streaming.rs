@@ -323,8 +323,21 @@ where
     }
 
     fn on_ping(&mut self, frame: &Frame) {
-        self.obligated_sends
-            .push_back(Frame::pong(frame.payload.clone()));
+        // Pongs are only flushed once the read side goes idle, so a Ping
+        // flood used to grow this queue without bound. RFC 6455 §5.5.3 allows
+        // answering only the most recent Ping: replace an unsent Pong. The
+        // payload (at most 125 bytes) is copied so it does not pin the read
+        // buffer.
+        let pong = Frame::pong(Bytes::copy_from_slice(&frame.payload));
+        if let Some(queued) = self
+            .obligated_sends
+            .iter_mut()
+            .find(|queued| queued.opcode == OpCode::Pong)
+        {
+            *queued = pong;
+        } else {
+            self.obligated_sends.push_back(pong);
+        }
     }
 
     fn on_close(&mut self, frame: &Frame) -> Result<()> {
@@ -456,5 +469,39 @@ where
         let wake_proxy = Arc::clone(&this.wake_proxy);
         this.wake_proxy.set_waker(ContextKind::Write, cx.waker());
         wake_proxy.with_context(|cx| this.write_half.poll_close(&mut this.stream, cx))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ping_flood_keeps_one_pending_pong() {
+        let (stream, _peer) = tokio::io::duplex(64);
+        let negotiation = Negotiation::default();
+        let mut streaming = Streaming::new(Role::Server, stream, Bytes::new(), &negotiation);
+
+        // Pings that keep arriving never let the read side go idle, so
+        // nothing is flushed in between.
+        for i in 0..1000u32 {
+            let ping = Frame::ping(i.to_be_bytes().to_vec());
+            assert!(streaming.on_frame(ping).expect("ping").is_some());
+        }
+        // The last payload is a slice of a larger buffer, as it is when the
+        // codec splits it off the read buffer.
+        let read_buffer = Bytes::from(vec![7u8; 4096]);
+        let ping = Frame::ping(read_buffer.slice(..4));
+        assert!(streaming.on_frame(ping).expect("ping").is_some());
+
+        assert_eq!(streaming.obligated_sends.len(), 1);
+        let pong = &streaming.obligated_sends[0];
+        assert_eq!(pong.opcode, OpCode::Pong);
+        assert_eq!(pong.payload.as_ref(), &[7u8; 4]);
+        assert_ne!(
+            pong.payload.as_ptr(),
+            read_buffer.as_ptr(),
+            "the Pong must not pin the read buffer"
+        );
     }
 }

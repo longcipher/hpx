@@ -195,14 +195,14 @@ impl std::str::FromStr for WebSocketExtensions {
 /// Parse a `*_max_window_bits` parameter value.
 ///
 /// `None` input (parameter present without a value) yields `Some(None)`.
-/// Numeric values must fit in 0..=15 (RFC 7692 §7.1.2.1 upper bound).
+/// Numeric values must fit in 8..=15 (RFC 7692 §7.1.2.1).
 fn parse_window_bits(value: Option<&str>) -> Result<Option<u8>, String> {
     match value {
         None => Ok(None),
         Some(v) => match v.parse::<u8>() {
-            Ok(bits) if bits <= 15 => Ok(Some(bits)),
+            Ok(bits) if (8..=15).contains(&bits) => Ok(Some(bits)),
             Ok(bits) => Err(format!(
-                "window bits {bits} out of range (must be 0-15 per RFC 7692)"
+                "window bits {bits} out of range (must be 8-15 per RFC 7692)"
             )),
             Err(_) => Err(format!("invalid window bits value: {v:?}")),
         },
@@ -318,6 +318,9 @@ impl Deflate {
     /// Creates a new `Deflate` compressor with a specific compression level and window size for LZ77.
     #[cfg(feature = "zlib")]
     fn new_with_window_bits(level: CompressionLevel, window_bits: u8) -> Self {
+        // flate2 panics outside 9..=15, yet RFC 7692 lets a peer negotiate 8;
+        // zlib's own deflate treats 8 as 9.
+        let window_bits = window_bits.clamp(9, 15);
         Self {
             output: BytesMut::with_capacity(1024),
             compress: flate2::Compress::new_with_window_bits(level, false, window_bits),
@@ -386,7 +389,7 @@ impl Deflate {
             let dst = chunk(output);
             let before_out = compressor.total_out();
 
-            compressor
+            let status = compressor
                 .compress(&[], dst, FlushCompress::Sync)
                 .map_err(deflate_error)?;
 
@@ -398,6 +401,23 @@ impl Deflate {
             // FlushCompress::Sync writes the end of the stream, indicating the stream is finished
             if output.ends_with(&[0x0, 0x0, 0xff, 0xff]) {
                 output.truncate(output.len() - 4);
+                break;
+            }
+
+            if written == 0 {
+                // zlib answers a sync flush that directly follows another one
+                // with no new input (an empty message) with Z_BUF_ERROR and no
+                // output, which used to spin here. The stream is then already
+                // byte-aligned, so emit the header byte of an empty stored
+                // block: with the `00 00 ff ff` the peer appends (RFC 7692
+                // §7.2.2) it decodes as an empty message.
+                if status != Status::BufError || !output.is_empty() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "deflate sync flush made no progress",
+                    ));
+                }
+                output.put_u8(0x00);
                 break;
             }
         }
@@ -599,6 +619,9 @@ struct Inflate {
     /// independently of the (compressed) payload size limit. This bounds the
     /// *total* payload of one message, not the rolling internal buffer.
     max_output: usize,
+    /// Set once the peer ended its deflate stream with a block that has
+    /// BFINAL=1 during the current message; cleared when the message ends.
+    stream_ended: bool,
 }
 
 impl Default for Inflate {
@@ -610,6 +633,7 @@ impl Default for Inflate {
             // Unbounded by default; production connections install an
             // explicit limit via `Decompressor::with_max_output`.
             max_output: usize::MAX,
+            stream_ended: false,
         }
     }
 }
@@ -627,10 +651,14 @@ impl Inflate {
     /// A `Inflate` instance configured with the specified window size.
     #[cfg(feature = "zlib")]
     fn new_with_window_bits(window_bits: u8) -> Self {
+        // flate2 panics outside 9..=15, yet RFC 7692 lets a peer negotiate 8;
+        // a 512-byte window decodes everything a 256-byte one produces.
+        let window_bits = window_bits.clamp(9, 15);
         Self {
             output: BytesMut::with_capacity(1024),
             decompress: flate2::Decompress::new_with_window_bits(false, window_bits),
             max_output: usize::MAX,
+            stream_ended: false,
         }
     }
 
@@ -649,12 +677,30 @@ impl Inflate {
         // `split`), so reset any leftover length accounting here; the
         // bomb guard below tracks this message's produced bytes only.
         let start_len = self.output.len();
-        self.write(input, start_len)?;
+        let trailing = self.write(input, start_len)?;
+        // A message may end the deflate stream with a BFINAL=1 block, and RFC
+        // 7692 §7.2.3.4 lets one 0x00 octet follow it. Any other byte after
+        // the final block is data the peer expected us to decode.
+        if trailing.iter().any(|&byte| byte != 0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "data after the final deflate block",
+            ));
+        }
 
         if stream_end {
-            // Add the required 4-byte suffix as per RFC 7692, Section 7.2.2
+            // Add the required 4-byte suffix as per RFC 7692, Section 7.2.2.
+            // After a final block it stays unconsumed and is ignored.
             self.write(&[0x0, 0x0, 0xff, 0xff], start_len)?;
-            self.flush()
+            let output = self.flush();
+            if self.stream_ended {
+                // An ended stream decodes nothing more, so the next message
+                // starts a fresh one. Its LZ77 window is lost: a peer that
+                // still refers to it fails as a corrupt stream.
+                self.decompress.reset(false);
+                self.stream_ended = false;
+            }
+            output
         } else {
             Ok(self.output.split().freeze())
         }
@@ -666,7 +712,10 @@ impl Inflate {
     /// (as returned by `decompress`); the bomb guard compares total produced
     /// bytes (`output.len() - start_len`) against `max_output`, so legitimate
     /// multi-frame messages are not rejected.
-    fn write(&mut self, mut input: &[u8], start_len: usize) -> io::Result<()> {
+    ///
+    /// Returns the tail of `input` left unconsumed because the deflate stream
+    /// ended (a block with BFINAL=1) before it.
+    fn write<'a>(&mut self, mut input: &'a [u8], start_len: usize) -> io::Result<&'a [u8]> {
         let output = &mut self.output;
         let decompressor = &mut self.decompress;
         let max_output = self.max_output;
@@ -700,7 +749,19 @@ impl Inflate {
             }
 
             match status {
-                Ok(Status::Ok | Status::BufError | Status::StreamEnd) => {}
+                // Once the stream has ended the inflater consumes nothing
+                // more, so looping on the remaining input would never end.
+                Ok(Status::StreamEnd) => {
+                    self.stream_ended = true;
+                    break;
+                }
+                Ok(Status::Ok | Status::BufError) if consumed == 0 && read == 0 => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "deflate stream made no progress",
+                    ));
+                }
+                Ok(Status::Ok | Status::BufError) => {}
                 Err(..) => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
@@ -710,7 +771,7 @@ impl Inflate {
             }
         }
 
-        Ok(())
+        Ok(input)
     }
 
     /// Flushes the decompressed data to the output buffer.
@@ -762,11 +823,99 @@ mod tests {
     #[test]
     fn test_parse_extensions() {
         use std::str::FromStr;
-        let compression = WebSocketExtensions::from_str("permessage-deflate; client_no_context_takeover; server_max_window_bits=7; client_max_window_bits=2; server_no_context_takeover").unwrap();
+        let compression = WebSocketExtensions::from_str("permessage-deflate; client_no_context_takeover; server_max_window_bits=8; client_max_window_bits=9; server_no_context_takeover").unwrap();
         assert!(compression.client_no_context_takeover);
         assert!(compression.server_no_context_takeover);
-        assert_eq!(compression.server_max_window_bits, Some(Some(7)));
-        assert_eq!(compression.client_max_window_bits, Some(Some(2)));
+        assert_eq!(compression.server_max_window_bits, Some(Some(8)));
+        assert_eq!(compression.client_max_window_bits, Some(Some(9)));
+    }
+
+    #[test]
+    fn window_bits_below_rfc_minimum_are_rejected() {
+        use std::str::FromStr;
+        // RFC 7692 §7.1.2.1 allows 8..=15; smaller values used to be accepted
+        // and later panicked inside flate2 with the `zlib` feature.
+        for offer in [
+            "permessage-deflate; server_max_window_bits=7",
+            "permessage-deflate; client_max_window_bits=0",
+        ] {
+            assert!(WebSocketExtensions::from_str(offer).is_err(), "{offer}");
+        }
+        let compression =
+            WebSocketExtensions::from_str("permessage-deflate; client_max_window_bits=8").unwrap();
+        assert_eq!(compression.client_max_window_bits, Some(Some(8)));
+    }
+
+    #[cfg(feature = "zlib")]
+    #[test]
+    fn window_bits_8_round_trips_without_panicking() {
+        // flate2 asserts 9..=15; a negotiated 8 is clamped to 9.
+        let mut compressor = Compressor::new_with_window_bits(Compression::default(), 8);
+        let mut decompressor = Decompressor::new_with_window_bits(8);
+        let compressed = compressor.compress(b"window", true).expect("compress");
+        let out = decompressor
+            .decompress(&compressed, true)
+            .expect("decompress");
+        assert_eq!(&out[..], b"window");
+    }
+
+    #[test]
+    fn final_deflate_block_ends_the_message() {
+        // `03 00` is an empty block with BFINAL=1. The inflater consumes
+        // nothing after it, which used to spin forever on the appended
+        // `00 00 ff ff` suffix.
+        let mut decompressor = Decompressor::new();
+        let out = decompressor
+            .decompress(&[0x03, 0x00], true)
+            .expect("empty final block");
+        assert!(out.is_empty());
+
+        // RFC 7692 §7.2.3.4: "Hello" in a BFINAL=1 block plus one 0x00 octet.
+        let hello: [u8; 8] = [0xf3, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00, 0x00];
+        let out = decompressor
+            .decompress(&hello, true)
+            .expect("final block message");
+        assert_eq!(&out[..], b"Hello");
+
+        // The ended stream is restarted, so a regular message still decodes.
+        let mut compressor = Compressor::new(Compression::default());
+        let compressed = compressor.compress(b"next", true).expect("compress");
+        let out = decompressor
+            .decompress(&compressed, true)
+            .expect("next message");
+        assert_eq!(&out[..], b"next");
+    }
+
+    #[test]
+    fn data_after_final_deflate_block_is_rejected() {
+        // `03 00 41` used to hang in the first write: the final block ends
+        // the stream and `41` is never consumed.
+        let mut decompressor = Decompressor::new();
+        let err = decompressor
+            .decompress(&[0x03, 0x00, 0x41], true)
+            .expect_err("trailing data must fail");
+        assert!(err.to_string().contains("final deflate block"), "{err}");
+    }
+
+    #[test]
+    fn empty_message_after_sync_flush_round_trips() {
+        // With the `zlib` feature a sync flush right after another one, with
+        // no new input, returns Z_BUF_ERROR and no output; `Deflate::flush`
+        // used to loop on it forever.
+        let mut compressor = Compressor::new(Compression::default());
+        let mut decompressor = Decompressor::new();
+        for payload in [
+            b"hi".as_slice(),
+            b"".as_slice(),
+            b"".as_slice(),
+            b"again".as_slice(),
+        ] {
+            let compressed = compressor.compress(payload, true).expect("compress");
+            let out = decompressor
+                .decompress(&compressed, true)
+                .expect("decompress");
+            assert_eq!(&out[..], payload);
+        }
     }
 
     #[test]

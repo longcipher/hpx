@@ -473,8 +473,7 @@ async fn connect_h2_priv(opts: H2BuilderOpts) -> std::result::Result<H2WebSocket
             Some(connector) => connector,
             None => super::tls_connector_for_alpn(vec![b"h2".to_vec()])?,
         };
-        let domain = super::ServerName::try_from(host.clone())
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid dnsname"))?;
+        let domain = super::tls_server_name(&host)?;
         let tls = connector.connect(domain, tcp).await?;
         if tls.get_ref().1.alpn_protocol() != Some(b"h2".as_slice()) {
             return Err(WebSocketError::AlpnMismatch);

@@ -79,7 +79,7 @@ pub async fn connect_through_proxy(
             // HTTP/1.1 inside that session.
             let proxy_stream: ProxyStream = if proxy_url.scheme() == "https" {
                 let connector = super::proxy_tls_connector()?;
-                let server_name = super::ServerName::try_from(host.to_owned()).map_err(|_| {
+                let server_name = super::tls_server_name(host).map_err(|_| {
                     io::Error::new(io::ErrorKind::InvalidInput, "invalid proxy dnsname")
                 })?;
                 Box::new(connector.connect(server_name, tcp_stream).await?)
@@ -102,7 +102,7 @@ pub async fn connect_through_proxy(
             })?;
             let port = proxy_port(proxy_url);
             let proxy_addr = format!("{}:{}", bracket_host(host), port);
-            let target = format!("{target_host}:{target_port}");
+            let target = format!("{}:{target_port}", bracket_host(target_host));
 
             let stream = if !proxy_url.username().is_empty() {
                 let user = proxy_url.username().to_string();
@@ -132,7 +132,7 @@ pub async fn connect_through_proxy(
             })?;
             let port = proxy_port(proxy_url);
             let proxy_addr = format!("{}:{}", bracket_host(host), port);
-            let target = format!("{target_host}:{target_port}");
+            let target = format!("{}:{target_port}", bracket_host(target_host));
 
             // SOCKS4 carries a `userid` field rather than a password. When
             // the target is a hostname it is encoded with the SOCKS4a
@@ -211,11 +211,10 @@ where
 {
     validate_host(target_host)?;
 
-    let authority = if target_host.contains(':') {
-        format!("[{target_host}]:{target_port}")
-    } else {
-        format!("{target_host}:{target_port}")
-    };
+    // Callers pass the host from `url::Host`'s `Display` or `Url::host_str`,
+    // which already bracket an IPv6 literal; adding a second pair produced
+    // `CONNECT [[::1]]:443`.
+    let authority = format!("{}:{target_port}", bracket_host(target_host));
 
     let mut connect_req = format!(
         "CONNECT {authority} HTTP/1.1\r\n\
