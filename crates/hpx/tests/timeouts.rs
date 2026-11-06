@@ -173,6 +173,40 @@ async fn response_timeout() {
     assert!(err.is_timeout());
 }
 
+/// The total timeout is one deadline counted from the start of the request:
+/// headers that arrive late must not give the body a fresh budget.
+#[cfg(feature = "stream")]
+#[tokio::test]
+async fn total_timeout_does_not_restart_when_headers_arrive() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+
+    let server = server::http(move |_req| {
+        async {
+            // Headers after 600 ms and the body 700 ms later: each phase fits
+            // in the 1 s timeout on its own, but the whole exchange does not.
+            tokio::time::sleep(Duration::from_millis(600)).await;
+            let body = hpx::Body::wrap_stream(futures_util::stream::once(async {
+                tokio::time::sleep(Duration::from_millis(700)).await;
+                Ok::<_, std::convert::Infallible>("Hello")
+            }));
+
+            http::Response::new(body)
+        }
+    });
+
+    let client = Client::builder()
+        .timeout(Duration::from_secs(1))
+        .no_proxy()
+        .build()
+        .unwrap();
+
+    let url = format!("http://{}/slow", server.addr());
+    let res = client.get(&url).send().await.expect("Failed to get");
+    let err = res.text().await.unwrap_err();
+
+    assert!(err.is_timeout());
+}
+
 #[tokio::test]
 async fn read_timeout_applies_to_headers() {
     let _ = tracing_subscriber::fmt().with_test_writer().try_init();
@@ -266,6 +300,29 @@ async fn read_timeout_allows_slow_response_body() {
     let body = res.text().await.expect("body text");
 
     assert_eq!(body, "012");
+}
+
+/// The read timeout measures waiting on the server. Time the caller spends on
+/// its own work between `send()` and reading a body the server has already
+/// sent must not count.
+#[tokio::test]
+async fn read_timeout_ignores_caller_time_before_reading_the_body() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+
+    let server = server::http(move |_req| async { http::Response::new("hello".into()) });
+
+    let client = Client::builder()
+        .read_timeout(Duration::from_millis(200))
+        .no_proxy()
+        .build()
+        .unwrap();
+
+    let url = format!("http://{}/buffered", server.addr());
+    let res = client.get(&url).send().await.expect("response");
+
+    tokio::time::sleep(Duration::from_millis(600)).await;
+
+    assert_eq!(res.text().await.expect("body text"), "hello");
 }
 
 #[tokio::test]

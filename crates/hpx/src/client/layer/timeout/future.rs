@@ -7,7 +7,7 @@ use std::{
 
 use http::Response;
 use pin_project_lite::pin_project;
-use tokio::time::Sleep;
+use tokio::time::{Instant, Sleep};
 
 use super::body::TimeoutBody;
 use crate::error::{BoxError, Error, TimedOut};
@@ -69,7 +69,9 @@ pin_project! {
     pub struct ResponseBodyTimeoutFuture<Fut> {
         #[pin]
         pub(super) inner: Fut,
-        pub(super) total_timeout: Option<Duration>,
+        // An instant, not a duration: the total timeout started with the
+        // request and must not restart when the headers arrive.
+        pub(super) deadline: Option<Instant>,
         pub(super) read_timeout: Option<Duration>,
     }
 }
@@ -81,10 +83,10 @@ where
     type Output = Result<Response<TimeoutBody<ResBody>>, E>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let total_timeout = self.total_timeout;
+        let deadline = self.deadline;
         let read_timeout = self.read_timeout;
         let res = ready!(self.project().inner.poll(cx))?
-            .map(|body| TimeoutBody::new(total_timeout, read_timeout, body));
+            .map(|body| TimeoutBody::new(deadline, read_timeout, body));
         Poll::Ready(Ok(res))
     }
 }

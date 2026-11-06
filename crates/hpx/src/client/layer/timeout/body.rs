@@ -7,7 +7,7 @@ use std::{
 
 use http_body::Body;
 use pin_project_lite::pin_project;
-use tokio::time::{Sleep, sleep};
+use tokio::time::{Instant, Sleep, sleep, sleep_until};
 
 use crate::{
     Error,
@@ -53,8 +53,10 @@ pin_project! {
 pin_project! {
     /// A body wrapper that enforces a timeout for each read operation.
     ///
-    /// The timeout resets after every successful read. If a single read
-    /// takes longer than the specified duration, an error is returned.
+    /// The timer runs only while the inner body is pending, so it measures
+    /// how long a read waits on the server, never the caller's own time
+    /// between reads. If a single read waits longer than the specified
+    /// duration, an error is returned.
     /// The timer is held and reused via `Sleep::reset` (same shape as
     /// [`TotalTimeoutBody`]) instead of allocating a new timer per chunk.
     pub struct ReadTimeoutBody<B> {
@@ -65,6 +67,8 @@ pin_project! {
         // for `poll`/`reset`. Marking it `#[pin]` would double-pin and
         // break method resolution.
         sleep: Pin<Box<Sleep>>,
+        // Whether `sleep` is counting down for the current read.
+        armed: bool,
         #[pin]
         body: B,
     }
@@ -73,8 +77,8 @@ pin_project! {
 /// ==== impl TimeoutBody ====
 impl<B> TimeoutBody<B> {
     /// Creates a new [`TimeoutBody`] with no timeout.
-    pub(crate) fn new(deadline: Option<Duration>, read_timeout: Option<Duration>, body: B) -> Self {
-        let deadline = deadline.map(sleep).map(Box::pin);
+    pub(crate) fn new(deadline: Option<Instant>, read_timeout: Option<Duration>, body: B) -> Self {
+        let deadline = deadline.map(sleep_until).map(Box::pin);
         match (deadline, read_timeout) {
             (Some(total_timeout), Some(read_timeout)) => Self::CombinedTimeout {
                 body: TotalTimeoutBody {
@@ -82,6 +86,7 @@ impl<B> TimeoutBody<B> {
                     body: ReadTimeoutBody {
                         timeout: read_timeout,
                         sleep: Box::pin(sleep(read_timeout)),
+                        armed: false,
                         body,
                     },
                 },
@@ -93,6 +98,7 @@ impl<B> TimeoutBody<B> {
                 body: ReadTimeoutBody {
                     timeout,
                     sleep: Box::pin(sleep(timeout)),
+                    armed: false,
                     body,
                 },
             },
@@ -201,24 +207,30 @@ where
     ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
         let this = self.project();
 
-        // Error if the per-read timeout has expired. The timer is reused
-        // across chunks via `reset` instead of allocating a new `Sleep`.
+        // Poll the body before the timer, and run the timer only while the
+        // body is pending: the read timeout measures waiting on the server,
+        // so a frame that is already available is returned however long the
+        // caller took to ask for it.
+        if let Poll::Ready(frame) = this.body.poll_frame(cx) {
+            // The next pending read starts a fresh countdown.
+            *this.armed = false;
+            return Poll::Ready(frame.map(|frame| frame.map_err(Into::into)));
+        }
+
+        if !*this.armed {
+            // Reuse the timer allocation via `reset`. A timeout too large to
+            // represent never fires, so the timer stays unarmed.
+            let Some(deadline) = Instant::now().checked_add(*this.timeout) else {
+                return Poll::Pending;
+            };
+            this.sleep.as_mut().reset(deadline);
+            *this.armed = true;
+        }
+
         if this.sleep.as_mut().poll(cx).is_ready() {
             return Poll::Ready(Some(Err(Box::new(TimedOut))));
         }
-
-        // Poll the actual body
-        match ready!(this.body.poll_frame(cx)) {
-            Some(Ok(frame)) => {
-                // Reset deadline for the next read, reusing the timer allocation.
-                // Dropping the body (end of stream) cancels the timer.
-                let deadline = tokio::time::Instant::now() + *this.timeout;
-                this.sleep.as_mut().reset(deadline);
-                Poll::Ready(Some(Ok(frame)))
-            }
-            Some(Err(err)) => Poll::Ready(Some(Err(err.into()))),
-            None => Poll::Ready(None),
-        }
+        Poll::Pending
     }
 
     #[inline]
@@ -288,6 +300,7 @@ mod tests {
         let mut body = Box::pin(ReadTimeoutBody {
             timeout: Duration::from_millis(100),
             sleep: Box::pin(sleep(Duration::from_millis(100))),
+            armed: false,
             body: inner,
         });
 
@@ -305,6 +318,7 @@ mod tests {
         let mut body = Box::pin(ReadTimeoutBody {
             timeout: Duration::from_millis(10),
             sleep: Box::pin(sleep(Duration::from_millis(10))),
+            armed: false,
             body: StalledBody,
         });
 
@@ -339,5 +353,29 @@ mod tests {
         }
         let end = futures_util::future::poll_fn(|cx| body.as_mut().poll_frame(cx)).await;
         assert!(end.is_none());
+    }
+
+    #[tokio::test]
+    async fn read_timeout_body_ignores_caller_time_between_reads() {
+        // The read timeout measures waiting on the server. A frame that is
+        // already available must be returned however long the caller spent
+        // on its own work before asking for it, both before the first read
+        // and between reads.
+        let inner = ImmediateBody { remaining: 2 };
+        let mut body = Box::pin(TimeoutBody::new(
+            None,
+            Some(Duration::from_millis(20)),
+            inner,
+        ));
+
+        for _ in 0..2 {
+            sleep(Duration::from_millis(60)).await;
+            let frame = futures_util::future::poll_fn(|cx| body.as_mut().poll_frame(cx)).await;
+            assert!(frame.is_some());
+            assert!(
+                frame.unwrap().is_ok(),
+                "an available frame must not time out"
+            );
+        }
     }
 }

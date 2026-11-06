@@ -9,6 +9,7 @@ use std::{
 };
 
 use http::{Request, Response};
+use tokio::time::Instant;
 use tower::{Layer, Service};
 
 pub(crate) use self::body::TimeoutBody;
@@ -288,15 +289,29 @@ where
     }
 
     #[inline]
-    fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
+    fn call(&mut self, mut req: Request<ReqBody>) -> Self::Future {
         let (total_timeout, read_timeout) = fetch_timeout_options(&self.timeout, req.extensions());
+        // A timeout too large to represent never fires, so it gets no deadline.
+        let deadline = total_timeout.and_then(|timeout| Instant::now().checked_add(timeout));
+        if let Some(deadline) = deadline {
+            req.extensions_mut().insert(RequestDeadline(deadline));
+        }
         ResponseFuture {
             response: self.inner.call(req),
-            total_timeout: total_timeout.map(tokio::time::sleep),
+            total_timeout: deadline.map(tokio::time::sleep_until),
             read_timeout: read_timeout.map(tokio::time::sleep),
         }
     }
 }
+
+/// The instant the total timeout expires, fixed by [`Timeout`] when the
+/// request starts.
+///
+/// It travels in the request extensions so that [`ResponseBodyTimeout`] bounds
+/// the body by the same deadline, rather than by a fresh budget counted from
+/// when the headers arrive.
+#[derive(Clone, Copy)]
+struct RequestDeadline(Instant);
 
 /// [`Layer`] that applies a [`ResponseBodyTimeout`] middleware to a service.
 // This layer allows you to set a total timeout and a read timeout for the response body.
@@ -351,9 +366,17 @@ where
     #[inline]
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
         let (total_timeout, read_timeout) = fetch_timeout_options(&self.timeout, req.extensions());
+        // Reuse the deadline `Timeout` fixed when the request started. Without
+        // one, count from now, which is still before the headers arrive.
+        let deadline = total_timeout.and_then(|timeout| {
+            req.extensions()
+                .get::<RequestDeadline>()
+                .map(|deadline| deadline.0)
+                .or_else(|| Instant::now().checked_add(timeout))
+        });
         ResponseBodyTimeoutFuture {
             inner: self.inner.call(req),
-            total_timeout,
+            deadline,
             read_timeout,
         }
     }
