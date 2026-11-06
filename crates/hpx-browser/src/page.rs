@@ -199,7 +199,9 @@ impl Page {
     pub fn reload_html(&mut self, html: &str, url: &str) {
         // Lowercase once and share between title extraction and challenge
         // classification; both only need case-insensitive matching on the body.
-        let lowered_html = html.to_lowercase();
+        // ASCII folding keeps every byte offset equal to `html`'s, which
+        // `extract_title_lower` relies on; the challenge markers are ASCII.
+        let lowered_html = html.to_ascii_lowercase();
         self.dom = crate::html_parser::parse_html(html);
         self.url = url.to_string();
         self.html = html.to_string();
@@ -991,7 +993,7 @@ async fn cookie_snapshot(client: &HttpClient, url: &str) -> String {
 
 /// Extract <title> from HTML (cheap string scan, no full parse).
 fn extract_title(html: &str) -> String {
-    let lower = html.to_lowercase();
+    let lower = html.to_ascii_lowercase();
     extract_title_lower(&lower, html)
 }
 
@@ -1000,12 +1002,17 @@ fn extract_title(html: &str) -> String {
 /// `lowered_html` is used only to locate the `<title` start tag and the
 /// `</title>` end marker (case-insensitive matches); `original_html` is
 /// indexed to preserve the title's original casing.
+///
+/// `lowered_html` must be `original_html.to_ascii_lowercase()`: its byte
+/// offsets slice `original_html`. Unicode `to_lowercase` changes the byte
+/// length of some characters (U+2126 OHM SIGN shrinks from 3 bytes to 2), so
+/// its offsets can split a character and panic.
 fn extract_title_lower(lowered_html: &str, original_html: &str) -> String {
     if let Some(start) = lowered_html.find("<title") {
         let after_tag = &original_html[start..];
         if let Some(gt) = after_tag.find('>') {
             let content = &after_tag[gt + 1..];
-            if let Some(end) = content.to_lowercase().find("</title>") {
+            if let Some(end) = lowered_html[start + gt + 1..].find("</title>") {
                 return content[..end].trim().to_string();
             }
         }
@@ -1332,6 +1339,32 @@ Checking your browser before accessing the site...
             extract_title("<HTML><HEAD><TITLE>Test</TITLE></HEAD></HTML>"),
             "Test"
         );
+    }
+
+    #[test]
+    fn extract_title_survives_length_changing_lowercase() {
+        // Regression: offsets found in `to_lowercase()` output sliced the
+        // original. U+2126 OHM SIGN lowercases from 3 bytes to 2, so the end
+        // offset split the character and panicked.
+        assert_eq!(extract_title("<title>4.7k\u{2126}</title>"), "4.7k\u{2126}");
+        // U+212A KELVIN SIGN lowercases from 3 bytes to 1, so a start offset
+        // found after it pointed before the real `<title`.
+        assert_eq!(
+            extract_title("<meta content=\"\u{212A}\"><title>Hi</title>"),
+            "Hi"
+        );
+    }
+
+    #[tokio::test]
+    async fn reload_html_title_survives_length_changing_lowercase() {
+        // `reload_html` (every navigation) shares one lowered body with the
+        // title extraction, so it must fold the same way.
+        let mut page = Page::from_html("<html></html>", false).await.unwrap();
+        page.reload_html(
+            "<html><head><title>4.7k\u{2126}</title></head></html>",
+            "https://example.com/",
+        );
+        assert_eq!(page.title(), "4.7k\u{2126}");
     }
 
     #[tokio::test]

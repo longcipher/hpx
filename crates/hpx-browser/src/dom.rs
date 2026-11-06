@@ -474,6 +474,9 @@ impl Dom {
         {
             return;
         }
+        if self.is_inclusive_ancestor(child, parent) {
+            return;
+        }
         // Route through blitz's mutator so `IS_IN_DOCUMENT` flags, style
         // damage and the id map are maintained for the moved subtree.
         // Detaching from the old parent is handled by the mutator itself.
@@ -487,6 +490,13 @@ impl Dom {
             || self.inner.get_node(child.to_blitz()).is_none()
             || self.inner.get_node(reference.to_blitz()).is_none()
         {
+            return;
+        }
+        // `insertBefore(c, c)` leaves the tree unchanged per the DOM spec.
+        // blitz cannot express it: `insert_nodes_before` detaches the child
+        // first and then unwraps the index of the anchor it just removed, and
+        // that panic inside a deno_core op aborts the whole process.
+        if child == reference || self.is_inclusive_ancestor(child, parent) {
             return;
         }
         // Only insert relative to `reference` when it actually lives under
@@ -503,6 +513,26 @@ impl Dom {
         } else {
             mutator.append_children(parent.to_blitz(), &[child.to_blitz()]);
         }
+    }
+
+    /// Whether `ancestor` is `node` itself or one of its ancestors.
+    ///
+    /// Inserting a node under itself or its own descendant is a
+    /// HierarchyRequestError in the DOM spec. blitz performs it anyway and
+    /// links the node into a parent cycle, detached from the document, so
+    /// callers must refuse it. A chain longer than `ANCESTOR_LIMIT` counts
+    /// as an ancestor match, so the insertion is refused rather than risked.
+    fn is_inclusive_ancestor(&self, ancestor: NodeId, node: NodeId) -> bool {
+        let target = ancestor.to_blitz();
+        let mut current = Some(node.to_blitz());
+        for _ in 0..ANCESTOR_LIMIT {
+            match current {
+                Some(id) if id == target => return true,
+                Some(id) => current = self.inner.get_node(id).and_then(|n| n.parent),
+                None => return false,
+            }
+        }
+        true
     }
 
     pub fn detach(&mut self, id: NodeId) {
@@ -1149,5 +1179,45 @@ mod tests {
 
         // A stale/unknown id resolves to None rather than panicking.
         assert!(dom.get(NodeId::from_raw(u32::MAX)).is_none());
+    }
+
+    #[test]
+    fn insert_before_with_child_as_reference_is_a_noop() {
+        // Regression: blitz detached the child and then unwrapped the index
+        // of the (same, now removed) anchor; inside a deno_core op that
+        // panic aborted the process (`p.insertBefore(c, c)`).
+        let mut dom = Dom::new();
+        let parent = dom.create_element(QualName::new("div"), vec![]);
+        let first = dom.create_element(QualName::new("span"), vec![]);
+        let child = dom.create_element(QualName::new("p"), vec![]);
+        dom.append_child(parent, first);
+        dom.append_child(parent, child);
+
+        dom.insert_before(parent, child, child);
+
+        assert_eq!(dom.children(parent), vec![first, child]);
+        assert_eq!(dom.node_ref(child).parent(), Some(parent));
+    }
+
+    #[test]
+    fn inserting_a_node_into_its_own_subtree_is_refused() {
+        // Regression: blitz linked the node into a parent cycle instead of
+        // raising the spec's HierarchyRequestError.
+        let mut dom = Dom::new();
+        let outer = dom.create_element(QualName::new("div"), vec![]);
+        let inner = dom.create_element(QualName::new("section"), vec![]);
+        let leaf = dom.create_element(QualName::new("p"), vec![]);
+        dom.append_child(outer, inner);
+        dom.append_child(inner, leaf);
+
+        dom.append_child(outer, outer);
+        dom.append_child(inner, outer);
+        dom.insert_before(outer, outer, inner);
+        dom.insert_before(inner, outer, leaf);
+
+        assert_eq!(dom.node_ref(outer).parent(), None);
+        assert_eq!(dom.children(outer), vec![inner]);
+        assert_eq!(dom.children(inner), vec![leaf]);
+        assert_eq!(dom.node_ref(leaf).parent(), Some(inner));
     }
 }
