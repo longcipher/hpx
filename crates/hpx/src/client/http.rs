@@ -791,10 +791,16 @@ impl Client {
     ///
     /// `#[doc(hidden)]` — exposed for integration tests only
     /// (`crates/hpx/tests/http3.rs`). Not part of the stable public API.
+    ///
+    /// Cache keys include the scheme; this checks both `http` and `https`.
     #[cfg(feature = "http3")]
     #[doc(hidden)]
     pub fn __test_alt_svc_cache_has_entry(&self, host: &str, port: u16) -> bool {
-        self.alt_svc_cache.get(&(host.to_string(), port)).is_some()
+        ["http", "https"].iter().any(|scheme| {
+            self.alt_svc_cache
+                .get(&(format!("{scheme}://{host}"), port))
+                .is_some()
+        })
     }
 
     /// Test helper: checks whether the H3 failure tracker has blocked
@@ -802,11 +808,15 @@ impl Client {
     ///
     /// `#[doc(hidden)]` — exposed for integration tests only
     /// (`crates/hpx/tests/http3.rs`). Not part of the stable public API.
+    ///
+    /// Tracker keys include the scheme; this checks both `http` and `https`.
     #[cfg(feature = "http3")]
     #[doc(hidden)]
     pub fn __test_h3_failure_tracker_is_blocked(&self, host: &str, port: u16) -> bool {
-        self.h3_failure_tracker
-            .is_blocked(&(host.to_string(), port))
+        ["http", "https"].iter().any(|scheme| {
+            self.h3_failure_tracker
+                .is_blocked(&(format!("{scheme}://{host}"), port))
+        })
     }
 }
 

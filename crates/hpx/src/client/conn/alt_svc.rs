@@ -17,7 +17,7 @@
 //! The `alt-authority` contains a `host:port` pair, or just `:port` (meaning
 //! same host as the origin). If the port is omitted, 443 is assumed.
 
-use http::HeaderValue;
+use http::{HeaderValue, Uri, uri::Scheme};
 
 /// A single alternative service entry parsed from an `Alt-Svc` header.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +71,43 @@ pub(crate) fn parse_alt_svc(header: &HeaderValue) -> Option<Vec<AltSvc>> {
 // Alt-Svc cache
 // ---------------------------------------------------------------------------
 
+/// Returns the Alt-Svc cache key for a request URI: `("scheme://host", port)`.
+///
+/// The scheme is part of the key because a plaintext `http` response can be
+/// rewritten by anyone on the path. Keyed by host and port alone, an `Alt-Svc`
+/// injected into `http://host:443/` would send the next `https://host/`
+/// request over QUIC to an endpoint of the attacker's choosing. The port
+/// defaults to the scheme's own (80 or 443).
+///
+/// The host keeps the brackets of an IPv6 literal, as `Uri::host` returns it.
+pub(crate) fn origin_key(uri: &Uri) -> Option<(String, u16)> {
+    let scheme = uri.scheme()?;
+    let default_port = if *scheme == Scheme::HTTPS {
+        443
+    } else if *scheme == Scheme::HTTP {
+        80
+    } else {
+        return None;
+    };
+    let host = uri.host()?;
+    Some((
+        format!("{scheme}://{host}"),
+        uri.port_u16().unwrap_or(default_port),
+    ))
+}
+
+/// The most entries kept from one `Alt-Svc` header for an origin.
+///
+/// A header can list any number of alternatives; only the first `h3` one is
+/// ever used.
+const MAX_ENTRIES_PER_ORIGIN: usize = 8;
+
+/// The most origins the Alt-Svc cache holds.
+const MAX_ORIGINS: usize = 1024;
+
+/// The most authorities the h3 failure tracker holds.
+const MAX_FAILED_AUTHORITIES: usize = 1024;
+
 /// An entry in the Alt-Svc cache with insertion time for TTL tracking.
 #[derive(Debug, Clone)]
 struct AltSvcEntry {
@@ -78,10 +115,23 @@ struct AltSvcEntry {
     inserted_at: std::time::Instant,
 }
 
+impl AltSvcEntry {
+    /// Whether the entry is still within its `max_age` at `now`.
+    fn is_alive(&self, now: std::time::Instant) -> bool {
+        // `saturating_duration_since` cannot overflow, unlike adding a
+        // `max_age` of up to `u32::MAX` seconds to an `Instant`.
+        now.saturating_duration_since(self.inserted_at)
+            <= std::time::Duration::from_secs(u64::from(self.alt_svc.max_age))
+    }
+}
+
 /// A per-authority cache for `Alt-Svc` entries.
 ///
 /// The key is a `(host, port)` tuple representing the authority.
-/// Entries are evicted based on their `max_age` when retrieved.
+/// Expired entries are removed when they are read. The cache keeps at most
+/// `MAX_ENTRIES_PER_ORIGIN` entries per origin and roughly
+/// `MAX_ORIGINS` origins: concurrent inserts of new origins can overshoot
+/// the limit by the number of inserting threads.
 ///
 /// Uses `scc::HashMap` for lock-free reads with fine-grained entry-level
 /// mutations, avoiding the `tokio::sync::RwLock` contention on the h3
@@ -101,12 +151,13 @@ impl AltSvcCache {
     /// Insert entries for an authority.
     ///
     /// If `entries` is empty (clear signal), remove all entries for that
-    /// authority.
-    pub(crate) fn insert(&self, authority: (String, u16), entries: Vec<AltSvc>) {
+    /// authority. Otherwise the entries replace the cached ones.
+    pub(crate) fn insert(&self, authority: (String, u16), mut entries: Vec<AltSvc>) {
         if entries.is_empty() {
             self.entries.remove_sync(&authority);
             return;
         }
+        entries.truncate(MAX_ENTRIES_PER_ORIGIN);
         let now = std::time::Instant::now();
         let alt_svc_entries: Vec<AltSvcEntry> = entries
             .into_iter()
@@ -115,28 +166,33 @@ impl AltSvcCache {
                 inserted_at: now,
             })
             .collect();
-        // `insert_sync` returns the previous entry (if any); we're
-        // overwriting unconditionally so the old value is irrelevant.
-        let _ = self.entries.insert_sync(authority, alt_svc_entries);
+        if !self.entries.contains_sync(&authority) {
+            make_room(
+                &self.entries,
+                MAX_ORIGINS,
+                |entries| entries.iter().any(|entry| entry.is_alive(now)),
+                |entries| entries.first().map(|entry| entry.inserted_at),
+            );
+        }
+        // `upsert_sync` replaces a cached value; `insert_sync` would keep
+        // the old one and silently drop the refreshed header.
+        self.entries.upsert_sync(authority, alt_svc_entries);
     }
 
     /// Returns non-expired entries for an authority.
     ///
-    /// Entries where `inserted_at + Duration::from_secs(max_age) < now` are
-    /// expired and filtered out. If all entries have expired, returns `None`.
+    /// Entries older than their `max_age` are expired: they are removed, and
+    /// so is the authority once none is left, in which case this returns
+    /// `None`.
     pub(crate) fn get(&self, authority: &(String, u16)) -> Option<Vec<AltSvc>> {
-        let entry = self.entries.get_sync(authority)?;
+        let mut entry = self.entries.get_sync(authority)?;
         let now = std::time::Instant::now();
-        let alive: Vec<AltSvc> = entry
-            .get()
-            .iter()
-            .filter(|e| {
-                let max_age = std::time::Duration::from_secs(u64::from(e.alt_svc.max_age));
-                e.inserted_at + max_age >= now
-            })
-            .map(|e| e.alt_svc.clone())
-            .collect();
-        if alive.is_empty() { None } else { Some(alive) }
+        entry.get_mut().retain(|e| e.is_alive(now));
+        if entry.get().is_empty() {
+            let _ = entry.remove_entry();
+            return None;
+        }
+        Some(entry.get().iter().map(|e| e.alt_svc.clone()).collect())
     }
 
     /// Remove all entries for an authority.
@@ -158,9 +214,11 @@ impl AltSvcCache {
 /// cooldown period. Subsequent requests to the same authority skip h3
 /// and fall back to h2/h1 until the cooldown expires.
 ///
-/// The cooldown defaults to 60 seconds. Failed authorities are
-/// automatically cleared from the tracker after the cooldown expires,
-/// allowing h3 retries on the next request.
+/// The cooldown defaults to 60 seconds. Once it has expired, the next
+/// request retries h3, and the check that lets it through removes the
+/// record. Nothing removes a record that is never checked again, so the
+/// tracker keeps at most roughly `MAX_FAILED_AUTHORITIES` authorities:
+/// when it is full, expired records are dropped first, then the oldest one.
 ///
 /// # Thread safety
 ///
@@ -184,14 +242,15 @@ impl H3FailureTracker {
 
     /// Returns `true` if the authority has a recent failure and is still
     /// within the cooldown period.
+    ///
+    /// A record whose cooldown has expired is removed.
     pub(crate) fn is_blocked(&self, authority: &(String, u16)) -> bool {
-        match self.failures.get_sync(authority) {
-            Some(entry) => {
-                let failure_time = entry.get();
-                failure_time.elapsed() < self.cooldown
-            }
-            None => false,
-        }
+        let mut blocked = false;
+        self.failures.remove_if_sync(authority, |failed_at| {
+            blocked = failed_at.elapsed() < self.cooldown;
+            !blocked
+        });
+        blocked
     }
 
     /// Records a failure for the given authority.
@@ -199,11 +258,18 @@ impl H3FailureTracker {
     /// The authority is blocked from h3 attempts for the duration of the
     /// cooldown period.
     pub(crate) fn record_failure(&self, authority: (String, u16)) {
-        // `insert_sync` overwrites any prior failure timestamp; the
-        // previous value (if any) is irrelevant.
-        let _ = self
-            .failures
-            .insert_sync(authority, std::time::Instant::now());
+        if !self.failures.contains_sync(&authority) {
+            make_room(
+                &self.failures,
+                MAX_FAILED_AUTHORITIES,
+                |failed_at| failed_at.elapsed() < self.cooldown,
+                |failed_at| Some(*failed_at),
+            );
+        }
+        // `upsert_sync` restarts the cooldown of a repeated failure;
+        // `insert_sync` would keep the first, possibly expired, timestamp.
+        self.failures
+            .upsert_sync(authority, std::time::Instant::now());
     }
 
     /// Clears the failure record for the given authority.
@@ -218,6 +284,39 @@ impl H3FailureTracker {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/// Makes room for one more key in `map` once it holds `limit` keys.
+///
+/// The values `keep` rejects (the expired ones) are dropped first; if the
+/// map is still full, the key whose value was inserted first goes.
+fn make_room<V>(
+    map: &scc::HashMap<(String, u16), V>,
+    limit: usize,
+    mut keep: impl FnMut(&V) -> bool,
+    inserted_at: impl Fn(&V) -> Option<std::time::Instant>,
+) {
+    if map.len() < limit {
+        return;
+    }
+    map.retain_sync(|_, value| keep(value));
+    if map.len() < limit {
+        return;
+    }
+
+    let mut oldest: Option<((String, u16), std::time::Instant)> = None;
+    map.iter_sync(|key, value| {
+        if let Some(at) = inserted_at(value)
+            && oldest.as_ref().is_none_or(|(_, oldest_at)| at < *oldest_at)
+        {
+            oldest = Some((key.clone(), at));
+        }
+        true
+    });
+    // The key is removed after the scan: `iter_sync` holds the bucket locks.
+    if let Some((key, _)) = oldest {
+        map.remove_sync(&key);
+    }
+}
 
 /// Split a comma-separated list, respecting quoted strings (so commas inside
 /// `"..."` are not treated as delimiters).
@@ -614,6 +713,189 @@ mod tests {
         tracker.record_failure(a1.clone());
         assert!(tracker.is_blocked(&a1));
         assert!(!tracker.is_blocked(&a2));
+    }
+
+    fn h3_on_port(port: u16, max_age: u32) -> AltSvc {
+        AltSvc {
+            protocol: "h3".to_string(),
+            host: String::new(),
+            port,
+            max_age,
+            persist: false,
+        }
+    }
+
+    fn origin(index: usize) -> (String, u16) {
+        (format!("origin-{index}.example"), 443)
+    }
+
+    #[test]
+    fn alt_svc_cache_get_removes_an_expired_origin() {
+        let cache = AltSvcCache::new();
+        let authority = ("example.com".to_string(), 443);
+        cache.insert(authority.clone(), vec![h3_on_port(443, 0)]);
+
+        assert!(cache.get(&authority).is_none());
+        assert!(!cache.entries.contains_sync(&authority));
+    }
+
+    #[test]
+    fn alt_svc_cache_get_removes_expired_entries_only() {
+        let cache = AltSvcCache::new();
+        let authority = ("example.com".to_string(), 443);
+        cache.insert(
+            authority.clone(),
+            vec![h3_on_port(443, 0), h3_on_port(8443, 86400)],
+        );
+
+        let alive = cache.get(&authority).unwrap();
+        assert_eq!(alive, [h3_on_port(8443, 86400)]);
+        let stored = cache
+            .entries
+            .read_sync(&authority, |_, entries| entries.len())
+            .unwrap();
+        assert_eq!(stored, 1);
+    }
+
+    #[test]
+    fn alt_svc_cache_insert_replaces_the_cached_entries() {
+        let cache = AltSvcCache::new();
+        let authority = ("example.com".to_string(), 443);
+        cache.insert(authority.clone(), vec![h3_on_port(443, 86400)]);
+        cache.insert(authority.clone(), vec![h3_on_port(8443, 86400)]);
+
+        assert_eq!(cache.get(&authority).unwrap(), [h3_on_port(8443, 86400)]);
+    }
+
+    #[test]
+    fn alt_svc_cache_caps_the_entries_per_origin() {
+        let cache = AltSvcCache::new();
+        let authority = ("example.com".to_string(), 443);
+        let entries = (0..100).map(|port| h3_on_port(port, 86400)).collect();
+        cache.insert(authority.clone(), entries);
+
+        let cached = cache.get(&authority).unwrap();
+        assert_eq!(cached.len(), MAX_ENTRIES_PER_ORIGIN);
+        // The first entries are the ones kept: they are the preferred ones.
+        assert_eq!(cached[0].port, 0);
+    }
+
+    #[test]
+    fn alt_svc_cache_caps_the_origins() {
+        let cache = AltSvcCache::new();
+        for index in 0..MAX_ORIGINS + 10 {
+            cache.insert(origin(index), vec![h3_on_port(443, 86400)]);
+        }
+
+        assert!(cache.entries.len() <= MAX_ORIGINS);
+        assert!(cache.get(&origin(MAX_ORIGINS + 9)).is_some());
+    }
+
+    #[test]
+    fn alt_svc_cache_evicts_the_oldest_origin_when_full() {
+        let cache = AltSvcCache::new();
+        let base = std::time::Instant::now();
+        for index in 0..MAX_ORIGINS {
+            let entry = AltSvcEntry {
+                alt_svc: h3_on_port(443, 86400),
+                // Distinct, increasing insertion times; the first is oldest.
+                inserted_at: base + std::time::Duration::from_secs(index as u64),
+            };
+            assert!(
+                cache
+                    .entries
+                    .insert_sync(origin(index), vec![entry])
+                    .is_ok()
+            );
+        }
+
+        cache.insert(origin(MAX_ORIGINS), vec![h3_on_port(443, 86400)]);
+
+        assert_eq!(cache.entries.len(), MAX_ORIGINS);
+        assert!(!cache.entries.contains_sync(&origin(0)));
+        assert!(cache.entries.contains_sync(&origin(1)));
+        assert!(cache.entries.contains_sync(&origin(MAX_ORIGINS)));
+    }
+
+    #[test]
+    fn alt_svc_cache_drops_expired_origins_before_live_ones() {
+        let cache = AltSvcCache::new();
+        for index in 0..MAX_ORIGINS {
+            cache.insert(origin(index), vec![h3_on_port(443, 0)]);
+        }
+
+        cache.insert(origin(MAX_ORIGINS), vec![h3_on_port(443, 86400)]);
+
+        assert_eq!(cache.entries.len(), 1);
+        assert!(cache.get(&origin(MAX_ORIGINS)).is_some());
+    }
+
+    #[test]
+    fn origin_key_separates_schemes() {
+        let uri = |s: &str| s.parse::<Uri>().unwrap();
+        let key = |s: &str| origin_key(&uri(s));
+
+        assert_eq!(
+            key("https://example.com/path"),
+            Some(("https://example.com".to_string(), 443))
+        );
+        assert_eq!(
+            key("https://example.com:8443/"),
+            Some(("https://example.com".to_string(), 8443))
+        );
+        assert_eq!(
+            key("https://[::1]/"),
+            Some(("https://[::1]".to_string(), 443))
+        );
+        assert_eq!(
+            key("http://example.com/"),
+            Some(("http://example.com".to_string(), 80))
+        );
+        // A plaintext origin on the https port must not share the https key.
+        assert_ne!(key("http://example.com:443/"), key("https://example.com/"));
+        assert_eq!(key("/relative"), None);
+    }
+
+    #[test]
+    fn h3_failure_tracker_removes_an_expired_record() {
+        let tracker = H3FailureTracker::new(std::time::Duration::ZERO);
+        let authority = ("example.com".to_string(), 443);
+        tracker.record_failure(authority.clone());
+
+        assert!(!tracker.is_blocked(&authority));
+        assert!(!tracker.failures.contains_sync(&authority));
+    }
+
+    #[test]
+    fn h3_failure_tracker_restarts_the_cooldown_of_a_repeated_failure() {
+        // Short enough for `Instant::now() - 2 * cooldown` to exist right
+        // after boot, long enough for the check below to run within it.
+        let cooldown = std::time::Duration::from_secs(1);
+        let tracker = H3FailureTracker::new(cooldown);
+        let authority = ("example.com".to_string(), 443);
+        // A failure whose cooldown has already expired.
+        let expired = std::time::Instant::now().checked_sub(cooldown * 2).unwrap();
+        assert!(
+            tracker
+                .failures
+                .insert_sync(authority.clone(), expired)
+                .is_ok()
+        );
+
+        tracker.record_failure(authority.clone());
+
+        assert!(tracker.is_blocked(&authority));
+    }
+
+    #[test]
+    fn h3_failure_tracker_caps_the_authorities() {
+        let tracker = H3FailureTracker::new(std::time::Duration::from_secs(60));
+        for index in 0..MAX_FAILED_AUTHORITIES + 10 {
+            tracker.record_failure(origin(index));
+        }
+
+        assert!(tracker.failures.len() <= MAX_FAILED_AUTHORITIES);
+        assert!(tracker.is_blocked(&origin(MAX_FAILED_AUTHORITIES + 9)));
     }
 
     #[test]

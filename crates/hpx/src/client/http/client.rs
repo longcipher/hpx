@@ -34,7 +34,7 @@ use self::{
     lazy::{Started as Lazy, lazy},
 };
 #[cfg(feature = "http3")]
-use crate::client::conn::alt_svc::{AltSvcCache, H3FailureTracker, parse_alt_svc};
+use crate::client::conn::alt_svc::{AltSvcCache, H3FailureTracker, origin_key, parse_alt_svc};
 #[cfg(feature = "http3")]
 use crate::client::conn::quic::H3Connection;
 #[cfg(feature = "http1")]
@@ -403,15 +403,14 @@ where
                     // Capture Alt-Svc headers for HTTP/3 upgrade discovery.
                     #[cfg(feature = "http3")]
                     {
-                        if let Some(host) = connect_req.uri().host() {
-                            let port = connect_req.uri().port_u16().unwrap_or(443);
-                            if let Some(alt_svc_value) = resp
+                        // Keyed by scheme too: see `origin_key`.
+                        if let Some(origin) = origin_key(connect_req.uri())
+                            && let Some(alt_svc_value) = resp
                                 .headers()
                                 .get(http::header::HeaderName::from_static("alt-svc"))
-                                && let Some(entries) = parse_alt_svc(alt_svc_value)
-                            {
-                                self.alt_svc_cache.insert((host.to_string(), port), entries);
-                            }
+                            && let Some(entries) = parse_alt_svc(alt_svc_value)
+                        {
+                            self.alt_svc_cache.insert(origin, entries);
                         }
                     }
                     return Ok(resp);
@@ -473,11 +472,13 @@ where
         let Some(host) = connect_req.uri().host() else {
             return H3UpgradeOutcome::FallThrough(req);
         };
-        let port = connect_req.uri().port_u16().unwrap_or(443);
-        // Compute the origin authority once and reuse it for cache lookups,
-        // circuit-breaker checks, and failure recording. This avoids
-        // re-allocating `host.to_string()` at each call site.
-        let authority = (host.to_string(), port);
+        // Compute the origin key once and reuse it for cache lookups,
+        // circuit-breaker checks, and failure recording. It includes the
+        // scheme, so a plaintext origin's alternatives never apply here to
+        // an https request (see `origin_key`).
+        let Some(authority) = origin_key(connect_req.uri()) else {
+            return H3UpgradeOutcome::FallThrough(req);
+        };
 
         // Circuit breaker: skip h3 if this authority had a recent QUIC
         // failure (still in cooldown).
@@ -1342,8 +1343,13 @@ impl<C, B> HttpClient<C, B> {
     /// (`crates/hpx/tests/http3.rs`). Not part of the stable public API.
     #[cfg(feature = "http3")]
     #[doc(hidden)]
+    /// Cache keys include the scheme; this checks both `http` and `https`.
     pub fn __test_alt_svc_cache_has_entry(&self, host: &str, port: u16) -> bool {
-        self.alt_svc_cache.get(&(host.to_string(), port)).is_some()
+        ["http", "https"].iter().any(|scheme| {
+            self.alt_svc_cache
+                .get(&(format!("{scheme}://{host}"), port))
+                .is_some()
+        })
     }
 
     /// Test helper: checks whether the H3 failure tracker has blocked
@@ -1353,9 +1359,12 @@ impl<C, B> HttpClient<C, B> {
     /// (`crates/hpx/tests/http3.rs`). Not part of the stable public API.
     #[cfg(feature = "http3")]
     #[doc(hidden)]
+    /// Tracker keys include the scheme; this checks both `http` and `https`.
     pub fn __test_h3_failure_tracker_is_blocked(&self, host: &str, port: u16) -> bool {
-        self.h3_failure_tracker
-            .is_blocked(&(host.to_string(), port))
+        ["http", "https"].iter().any(|scheme| {
+            self.h3_failure_tracker
+                .is_blocked(&(format!("{scheme}://{host}"), port))
+        })
     }
 }
 
