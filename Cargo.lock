@@ -2755,9 +2755,9 @@ dependencies = [
 
 [[package]]
 name = "flate2"
-version = "1.1.10"
+version = "1.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e634e2e0ebac1ee034020da1ca582e17ffe4e0f5e985823721e168928136dcb"
+checksum = "626d4928326b646e70f65ed36fc7cf9f206bdb68a0019ee7c6b4709da4e084c4"
 dependencies = [
  "crc32fast",
  "miniz_oxide 0.9.1",
@@ -3445,7 +3445,7 @@ dependencies = [
 
 [[package]]
 name = "hpx"
-version = "2.5.35"
+version = "2.6.0"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -3530,7 +3530,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-browser"
-version = "2.5.35"
+version = "2.6.0"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -3581,7 +3581,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-cli"
-version = "2.5.35"
+version = "2.6.0"
 dependencies = [
  "axum",
  "clap",
@@ -3606,7 +3606,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-dl"
-version = "2.5.35"
+version = "2.6.0"
 dependencies = [
  "ahash",
  "arrayvec",
@@ -3640,7 +3640,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-emulation"
-version = "2.5.35"
+version = "2.6.0"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -3666,7 +3666,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-h3"
-version = "2.5.35"
+version = "2.6.0"
 dependencies = [
  "assert_matches",
  "bytes",
@@ -3684,7 +3684,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-streams"
-version = "2.5.35"
+version = "2.6.0"
 dependencies = [
  "arrow",
  "bytes",
@@ -3705,7 +3705,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-yawc"
-version = "2.5.35"
+version = "2.6.0"
 dependencies = [
  "axum",
  "axum-core",
@@ -3750,7 +3750,7 @@ dependencies = [
 
 [[package]]
 name = "hpxless"
-version = "2.5.35"
+version = "2.6.0"
 dependencies = [
  "clap",
  "eyre",
@@ -7804,9 +7804,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-boring"
-version = "5.3.0"
+version = "5.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eed262597ccbc7d443f02ee8d20eb845cea242bbea79e7481ba6218003214970"
+checksum = "220292ecb9416a27506c0301b48474737b18d3b718b1028bdca0bd19e2c7fd3d"
 dependencies = [
  "boring",
  "boring-sys",
@@ -9081,9 +9081,9 @@ dependencies = [
 
 [[package]]
 name = "zlib-rs"
-version = "0.6.6"
+version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b142a20ec14a91d5bc708c1dc21b080c550113d8aa77afa29635673a65dd02c5"
+checksum = "b268e58e7c693d7c271f93ffc4ba3b380412554231c85bf61ca7af91042a4112"
 
 [[package]]
 name = "zmij"

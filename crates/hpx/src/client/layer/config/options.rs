@@ -156,6 +156,7 @@ impl RequestOptions {
     }
 
     /// Get a mutable reference to the `CONNECT` tunnel requirement.
+    #[cfg(feature = "ws-yawc")]
     #[inline]
     pub(crate) const fn force_tunnel_mut(&mut self) -> &mut bool {
         &mut self.force_tunnel
