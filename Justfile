@@ -56,6 +56,14 @@ test-full:
 # Run the full test suite
 test-all: test-full
 
+# Run the hpx tests against the rustls backend.
+#
+# `--all-features` enables `boring-tls`, which compiles `tls/rustls.rs` out, so
+# `just test` never runs the rustls backend. This feature set mirrors the one
+# downstream rustls users build with, plus `keylog`.
+test-rustls:
+  cargo nextest run -p hpx --no-default-features --features rustls-tls,http1,http2,ws,keylog
+
 # Build the workspace documentation
 build-docs:
   #!/usr/bin/env bash

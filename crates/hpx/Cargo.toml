@@ -483,6 +483,11 @@ required-features = ["ws"]
 name = "sse_stream"
 path = "examples/sse_stream.rs"
 required-features = ["sse"]
+
+[[example]]
+name = "check_peet"
+path = "examples/check_peet.rs"
+required-features = ["boring-tls"]
 # Benchmarks
 [[bench]]
 name = "json_parsing"

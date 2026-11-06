@@ -44,6 +44,11 @@ jobs:
       - name: Lint
         run: just ci
 
+      # `just ci` tests with `--all-features`, which selects BoringSSL and
+      # compiles the rustls backend out, so rustls needs its own run.
+      - name: Test rustls backend
+        run: just test-rustls
+
       - name: Check features
         run: just check-feature
 
