@@ -5,25 +5,44 @@ use tokio_util::{codec::Decoder, io::StreamReader};
 
 use crate::{StreamBodyError, StreamBodyResult, error::StreamBodyKind};
 
+/// Where the framer is inside the current record.
+///
+/// These are the `csv_core` reader states that decide where a record ends,
+/// for the configuration `csv_stream` parses with: `"` quoting with doubled
+/// quotes as the escape, no escape byte, no comments, and the default CRLF
+/// terminator (`\r`, `\n` or `\r\n`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FrameState {
+    StartRecord,
+    StartField,
+    InField,
+    InQuotedField,
+    /// A quote inside a quoted field: the first half of `""` or the closing quote.
+    InDoubleEscapedQuote,
+}
+
 /// Incremental decoder yielding one complete RFC 4180 CSV record per item.
 ///
 /// Splitting the byte stream on `\n` (as `LinesCodec` does) corrupts records
-/// whose quoted fields contain embedded newlines. This decoder tracks quote
-/// state across chunk boundaries so a record is only emitted once its closing
-/// unquoted newline has been seen.
+/// whose quoted fields contain embedded newlines. This decoder mirrors the
+/// `csv_core` state machine across chunk boundaries, so it ends a record
+/// exactly where the `csv` parser does: a quote is only special at the start
+/// of a field, and blank lines are skipped rather than emitted as empty frames.
 #[derive(Debug)]
 struct CsvRecordCodec {
     max_obj_len: usize,
+    delimiter: u8,
     buf: Vec<u8>,
-    in_quotes: bool,
+    state: FrameState,
 }
 
 impl CsvRecordCodec {
-    fn new(max_obj_len: usize) -> Self {
+    fn new(max_obj_len: usize, delimiter: u8) -> Self {
         Self {
             max_obj_len,
+            delimiter,
             buf: Vec::new(),
-            in_quotes: false,
+            state: FrameState::StartRecord,
         }
     }
 }
@@ -33,21 +52,61 @@ impl Decoder for CsvRecordCodec {
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        for (index, byte) in src.iter().enumerate() {
-            match byte {
-                b'"' => self.in_quotes = !self.in_quotes,
-                b'\n' if !self.in_quotes => {
-                    let mut record = std::mem::take(&mut self.buf);
-                    // Strip a trailing CR from CRLF line endings.
-                    if record.last() == Some(&b'\r') {
-                        record.pop();
+        for (index, &byte) in src.iter().enumerate() {
+            let is_term = byte == b'\r' || byte == b'\n';
+            // `None` means `byte` terminates the current record. The checks
+            // follow `csv_core`'s order: quote, then delimiter, then terminator.
+            let next = match self.state {
+                // `csv_core` discards terminators between records, so blank
+                // lines (and the `\n` of a `\r\n`) never form a record.
+                FrameState::StartRecord if is_term => continue,
+                FrameState::StartRecord | FrameState::StartField => {
+                    if byte == b'"' {
+                        Some(FrameState::InQuotedField)
+                    } else if byte == self.delimiter {
+                        Some(FrameState::StartField)
+                    } else if is_term {
+                        None
+                    } else {
+                        Some(FrameState::InField)
                     }
-                    src.advance(index + 1);
-                    return Ok(Some(String::from_utf8_lossy(&record).into_owned()));
                 }
-                _ => {}
-            }
-            self.buf.push(*byte);
+                FrameState::InField => {
+                    if byte == self.delimiter {
+                        Some(FrameState::StartField)
+                    } else if is_term {
+                        None
+                    } else {
+                        Some(FrameState::InField)
+                    }
+                }
+                FrameState::InQuotedField => {
+                    if byte == b'"' {
+                        Some(FrameState::InDoubleEscapedQuote)
+                    } else {
+                        Some(FrameState::InQuotedField)
+                    }
+                }
+                FrameState::InDoubleEscapedQuote => {
+                    if byte == b'"' {
+                        Some(FrameState::InQuotedField)
+                    } else if byte == self.delimiter {
+                        Some(FrameState::StartField)
+                    } else if is_term {
+                        None
+                    } else {
+                        Some(FrameState::InField)
+                    }
+                }
+            };
+            let Some(next) = next else {
+                self.state = FrameState::StartRecord;
+                let record = std::mem::take(&mut self.buf);
+                src.advance(index + 1);
+                return Ok(Some(String::from_utf8_lossy(&record).into_owned()));
+            };
+            self.state = next;
+            self.buf.push(byte);
 
             // Enforce the record limit incrementally so a hostile
             // newline-free stream cannot buffer without bound.
@@ -72,7 +131,7 @@ impl Decoder for CsvRecordCodec {
                     Ok(None)
                 } else {
                     let record = std::mem::take(&mut self.buf);
-                    self.in_quotes = false;
+                    self.state = FrameState::StartRecord;
                     Ok(Some(String::from_utf8_lossy(&record).into_owned()))
                 }
             }
@@ -141,7 +200,7 @@ impl CsvStreamResponse for hpx::Response {
     {
         let reader = StreamReader::new(self.bytes_stream().map_err(std::io::Error::other));
 
-        let codec = CsvRecordCodec::new(max_obj_len);
+        let codec = CsvRecordCodec::new(max_obj_len, delimiter);
         let frames_reader = tokio_util::codec::FramedRead::new(reader, codec);
 
         #[expect(clippy::bool_to_int_with_if)]
@@ -155,30 +214,44 @@ impl CsvStreamResponse for hpx::Response {
             .into_stream()
             .skip(skip_header_if_expected)
             .map(move |frame_res| match frame_res {
-                Ok(frame_str) => {
-                    let mut csv_reader = builder.from_reader(frame_str.as_bytes());
-
-                    let mut iter = csv_reader.deserialize::<T>();
-
-                    if let Some(csv_res) = iter.next() {
-                        match csv_res {
-                            Ok(result) => Ok(result),
-                            Err(err) => Err(StreamBodyError::new(
-                                StreamBodyKind::CodecError,
-                                Some(Box::new(err)),
-                                None,
-                            )),
-                        }
-                    } else {
-                        Err(StreamBodyError::new(StreamBodyKind::CodecError, None, None))
-                    }
-                }
+                Ok(frame_str) => deserialize_frame(&builder, &frame_str),
                 Err(err) => Err(StreamBodyError::new(
                     StreamBodyKind::CodecError,
                     Some(Box::new(err)),
                     None,
                 )),
             })
+    }
+}
+
+/// Deserializes the single CSV record in one frame from [`CsvRecordCodec`].
+///
+/// The codec ends frames exactly where `csv` ends records, so a frame holds
+/// one record. A frame that parses to more than one is reported as an error
+/// instead of having its extra records silently dropped.
+fn deserialize_frame<T>(builder: &csv::ReaderBuilder, frame: &str) -> StreamBodyResult<T>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    let mut csv_reader = builder.from_reader(frame.as_bytes());
+    let mut iter = csv_reader.deserialize::<T>();
+    match iter.next() {
+        Some(Ok(result)) => {
+            if iter.next().is_some() {
+                return Err(StreamBodyError::new(
+                    StreamBodyKind::CodecError,
+                    None,
+                    Some("CSV frame contains more than one record".to_owned()),
+                ));
+            }
+            Ok(result)
+        }
+        Some(Err(err)) => Err(StreamBodyError::new(
+            StreamBodyKind::CodecError,
+            Some(Box::new(err)),
+            None,
+        )),
+        None => Err(StreamBodyError::new(StreamBodyKind::CodecError, None, None)),
     }
 }
 
@@ -189,7 +262,7 @@ mod tests {
     use serde::Deserialize;
     use tokio_util::codec::Decoder;
 
-    use super::CsvRecordCodec;
+    use super::{CsvRecordCodec, StreamBodyKind, deserialize_frame};
 
     #[derive(Debug, Deserialize, PartialEq)]
     struct Record {
@@ -200,7 +273,16 @@ mod tests {
 
     /// Feed `payload` to the codec in fixed-size chunks and collect records.
     fn decode_chunked(payload: &[u8], chunk_size: usize) -> Vec<String> {
-        let mut codec = CsvRecordCodec::new(usize::MAX);
+        decode_chunked_with_delimiter(payload, chunk_size, b',')
+    }
+
+    /// [`decode_chunked`] with an explicit field delimiter.
+    fn decode_chunked_with_delimiter(
+        payload: &[u8],
+        chunk_size: usize,
+        delimiter: u8,
+    ) -> Vec<String> {
+        let mut codec = CsvRecordCodec::new(usize::MAX, delimiter);
         let mut records = Vec::new();
 
         for chunk in payload.chunks(chunk_size.max(1)) {
@@ -247,10 +329,110 @@ mod tests {
 
     #[test]
     fn codec_enforces_max_record_length() {
-        let mut codec = CsvRecordCodec::new(8);
+        let mut codec = CsvRecordCodec::new(8, b',');
         let mut src = BytesMut::from(&b"0123456789"[..]);
         let err = codec.decode(&mut src).expect_err("must exceed limit");
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn codec_quote_inside_unquoted_field_is_literal() {
+        // `csv` treats a quote as special only at the start of a field, so the
+        // `"` after `5` is data and must not swallow the following records.
+        let records = decode_chunked(b"Pipe,5\"\nBolt,3\nNut,1\n", 4);
+        assert_eq!(records, vec!["Pipe,5\"", "Bolt,3", "Nut,1"]);
+    }
+
+    #[test]
+    fn codec_skips_blank_lines() {
+        // `csv` skips blank lines; an empty frame would surface as an error.
+        let records = decode_chunked(b"\na,1\n\n\r\nb,2\n\n", 3);
+        assert_eq!(records, vec!["a,1", "b,2"]);
+    }
+
+    #[test]
+    fn codec_lone_cr_ends_record() {
+        // `csv`'s default terminator accepts `\r` alone, so the framer must
+        // too, or the second record would ride along in the first frame.
+        let records = decode_chunked(b"a,1\rb,2\n", 2);
+        assert_eq!(records, vec!["a,1", "b,2"]);
+    }
+
+    #[test]
+    fn codec_quotes_follow_the_configured_delimiter() {
+        // The quote opens a field only because it follows the tab delimiter;
+        // framing with `,` would split this record at the quoted newline.
+        let records = decode_chunked_with_delimiter(b"a\t\"x\ny\"\nb\tz\n", 3, b'\t');
+        assert_eq!(records, vec!["a\t\"x\ny\"", "b\tz"]);
+    }
+
+    #[test]
+    fn deserialize_frame_returns_the_single_record() {
+        let mut builder = csv::ReaderBuilder::new();
+        builder.has_headers(false);
+        let record = deserialize_frame::<Record>(&builder, "Alice,30,NYC").expect("one record");
+        assert_eq!(
+            record,
+            Record {
+                name: "Alice".to_owned(),
+                age: 30,
+                city: "NYC".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_frame_rejects_extra_records() {
+        let mut builder = csv::ReaderBuilder::new();
+        builder.has_headers(false);
+        let err = deserialize_frame::<Record>(&builder, "Alice,30,NYC\nBob,25,LA")
+            .expect_err("a second record must not be dropped silently");
+        assert_eq!(err.kind(), StreamBodyKind::CodecError);
+    }
+
+    #[test]
+    fn deserialize_frame_rejects_an_empty_frame() {
+        let mut builder = csv::ReaderBuilder::new();
+        builder.has_headers(false);
+        let err = deserialize_frame::<Record>(&builder, "").expect_err("no record");
+        assert_eq!(err.kind(), StreamBodyKind::CodecError);
+    }
+
+    proptest! {
+        /// The framer ends records exactly where `csv` does: every frame parses
+        /// to exactly one record, and the frames' records equal the records of
+        /// parsing the whole payload at once, at every chunk size.
+        #[test]
+        fn framing_agrees_with_csv_parser(
+            pieces in prop::collection::vec(
+                prop::sample::select(vec!["a", "b", ",", "\"", "\"\"", "\n", "\r", "\r\n", " "]),
+                0..40,
+            ),
+            chunk_size in 1usize..16,
+        ) {
+            let payload = pieces.concat();
+            let mut builder = csv::ReaderBuilder::new();
+            builder.has_headers(false);
+            builder.flexible(true);
+
+            let whole = builder
+                .from_reader(payload.as_bytes())
+                .byte_records()
+                .collect::<Result<Vec<_>, _>>()
+                .expect("whole payload parses");
+
+            let mut framed = Vec::new();
+            for frame in decode_chunked(payload.as_bytes(), chunk_size) {
+                let records = builder
+                    .from_reader(frame.as_bytes())
+                    .byte_records()
+                    .collect::<Result<Vec<_>, _>>()
+                    .expect("frame parses");
+                prop_assert_eq!(records.len(), 1, "frame {:?} is not one record", frame);
+                framed.extend(records);
+            }
+            prop_assert_eq!(framed, whole, "payload {:?}", payload);
+        }
     }
 
     proptest! {
@@ -509,7 +691,7 @@ mod tests {
 
         /// Decode a payload and collect the records it produces.
         fn records(data: &[u8], chunk: usize, max_obj_len: usize) -> Vec<String> {
-            let mut codec = CsvRecordCodec::new(max_obj_len);
+            let mut codec = CsvRecordCodec::new(max_obj_len, b',');
             let mut buf = BytesMut::new();
             let mut out = Vec::new();
             let mut fed = 0usize;
@@ -578,8 +760,10 @@ mod tests {
         }
 
         #[test]
-        fn empty_record_is_accepted() {
-            assert_eq!(records(b"\n", 1, 8), vec![String::new()]);
+        fn blank_line_is_skipped() {
+            // `csv` skips blank lines, so the framer must not emit an empty
+            // frame for one (the mapper would turn it into an error item).
+            assert!(records(b"\n", 1, 8).is_empty());
         }
     }
 
@@ -643,7 +827,7 @@ mod tests {
         /// Feed `data` to the codec `chunk` bytes at a time, then flush at EOF,
         /// collecting the records it emits.
         fn decode_records(data: &[u8], chunk: usize, max_obj_len: usize) -> Vec<String> {
-            let mut codec = CsvRecordCodec::new(max_obj_len);
+            let mut codec = CsvRecordCodec::new(max_obj_len, b',');
             let mut buf = BytesMut::new();
             let mut out = Vec::new();
             let mut fed = 0usize;

@@ -313,6 +313,69 @@ mod csv {
             assert_eq!(rows[1].name, "b,ob");
         }
     }
+
+    #[tokio::test]
+    async fn quote_inside_unquoted_field_does_not_swallow_rows() {
+        // A quote that does not open a field is data to the `csv` parser; the
+        // record splitter must agree, or the rows after it are silently lost.
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct Item {
+            name: String,
+            qty: String,
+        }
+        let body = csv_body("Pipe,5\"\nBolt,3\nNut,1\n");
+        let server = ChunkedServer::serve(body.as_bytes(), "text/csv");
+        let rows: Vec<Item> = collect_ok(
+            crate::support::get_ok(&server.url("/csv"))
+                .await
+                .csv_stream(1024, false, b','),
+        )
+        .await;
+        assert_eq!(
+            rows,
+            vec![
+                Item {
+                    name: "Pipe".into(),
+                    qty: "5\"".into()
+                },
+                Item {
+                    name: "Bolt".into(),
+                    qty: "3".into()
+                },
+                Item {
+                    name: "Nut".into(),
+                    qty: "1".into()
+                },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn blank_lines_are_skipped_without_errors() {
+        // Blank lines are not records: they must neither surface as error
+        // items nor be mistaken for the header row.
+        let body = csv_body("\nid,name\n\n1,alice\r\n\r\n2,bob\n\n");
+        let server = ChunkedServer::serve(body.as_bytes(), "text/csv");
+        let rows: Vec<Row> = collect_ok(
+            crate::support::get_ok(&server.url("/csv"))
+                .await
+                .csv_stream(1024, true, b','),
+        )
+        .await;
+        assert_eq!(
+            rows,
+            vec![
+                Row {
+                    id: 1,
+                    name: "alice".into()
+                },
+                Row {
+                    id: 2,
+                    name: "bob".into()
+                },
+            ]
+        );
+    }
 }
 
 #[cfg(feature = "protobuf")]
