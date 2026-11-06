@@ -27,6 +27,7 @@ use crate::{
     Error,
     client::{ConnectRequest, Connected, Connection},
     error::BoxError,
+    ext::UriExt,
     tls::{AlpnProtocol, AlpsProtocol, CertStore, Identity, KeyLog, TlsOptions, TlsVersion},
 };
 
@@ -884,6 +885,12 @@ where
         let connector = self.select_connector(connect_req.extra().alpn_protocol());
 
         Box::pin(async move {
+            // A tunnel to a plain-HTTP target carries no TLS, as in the
+            // BoringSSL and OpenSSL backends.
+            if uri.is_http() {
+                return Ok(MaybeHttpsStream::Http(conn));
+            }
+
             let domain = uri.host().ok_or("URI missing host")?;
             // `Uri::host` keeps IPv6 brackets, which `ServerName` rejects.
             let domain = super::normalize_host(domain);

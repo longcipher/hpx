@@ -198,23 +198,33 @@ impl WebSocket<H2Stream> {
         protocol: Option<String>,
         extensions: Option<WebSocketExtensions>,
     ) -> Self {
-        let max_read_buffer = options.max_read_buffer.unwrap_or(
-            options
-                .max_payload_read
-                .map(|payload_read| payload_read * 2)
-                .unwrap_or(super::MAX_READ_BUFFER),
-        );
-        let negotiation = Negotiation {
-            extensions,
-            compression_level: options.compression.as_ref().map(|c| c.level),
-            max_payload_read: options.max_payload_read.unwrap_or(super::MAX_PAYLOAD_READ),
-            max_read_buffer,
-            utf8: options.check_utf8,
-            fragmentation: options.fragmentation.clone(),
-            max_backpressure_write_boundary: options.max_backpressure_write_boundary,
-            protocol,
-        };
+        let negotiation = connect_negotiation(options, protocol, extensions);
         Self::new(Role::Client, io, Bytes::new(), negotiation)
+    }
+}
+
+/// The client-side parameters of an RFC 8441 handshake, from the options
+/// and the subprotocol and extensions the server accepted.
+pub(super) fn connect_negotiation(
+    options: Options,
+    protocol: Option<String>,
+    extensions: Option<WebSocketExtensions>,
+) -> Negotiation {
+    let max_read_buffer = options.max_read_buffer.unwrap_or(
+        options
+            .max_payload_read
+            .map(|payload_read| payload_read * 2)
+            .unwrap_or(super::MAX_READ_BUFFER),
+    );
+    Negotiation {
+        extensions,
+        compression_level: options.compression.as_ref().map(|c| c.level),
+        max_payload_read: options.max_payload_read.unwrap_or(super::MAX_PAYLOAD_READ),
+        max_read_buffer,
+        utf8: options.check_utf8,
+        fragmentation: options.fragmentation.clone(),
+        max_backpressure_write_boundary: options.max_backpressure_write_boundary,
+        protocol,
     }
 }
 
@@ -406,17 +416,15 @@ fn h2_error(err: http2::Error) -> WebSocketError {
 /// Any `2xx` status establishes the stream (servers send `200` per RFC 8441
 /// §5); accepting the whole class avoids failing against otherwise
 /// compliant peers.
-fn verify_connect_response(
-    response: &http::Response<RecvStream>,
+pub(super) fn verify_connect_response(
+    status: http::StatusCode,
+    headers: &HeaderMap,
     options: &Options,
 ) -> std::result::Result<(Option<String>, Option<WebSocketExtensions>), WebSocketError> {
-    if !response.status().is_success() {
-        return Err(WebSocketError::InvalidStatusCode(
-            response.status().as_u16(),
-        ));
+    if !status.is_success() {
+        return Err(WebSocketError::InvalidStatusCode(status.as_u16()));
     }
 
-    let headers = response.headers();
     let protocol = headers
         .get(header::SEC_WEBSOCKET_PROTOCOL)
         .and_then(|h| h.to_str().ok())
@@ -502,7 +510,8 @@ async fn connect_h2_priv(opts: H2BuilderOpts) -> std::result::Result<H2WebSocket
     let response = response_future.await.map_err(|e| {
         WebSocketError::IoError(io::Error::other(format!("h2 connect failed: {e}")))
     })?;
-    let (protocol, extensions) = verify_connect_response(&response, &options)?;
+    let (protocol, extensions) =
+        verify_connect_response(response.status(), response.headers(), &options)?;
     let recv_stream = response.into_body();
 
     let stream = H2Stream {
@@ -563,6 +572,17 @@ mod tests {
 
     fn options_with_protocols(protocols: &[&str]) -> Options {
         Options::default().with_protocols(protocols.iter().copied())
+    }
+
+    /// Without an explicit read buffer limit, an RFC 8441 connection buffers
+    /// twice the frame limit, as an HTTP/1.1 one does.
+    #[test]
+    fn connect_negotiation_buffers_twice_the_frame_limit() {
+        let options = Options::default().with_max_payload_read(1000);
+        let negotiation = connect_negotiation(options, None, None);
+
+        assert_eq!(negotiation.max_payload_read, 1000);
+        assert_eq!(negotiation.max_read_buffer, 2000);
     }
 
     #[test]

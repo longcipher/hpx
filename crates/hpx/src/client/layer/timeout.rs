@@ -50,6 +50,10 @@ pub struct TimeoutOptions {
     /// Maximum size of HTTP response headers in bytes.
     /// `None` means no limit.
     max_response_header_size: Option<usize>,
+    /// Whether the connect timeout also bounds the wait for the response.
+    /// Set on a WebSocket opening handshake, which is connected only once
+    /// the server answers the upgrade.
+    connect_bounds_response: bool,
 }
 
 impl Default for TimeoutOptions {
@@ -67,6 +71,7 @@ impl Default for TimeoutOptions {
             total_timeout: None,
             read_timeout: None,
             max_response_header_size: None,
+            connect_bounds_response: false,
         }
     }
 }
@@ -235,6 +240,13 @@ impl TimeoutOptions {
         self.max_response_header_size = size;
         self
     }
+
+    /// Makes the connect timeout bound the wait for the response as well.
+    #[cfg(feature = "ws-yawc")]
+    pub(crate) const fn bound_response_by_connect(&mut self) -> &mut Self {
+        self.connect_bounds_response = true;
+        self
+    }
 }
 
 impl_request_config_value!(TimeoutOptions);
@@ -387,14 +399,23 @@ fn fetch_timeout_options(
     extensions: &http::Extensions,
 ) -> (Option<Duration>, Option<Duration>) {
     match (opts.as_ref(), opts.fetch(extensions)) {
-        (Some(opts), Some(request_opts)) => (
-            request_opts
+        (Some(opts), Some(request_opts)) => {
+            let global = request_opts
                 .global_timeout()
-                .or_else(|| opts.global_timeout()),
-            request_opts
-                .recv_body_timeout()
-                .or_else(|| opts.recv_body_timeout()),
-        ),
+                .or_else(|| opts.global_timeout());
+            // A WebSocket opening handshake is connected only once the server
+            // answers the upgrade, so the connect timeout bounds that wait.
+            let connect = request_opts
+                .connect_bounds_response
+                .then(|| request_opts.connect.or(opts.connect))
+                .flatten();
+            (
+                [global, connect].into_iter().flatten().min(),
+                request_opts
+                    .recv_body_timeout()
+                    .or_else(|| opts.recv_body_timeout()),
+            )
+        }
         (Some(opts), None) => (opts.global_timeout(), opts.recv_body_timeout()),
         (None, Some(opts)) => (opts.global_timeout(), opts.recv_body_timeout()),
         (None, None) => (None, None),
