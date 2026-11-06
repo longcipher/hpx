@@ -14,6 +14,13 @@ pub(crate) trait Policy<B, E> {
     /// the redirection.
     fn redirect(&mut self, attempt: Attempt<'_>) -> Result<Action, E>;
 
+    /// Invoked when an [`Action::Pending`] returned by [`Policy::redirect`]
+    /// resolves, with the same `attempt`.
+    ///
+    /// The resolved action must go through the same checks as one returned
+    /// synchronously; otherwise an async policy would bypass them.
+    fn on_pending_resolved(&mut self, attempt: Attempt<'_>, action: Action) -> Result<Action, E>;
+
     /// Returns whether redirection is currently permitted by this policy.
     ///
     /// This method is called to determine whether the client should follow redirects at all.

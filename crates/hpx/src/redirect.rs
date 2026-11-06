@@ -383,6 +383,58 @@ impl FollowRedirectPolicy {
         self.https_only = https_only;
         self
     }
+
+    /// Validates a policy decision, wraps its error and records the redirect
+    /// history.
+    ///
+    /// Both a synchronous decision and a resolved pending one go through
+    /// here, so an async policy cannot bypass the scheme and HTTPS-only
+    /// checks.
+    fn resolve(
+        &mut self,
+        attempt: redirect::Attempt<'_>,
+        action: redirect::Action,
+    ) -> Result<redirect::Action, BoxError> {
+        let previous_uri = attempt.previous;
+        let next_uri = attempt.location;
+
+        match action {
+            redirect::Action::Follow => {
+                // Validate the redirect URI scheme
+                if !(next_uri.is_http() || next_uri.is_https()) {
+                    return Err(Error::uri_bad_scheme(next_uri.clone()).into());
+                }
+
+                // Check HTTPS-only policy
+                if self.https_only && !next_uri.is_https() {
+                    return Err(Error::redirect(
+                        Error::uri_bad_scheme(next_uri.clone()),
+                        next_uri.clone(),
+                    )
+                    .into());
+                }
+
+                // Record redirect history
+                if self
+                    .policy
+                    .as_ref()
+                    .is_some_and(|policy| !matches!(policy.inner, PolicyKind::None))
+                {
+                    self.history.get_or_insert_default().push(HistoryEntry {
+                        status: attempt.status,
+                        uri: attempt.location.clone(),
+                        previous: attempt.previous.clone(),
+                        headers: attempt.headers.clone(),
+                    });
+                }
+
+                Ok(redirect::Action::Follow)
+            }
+            redirect::Action::Stop => Ok(redirect::Action::Stop),
+            redirect::Action::Pending(task) => Ok(redirect::Action::Pending(task)),
+            redirect::Action::Error(err) => Err(Error::redirect(err, previous_uri.clone()).into()),
+        }
+    }
 }
 
 impl redirect::Policy<Body, BoxError> for FollowRedirectPolicy {
@@ -401,38 +453,18 @@ impl redirect::Policy<Body, BoxError> for FollowRedirectPolicy {
             .ok_or_else(|| Error::request("redirect policy not configured"))?;
 
         // Check if the next URI is already in the list of URLs.
-        match policy.check(attempt.status, attempt.headers, next_uri, &self.uris) {
-            redirect::Action::Follow => {
-                // Validate the redirect URI scheme
-                if !(next_uri.is_http() || next_uri.is_https()) {
-                    return Err(Error::uri_bad_scheme(next_uri.clone()).into());
-                }
+        let action = policy.check(attempt.status, attempt.headers, next_uri, &self.uris);
+        self.resolve(attempt, action)
+    }
 
-                // Check HTTPS-only policy
-                if self.https_only && !next_uri.is_https() {
-                    return Err(Error::redirect(
-                        Error::uri_bad_scheme(next_uri.clone()),
-                        next_uri.clone(),
-                    )
-                    .into());
-                }
-
-                // Record redirect history
-                if !matches!(policy.inner, PolicyKind::None) {
-                    self.history.get_or_insert_default().push(HistoryEntry {
-                        status: attempt.status,
-                        uri: attempt.location.clone(),
-                        previous: attempt.previous.clone(),
-                        headers: attempt.headers.clone(),
-                    });
-                }
-
-                Ok(redirect::Action::Follow)
-            }
-            redirect::Action::Stop => Ok(redirect::Action::Stop),
-            redirect::Action::Pending(task) => Ok(redirect::Action::Pending(task)),
-            redirect::Action::Error(err) => Err(Error::redirect(err, previous_uri.clone()).into()),
-        }
+    fn on_pending_resolved(
+        &mut self,
+        attempt: redirect::Attempt<'_>,
+        action: redirect::Action,
+    ) -> Result<redirect::Action, BoxError> {
+        // `redirect` already pushed `attempt.previous` to the URI chain
+        // before the decision went pending.
+        self.resolve(attempt, action)
     }
 
     fn follow_redirects(&mut self, request: &mut http::Request<Body>) -> bool {
@@ -474,22 +506,28 @@ fn make_referer(next: Uri, previous: &Uri) -> Option<HeaderValue> {
     HeaderValue::from_maybe_shared(Bytes::from(referer.to_string())).ok()
 }
 
+/// Strips credentials when `next` leaves the origin of any earlier hop.
+///
+/// `previous` is the whole chain, starting with the original request. Every hop
+/// is rebuilt from the original request's headers, so comparing with the last
+/// hop alone would hand the credentials back to a foreign host that redirects
+/// within itself (`a.com` → `evil.com/x` → `evil.com/y`).
 fn remove_sensitive_headers(headers: &mut HeaderMap, next: &Uri, previous: &[Uri]) {
-    if let Some(previous) = previous.last() {
-        let cross_host = next.host() != previous.host()
+    let cross_host = previous.iter().any(|previous| {
+        next.host() != previous.host()
             || next.port() != previous.port()
-            || next.scheme() != previous.scheme();
-        if cross_host {
-            /// Avoid dynamic allocation of `HeaderName` by using `from_static`.
-            /// https://github.com/hyperium/http/blob/e9de46c9269f0a476b34a02a401212e20f639df2/src/header/map.rs#L3794
-            const COOKIE2: HeaderName = HeaderName::from_static("cookie2");
+            || next.scheme() != previous.scheme()
+    });
+    if cross_host {
+        /// Avoid dynamic allocation of `HeaderName` by using `from_static`.
+        /// https://github.com/hyperium/http/blob/e9de46c9269f0a476b34a02a401212e20f639df2/src/header/map.rs#L3794
+        const COOKIE2: HeaderName = HeaderName::from_static("cookie2");
 
-            headers.remove(AUTHORIZATION);
-            headers.remove(COOKIE);
-            headers.remove(COOKIE2);
-            headers.remove(PROXY_AUTHORIZATION);
-            headers.remove(WWW_AUTHENTICATE);
-        }
+        headers.remove(AUTHORIZATION);
+        headers.remove(COOKIE);
+        headers.remove(COOKIE2);
+        headers.remove(PROXY_AUTHORIZATION);
+        headers.remove(WWW_AUTHENTICATE);
     }
 }
 
@@ -711,6 +749,41 @@ mod tests {
             redirect::Action::Error(err) if err.is::<TooManyRedirects>() => (),
             other => panic!("should error on too many redirects, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn pending_follow_is_checked_against_https_only() {
+        use tower::ServiceExt as _;
+
+        // A pending decision that resolves to `Follow` must pass the same
+        // checks as a synchronous one, so `https_only` still rejects a
+        // redirect from `https` to `http`.
+        let service = tower::service_fn(|req: http::Request<Body>| async move {
+            let status = if req.uri().path() == "/start" {
+                StatusCode::FOUND
+            } else {
+                StatusCode::OK
+            };
+            http::Response::builder()
+                .status(status)
+                .header(http::header::LOCATION, "http://example.com/next")
+                .body(Body::default())
+                .map_err(BoxError::from)
+        });
+        let policy = FollowRedirectPolicy::new(Policy::custom(|attempt| {
+            attempt.pending(|attempt| async move { attempt.follow() })
+        }))
+        .with_https_only(true);
+        let request = http::Request::get("https://example.com/start")
+            .body(Body::default())
+            .unwrap();
+
+        let err = redirect::FollowRedirect::with_policy(service, policy)
+            .oneshot(request)
+            .await
+            .expect_err("https_only must reject a pending follow to http://");
+        let err = err.downcast::<Error>().expect("a crate error");
+        assert!(err.is_redirect(), "expected a redirect error, got {err:?}");
     }
 
     // -----------------------------------------------------------------------

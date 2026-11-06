@@ -187,6 +187,49 @@ async fn test_redirect_removes_sensitive_headers() {
         .unwrap();
 }
 
+/// Credentials stripped on a cross-origin hop must stay stripped. Every hop is
+/// rebuilt from the original request, so a chain that leaves the origin and
+/// then redirects within the new host must not get them back.
+#[tokio::test]
+async fn test_redirect_keeps_credentials_stripped_after_leaving_the_origin() {
+    let other = server::http(move |req| async move {
+        if req.uri() == "/a" {
+            return http::Response::builder()
+                .status(302)
+                .header("location", "/b")
+                .body(Body::default())
+                .unwrap();
+        }
+        let leaked =
+            req.headers().contains_key("authorization") || req.headers().contains_key("cookie");
+        http::Response::builder()
+            .status(if leaked { 400 } else { 200 })
+            .body(Body::default())
+            .unwrap()
+    });
+    let other_addr = other.addr();
+
+    let origin = server::http(move |_req| async move {
+        http::Response::builder()
+            .status(302)
+            .header("location", format!("http://{other_addr}/a"))
+            .body(Body::default())
+            .unwrap()
+    });
+
+    let res = Client::builder()
+        .redirect(Policy::default())
+        .build()
+        .unwrap()
+        .get(format!("http://{}/start", origin.addr()))
+        .header(hpx::header::AUTHORIZATION, "Bearer secret")
+        .header(hpx::header::COOKIE, "sid=1")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
 #[tokio::test]
 async fn test_redirect_policy_can_return_errors() {
     let server = server::http(move |req| async move {
@@ -600,6 +643,71 @@ async fn test_redirect_async_pending_follow() {
     assert_eq!(res.uri(), dst.as_str());
     assert_eq!(res.status(), hpx::StatusCode::OK);
     assert_eq!(res.headers().get(hpx::header::SERVER).unwrap(), &"test-dst");
+}
+
+/// A redirect followed by an async (pending) decision is recorded in the
+/// history, like one followed by a synchronous decision.
+#[tokio::test]
+async fn test_redirect_async_pending_follow_records_history() {
+    let server = server::http(move |req| async move {
+        if req.uri() == "/start" {
+            http::Response::builder()
+                .status(302)
+                .header("location", "/dst")
+                .body(Body::default())
+                .unwrap()
+        } else {
+            assert_eq!(req.uri(), "/dst");
+            http::Response::default()
+        }
+    });
+
+    let client = Client::builder()
+        .no_proxy()
+        .redirect(Policy::custom(|attempt| {
+            attempt.pending(|attempt| async move { attempt.follow() })
+        }))
+        .build()
+        .unwrap();
+
+    let url = format!("http://{}/start", server.addr());
+    let res = client.get(&url).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let mut history = res
+        .extensions()
+        .get::<History>()
+        .expect("a pending follow is recorded in the history")
+        .iter();
+    let entry = history.next().unwrap();
+    assert_eq!(entry.previous.path(), "/start");
+    assert_eq!(entry.uri.path(), "/dst");
+    assert!(history.next().is_none());
+}
+
+/// An error returned by an async (pending) decision is a redirect error, like
+/// one returned by a synchronous decision.
+#[tokio::test]
+async fn test_redirect_async_pending_error_is_a_redirect_error() {
+    let server = server::http(move |_req| async move {
+        http::Response::builder()
+            .status(302)
+            .header("location", "/dst")
+            .body(Body::default())
+            .unwrap()
+    });
+
+    let client = Client::builder()
+        .no_proxy()
+        .redirect(Policy::custom(|attempt| {
+            attempt.pending(|attempt| async move { attempt.error("denied") })
+        }))
+        .build()
+        .unwrap();
+
+    let url = format!("http://{}/start", server.addr());
+    let err = client.get(&url).send().await.unwrap_err();
+    assert!(err.is_redirect(), "expected a redirect error, got {err:?}");
 }
 
 #[tokio::test]
