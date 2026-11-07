@@ -460,6 +460,15 @@ where
         req: Request<B>,
         original_uri: &Uri,
     ) -> H3UpgradeOutcome<B> {
+        // A request that enforces HTTP/1.x or HTTP/2 (`RequestBuilder::version`)
+        // must keep that version. Every `hpx::ws` handshake is one: an HTTP/1.1
+        // upgrade, or an HTTP/2 extended CONNECT with `force_http2`. An enforced
+        // HTTP/3 has no ALPN here, so it still takes the upgrade.
+        if connect_req.extra().alpn_protocol().is_some() {
+            trace!("h3 upgrade skipped: the request enforces HTTP/1.x or HTTP/2");
+            return H3UpgradeOutcome::FallThrough(req);
+        }
+
         // QUIC has no proxy support. When the request would be sent through
         // a proxy, upgrading to HTTP/3 would bypass it and expose the
         // client's IP to the origin. Fall back to TCP, which honours the
