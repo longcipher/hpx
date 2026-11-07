@@ -2095,7 +2095,10 @@ impl ClientBuilder {
     /// h2/h1 over TCP while also enabling Alt-Svc (RFC 7838) discovery for
     /// opportunistic h3 upgrades. When an h3 endpoint is discovered via
     /// `Alt-Svc` and the QUIC handshake succeeds, subsequent requests are
-    /// routed over h3; otherwise, the client falls back to h2/h1.
+    /// routed over h3; otherwise, the client falls back to h2/h1. A request
+    /// that enforces HTTP/1.x or HTTP/2 with
+    /// [`RequestBuilder::version`](crate::RequestBuilder::version) is never
+    /// upgraded.
     ///
     /// Unlike [`http3_only()`](Self::http3_only), this mode tolerates
     /// servers that do not support h3 by falling back to h2/h1.

@@ -2582,15 +2582,13 @@ async fn client_upgrades_to_h3_after_alt_svc() -> TestResult<()> {
 
     // 12. Second request: GET to the same h2 server. The client checks
     //     the AltSvcCache, finds the h3 entry, and routes via h3 to the
-    //     h3 server on the advertised port. This is the T2.4 upgrade.
-    let response2 = tokio::time::timeout(
-        Duration::from_secs(10),
-        client.get(&h2_url).version(http::Version::HTTP_2).send(),
-    )
-    .await
-    .map_err(|_| -> Box<dyn std::error::Error + Send + Sync> {
-        "second GET request should resolve within 10s".into()
-    })??;
+    //     h3 server on the advertised port. This is the T2.4 upgrade. The
+    //     request must not enforce HTTP/2: that would keep it on TCP.
+    let response2 = tokio::time::timeout(Duration::from_secs(10), client.get(&h2_url).send())
+        .await
+        .map_err(|_| -> Box<dyn std::error::Error + Send + Sync> {
+            "second GET request should resolve within 10s".into()
+        })??;
 
     assert_eq!(
         response2.status(),
@@ -2615,6 +2613,172 @@ async fn client_upgrades_to_h3_after_alt_svc() -> TestResult<()> {
         "expected response body to be 'hello, h3' from the h3 server, got {:?}",
         std::str::from_utf8(body.as_ref()).unwrap_or("<non-utf8>")
     );
+
+    Ok(())
+}
+
+/// A request that enforces HTTP/1.1 or HTTP/2 stays on TCP even when the
+/// `AltSvcCache` has a fresh h3 entry for its origin; one that enforces
+/// HTTP/3 still takes the Alt-Svc upgrade.
+///
+/// Every `hpx::ws` handshake is such a request: an HTTP/1.1 upgrade, or an
+/// HTTP/2 extended CONNECT with `force_http2`. Neither can be carried over h3.
+///
+/// Uses the same fixture as `client_upgrades_to_h3_after_alt_svc`: an h3 server
+/// on an ephemeral QUIC port and an h2c/h1 server that advertises it with
+/// `Alt-Svc`.
+#[tokio::test]
+async fn alt_svc_upgrade_honors_enforced_version() -> TestResult<()> {
+    use support::server;
+    use tower::Service;
+
+    // 1. Self-signed certificate and h3 server-side rustls config.
+    let certified_key = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])?;
+    let cert_der: CertificateDer<'static> = certified_key.cert.der().clone();
+    let key_der: PrivateKeyDer<'static> =
+        PrivatePkcs8KeyDer::from(certified_key.signing_key.serialize_der()).into();
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut h3_rustls_config = RustlsServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            format!("bad protocol versions: {e}").into()
+        })?
+        .with_no_client_auth()
+        .with_single_cert(vec![cert_der.clone()], key_der)?;
+    h3_rustls_config.alpn_protocols = vec![b"h3".to_vec()];
+
+    // 2. h3 server on an ephemeral loopback port; answers every request with
+    //    200 OK and body `hello, h3`.
+    let h3_quic_config = QuicServerConfig::try_from(Arc::new(h3_rustls_config))?;
+    let h3_server_config = ServerConfig::with_crypto(Arc::new(h3_quic_config));
+    let h3_endpoint = Endpoint::server(h3_server_config, "127.0.0.1:0".parse()?)?;
+    let h3_port = h3_endpoint.local_addr()?.port();
+    let h3_server_task = tokio::spawn(async move {
+        while let Some(incoming) = h3_endpoint.accept().await {
+            let Ok(quinn_conn) = incoming.await else {
+                break;
+            };
+            tokio::spawn(async move {
+                let h3_quinn_conn = hpx_h3::quinn::Connection::new(quinn_conn);
+                let mut h3_conn: hpx_h3::server::Connection<
+                    hpx_h3::quinn::Connection,
+                    bytes::Bytes,
+                > = match hpx_h3::server::Connection::new(h3_quinn_conn).await {
+                    Ok(c) => c,
+                    Err(_) => return,
+                };
+                while let Ok(Some(resolver)) = h3_conn.accept().await {
+                    let Ok((_req, mut stream)) = resolver.resolve_request().await else {
+                        continue;
+                    };
+                    let Ok(resp) = http::Response::builder()
+                        .status(http::StatusCode::OK)
+                        .body(())
+                    else {
+                        continue;
+                    };
+                    if stream.send_response(resp).await.is_err()
+                        || stream
+                            .send_data(bytes::Bytes::from_static(b"hello, h3"))
+                            .await
+                            .is_err()
+                    {
+                        continue;
+                    }
+                    while matches!(stream.recv_data().await, Ok(Some(_))) {}
+                    let _ = stream.finish().await;
+                }
+            });
+        }
+    });
+    let _ = h3_server_task;
+
+    // 3. TCP server (h1 and h2c) advertising the h3 endpoint via Alt-Svc.
+    let alt_svc_value = format!(r#"h3=":{h3_port}""#);
+    let tcp_server = server::http(move |_| {
+        let alt_svc_value = alt_svc_value.clone();
+        async move {
+            let mut resp = http::Response::<hpx::Body>::default();
+            resp.headers_mut().insert(
+                http::header::HeaderName::from_static("alt-svc"),
+                http::header::HeaderValue::from_str(&alt_svc_value).unwrap(),
+            );
+            resp
+        }
+    });
+    let tcp_addr = tcp_server.addr();
+
+    // 4. Client-side QUIC connector trusting the self-signed certificate.
+    let mut root_store = RootCertStore::empty();
+    root_store.add(cert_der)?;
+    let client_provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut client_tls_config = rustls::ClientConfig::builder_with_provider(client_provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            format!("bad protocol versions: {e}").into()
+        })?
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+    client_tls_config.alpn_protocols = vec![b"h3".to_vec()];
+    let mut connector = QuicConnector::new(
+        build_quinn_endpoint("127.0.0.1:0".parse()?)?,
+        Arc::new(quinn::TransportConfig::default()),
+        Arc::new(client_tls_config),
+        Http3Options::default(),
+    );
+    let waker = futures_util::task::noop_waker();
+    let mut cx = std::task::Context::from_waker(&waker);
+    match connector.poll_ready(&mut cx) {
+        std::task::Poll::Ready(Ok(())) => {}
+        other => {
+            return Err(format!("poll_ready should be Ok, got {other:?}").into());
+        }
+    }
+
+    // 5. `Ver::Auto` client with the QUIC connector, so Alt-Svc upgrades are on.
+    let client = Client::builder()
+        .no_proxy()
+        .__test_with_quic_connector(connector)
+        .build()?;
+    let url = format!("http://{tcp_addr}/");
+    let send = |version: http::Version| {
+        let request = client.get(&url).version(version);
+        async move {
+            tokio::time::timeout(Duration::from_secs(10), request.send())
+                .await
+                .map_err(|_| -> Box<dyn std::error::Error + Send + Sync> {
+                    format!("{version:?} request should resolve within 10s").into()
+                })?
+                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })
+        }
+    };
+
+    // 6. Populate the Alt-Svc cache over TCP.
+    let first = send(http::Version::HTTP_11).await?;
+    assert_eq!(first.version(), http::Version::HTTP_11);
+    assert!(
+        client.__test_alt_svc_cache_has_entry(&tcp_addr.ip().to_string(), tcp_addr.port()),
+        "Alt-Svc cache should have an h3 entry for {tcp_addr}"
+    );
+
+    // 7. With the h3 entry cached, requests that enforce a TCP version must
+    //    keep it instead of being upgraded to h3.
+    for version in [http::Version::HTTP_11, http::Version::HTTP_2] {
+        let response = send(version).await?;
+        assert_eq!(response.status(), http::StatusCode::OK);
+        assert_eq!(
+            response.version(),
+            version,
+            "a request that enforces {version:?} must not be upgraded to h3"
+        );
+    }
+
+    // 8. A request that enforces HTTP/3 still takes the upgrade. This also
+    //    proves the h3 entry was usable, so step 7 skipped h3 rather than
+    //    falling back from a failed attempt.
+    let response = send(http::Version::HTTP_3).await?;
+    assert_eq!(response.version(), http::Version::HTTP_3);
+    assert_eq!(response.bytes().await?.as_ref(), b"hello, h3");
 
     Ok(())
 }
@@ -2818,15 +2982,13 @@ async fn prefer_http3_prefers_h3_with_fallback() -> TestResult<()> {
 
     // 12. Second request: GET to the same h2 server. The client checks
     //     the AltSvcCache, finds the h3 entry, and routes via h3 to the
-    //     h3 server on the advertised port. This is the T2.5 upgrade.
-    let response2 = tokio::time::timeout(
-        Duration::from_secs(10),
-        client.get(&h2_url).version(http::Version::HTTP_2).send(),
-    )
-    .await
-    .map_err(|_| -> Box<dyn std::error::Error + Send + Sync> {
-        "second GET request should resolve within 10s".into()
-    })??;
+    //     h3 server on the advertised port. This is the T2.5 upgrade. The
+    //     request must not enforce HTTP/2: that would keep it on TCP.
+    let response2 = tokio::time::timeout(Duration::from_secs(10), client.get(&h2_url).send())
+        .await
+        .map_err(|_| -> Box<dyn std::error::Error + Send + Sync> {
+            "second GET request should resolve within 10s".into()
+        })??;
 
     assert_eq!(
         response2.status(),
@@ -2870,8 +3032,10 @@ async fn prefer_http3_prefers_h3_with_fallback() -> TestResult<()> {
 ///    no server listening).
 /// 2. Build a client with `prefer_http3()` and a `QuicConnector`.
 /// 3. First request: populates the Alt-Svc cache from the h2 response.
-/// 4. Second request: tries h3 on port 8443, fails, falls back to h2.
-/// 5. Assert the second response version is HTTP/2 (not HTTP/3).
+/// 4. Second request: tries h3 on port 8443, fails, falls back to TCP.
+/// 5. Assert the second response version is HTTP/1.1 (not HTTP/3). The
+///    requests that may attempt h3 cannot enforce HTTP/2 (that keeps them on
+///    TCP), so the plaintext server is reached over HTTP/1.1.
 /// 6. Assert the circuit breaker has blocked the authority.
 /// 7. Third request: h3 is skipped immediately by the circuit breaker.
 ///
@@ -2991,29 +3155,26 @@ async fn quic_unreachable_triggers_fallback() -> TestResult<()> {
     // 10. Second request: sends GET to the same h2 server. The client
     //     checks the AltSvcCache, finds the h3 entry, and tries to connect
     //     via QUIC to port 8443. The QUIC handshake fails (no server on
-    //     that port), so the client falls back to h2 and records the
+    //     that port), so the client falls back to TCP and records the
     //     failure in the circuit breaker.
-    let response2 = tokio::time::timeout(
-        Duration::from_secs(10),
-        client.get(&h2_url).version(http::Version::HTTP_2).send(),
-    )
-    .await
-    .map_err(|_| -> Box<dyn std::error::Error + Send + Sync> {
-        "second GET request should resolve within 10s".into()
-    })??;
+    let response2 = tokio::time::timeout(Duration::from_secs(10), client.get(&h2_url).send())
+        .await
+        .map_err(|_| -> Box<dyn std::error::Error + Send + Sync> {
+            "second GET request should resolve within 10s".into()
+        })??;
 
     assert_eq!(
         response2.status(),
         http::StatusCode::OK,
-        "second request should return 200 OK (fallback to h2)"
+        "second request should return 200 OK (fallback to TCP)"
     );
 
-    // 11. Assert: the second response version is HTTP/2 (not HTTP/3),
-    //     confirming the h3 attempt failed and the client fell back to h2.
+    // 11. Assert: the second response version is HTTP/1.1 (not HTTP/3),
+    //     confirming the h3 attempt failed and the client fell back to TCP.
     assert_eq!(
         response2.version(),
-        http::Version::HTTP_2,
-        "expected HTTP/2 version after h3 fallback, got {:?}",
+        http::Version::HTTP_11,
+        "expected HTTP/1.1 version after h3 fallback, got {:?}",
         response2.version()
     );
 
@@ -3025,15 +3186,12 @@ async fn quic_unreachable_triggers_fallback() -> TestResult<()> {
     );
 
     // 13. Third request: the circuit breaker blocks h3 immediately, so the
-    //     request goes straight to h2 without attempting h3 at all.
-    let response3 = tokio::time::timeout(
-        Duration::from_secs(10),
-        client.get(&h2_url).version(http::Version::HTTP_2).send(),
-    )
-    .await
-    .map_err(|_| -> Box<dyn std::error::Error + Send + Sync> {
-        "third GET request should resolve within 10s".into()
-    })??;
+    //     request goes straight to TCP without attempting h3 at all.
+    let response3 = tokio::time::timeout(Duration::from_secs(10), client.get(&h2_url).send())
+        .await
+        .map_err(|_| -> Box<dyn std::error::Error + Send + Sync> {
+            "third GET request should resolve within 10s".into()
+        })??;
 
     assert_eq!(
         response3.status(),
@@ -3042,8 +3200,8 @@ async fn quic_unreachable_triggers_fallback() -> TestResult<()> {
     );
     assert_eq!(
         response3.version(),
-        http::Version::HTTP_2,
-        "expected HTTP/2 version when circuit breaker skips h3, got {:?}",
+        http::Version::HTTP_11,
+        "expected HTTP/1.1 version when circuit breaker skips h3, got {:?}",
         response3.version()
     );
 
