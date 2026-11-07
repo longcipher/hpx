@@ -3445,7 +3445,7 @@ dependencies = [
 
 [[package]]
 name = "hpx"
-version = "2.6.0"
+version = "2.6.1"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -3530,7 +3530,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-browser"
-version = "2.6.0"
+version = "2.6.1"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -3581,7 +3581,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-cli"
-version = "2.6.0"
+version = "2.6.1"
 dependencies = [
  "axum",
  "clap",
@@ -3606,7 +3606,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-dl"
-version = "2.6.0"
+version = "2.6.1"
 dependencies = [
  "ahash",
  "arrayvec",
@@ -3640,7 +3640,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-emulation"
-version = "2.6.0"
+version = "2.6.1"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -3666,7 +3666,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-h3"
-version = "2.6.0"
+version = "2.6.1"
 dependencies = [
  "assert_matches",
  "bytes",
@@ -3684,7 +3684,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-streams"
-version = "2.6.0"
+version = "2.6.1"
 dependencies = [
  "arrow",
  "bytes",
@@ -3705,7 +3705,7 @@ dependencies = [
 
 [[package]]
 name = "hpx-yawc"
-version = "2.6.0"
+version = "2.6.1"
 dependencies = [
  "axum",
  "axum-core",
@@ -3750,7 +3750,7 @@ dependencies = [
 
 [[package]]
 name = "hpxless"
-version = "2.6.0"
+version = "2.6.1"
 dependencies = [
  "clap",
  "eyre",
@@ -8270,9 +8270,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.29.0"
+version = "1.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a0e2d11620c50695fe12bbbfde96b3477fe606e7284c22d505c12ce51214514"
+checksum = "4a06f08a856b009bc7bbaf7d3e79808595d032dd19074c0c2ef26e49e03e6bdc"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
