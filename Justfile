@@ -22,7 +22,6 @@ lint:
   cargo sort -w -g -c
   cargo fmt --all -- --check
   RUSTC_WRAPPER= cargo clippy --all --all-targets -- -D warnings
-  cargo shear
   cargo workspace-inheritance-check
   just check-agents-md
   just check-mutation-scope
@@ -307,7 +306,6 @@ clean:
 
 # Install all required development tools
 setup:
-  cargo install cargo-shear
   cargo install cargo-sort
   cargo install cargo-workspace-inheritance-check
   cargo install cargo-nextest
@@ -342,10 +340,6 @@ test-nextest:
 # Run miri on unsafe code
 miri:
   cargo miri test --all-features
-
-# Check for unused dependencies
-unused-deps:
-  cargo shear
 
 # Update all dependencies
 update-deps:

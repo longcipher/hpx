@@ -21,6 +21,7 @@ exclude = ["/.github/*", "/examples/*", "/tests/*", "/.gitignore"]
 include = ["/src/**/*", "/Cargo.toml", "/README.md", "/LICENSE"]
 
 # Documentation settings
+rust-version.workspace = true
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]

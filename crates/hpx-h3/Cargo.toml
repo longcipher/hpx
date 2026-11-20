@@ -12,6 +12,7 @@ categories = [
     "web-programming::http-client",
     "web-programming::http-server",
 ]
+rust-version.workspace = true
 
 [package.metadata.docs.rs]
 all-features = true
@@ -41,6 +42,11 @@ tracing = { workspace = true, optional = true }
 assert_matches = { workspace = true }
 proptest = { workspace = true }
 tokio = { workspace = true, features = ["io-std", "io-util", "macros", "rt"] }
+
+[lints]
+# This crate keeps its own lint table: it does not inherit the workspace lint
+# set. Declaring `[lints]` explicitly keeps `cargo::missing_lints_inheritance`
+# quiet without changing which lints apply.
 
 [lints.clippy]
 # Vendored third-party crate: allow `#[allow(...)]` attributes to suppress

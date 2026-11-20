@@ -16,6 +16,7 @@ include = [
     "examples/**/*.rs",
     "tests/**/*.rs",
 ]
+rust-version.workspace = true
 
 [package.metadata.docs.rs]
 all-features = true

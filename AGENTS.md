@@ -56,9 +56,12 @@ temp file and run `cargo mutants --in-diff <diff-file>` for that file only, with
 - Workspace lints deny `unwrap_used`, `expect_used`, `panic`, `allow_attributes`, `todo`, `unimplemented`, `dbg_macro`, `print_stdout`, and `print_stderr`. The only escape hatch is `#[expect(lint, reason = "...")]`; the binaries use it for stdout output.
 - `wildcard_imports` is allowed only for the generated browser profile modules; every other module must name its imports.
 - `cognitive_complexity` is off on purpose: turning it on surfaces dozens of pre-existing violations in the protocol parsers and state machines and needs a separate, measured refactor.
-- `cargo shear` is the unused-dependency gate; `getrandom` is declared for wasm builds only and is listed in `[workspace.metadata.cargo-shear]`.
+- Cargo's native `unused_dependencies` lint is the unused-dependency gate; `getrandom` is declared for wasm builds only, in `crates/yawc`'s wasm32 target-specific dependencies.
 - Mutation testing is configured in `.cargo/mutants.toml` (nextest as the test tool, vendored `crates/hpx-h3` excluded). A surviving mutant means a missing assertion.
 - Building the browser stack needs the native packages `libfreetype-dev` and `libfontconfig1-dev`.
+- Workspace MSRV is Rust 1.100. Prefer newly stabilized features and APIs over older workarounds; do not add feature gates for anything already stable in 1.100.
+- `[workspace.lints.cargo]` enables Cargo's native `unused_dependencies` lint, the only unused-dependency check; do not reintroduce a third-party checker. Its level is `warn`, and `.cargo/config.toml` sets `build.warnings = "deny"` so a finding fails the gate.
+- `.cargo/config.toml` sets resolver `incompatible-rust-versions = "fallback"` (MSRV-aligned resolution) and `registry.global-min-publish-age = "5 days"` (Rust 1.100 dependency cooldown); keep both.
 
 ## Dependency choices
 

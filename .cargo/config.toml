@@ -11,7 +11,15 @@ rustc-wrapper = "kache"
 # `polonius=next` is the newer, more compatible Polonius implementation that
 # does not ICE on third-party code (e.g. hashbrown 0.17.x).
 rustflags = ["-Zpolonius=next"]
+warnings = "deny"
 
 [target.aarch64-apple-darwin]
 linker = "clang"
 rustflags = ["-Zpolonius=next", "-C", "link-arg=-fuse-ld=/opt/homebrew/bin/ld64.lld", "-A", "linker_messages"]
+
+[resolver]
+incompatible-rust-versions = "fallback"
+
+[registry]
+default = "crates-io"
+global-min-publish-age = "5 days"
