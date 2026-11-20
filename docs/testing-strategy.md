@@ -18,7 +18,7 @@ layer that matches the property you need to pin.
 ```bash
 just test        # nextest across the workspace
 just test-all    # same; kept for parity with `just ci`
-just lint        # fmt, clippy, cargo-shear, inheritance, AGENTS.md version check
+just lint        # fmt, clippy, inheritance, AGENTS.md version check
 just build-docs  # rustdoc with -D warnings
 just fuzz-build  # build every fuzz target
 just fuzz-list   # list every fuzz target

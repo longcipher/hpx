@@ -697,7 +697,7 @@ async fn main() -> hpx::Result<()> {
 # Format code
 just format
 
-# Lint (clippy, fmt check, cargo-shear, AGENTS.md version check)
+# Lint (clippy, fmt check, AGENTS.md version check)
 just lint
 
 # Run tests
