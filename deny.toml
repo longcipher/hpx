@@ -13,7 +13,6 @@ yanked = "deny"
 # Unmaintained (not vulnerable) transitive dependencies awaiting upstream
 # replacements; re-review when a replacement lands.
 ignore = [
-    "RUSTSEC-2025-0141", # bincode via sqlx — unmaintained, no vuln
     "RUSTSEC-2024-0436", # paste via serde_v8/deno_core — unmaintained, no vuln
     "RUSTSEC-2025-0134", # rustls-pemfile — superseded by rustls-pki-types
     "RUSTSEC-2026-0206", # rustybuzz via blitz rendering stack — unmaintained
