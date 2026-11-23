@@ -45,6 +45,10 @@ check-agents-md:
   fi
   echo "OK: AGENTS.md documents every workspace crate"
 
+# Run the prek commit hooks on every tracked file (requires prek)
+hooks:
+  prek run --all-files
+
 # Run tests
 test:
   cargo nextest run --workspace --all-features
