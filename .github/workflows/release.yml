@@ -47,11 +47,11 @@ jobs:
         run: |
           VERSION="${{ env.VERSION }}"
           CRATES=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name' | sort)
-          
+
           echo "Workspace crates:"
           echo "$CRATES"
           echo ""
-          
+
           # Verify all crates match the tag version
           MISMATCH=0
           for crate in $CRATES; do
@@ -61,11 +61,11 @@ jobs:
               MISMATCH=1
             fi
           done
-          
+
           if [ "$MISMATCH" -ne 0 ]; then
             exit 1
           fi
-          
+
           echo "All crates have version $VERSION"
 
       - name: Generate Changelog
@@ -101,7 +101,7 @@ jobs:
           CRATES=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name' | sort)
           VERSION="${{ env.VERSION }}"
           FAILED=0
-          
+
           for crate in $CRATES; do
             echo "Checking $crate@$VERSION..."
             if ! cargo search "$crate" --limit 1 2>/dev/null | grep -q "$VERSION"; then
@@ -109,7 +109,7 @@ jobs:
               FAILED=1
             fi
           done
-          
+
           if [ "$FAILED" -ne 0 ]; then
             echo "Some crates may not have been published. Check the publish step output."
           fi

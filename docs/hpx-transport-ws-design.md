@@ -366,7 +366,7 @@ struct PendingRequest {
 }
 
 /// Store for pending request-response pairs.
-/// 
+///
 /// Uses `scc::HashMap` for lock-free concurrent access, providing
 /// better performance under high contention compared to `RwLock<HashMap>`.
 pub struct PendingRequestStore {
@@ -384,8 +384,8 @@ impl PendingRequestStore {
     }
 
     /// Add a pending request and return a receiver for the response.
-    pub fn add(&self, id: RequestId, timeout: Option<Duration>) 
-        -> oneshot::Receiver<Result<String, TransportError>> 
+    pub fn add(&self, id: RequestId, timeout: Option<Duration>)
+        -> oneshot::Receiver<Result<String, TransportError>>
     {
         let (tx, rx) = oneshot::channel();
         let timeout = timeout.unwrap_or(self.config.request_timeout);
@@ -413,7 +413,7 @@ impl PendingRequestStore {
     }
 
     /// Clean up timed-out requests.
-    /// 
+    ///
     /// Uses `scc::HashMap::retain` which provides lock-free iteration
     /// with atomic removal of entries that don't satisfy the predicate.
     pub fn cleanup_stale(&self) {
@@ -431,7 +431,7 @@ impl PendingRequestStore {
     }
 
     /// Clean up timed-out requests with timeout notification.
-    /// 
+    ///
     /// This variant sends timeout errors to waiting receivers.
     pub async fn cleanup_stale_with_notify(&self) {
         let now = Instant::now();
@@ -465,7 +465,7 @@ impl PendingRequestStore {
 
 ```rust
 /// Store for active subscriptions.
-/// 
+///
 /// Uses `scc::HashMap` for lock-free concurrent access, providing
 /// better performance under high contention compared to `RwLock<HashMap>`.
 pub struct SubscriptionStore {
@@ -484,7 +484,7 @@ impl SubscriptionStore {
     }
 
     /// Subscribe to a topic. Returns a receiver for messages.
-    /// 
+    ///
     /// Uses `scc::HashMap::entry` for atomic upsert operation.
     pub fn subscribe(&self, topic: Topic) -> broadcast::Receiver<Message> {
         // Use entry API for atomic get-or-insert
@@ -520,7 +520,7 @@ impl SubscriptionStore {
     }
 
     /// Unsubscribe from a topic. Returns true if this was the last subscriber.
-    /// 
+    ///
     /// Uses lock-free operations for concurrent safety.
     pub fn unsubscribe(&self, topic: &Topic) -> bool {
         // Use update_if to atomically decrement and check
@@ -545,7 +545,7 @@ impl SubscriptionStore {
     }
 
     /// Publish a message to a topic.
-    /// 
+    ///
     /// Lock-free read operation using `scc::HashMap::get`.
     pub fn publish(&self, topic: &Topic, message: Message) -> bool {
         if let Some(entry) = self.subscriptions.get(topic) {
@@ -557,7 +557,7 @@ impl SubscriptionStore {
     }
 
     /// Get all currently subscribed topics (for resubscription after reconnect).
-    /// 
+    ///
     /// Uses `scc::HashMap::scan` for lock-free iteration.
     pub fn get_all_topics(&self) -> Vec<Topic> {
         let mut topics = Vec::new();

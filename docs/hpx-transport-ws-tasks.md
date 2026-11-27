@@ -261,7 +261,7 @@ ulid = "1.2.1"
 ```rust
 impl PendingRequestStore {
     pub fn new(config: Arc<WebSocketConfig>) -> Self;
-    pub fn add(&self, id: RequestId, timeout: Option<Duration>) 
+    pub fn add(&self, id: RequestId, timeout: Option<Duration>)
         -> oneshot::Receiver<Result<String, TransportError>>;
     pub fn resolve(&self, id: &RequestId, response: Result<String, TransportError>) -> bool;
     pub fn cleanup_stale(&self);
