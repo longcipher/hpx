@@ -8,6 +8,8 @@
 
 use std::fmt;
 
+use blitz_dom::CopyStyleGetters;
+
 /// Snapshot of a few longhands that CDP / layout queries need most often.
 ///
 /// Values are rendered as strings so this module does not have to name
@@ -124,7 +126,7 @@ pub fn extract_style(dom: &crate::dom::Dom, node_id: crate::dom::NodeId) -> Comp
         format!("{:?}", display_obj.inside()).to_ascii_lowercase()
     );
     let color = format!("{:?}", styles.clone_color());
-    let font_size_px = styles.clone_font_size().used_size().px();
+    let font_size_px = styles.get_font().slow_clone_font_size().used_size().px();
     // `clone_visibility` / `clone_opacity` exist on ComputedValues; fall back
     // safely if a future stylo rename drops them (we only read Debug here).
     let visibility = debug_lower(styles.clone_visibility());

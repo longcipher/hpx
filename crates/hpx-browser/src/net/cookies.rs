@@ -172,7 +172,7 @@ fn parse_http_date(s: &str) -> Option<u64> {
     for f in FORMATS {
         if let Ok(dt) = jiff::civil::DateTime::strptime(f, s) {
             // HTTP dates are always GMT/UTC. Attach UTC timezone to get a timestamp.
-            if let Ok(zoned) = dt.to_zoned(jiff::tz::TimeZone::UTC) {
+            if let Ok(zoned) = dt.to_zoned_datetime(jiff::tz::TimeZone::UTC) {
                 let secs = zoned.timestamp().as_second();
                 if secs >= 0 {
                     return Some(secs as u64);

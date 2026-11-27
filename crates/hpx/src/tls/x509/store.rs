@@ -152,7 +152,10 @@ impl CertStoreBuilder {
     ///
     /// These locations are read from the `SSL_CERT_FILE` and `SSL_CERT_DIR`
     /// environment variables if present, or defaults specified at OpenSSL
-    /// build time otherwise.
+    /// build time otherwise. The bundled Mozilla roots are added as well so
+    /// verification does not depend on how recently the host CA bundle was
+    /// updated (for example, `SSL.com TLS ECC Root CA 2022` is absent from
+    /// older macOS bundles).
     #[cfg_attr(
         not(any(
             feature = "boring-tls",
@@ -169,8 +172,19 @@ impl CertStoreBuilder {
         ))]
         if let Ok(ref mut builder) = self.builder {
             #[cfg(feature = "boring-tls")]
-            if let Err(err) = builder.set_default_paths() {
-                self.builder = Err(Error::tls(err));
+            {
+                if let Err(err) = builder.set_default_paths() {
+                    self.builder = Err(Error::tls(err));
+                } else {
+                    let certs = webpki_root_certs::TLS_SERVER_ROOT_CERTS
+                        .iter()
+                        .map(Certificate::from_der);
+                    let result = process_certs(filter_map_certs(certs), builder);
+                    match result {
+                        Ok(der_roots) => self.raw_roots.extend(der_roots),
+                        Err(err) => self.builder = Err(err),
+                    }
+                }
             }
             #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
             if let Err(err) = builder.set_default_paths() {

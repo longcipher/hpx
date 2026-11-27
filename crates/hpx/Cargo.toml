@@ -103,7 +103,13 @@ keylog = ["dep:scc"]
 sse = ["dep:memchr", "dep:fastrand", "stream"]
 
 # Enable BoringSSL support.
-boring-tls = ["dep:boring", "dep:tokio-boring", "dep:brotli", "dep:flate2"]
+boring-tls = [
+    "dep:boring",
+    "dep:tokio-boring",
+    "dep:brotli",
+    "dep:flate2",
+    "dep:webpki-root-certs",
+]
 
 # Enable vendored BoringSSL (static linking).
 #

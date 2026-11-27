@@ -100,7 +100,7 @@ pub fn shape(text: &str, face_data: &[u8], _face_index: u32, size_px: f32) -> Sh
 
     let mut layout = builder.build(text);
     layout.break_all_lines(Some(f32::INFINITY));
-    layout.align(Alignment::Start, AlignmentOptions::default());
+    layout.set_alignment(Alignment::Start, AlignmentOptions::default());
 
     let mut glyphs = Vec::new();
     let mut cursor_x = 0.0_f32;
