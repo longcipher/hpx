@@ -27,10 +27,11 @@ use pool::Ver;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tower::util::Oneshot;
 
+pub(crate) use self::extra::ConnectIdentity;
 use self::{
     error::{ClientConnectError, Error, ErrorKind, TrySendError},
     exec::Exec,
-    extra::{ConnectExtra, ConnectIdentity},
+    extra::ConnectExtra,
     lazy::{Started as Lazy, lazy},
 };
 #[cfg(feature = "http3")]
@@ -60,6 +61,16 @@ use crate::{
 };
 
 type BoxSendFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+
+/// A boxed future that primes a replacement connection for the pool.
+pub(super) type PrewarmFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+
+/// Callback that primes a replacement connection for a pooled key.
+///
+/// The pool invokes the hook when an idle connection enters its prewarm
+/// window. The hook must return quickly: the pool spawns the returned future
+/// on the pool's executor, so the hook only *starts* the replacement.
+pub(super) type PrewarmHook<K> = Arc<dyn Fn(&K) -> PrewarmFuture + Send + Sync>;
 
 /// Collects the `Proxy-Authenticate` challenges from the response headers.
 fn collect_proxy_challenges(headers: &HeaderMap) -> Vec<Challenge> {
@@ -188,6 +199,17 @@ impl ConnectRequest {
     #[inline]
     pub(crate) fn extra(&self) -> &ConnectExtra {
         self.identifier.as_ref().as_ref()
+    }
+
+    /// Rebuild a connect request from a pooled connection identity.
+    ///
+    /// The pool key carries the normalized URI and the connection options, so
+    /// a replacement connection can be established for an idle entry without
+    /// replaying the original request.
+    #[inline]
+    pub(crate) fn from_identity(identity: &ConnectIdentity) -> Option<Self> {
+        let extra = identity.as_ref().as_ref();
+        Some(Self::new(extra.uri().clone(), extra.options().cloned()))
     }
 }
 
@@ -1174,6 +1196,43 @@ where
         })
     }
 
+    /// Register the callback that primes replacement connections.
+    ///
+    /// The pool invokes the hook when an idle connection enters its prewarm
+    /// window, i.e. shortly before the connection would be rejected as stale.
+    /// The hook establishes a fresh connection in the background so that the
+    /// next request never pays for a cold connect.
+    ///
+    /// The hook is only invoked when a stale-after window is configured; see
+    /// [`crate::ClientBuilder::pool_stale_after`].
+    pub(crate) fn enable_prewarm(self: &Arc<Self>) {
+        // The hook holds a weak reference to the client, so the pool never
+        // keeps the client alive.
+        let weak_client = Arc::downgrade(self);
+        self.pool
+            .set_prewarm_hook(Arc::new(move |key: &ConnectIdentity| {
+                let weak_client = weak_client.clone();
+                // The request is rebuilt from the pool key, so it must be owned by
+                // the future: the hook is called with a borrowed key.
+                let request = ConnectRequest::from_identity(key);
+                let future: PrewarmFuture = Box::pin(async move {
+                    let Some(client) = weak_client.upgrade() else {
+                        return;
+                    };
+                    let Some(request) = request else {
+                        return;
+                    };
+                    let connect = client.connect_to(request);
+                    if let Err(err) = connect.await {
+                        tracing::trace!("pool prewarm failed: {err}");
+                    }
+                    // `connect` is dropped here: the `Pooled`'s `Drop` reinserts
+                    // the fresh connection into the idle list.
+                });
+                future
+            }));
+    }
+
     /// Pre-establish and pool connections to the given authorities so that
     /// subsequent requests hit an already-warm connection (no connect/TLS/handshake
     /// latency on the critical path).
@@ -1913,6 +1972,7 @@ impl Builder {
                 idle_timeout: Some(Duration::from_secs(90)),
                 max_idle_per_host: usize::MAX,
                 max_pool_size: None,
+                stale_after: None,
             },
             pool_timer: None,
         }
@@ -1929,6 +1989,21 @@ impl Builder {
         D: Into<Option<Duration>>,
     {
         self.pool_config.idle_timeout = val.into();
+        self
+    }
+
+    /// Reject idle connections older than `stale_after`, even when the idle
+    /// timeout has not elapsed.
+    ///
+    /// This closes the half-open-connection window where a server or NAT has
+    /// silently dropped an idle socket that `is_open()` still reports as live.
+    /// `None` (the default) keeps the legacy `idle_timeout`-only behaviour.
+    #[inline]
+    pub fn pool_stale_after<D>(mut self, val: D) -> Self
+    where
+        D: Into<Option<Duration>>,
+    {
+        self.pool_config.stale_after = val.into();
         self
     }
 
@@ -2161,8 +2236,10 @@ impl Builder {
 
 #[cfg(test)]
 mod tests {
-    use super::PoisonOnCancel;
-    use crate::client::conn::Connected;
+    use http::Uri;
+
+    use super::{ConnectRequest, PoisonOnCancel};
+    use crate::client::{conn::Connected, layer::config::RequestOptions};
 
     #[test]
     fn poison_on_cancel_poisons_only_unfinished_requests() {
@@ -2181,5 +2258,25 @@ mod tests {
         guard.complete();
         drop(guard);
         assert!(!finished.poisoned());
+    }
+
+    /// The pool prewarm rebuilds a connect request from the pool key, so the
+    /// rebuilt request must produce the very same identity.
+    #[test]
+    fn connect_request_round_trips_through_a_pool_identity() {
+        let uri: Uri = "https://example.com/v1/orders?page=2".parse().expect("uri");
+        let request = ConnectRequest::new(uri, None::<RequestOptions>);
+        let identity = request.identify();
+
+        let rebuilt = ConnectRequest::from_identity(&identity).expect("rebuilt request");
+        assert_eq!(rebuilt.identify(), identity);
+        assert_eq!(rebuilt.uri().scheme_str(), Some("https"));
+        assert_eq!(
+            rebuilt
+                .uri()
+                .authority()
+                .map(|authority| authority.as_str()),
+            Some("example.com")
+        );
     }
 }

@@ -57,13 +57,13 @@ impl PacRule {
 
         let selected = PAC_CONTEXTS.with(|contexts| {
             let mut contexts = contexts.borrow_mut();
-            if !contexts.contains_key(&key) {
+            if let std::collections::hash_map::Entry::Vacant(slot) = contexts.entry(key) {
                 let mut context = Context::default();
                 register_helpers(&mut context).ok()?;
                 context
                     .eval(Source::from_bytes(self.script.as_bytes()))
                     .ok()?;
-                contexts.insert(key, context);
+                slot.insert(context);
             }
             let context = contexts.get_mut(&key)?;
             evaluate(context, &self.script, &url, host)
@@ -98,8 +98,7 @@ fn evaluate(context: &mut Context, script: &str, url: &str, host: &str) -> Optio
         .global_object()
         .get(boa_engine::js_string!("FindProxyForURL"), context)
         .ok()?
-        .as_callable()?
-        .clone();
+        .as_callable()?;
 
     let result = callable
         .call(
@@ -283,16 +282,12 @@ fn register_helpers(context: &mut Context) -> JsResult<()> {
     context.register_global_callable(
         boa_engine::js_string!("dnsResolve"),
         1,
-        NativeFunction::from_copy_closure(|_this, _args, _context| {
-            Ok(JsValue::from(JsValue::null()))
-        }),
+        NativeFunction::from_copy_closure(|_this, _args, _context| Ok(JsValue::null())),
     )?;
     context.register_global_callable(
         boa_engine::js_string!("myIpAddress"),
         0,
-        NativeFunction::from_copy_closure(|_this, _args, _context| {
-            Ok(JsValue::from(JsValue::null()))
-        }),
+        NativeFunction::from_copy_closure(|_this, _args, _context| Ok(JsValue::null())),
     )?;
 
     Ok(())

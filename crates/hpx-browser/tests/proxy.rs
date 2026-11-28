@@ -51,19 +51,19 @@
     unfulfilled_lint_expectations
 )]
 
-use std::{
-    net::{Ipv4Addr, Ipv6Addr},
-    sync::Arc,
-    time::Duration,
-};
+#[cfg(feature = "socks")]
+use std::net::{Ipv4Addr, Ipv6Addr};
+#[cfg(feature = "v8")]
+use std::sync::Arc;
+use std::time::Duration;
 
+#[cfg(feature = "v8")]
 use hpx_browser::{
     dom::Dom,
     js_runtime::BrowserJsRuntime,
     net::{NetConfig, SharedNetConfig},
-    page::Page,
-    stealth::chrome_148_windows,
 };
+use hpx_browser::{page::Page, stealth::chrome_148_windows};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
@@ -116,6 +116,7 @@ async fn spawn_http_proxy() -> (String, mpsc::UnboundedReceiver<String>) {
 /// Performs the greeting + CONNECT handshake, records the requested
 /// (host, port), and then relays a fixed HTTP 200 over the tunnel — it never
 /// opens an upstream connection.
+#[cfg(feature = "socks")]
 async fn spawn_socks5_proxy() -> (String, mpsc::UnboundedReceiver<(String, u16)>) {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await

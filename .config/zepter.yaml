@@ -1,0 +1,21 @@
+version:
+  format: 1
+  # Minimum zepter version expected to work; older versions print a clear error.
+  binary: 0.13.2
+
+workflows:
+  check:
+    - [
+        "lint",
+        "propagate-feature",
+        "--features=stream,json,tracing,keylog",
+        "--left-side-feature-missing=ignore",
+        "--left-side-outside-workspace=ignore",
+        "--workspace",
+        "--offline",
+        "--locked",
+        "--show-path",
+        "--quiet",
+      ]
+  default:
+    - [$check.0, "--fix"]

@@ -12,34 +12,36 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_BUILD_RUSTC_WRAPPER: ""
   CARGO_INCREMENTAL: 0
+  # Test builds do not need debuginfo; dropping it shrinks link output.
+  CARGO_PROFILE_DEV_DEBUG: 0
 
 jobs:
   ci:
     name: Lint & Check Features
     runs-on: ubuntu-latest
     env:
-      RUSTC_WRAPPER: ""
+      # The local kache wrapper is not available on runners; use sccache.
+      RUSTC_WRAPPER: "sccache"
+      CARGO_BUILD_RUSTC_WRAPPER: "sccache"
+      RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+      NEXTEST_PROFILE: ci
     steps:
-      - uses: actions/checkout@v7
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 24
+          persist-credentials: false
 
       - name: Install the pinned toolchain
         run: rustup toolchain install "$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" --profile minimal --component rustfmt,clippy
 
-      # Only tools actually invoked by the Justfile recipes below.
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
-          tool: just,rumdl,cargo-nextest,cargo-workspace-inheritance-check
+          tool: just,rumdl,cargo-nextest,cargo-workspace-inheritance-check,sccache
 
       - name: Install cargo-sort
         run: cargo install cargo-sort
 
       - name: Install native dependencies
-        run: sudo apt-get update && sudo apt-get install -y libfreetype-dev libfontconfig1-dev
+        run: sudo apt-get update && sudo apt-get install -y libfreetype-dev libfontconfig1-dev mold
 
       - name: Lint
         run: just ci
@@ -52,23 +54,52 @@ jobs:
       - name: Check features
         run: just check-feature
 
+      - name: Install zepter
+        run: cargo install zepter --locked
+
+      - name: Check feature propagation
+        run: just check-feature-propagation
+
+  msrv:
+    name: MSRV (1.100)
+    runs-on: ubuntu-latest
+    env:
+      # `-Zpolonius=next` from .cargo/config.toml is nightly-only.
+      RUSTFLAGS: ""
+      RUSTC_WRAPPER: ""
+      CARGO_BUILD_RUSTC_WRAPPER: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install MSRV toolchain
+        run: rustup toolchain install 1.100.0 --profile minimal
+
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: just
+
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y libfreetype-dev libfontconfig1-dev
+
+      - name: Check at MSRV
+        run: cargo +1.100.0 check --workspace --all-targets --locked
+
   fuzz:
     name: Fuzz Targets (smoke)
     runs-on: ubuntu-latest
     env:
       RUSTC_WRAPPER: ""
     steps:
-      - uses: actions/checkout@v7
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 24
+          persist-credentials: false
 
       - name: Install the pinned toolchain
         run: rustup toolchain install "$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" --profile minimal --component rustfmt,clippy
 
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: just,cargo-fuzz
 
@@ -88,7 +119,7 @@ jobs:
       - name: Smoke-run fuzz targets
         run: just fuzz-smoke 30
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
           name: fuzz-crashes
@@ -101,17 +132,14 @@ jobs:
     env:
       RUSTC_WRAPPER: ""
     steps:
-      - uses: actions/checkout@v7
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 24
+          persist-credentials: false
 
       - name: Install the pinned toolchain
         run: rustup toolchain install "$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" --profile minimal --component rustfmt,clippy
 
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: just,cargo-nextest,cargo-llvm-cov
 
@@ -121,9 +149,19 @@ jobs:
       # Doctests are part of the contract, but `just test` uses nextest, which
       # skips them. Several were silently broken before this job existed.
       - name: Run doctests
-        run: cargo test --workspace --all-features --doc
+        run: just doctest
 
       - name: Collect coverage
         run: |
           cargo llvm-cov nextest --workspace --all-features --summary-only
           cargo llvm-cov report --summary-only | tee coverage-summary.txt
+
+  ci-success:
+    name: CI Success
+    if: always()
+    needs: [ci, msrv, fuzz, coverage]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
+        with:
+          jobs: ${{ toJSON(needs) }}

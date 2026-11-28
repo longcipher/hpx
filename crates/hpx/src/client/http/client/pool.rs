@@ -8,7 +8,7 @@ use std::{
     num::NonZero,
     ops::{Deref, DerefMut},
     pin::Pin,
-    sync::{Arc, Weak},
+    sync::{Arc, OnceLock, Weak},
     task::{self, Poll, ready},
     time::{Duration, Instant},
 };
@@ -16,7 +16,10 @@ use std::{
 use parking_lot::Mutex;
 use tokio::sync::oneshot;
 
-use super::exec::{self, Exec};
+use super::{
+    PrewarmHook,
+    exec::{self, Exec},
+};
 use crate::{
     client::core::rt::{ArcTimer, Executor, Timer},
     hash::{HASHER, HashMap, HashSet},
@@ -81,6 +84,10 @@ struct PoolShard<T, K: Key> {
     // should be shared. This prevents making multiple HTTP/2 connections
     // to the same host.
     connecting: HashSet<K>,
+    // Keys that already have a background prewarm in flight. The entry is
+    // removed once the prewarm settles, so a later rotation can start a new
+    // one.
+    prewarming: HashSet<K>,
     // These are internal Conns sitting in the event loop in the KeepAlive
     // state, waiting to receive a new Request to send on the socket.
     //
@@ -119,6 +126,7 @@ struct PoolShard<T, K: Key> {
     exec: Exec,
     timer: Option<ArcTimer>,
     timeout: Option<Duration>,
+    stale_after: Option<Duration>,
 }
 
 /// A host's parked connections plus its LRU recency stamp.
@@ -133,6 +141,13 @@ struct IdleEntry<T> {
 struct ShardedPool<T, K: Key> {
     shards: Vec<Mutex<PoolShard<T, K>>>,
     shard_count: usize,
+    /// Executor used to run the pool's background prewarm tasks.
+    exec: Exec,
+    /// Callback that primes a replacement connection for a key.
+    ///
+    /// Set once, right after the client is constructed: the hook needs the
+    /// client, and the client needs the pool.
+    prewarm: OnceLock<PrewarmHook<K>>,
 }
 
 // This is because `Weak::new()` *allocates* space for `T`, even if it
@@ -144,6 +159,21 @@ pub(super) struct Config {
     pub idle_timeout: Option<Duration>,
     pub max_idle_per_host: usize,
     pub max_pool_size: Option<NonZero<u32>>,
+    /// Maximum age of an idle connection before it is treated as stale and
+    /// never handed out, even if the idle timeout has not elapsed yet.
+    /// `None` preserves the legacy `idle_timeout`-only behaviour.
+    pub stale_after: Option<Duration>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            idle_timeout: Some(Duration::from_secs(90)),
+            max_idle_per_host: usize::MAX,
+            max_pool_size: None,
+            stale_after: None,
+        }
+    }
 }
 
 impl Config {
@@ -159,12 +189,15 @@ impl<T: Send + 'static, K: Key> ShardedPool<T, K> {
         M: Timer + Send + Sync + Clone + 'static,
     {
         let shard_count = shard_count.max(1);
+        let exec = Exec::new(executor);
         let shards = (0..shard_count)
-            .map(|_| Mutex::new(PoolShard::new(config, executor.clone(), timer.clone())))
+            .map(|_| Mutex::new(PoolShard::new(config, exec.clone(), timer.clone())))
             .collect();
         Self {
             shards,
             shard_count,
+            exec,
+            prewarm: OnceLock::new(),
         }
     }
 }
@@ -325,6 +358,42 @@ impl<T: Poolable, K: Key> Pool<T, K> {
             value: Some(value),
         }
     }
+
+    /// Register the callback that primes replacement connections.
+    ///
+    /// The pool invokes the hook from the checkout path when an idle
+    /// connection enters its prewarm window. The hook must not block: the
+    /// pool spawns the future it returns on the pool's executor.
+    pub(super) fn set_prewarm_hook(&self, hook: PrewarmHook<K>) {
+        if let Some(inner) = &self.inner
+            && inner.prewarm.set(hook).is_err()
+        {
+            trace!("prewarm hook already registered; keeping the first one");
+        }
+    }
+
+    /// Prime a replacement connection for `key`.
+    ///
+    /// The replacement is established in the background, so the connection
+    /// that triggered the prewarm stays usable and can still be handed out.
+    fn trigger_prewarm(&self, key: &K) {
+        let Some(inner) = self.inner.as_ref() else {
+            return;
+        };
+        let Some(hook) = inner.prewarm.get() else {
+            return;
+        };
+        let future = hook(key);
+        let pool = Arc::clone(inner);
+        let key = key.clone();
+        inner.exec.execute(async move {
+            future.await;
+            // Allow a later rotation to start a new prewarm for this key.
+            let (shard, _index) = pool.shard_for(&key);
+            let mut inner = shard.lock();
+            inner.prewarming.remove(&key);
+        });
+    }
 }
 
 /// Pop off this list, looking for a usable connection that hasn't expired.
@@ -334,7 +403,12 @@ struct IdlePopper<'a, T, K> {
 }
 
 impl<'a, T: Poolable + 'a, K: Debug> IdlePopper<'a, T, K> {
-    fn pop(self, expiration: &Expiration) -> Option<Idle<T>> {
+    /// Pop the next usable connection.
+    ///
+    /// Returns the connection together with a flag telling the caller that
+    /// the connection is close to its retirement window and that a
+    /// replacement should be primed for it.
+    fn pop(self, expiration: &Expiration, health: &PoolHealthPolicy) -> (Option<Idle<T>>, bool) {
         // The idle list is appended in chronological order: newer entries are
         // at the back (`pop()` removes from the end). Because `Instant` is
         // monotonically non-decreasing when entries are inserted, if the
@@ -349,7 +423,7 @@ impl<'a, T: Poolable + 'a, K: Debug> IdlePopper<'a, T, K> {
                     self.list.len()
                 );
                 self.list.clear();
-                return None;
+                return (None, false);
             }
             _ => {}
         }
@@ -361,9 +435,20 @@ impl<'a, T: Poolable + 'a, K: Debug> IdlePopper<'a, T, K> {
                 trace!("removing closed connection for {:?}", self.key);
                 continue;
             }
-            if expiration.expires(entry.idle_at) {
-                trace!("removing expired connection for {:?}", self.key);
-                continue;
+            let mut prewarm = false;
+            match health.evaluate(entry.idle_at, Instant::now(), expiration.idle_timeout) {
+                HealthDecision::Refresh => {
+                    trace!("removing stale or expired connection for {:?}", self.key);
+                    continue;
+                }
+                HealthDecision::Prewarm => {
+                    prewarm = true;
+                    trace!(
+                        "idle connection for {:?} is near retirement; prime a replacement",
+                        self.key
+                    );
+                }
+                HealthDecision::Keep => {}
             }
 
             let value = match entry.value.reserve() {
@@ -377,13 +462,16 @@ impl<'a, T: Poolable + 'a, K: Debug> IdlePopper<'a, T, K> {
                 Reservation::Unique(unique) => unique,
             };
 
-            return Some(Idle {
-                idle_at: entry.idle_at,
-                value,
-            });
+            return (
+                Some(Idle {
+                    idle_at: entry.idle_at,
+                    value,
+                }),
+                prewarm,
+            );
         }
 
-        None
+        (None, false)
     }
 }
 
@@ -400,6 +488,7 @@ impl<T: Send + 'static, K: Key> PoolShard<T, K> {
             .map_or(usize::MAX, |n| n.get() as usize);
         Self {
             connecting: HashSet::with_hasher(HASHER),
+            prewarming: HashSet::with_hasher(HASHER),
             idle: HashMap::with_hasher(HASHER),
             max_capacity,
             idle_interval_ref: None,
@@ -409,6 +498,7 @@ impl<T: Send + 'static, K: Key> PoolShard<T, K> {
             exec: Exec::new(executor),
             timer: timer.map(ArcTimer::new),
             timeout: config.idle_timeout,
+            stale_after: config.stale_after,
         }
     }
 }
@@ -833,14 +923,21 @@ impl<T: Poolable, K: Key> Checkout<T, K> {
     }
 
     fn checkout(&mut self, cx: &mut task::Context<'_>) -> Option<Pooled<T, K>> {
-        let entry = {
+        let (entry, prewarm) = {
             let pool = self.pool.inner.as_ref()?;
             let (shard, _shard_index) = pool.shard_for(&self.key);
             let mut inner = shard.lock();
-            let expiration = Expiration::new(inner.timeout);
+            let expiration = Expiration::new(inner.timeout).with_stale_after(inner.stale_after);
+            let health = PoolHealthPolicy {
+                stale_after: inner.stale_after,
+                // Prime a replacement during the last tenth of the stale
+                // window so rotation does not wait for a failed checkout.
+                prewarm_before: inner.stale_after.map(|d| d / 10),
+            };
+            let mut needs_prewarm = false;
             let maybe_entry = inner.idle.get(&self.key).and_then(|idle_entry| {
                 let mut list = idle_entry.list.lock();
-                trace!("take? {:?}: expiration = {:?}", self.key, expiration.0);
+                trace!("take? {:?}: expiration = {:?}", self.key, expiration);
                 // Polonius: `IdlePopper`'s borrow of `list` is dead after
                 // `pop()`, and `list` itself is dead after `is_empty()`, so the
                 // explicit scope block and `drop(list)` are no longer needed
@@ -850,10 +947,11 @@ impl<T: Poolable, K: Key> Checkout<T, K> {
                         key: &self.key,
                         list: &mut *list,
                     };
-                    popper.pop(&expiration)
+                    popper.pop(&expiration, &health)
                 };
+                needs_prewarm = pop_result.1;
                 let is_empty = list.is_empty();
-                pop_result.map(|e| (e, is_empty))
+                pop_result.0.map(|e| (e, is_empty))
             });
 
             let (entry, empty) = if let Some((e, empty)) = maybe_entry {
@@ -874,6 +972,12 @@ impl<T: Poolable, K: Key> Checkout<T, K> {
                 }
             }
 
+            // Only one prewarm per key may be in flight, and the hook must
+            // exist for a prewarm to be possible at all.
+            let prewarm = needs_prewarm
+                && pool.prewarm.get().is_some()
+                && inner.prewarming.insert(self.key.clone());
+
             if entry.is_none() && self.waiter.is_none() {
                 let (tx, mut rx) = oneshot::channel();
                 trace!("checkout waiting for idle connection: {:?}", self.key);
@@ -892,8 +996,14 @@ impl<T: Poolable, K: Key> Checkout<T, K> {
                 self.waiter = Some(rx);
             }
 
-            entry
+            (entry, prewarm)
         };
+
+        // The hook is invoked without the shard lock held: it establishes a
+        // replacement connection, which needs the pool's own lock.
+        if prewarm {
+            self.pool.trigger_prewarm(&self.key);
+        }
 
         entry.map(|e| self.pool.reuse(&self.key, e.value))
     }
@@ -959,19 +1069,103 @@ impl<T: Poolable, K: Key> Drop for Connecting<T, K> {
     }
 }
 
-struct Expiration(Option<Duration>);
+/// Health policy for idle connections.
+///
+/// `stale_after` is a hard cap on how long an idle socket may be reused even
+/// when the configured idle timeout has not elapsed. It closes the
+/// "half-open connection" window: a server or NAT may silently drop an idle
+/// socket long before the pool's timeout, and `is_open()` cannot detect that
+/// without a probe. `prewarm_before` is the lead time at which a fresh
+/// connection should be established so the swap is hitless.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct PoolHealthPolicy {
+    pub stale_after: Option<Duration>,
+    pub prewarm_before: Option<Duration>,
+}
+
+/// What the pool should do with an idle connection at `now`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum HealthDecision {
+    /// Still fresh; hand it out.
+    Keep,
+    /// Too old or expired; never hand it out.
+    Refresh,
+    /// Still usable, but a replacement should be primed now.
+    Prewarm,
+}
+
+impl PoolHealthPolicy {
+    /// The first bound at which an idle connection must not be reused.
+    ///
+    /// A connection retires at whichever of `idle_timeout` and `stale_after`
+    /// elapses first, so the prewarm window is measured against that same
+    /// bound. Measuring it against `idle_timeout` alone made a `stale_after`
+    /// shorter than the idle timeout retire connections without ever priming
+    /// a replacement.
+    fn retirement(&self, idle_timeout: Option<Duration>) -> Option<Duration> {
+        match (idle_timeout, self.stale_after) {
+            (Some(idle), Some(stale)) => Some(idle.min(stale)),
+            (Some(idle), None) => Some(idle),
+            (None, Some(stale)) => Some(stale),
+            (None, None) => None,
+        }
+    }
+
+    /// Evaluate one idle entry.
+    pub(super) fn evaluate(
+        &self,
+        idle_at: Instant,
+        now: Instant,
+        idle_timeout: Option<Duration>,
+    ) -> HealthDecision {
+        let Some(retirement) = self.retirement(idle_timeout) else {
+            return HealthDecision::Keep;
+        };
+        // Avoid `Instant::elapsed` (rust-lang/rust#86470).
+        let age = now.saturating_duration_since(idle_at);
+        if age > retirement {
+            return HealthDecision::Refresh;
+        }
+        if let Some(lead) = self.prewarm_before {
+            // A stale window much larger than the idle timeout would otherwise
+            // make the lead cover the whole lifetime and prewarm on every
+            // checkout. Half the retirement window keeps the lead meaningful.
+            let lead = if lead > retirement {
+                retirement / 2
+            } else {
+                lead
+            };
+            if retirement.saturating_sub(age) <= lead {
+                return HealthDecision::Prewarm;
+            }
+        }
+        HealthDecision::Keep
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Expiration {
+    idle_timeout: Option<Duration>,
+    stale_after: Option<Duration>,
+}
 
 impl Expiration {
-    const fn new(dur: Option<Duration>) -> Self {
-        Self(dur)
+    const fn new(idle_timeout: Option<Duration>) -> Self {
+        Self {
+            idle_timeout,
+            stale_after: None,
+        }
+    }
+
+    const fn with_stale_after(mut self, stale_after: Option<Duration>) -> Self {
+        self.stale_after = stale_after;
+        self
     }
 
     fn expires(&self, instant: Instant) -> bool {
-        match self.0 {
-            // Avoid `Instant::elapsed` to avoid issues like rust-lang/rust#86470.
-            Some(timeout) => Instant::now().saturating_duration_since(instant) > timeout,
-            None => false,
-        }
+        let age = Instant::now().saturating_duration_since(instant);
+        self.idle_timeout.is_some_and(|timeout| age > timeout)
+            || self.stale_after.is_some_and(|stale| age > stale)
     }
 }
 
@@ -1038,14 +1232,25 @@ mod tests {
         hash::Hash,
         num::NonZero,
         pin::Pin,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
         task::{self, Poll},
-        time::Duration,
+        time::{Duration, Instant},
     };
 
     use parking_lot::MutexGuard;
+    use tokio::sync::Notify;
 
-    use super::{Connecting, Key, Pool, Poolable, Reservation, WeakOpt};
-    use crate::client::core::rt::{ArcTimer, TokioExecutor, TokioTimer};
+    use super::{
+        Connecting, Expiration, HealthDecision, Key, Pool, PoolHealthPolicy, Poolable, Reservation,
+        WeakOpt,
+    };
+    use crate::client::{
+        core::rt::{ArcTimer, TokioExecutor, TokioTimer},
+        http::client::PrewarmFuture,
+    };
     #[derive(Clone, Debug, PartialEq, Eq, Hash)]
     struct KeyImpl(http::uri::Scheme, http::uri::Authority);
 
@@ -1088,6 +1293,26 @@ mod tests {
                 idle_timeout: Some(Duration::from_millis(100)),
                 max_idle_per_host: max_idle,
                 max_pool_size: None,
+                stale_after: None,
+            },
+            TokioExecutor::new(),
+            Option::<ArcTimer>::None,
+        )
+    }
+
+    /// A pool whose idle connections enter their prewarm window immediately.
+    ///
+    /// The prewarm lead time is `stale_after / 10`, so a stale window ten
+    /// times the idle timeout makes every idle connection eligible for a
+    /// replacement right away — while the idle timeout itself keeps the
+    /// connection from being dropped as expired.
+    fn pool_with_prewarm_window<T: Send + 'static, K: Key>() -> Pool<T, K> {
+        Pool::new(
+            super::Config {
+                idle_timeout: Some(Duration::from_secs(10)),
+                max_idle_per_host: usize::MAX,
+                max_pool_size: None,
+                stale_after: Some(Duration::from_secs(100)),
             },
             TokioExecutor::new(),
             Option::<ArcTimer>::None,
@@ -1114,6 +1339,86 @@ mod tests {
             Ok(pooled) => assert_eq!(*pooled, Uniq(41)),
             Err(e) => panic!("not ready: {e:?}"),
         }
+    }
+
+    /// An idle connection that enters its prewarm window must trigger a
+    /// replacement connection, and the connection that triggered it must
+    /// still be handed out.
+    #[tokio::test]
+    async fn prewarm_hook_primes_a_replacement_connection() {
+        let pool = pool_with_prewarm_window();
+        let key = host_key("foo");
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let notify = Arc::new(Notify::new());
+        let hook_calls = calls.clone();
+        let hook_notify = notify.clone();
+        pool.set_prewarm_hook(Arc::new(move |_key: &KeyImpl| {
+            hook_calls.fetch_add(1, Ordering::SeqCst);
+            let hook_notify = hook_notify.clone();
+            Box::pin(async move {
+                hook_notify.notify_one();
+            }) as PrewarmFuture
+        }));
+
+        drop(pool.pooled(c(key.clone()), Uniq(41)));
+
+        let pooled = pool.checkout(key.clone()).await.expect("checkout");
+        assert_eq!(*pooled, Uniq(41));
+
+        // The hook is invoked from the checkout path.
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        // The replacement is established in the background.
+        notify.notified().await;
+    }
+
+    /// Only one prewarm may be in flight per key.
+    #[tokio::test]
+    async fn prewarm_hook_is_deduplicated_per_key() {
+        let pool = pool_with_prewarm_window();
+        let key = host_key("foo");
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let release = Arc::new(Notify::new());
+        let hook_calls = calls.clone();
+        let hook_release = release.clone();
+        pool.set_prewarm_hook(Arc::new(move |_key: &KeyImpl| {
+            hook_calls.fetch_add(1, Ordering::SeqCst);
+            let hook_release = hook_release.clone();
+            Box::pin(async move {
+                // Block until the test releases the prewarm, so the second
+                // checkout observes an in-flight prewarm.
+                hook_release.notified().await;
+            }) as PrewarmFuture
+        }));
+
+        drop(pool.pooled(c(key.clone()), Uniq(1)));
+        drop(pool.pooled(c(key.clone()), Uniq(2)));
+
+        let first = pool.checkout(key.clone()).await.expect("checkout");
+        let second = pool.checkout(key.clone()).await.expect("checkout");
+        // The idle list hands out the most recently pooled connection first.
+        assert_eq!(*first, Uniq(2));
+        assert_eq!(*second, Uniq(1));
+
+        // The second idle connection also needed a replacement, but the first
+        // prewarm is still in flight.
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        release.notify_one();
+    }
+
+    /// Without a hook the pool must not prime anything.
+    #[tokio::test]
+    async fn no_prewarm_hook_means_no_replacement() {
+        let pool = pool_with_prewarm_window();
+        let key = host_key("foo");
+
+        drop(pool.pooled(c(key.clone()), Uniq(41)));
+        let pooled = pool.checkout(key.clone()).await.expect("checkout");
+        assert_eq!(*pooled, Uniq(41));
+        assert!(pool.locked(&key).prewarming.is_empty());
     }
 
     /// Helper to check if the future is ready after polling once.
@@ -1204,6 +1509,7 @@ mod tests {
                 idle_timeout: Some(Duration::from_secs(60)),
                 max_idle_per_host: 10,
                 max_pool_size: NonZero::new(2),
+                stale_after: None,
             },
             TokioExecutor::new(),
             Option::<ArcTimer>::None,
@@ -1245,6 +1551,7 @@ mod tests {
                 idle_timeout: Some(Duration::from_millis(10)),
                 max_idle_per_host: usize::MAX,
                 max_pool_size: None,
+                stale_after: None,
             },
             TokioExecutor::new(),
             Some(TokioTimer::new()),
@@ -1371,6 +1678,7 @@ mod tests {
                 idle_timeout: Some(Duration::from_millis(100)),
                 max_idle_per_host: usize::MAX,
                 max_pool_size: Some(NonZero::new(2).expect("max pool size")),
+                stale_after: None,
             },
             TokioExecutor::new(),
             Option::<ArcTimer>::None,
@@ -1399,5 +1707,154 @@ mod tests {
         let h3 = Ver::Http3;
         assert_ne!(h3, Ver::Auto);
         assert_ne!(h3, Ver::Http2);
+    }
+
+    #[test]
+    fn health_policy_keeps_fresh_connections() {
+        let policy = PoolHealthPolicy::default();
+        let now = Instant::now();
+        assert_eq!(policy.evaluate(now, now, None), HealthDecision::Keep);
+        assert_eq!(
+            policy.evaluate(now, now, Some(Duration::from_secs(90))),
+            HealthDecision::Keep
+        );
+    }
+
+    #[test]
+    fn health_policy_refreshes_past_idle_timeout() {
+        let policy = PoolHealthPolicy::default();
+        let now = Instant::now();
+        let old = now - Duration::from_secs(91);
+        assert_eq!(
+            policy.evaluate(old, now, Some(Duration::from_secs(90))),
+            HealthDecision::Refresh
+        );
+    }
+
+    #[test]
+    fn health_policy_refreshes_past_stale_bound_before_idle_timeout() {
+        let policy = PoolHealthPolicy {
+            stale_after: Some(Duration::from_secs(30)),
+            prewarm_before: None,
+        };
+        let now = Instant::now();
+        let old = now - Duration::from_secs(31);
+        assert_eq!(
+            policy.evaluate(old, now, Some(Duration::from_secs(90))),
+            HealthDecision::Refresh
+        );
+        assert_eq!(
+            policy.evaluate(
+                now - Duration::from_secs(29),
+                now,
+                Some(Duration::from_secs(90))
+            ),
+            HealthDecision::Keep
+        );
+    }
+
+    #[test]
+    fn health_policy_requests_prewarm_inside_the_lead_window() {
+        let policy = PoolHealthPolicy {
+            stale_after: Some(Duration::from_secs(120)),
+            prewarm_before: Some(Duration::from_secs(10)),
+        };
+        let now = Instant::now();
+        let timeout = Duration::from_secs(90);
+        assert_eq!(
+            policy.evaluate(now - Duration::from_secs(81), now, Some(timeout)),
+            HealthDecision::Prewarm
+        );
+        assert_eq!(
+            policy.evaluate(now - Duration::from_secs(79), now, Some(timeout)),
+            HealthDecision::Keep
+        );
+        assert_eq!(
+            policy.evaluate(now - Duration::from_secs(91), now, Some(timeout)),
+            HealthDecision::Refresh
+        );
+    }
+
+    #[test]
+    fn health_policy_caps_a_lead_that_exceeds_the_retirement_window() {
+        let policy = PoolHealthPolicy {
+            stale_after: Some(Duration::from_secs(1_800)),
+            prewarm_before: Some(Duration::from_secs(180)),
+        };
+        let now = Instant::now();
+        let timeout = Duration::from_secs(90);
+        assert_eq!(
+            policy.evaluate(now, now, Some(timeout)),
+            HealthDecision::Keep,
+            "a 180s lead must not cover the whole 90s retirement window"
+        );
+        assert_eq!(
+            policy.evaluate(now - Duration::from_secs(50), now, Some(timeout)),
+            HealthDecision::Prewarm
+        );
+        assert_eq!(
+            policy.evaluate(now - Duration::from_secs(91), now, Some(timeout)),
+            HealthDecision::Refresh
+        );
+    }
+
+    #[test]
+    fn health_policy_prewarms_before_a_stale_bound_shorter_than_the_idle_timeout() {
+        let policy = PoolHealthPolicy {
+            stale_after: Some(Duration::from_secs(30)),
+            prewarm_before: Some(Duration::from_secs(3)),
+        };
+        let now = Instant::now();
+        let timeout = Duration::from_secs(90);
+        assert_eq!(
+            policy.evaluate(now - Duration::from_secs(27), now, Some(timeout)),
+            HealthDecision::Prewarm,
+            "the last tenth of the stale bound is the prewarm window"
+        );
+        assert_eq!(
+            policy.evaluate(now - Duration::from_secs(26), now, Some(timeout)),
+            HealthDecision::Keep
+        );
+        assert_eq!(
+            policy.evaluate(now - Duration::from_secs(31), now, Some(timeout)),
+            HealthDecision::Refresh
+        );
+    }
+
+    #[test]
+    fn health_policy_uses_the_stale_bound_without_an_idle_timeout() {
+        let policy = PoolHealthPolicy {
+            stale_after: Some(Duration::from_secs(30)),
+            prewarm_before: Some(Duration::from_secs(3)),
+        };
+        let now = Instant::now();
+        assert_eq!(
+            policy.evaluate(now - Duration::from_secs(27), now, None),
+            HealthDecision::Prewarm
+        );
+        assert_eq!(
+            policy.evaluate(now - Duration::from_secs(26), now, None),
+            HealthDecision::Keep
+        );
+        assert_eq!(
+            policy.evaluate(now - Duration::from_secs(31), now, None),
+            HealthDecision::Refresh
+        );
+    }
+
+    #[test]
+    fn expiration_honours_both_bounds() {
+        let now = Instant::now();
+        let plain = Expiration::new(Some(Duration::from_secs(90)));
+        assert!(!plain.expires(now - Duration::from_secs(60)));
+        let with_stale = Expiration::new(Some(Duration::from_secs(90)))
+            .with_stale_after(Some(Duration::from_secs(30)));
+        assert!(with_stale.expires(now - Duration::from_secs(31)));
+        assert!(!with_stale.expires(now - Duration::from_secs(29)));
+        assert!(
+            !Expiration::new(None)
+                .with_stale_after(None)
+                .expires(now - Duration::from_secs(10_000))
+        );
     }
 }

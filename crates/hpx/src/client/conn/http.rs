@@ -20,7 +20,10 @@ use tokio::{
     time::Sleep,
 };
 
-use super::{Connected, Connection};
+use super::{
+    Connected, Connection,
+    tcp_tuning::{QuickAckStream, TcpTuning},
+};
 use crate::{
     dns::{self, GaiResolver, InternalResolve, resolve},
     error::BoxError,
@@ -193,6 +196,7 @@ struct Config {
     recv_buffer_size: Option<usize>,
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
     tcp_user_timeout: Option<Duration>,
+    tcp_low_latency: TcpTuning,
 }
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -334,6 +338,7 @@ impl<R> HttpConnector<R> {
                 recv_buffer_size: None,
                 #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
                 tcp_user_timeout: None,
+                tcp_low_latency: TcpTuning::default(),
             }),
             resolver,
         }
@@ -452,6 +457,12 @@ impl<R> HttpConnector<R> {
         self.config_mut().happy_eyeballs_timeout = dur;
     }
 
+    /// Set Linux low-latency socket options applied at connect time.
+    #[inline]
+    pub(crate) fn set_tcp_low_latency(&mut self, tuning: TcpTuning) {
+        self.config_mut().tcp_low_latency = tuning;
+    }
+
     /// Set that all socket have `SO_REUSEADDR` set to the supplied value `reuse_address`.
     ///
     /// Default is `false`.
@@ -494,7 +505,7 @@ where
     R: InternalResolve + Clone + Send + Sync + 'static,
     R::Future: Send,
 {
-    type Response = TcpStream;
+    type Response = QuickAckStream;
     type Error = ConnectError;
     type Future = HttpConnecting<R>;
 
@@ -564,7 +575,7 @@ impl<R> HttpConnector<R>
 where
     R: InternalResolve,
 {
-    async fn call_async(&mut self, dst: Uri) -> Result<TcpStream, ConnectError> {
+    async fn call_async(&mut self, dst: Uri) -> Result<QuickAckStream, ConnectError> {
         let config = &self.config;
 
         let (host, port) = get_host_port(config, &dst)?;
@@ -591,7 +602,7 @@ where
 
         let sock = c.connect().await?;
 
-        if let Err(_e) = sock.set_nodelay(config.nodelay) {
+        if let Err(_e) = sock.get_ref().set_nodelay(config.nodelay) {
             warn!("tcp set_nodelay error: {_e}");
         }
 
@@ -639,7 +650,7 @@ pin_project! {
     }
 }
 
-type ConnectResult = Result<TcpStream, ConnectError>;
+type ConnectResult = Result<QuickAckStream, ConnectError>;
 type BoxConnecting = Pin<Box<dyn Future<Output = ConnectResult> + Send>>;
 
 impl<R: InternalResolve> Future for HttpConnecting<R> {
@@ -852,6 +863,10 @@ fn connect(
         .set_nonblocking(true)
         .map_err(ConnectError::m("tcp set_nonblocking error"))?;
 
+    if let Err(_e) = config.tcp_low_latency.apply(&socket) {
+        warn!("tcp low-latency tuning error: {_e}");
+    }
+
     if let Some(tcp_keepalive) = &config.tcp_keepalive.into_tcpkeepalive()
         && let Err(_e) = socket.set_tcp_keepalive(tcp_keepalive)
     {
@@ -968,14 +983,16 @@ fn connect(
 }
 
 impl ConnectingTcp<'_> {
-    async fn connect(mut self) -> Result<TcpStream, ConnectError> {
-        match self.fallback {
-            None => self.preferred.connect(self.config).await,
+    async fn connect(mut self) -> Result<QuickAckStream, ConnectError> {
+        let config = self.config;
+        let quickack = config.tcp_low_latency.quickack();
+        let stream = match self.fallback {
+            None => self.preferred.connect(config).await?,
             Some(mut fallback) => {
-                let preferred_fut = self.preferred.connect(self.config);
+                let preferred_fut = self.preferred.connect(config);
                 futures_util::pin_mut!(preferred_fut);
 
-                let fallback_fut = fallback.remote.connect(self.config);
+                let fallback_fut = fallback.remote.connect(config);
                 futures_util::pin_mut!(fallback_fut);
 
                 let fallback_delay = fallback.delay;
@@ -1000,9 +1017,11 @@ impl ConnectingTcp<'_> {
                     future.await
                 } else {
                     result
-                }
+                }?
             }
-        }
+        };
+
+        Ok(QuickAckStream::new(stream, quickack))
     }
 }
 
@@ -1012,5 +1031,52 @@ impl ConnectingTcp<'_> {
 const fn set_port(addr: &mut SocketAddr, host_port: u16, explicit: bool) {
     if explicit || addr.port() == 0 {
         addr.set_port(host_port);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use http::Uri;
+    use tokio::net::TcpListener;
+    use tower::Service as _;
+
+    use super::*;
+    use crate::client::conn::tcp_tuning::TcpTuning;
+
+    /// The connector must hand out a stream that re-arms `TCP_QUICKACK` when
+    /// the low-latency profile asks for it.
+    #[tokio::test]
+    async fn connector_wraps_the_socket_with_the_quickack_policy() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        let server = tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.expect("accept");
+        });
+
+        let mut connector = HttpConnector::new();
+        connector.set_tcp_low_latency(TcpTuning::new().with_quickack(true));
+
+        let uri: Uri = format!("http://{addr}/").parse().expect("uri");
+        let stream = connector.call(uri).await.expect("connect");
+        assert!(stream.quickack_enabled());
+
+        server.await.expect("server");
+    }
+
+    /// Without the opt-in the socket is wrapped, but no re-arm happens.
+    #[tokio::test]
+    async fn connector_leaves_quickack_disabled_by_default() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        let server = tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.expect("accept");
+        });
+
+        let mut connector = HttpConnector::new();
+        let uri: Uri = format!("http://{addr}/").parse().expect("uri");
+        let stream = connector.call(uri).await.expect("connect");
+        assert!(!stream.quickack_enabled());
+
+        server.await.expect("server");
     }
 }

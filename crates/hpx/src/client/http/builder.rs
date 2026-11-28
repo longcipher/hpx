@@ -30,7 +30,7 @@ use {super::super::layer::cookie::CookieServiceLayer, crate::cookie};
 use super::super::layer::decoder::DecompressionLayer;
 use super::{
     super::{
-        conn::{BoxedConnectorService, Conn, Connector, Unnameable},
+        conn::{BoxedConnectorService, Conn, Connector, TcpTuning, Unnameable},
         core::rt::{TokioExecutor, TokioTimer},
         layer::{
             config::ConfigServiceLayer,
@@ -276,6 +276,7 @@ impl ClientBuilder {
                     http.set_send_buffer_size(config.transport.tcp_send_buffer_size);
                     http.set_recv_buffer_size(config.transport.tcp_recv_buffer_size);
                     http.set_happy_eyeballs_timeout(config.transport.tcp_happy_eyeballs_timeout);
+                    http.set_tcp_low_latency(config.transport.tcp_low_latency);
                     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
                     http.set_tcp_user_timeout(config.transport.tcp_user_timeout);
                 })
@@ -372,6 +373,7 @@ impl ClientBuilder {
             builder
                 .pool_timer(TokioTimer::new())
                 .pool_idle_timeout(config.pool.idle_timeout)
+                .pool_stale_after(config.pool.stale_after)
                 .pool_max_idle_per_host(config.pool.max_idle_per_host)
                 .pool_max_size(config.pool.max_size)
                 .build(connector)
@@ -382,6 +384,15 @@ impl ClientBuilder {
         // service stack below, so warming here populates the same pool that
         // serves real requests.
         let warmup_client = Arc::new(service.clone());
+
+        // Wire the pool's background prewarm.
+        //
+        // When an idle connection enters its prewarm window (the last tenth of
+        // the configured stale-after window), the pool asks the client to
+        // establish a replacement in the background. The replacement lands in
+        // the idle list, so the next request to that origin never pays for a
+        // cold connect.
+        warmup_client.enable_prewarm();
 
         let service = service.map_err(Into::into as _);
 
@@ -1142,6 +1153,31 @@ impl ClientBuilder {
         self
     }
 
+    /// Reject idle connections older than `stale_after` at checkout time.
+    ///
+    /// A server or NAT can silently drop an idle socket long before the pool's
+    /// idle timeout, and `is_open()` cannot detect that without a probe. Setting
+    /// this bound makes the pool retire those half-open connections instead of
+    /// handing them to a request that would then fail or stall. Pass `None`
+    /// (the default) to keep the legacy `idle_timeout`-only behaviour.
+    ///
+    /// A configured bound also enables background prewarming: when an idle
+    /// connection enters the last tenth of its retirement window, the client
+    /// establishes a replacement so the next request does not pay for a cold
+    /// connect.
+    ///
+    /// This is not part of the `hft` or `stealth` presets: those are
+    /// compile-time feature bundles, whereas this is a per-client runtime
+    /// setting.
+    #[inline]
+    pub fn pool_stale_after<D>(mut self, val: D) -> Self
+    where
+        D: Into<Option<Duration>>,
+    {
+        self.config.pool.stale_after = val.into();
+        self
+    }
+
     /// Sets the maximum idle connection per host allowed in the pool.
     ///
     /// This is a convenience method. For batch pool configuration, see
@@ -1325,6 +1361,32 @@ impl ClientBuilder {
     #[inline]
     pub const fn tcp_reuse_address(mut self, enabled: bool) -> Self {
         self.config.transport.tcp_reuse_address = enabled;
+        self
+    }
+
+    /// Enable Linux low-latency socket tuning for HFT-style clients.
+    ///
+    /// Configures `SO_BUSY_POLL`, `SO_INCOMING_CPU`, `SO_PRIORITY` and
+    /// `TCP_QUICKACK` on the TCP socket before `connect(2)`. All options are
+    /// opt-in and validated on connect; on non-Linux targets the profile is a
+    /// portable no-op. To re-arm `TCP_QUICKACK` after every read, wrap the raw
+    /// stream in [`crate::QuickAckRead`] in a custom connector layer.
+    ///
+    /// This is not part of the `hft` or `stealth` presets: those are compile-time
+    /// feature bundles, whereas this is a per-client runtime setting.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use hpx::{Client, TcpTuning};
+    ///
+    /// let tuning = TcpTuning::new().with_busy_poll_us(50).with_quickack(true);
+    /// let client = Client::builder().tcp_low_latency(tuning).build()?;
+    /// # Ok::<(), hpx::Error>(())
+    /// ```
+    #[inline]
+    pub const fn tcp_low_latency(mut self, tuning: TcpTuning) -> Self {
+        self.config.transport.tcp_low_latency = tuning;
         self
     }
 

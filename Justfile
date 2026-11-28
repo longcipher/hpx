@@ -24,6 +24,9 @@ lint:
   RUSTC_WRAPPER= cargo clippy --all --all-targets -- -D warnings
   cargo workspace-inheritance-check
   just check-agents-md
+  just check-config-docs
+  just check-cn
+  just no-test-deps
   just check-mutation-scope
 
 # Check that AGENTS.md documents every workspace crate
@@ -39,26 +42,81 @@ check-agents-md:
       errors=$((errors + 1))
     fi
   done
+  for rule in .agents/skills/hpx-rust-style/SKILL.md crates/hpx-browser/AGENTS.md crates/hpx-h3/AGENTS.md; do
+    if [ ! -f "$rule" ]; then
+      echo "MISSING: AGENTS.md references '$rule' but the file does not exist" >&2
+      errors=$((errors + 1))
+    fi
+  done
   if [ "$errors" -gt 0 ]; then
-    echo "FAIL: ${errors} workspace crate(s) are not documented in AGENTS.md" >&2
+    echo "FAIL: ${errors} documentation gap(s) found" >&2
     exit 1
   fi
-  echo "OK: AGENTS.md documents every workspace crate"
+  echo "OK: AGENTS.md documents every workspace crate and every referenced rule file"
+
+# Verify that config keys claimed in AGENTS.md are active, not commented out
+check-config-docs:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  errors=0
+  for key in rustc-wrapper incompatible-rust-versions global-min-publish-age; do
+    if ! grep -Eq "^[[:space:]]*${key}[[:space:]]*=" .cargo/config.toml; then
+      echo "MISSING: .cargo/config.toml does not activate '${key}'" >&2
+      errors=$((errors + 1))
+    fi
+  done
+  if ! grep -Eq '^[[:space:]]*rustflags[[:space:]]*=.*polonius' .cargo/config.toml; then
+    echo "MISSING: .cargo/config.toml does not activate polonius" >&2
+    errors=$((errors + 1))
+  fi
+  if [ "$errors" -gt 0 ]; then
+    echo "FAIL: ${errors} documented config key(s) are inactive" >&2
+    exit 1
+  fi
+  echo "OK: all documented config keys are active"
+
+# Keep test-only crates out of the default dependency graph
+no-test-deps:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if cargo tree --package hpx -e=features,no-dev 2>/dev/null | grep -Eq 'arbitrary|proptest|test-fuzz'; then
+    echo "error: test-only dependency leaked into the default hpx graph" >&2
+    exit 1
+  fi
+  echo "OK: no test-only dependencies in the default hpx graph"
+
+# Diagnostic only: check each feature combination for hpx-streams.
+#
+# This is NOT a CI gate. Known pre-existing debt: `hpx --no-default-features`
+# has 18 compile errors, and `hpx-streams --features hotpath` alone trips
+# cargo::unused_dependencies because no codec feature is enabled to use it.
+# Do not weaken `build.warnings` to make this pass. `check-publish-features`
+# is the blocking gate for isolated per-crate builds.
+check-feature-matrix:
+  cargo hack check -p hpx-streams --each-feature --locked
+
+# Check that features propagate consistently across workspace crates
+check-feature-propagation:
+  zepter run check
 
 # Run the prek commit hooks on every tracked file (requires prek)
 hooks:
   prek run --all-files
 
-# Run tests
+# Run the fast test suite (nextest default filter)
 test:
   cargo nextest run --workspace --all-features
 
-# Run the full test suite
-test-full:
-  cargo nextest run --workspace --all-features
+# Run only the slow benchmark-style tests excluded by the default filter
+test-slow:
+  cargo nextest run --workspace --all-features --ignore-default-filter -E 'test(/memory_benchmark|reload_html_100_times_no_leak|create_and_drop_100_pages_no_leak/)'
 
-# Run the full test suite
-test-all: test-full
+# Doctests are skipped by nextest but are part of the contract
+doctest:
+  cargo test --workspace --all-features --doc
+
+# Full test suite: fast path, slow path, and doctests
+test-all: test test-slow doctest
 
 # Run the hpx tests against the rustls backend.
 #
@@ -255,6 +313,14 @@ check:
 build:
   cargo build --workspace
 
+# Optimized build with symbols, for profiling
+profiling:
+  RUSTFLAGS="-C target-cpu=native" cargo build --workspace --profile profiling
+
+# Maximum-performance build (fat LTO, one codegen unit)
+maxperf:
+  RUSTFLAGS="-C target-cpu=native" cargo build --workspace --profile maxperf
+
 # Verify all workspace crates package from their published layout
 publish-check:
   cargo package --workspace --allow-dirty
@@ -266,8 +332,8 @@ publish: check-publish-features
   VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
   echo "Publishing workspace crates v$VERSION..."
   echo ""
-  # Dependency order: hpx-yawc, hpx-h3 → hpx → {hpx-browser, hpx-dl, hpx-emulation, hpx-streams} → {hpxless, hpx-cli}
-  CRATES="hpx-yawc hpx-h3 hpx hpx-browser hpx-dl hpx-emulation hpx-streams hpxless hpx-cli"
+  # Dependency order: hpx-yawc, hpx-h3 → hpx → {hpx-browser, hpx-dl, hpx-emulation, hpx-streams, hpx-transport} → {hpxless, hpx-cli}
+  CRATES="hpx-yawc hpx-h3 hpx hpx-browser hpx-dl hpx-emulation hpx-streams hpx-transport hpxless hpx-cli"
   for crate in $CRATES; do
   	# Check if already published at this version
   	if cargo search "$crate" --limit 1 2>/dev/null | grep -q "^$crate = \"$VERSION\""; then
@@ -320,6 +386,8 @@ setup:
   cargo install cargo-fuzz
   cargo install cargo-audit
   cargo install cargo-outdated
+  cargo install cargo-hack
+  cargo install zepter
   cargo install rumdl
 
 # Generate documentation for the workspace

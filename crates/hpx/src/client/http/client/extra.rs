@@ -123,6 +123,18 @@ impl ConnectExtra {
     pub(crate) fn tcp_options(&self) -> Option<&TcpConnectOptions> {
         self.extra.as_ref().map(RequestOptions::tcp_connect_opts)
     }
+
+    /// Return the normalized URI this identity was built from.
+    #[inline]
+    pub(crate) fn uri(&self) -> &Uri {
+        &self.uri
+    }
+
+    /// Return the per-request connection options.
+    #[inline]
+    pub(crate) fn options(&self) -> Option<&RequestOptions> {
+        self.extra.as_ref()
+    }
 }
 
 #[cfg(test)]

@@ -19,22 +19,120 @@ pub(crate) fn fast_mask_bytes() -> [u8; 4] {
     rand::rng().random()
 }
 
+/// Payload length above which the optional vectorised XOR path is considered.
+///
+/// Criterion results on an Apple M1 Max (aarch64) show the word-aligned scalar
+/// path already matches the hand-written NEON path from 96 B to 16 KiB, so
+/// NEON only pays off for frames large enough to amortise the dispatch and
+/// tail cost. On x86_64 the AVX2 path processes 32 bytes per iteration and is
+/// worth trying much earlier.
+#[cfg(all(feature = "simd-mask", target_arch = "aarch64"))]
+const SIMD_THRESHOLD: usize = 64 * 1024;
+#[cfg(all(feature = "simd-mask", not(target_arch = "aarch64")))]
+const SIMD_THRESHOLD: usize = 64;
+
+/// AVX2 XOR masking, 32 bytes per iteration.
+///
+/// The 4-byte key is broadcast into every 32-bit lane. Because the mask cycle
+/// (period 4) divides the vector width (32), no rotation is needed between
+/// successive chunks or before the scalar tail.
+#[cfg(all(feature = "simd-mask", target_arch = "x86_64"))]
+#[target_feature(enable = "avx2")]
+unsafe fn apply_mask_avx2(buf: &mut [u8], mask: [u8; 4]) {
+    use std::arch::x86_64::{
+        __m256i, _mm256_loadu_si256, _mm256_set1_epi32, _mm256_storeu_si256, _mm256_xor_si256,
+    };
+
+    let vmask: __m256i = unsafe { _mm256_set1_epi32(i32::from_ne_bytes(mask)) };
+    let ptr = buf.as_mut_ptr();
+    let chunks = buf.len() / 32;
+    for index in 0..chunks {
+        let offset = index * 32;
+        // SAFETY: `offset + 32 <= buf.len()` because `chunks = buf.len() / 32`.
+        // Both intrinsics accept unaligned addresses, which matters because a
+        // frame payload starts after a 2/6/10/14-byte header.
+        let chunk = unsafe { _mm256_loadu_si256(ptr.add(offset).cast()) };
+        unsafe { _mm256_storeu_si256(ptr.add(offset).cast(), _mm256_xor_si256(chunk, vmask)) };
+    }
+    apply_mask_fallback(&mut buf[chunks * 32..], mask);
+}
+
+/// NEON XOR masking, 16 bytes per iteration.
+///
+/// NEON is part of the aarch64 baseline, so no runtime feature detection is
+/// needed. As with AVX2, the vector width is a multiple of the key period.
+#[cfg(all(feature = "simd-mask", target_arch = "aarch64"))]
+#[inline]
+fn apply_mask_neon(buf: &mut [u8], mask: [u8; 4]) {
+    use std::arch::aarch64::{vdupq_n_u32, veorq_u8, vld1q_u8, vreinterpretq_u8_u32, vst1q_u8};
+
+    // One `dup` builds [m0, m1, m2, m3, m0, ...] in a register. Building the
+    // same pattern through a 16-byte stack buffer dominated small frames.
+    // SAFETY: NEON is part of the aarch64 baseline, so the intrinsic is
+    // always available on this target.
+    let vmask = unsafe { vreinterpretq_u8_u32(vdupq_n_u32(u32::from_ne_bytes(mask))) };
+    let ptr = buf.as_mut_ptr();
+    let chunks = buf.len() / 16;
+    for index in 0..chunks {
+        let offset = index * 16;
+        // SAFETY: `offset + 16 <= buf.len()` because `chunks = buf.len() / 16`.
+        // The load/store are unaligned-safe.
+        let chunk = unsafe { vld1q_u8(ptr.add(offset)) };
+        unsafe { vst1q_u8(ptr.add(offset), veorq_u8(chunk, vmask)) };
+    }
+    apply_mask_fallback(&mut buf[chunks * 16..], mask);
+}
+
+/// Try the architecture's vectorised path, returning `false` when unavailable.
+#[cfg(all(feature = "simd-mask", target_arch = "x86_64"))]
+#[inline]
+fn try_apply_mask_simd(buf: &mut [u8], mask: [u8; 4]) -> bool {
+    if !std::is_x86_feature_detected!("avx2") {
+        return false;
+    }
+    // SAFETY: AVX2 availability was checked immediately above.
+    unsafe { apply_mask_avx2(buf, mask) };
+    true
+}
+
+/// Try the architecture's vectorised path, returning `false` when unavailable.
+#[cfg(all(feature = "simd-mask", target_arch = "aarch64"))]
+#[inline]
+fn try_apply_mask_simd(buf: &mut [u8], mask: [u8; 4]) -> bool {
+    apply_mask_neon(buf, mask);
+    true
+}
+
+/// Try the architecture's vectorised path, returning `false` when unavailable.
+#[cfg(all(
+    feature = "simd-mask",
+    not(any(target_arch = "x86_64", target_arch = "aarch64"))
+))]
+fn try_apply_mask_simd(_buf: &mut [u8], _mask: [u8; 4]) -> bool {
+    false
+}
+
 /// Mask/unmask a frame with optimal strategy selection.
 ///
 /// This function automatically selects the fastest masking implementation based on:
 /// - Buffer size
 /// - Architecture alignment
+/// - Whether the opt-in `simd-mask` feature is enabled
 #[inline]
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn apply_mask(buf: &mut [u8], mask: [u8; 4]) {
-    // Criterion benchmarks on the core codec path show the word-aligned scalar
-    // paths beat the hand-written NEON path on aarch64 and are consistently
-    // faster than routing large buffers through manual SIMD.
-    if buf.len() <= 128 {
-        apply_mask_fast64(buf, mask);
-    } else {
-        apply_mask_fast32(buf, mask);
+    #[cfg(feature = "simd-mask")]
+    {
+        if buf.len() >= SIMD_THRESHOLD && try_apply_mask_simd(buf, mask) {
+            return;
+        }
     }
+
+    // Criterion benchmarks on the core codec path (16 B – 64 KiB) show the
+    // word-aligned 64-bit path is faster than the 32-bit `align_to_mut` path at
+    // every measured size, including the 125/126-byte frames that dominate
+    // exchange traffic, so there is no size split.
+    apply_mask_fast64(buf, mask);
 }
 
 /// A safe unoptimized mask application.
@@ -78,7 +176,7 @@ pub fn apply_mask_fast32(buf: &mut [u8], mask: [u8; 4]) {
     apply_mask_fallback(suffix, mask_u32.to_ne_bytes());
 }
 
-/// Even faster version using 64-bit blocks for larger buffers.
+/// Default 64-bit implementation, used for every payload size.
 ///
 /// This implementation uses `read_unaligned`/`write_unaligned` instead of
 /// `align_to_mut::<u64>()` to avoid the runtime alignment-computation overhead
@@ -406,5 +504,83 @@ mod tests {
         let decoded = decoder.decode(&mut buf).unwrap().unwrap();
         assert_eq!(decoded.opcode(), OpCode::Text);
         assert_eq!(&decoded.into_payload()[..], b"hello fast mask");
+    }
+}
+
+#[cfg(all(test, feature = "simd-mask"))]
+mod simd_tests {
+    use super::*;
+
+    fn deterministic(len: usize) -> Vec<u8> {
+        (0..len)
+            .map(|index| index.wrapping_mul(31).wrapping_add(17) as u8)
+            .collect()
+    }
+
+    const MASKS: [[u8; 4]; 4] = [
+        [0x6d, 0xb6, 0xb2, 0x80],
+        [0x00, 0x00, 0x00, 0x00],
+        [0xff, 0xff, 0xff, 0xff],
+        [0x01, 0x02, 0x03, 0x04],
+    ];
+
+    #[test]
+    fn vector_path_matches_scalar_for_every_size_and_alignment() {
+        for len in 0..=320_usize {
+            let base = deterministic(len + 8);
+            for offset in 0..=7_usize {
+                for mask in MASKS {
+                    let mut expected = base.clone();
+                    apply_mask_fallback(&mut expected[offset..], mask);
+
+                    let mut actual = base.clone();
+                    if !try_apply_mask_simd(&mut actual[offset..], mask) {
+                        // x86_64 host without AVX2: the dispatcher must fall
+                        // back to scalar, which the other tests cover.
+                        continue;
+                    }
+                    assert_eq!(actual, expected, "len={len} offset={offset} mask={mask:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn vector_path_is_involutive() {
+        let mask = [0x12, 0x34, 0x56, 0x78];
+        for len in [64, 65, 96, 127, 128, 129, 1024, 65_536] {
+            let original = deterministic(len);
+            let mut data = original.clone();
+            if !try_apply_mask_simd(&mut data, mask) {
+                continue;
+            }
+            assert_ne!(data, original, "len={len}");
+            assert!(try_apply_mask_simd(&mut data, mask));
+            assert_eq!(data, original, "len={len}");
+        }
+    }
+
+    #[test]
+    fn dispatcher_matches_scalar_on_both_sides_of_the_threshold() {
+        for len in [
+            0, 1, 15, 63, 64, 65, 100, 128, 129, 256, 4096, 65_535, 65_536, 65_537,
+        ] {
+            let base = deterministic(len);
+            for mask in MASKS {
+                let mut expected = base.clone();
+                apply_mask_fallback(&mut expected, mask);
+
+                let mut actual = base.clone();
+                apply_mask(&mut actual, mask);
+                assert_eq!(actual, expected, "len={len} mask={mask:?}");
+            }
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn neon_path_is_selected_on_aarch64() {
+        let mut buf = deterministic(64);
+        assert!(try_apply_mask_simd(&mut buf, MASKS[0]));
     }
 }

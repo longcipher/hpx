@@ -5,14 +5,11 @@ use std::{
 };
 
 use pin_project_lite::pin_project;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 #[cfg(unix)]
 use tokio::net::UnixStream;
-use tokio::{
-    io::{AsyncRead, AsyncWrite, ReadBuf},
-    net::TcpStream,
-};
 
-use super::{AsyncConnWithInfo, Connected, Connection, TlsInfoFactory};
+use super::{AsyncConnWithInfo, Connected, Connection, TlsInfoFactory, tcp_tuning::QuickAckStream};
 use crate::{
     proxy::matcher::Intercept,
     tls::{
@@ -127,9 +124,9 @@ where
     }
 }
 
-// ===== impl TcpStream =====
+// ===== impl QuickAckStream =====
 
-impl Connection for TlsConn<TcpStream> {
+impl Connection for TlsConn<QuickAckStream> {
     fn connected(&self) -> Connected {
         #[cfg(feature = "boring-tls")]
         {
@@ -170,7 +167,7 @@ impl Connection for TlsConn<TcpStream> {
     }
 }
 
-impl Connection for TlsConn<MaybeHttpsStream<TcpStream>> {
+impl Connection for TlsConn<MaybeHttpsStream<QuickAckStream>> {
     fn connected(&self) -> Connected {
         #[cfg(feature = "boring-tls")]
         {

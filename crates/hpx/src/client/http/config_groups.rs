@@ -3,7 +3,7 @@ use std::{num::NonZeroU32, time::Duration};
 use crate::{
     Proxy,
     client::{
-        conn::TcpConnectOptions,
+        conn::{TcpConnectOptions, TcpTuning},
         layer::{recovery::Recoveries, timeout::TimeoutOptions},
     },
     redirect, retry,
@@ -46,6 +46,7 @@ pub struct TransportConfigOptions {
     pub(crate) tcp_recv_buffer_size: Option<usize>,
     pub(crate) tcp_happy_eyeballs_timeout: Option<Duration>,
     pub(crate) tcp_connect_options: TcpConnectOptions,
+    pub(crate) tcp_low_latency: TcpTuning,
 }
 
 impl Default for TransportConfigOptions {
@@ -64,6 +65,7 @@ impl Default for TransportConfigOptions {
             tcp_recv_buffer_size: None,
             tcp_happy_eyeballs_timeout: Some(Duration::from_millis(300)),
             tcp_connect_options: TcpConnectOptions::default(),
+            tcp_low_latency: TcpTuning::default(),
         }
     }
 }
@@ -92,6 +94,16 @@ impl TransportConfigOptions {
     /// Set whether sockets use `TCP_NODELAY`.
     pub const fn tcp_nodelay(mut self, enabled: bool) -> Self {
         self.tcp_nodelay = enabled;
+        self
+    }
+
+    /// Set Linux low-latency socket options (`SO_BUSY_POLL`,
+    /// `SO_INCOMING_CPU`, `SO_PRIORITY`, `TCP_QUICKACK`).
+    ///
+    /// Options are validated on connect; on non-Linux targets this is a
+    /// validated no-op so the same configuration stays portable.
+    pub const fn tcp_low_latency(mut self, tuning: TcpTuning) -> Self {
+        self.tcp_low_latency = tuning;
         self
     }
 
@@ -184,6 +196,7 @@ pub struct PoolConfigOptions {
     pub(crate) idle_timeout: Option<Duration>,
     pub(crate) max_idle_per_host: usize,
     pub(crate) max_size: Option<NonZeroU32>,
+    pub(crate) stale_after: Option<Duration>,
 }
 
 impl Default for PoolConfigOptions {
@@ -192,6 +205,7 @@ impl Default for PoolConfigOptions {
             idle_timeout: Some(Duration::from_secs(90)),
             max_idle_per_host: usize::MAX,
             max_size: None,
+            stale_after: None,
         }
     }
 }
@@ -208,6 +222,17 @@ impl PoolConfigOptions {
         D: Into<Option<Duration>>,
     {
         self.idle_timeout = value.into();
+        self
+    }
+
+    /// Set the maximum age of a reusable idle connection.
+    ///
+    /// `None` keeps the legacy `idle_timeout`-only behaviour.
+    pub fn stale_after<D>(mut self, value: D) -> Self
+    where
+        D: Into<Option<Duration>>,
+    {
+        self.stale_after = value.into();
         self
     }
 

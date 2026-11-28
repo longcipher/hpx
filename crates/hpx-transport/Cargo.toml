@@ -1,0 +1,31 @@
+[package]
+name = "hpx-transport"
+version.workspace = true
+description = "Exchange transport governance: multi-dimensional quotas, dynamic auth, order-book resync"
+documentation = "https://docs.rs/hpx-transport"
+keywords = ["trading", "rate-limit", "orderbook", "websocket"]
+categories = ["network-programming", "asynchronous"]
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+include = ["Cargo.toml", "src/**/*.rs", "README.md", "LICENSE"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = ["rate-limit", "auth", "book"]
+# Multi-dimensional quota pools with response-header calibration.
+rate-limit = []
+# Per-message dynamic authentication hooks (short-lived JWTs, HMAC).
+auth = []
+# Snapshot + buffered-delta order-book alignment state machine.
+book = []
+# All capabilities.
+full = ["rate-limit", "auth", "book"]
+
+[lints]
+workspace = true

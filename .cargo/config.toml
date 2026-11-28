@@ -4,7 +4,8 @@
 # contains the system stable rustc).
 # rustc = "$HOME/.cargo/bin/rustc"
 
-# Disable global kache wrapper which bypasses rustup proxy and breaks nightly.
+# Use the local kache wrapper for normal builds. Clippy clears RUSTC_WRAPPER
+# because kache bypasses the rustup proxy and breaks the pinned nightly.
 rustc-wrapper = "kache"
 
 # Enable Polonius next-generation borrow checker for all crates.

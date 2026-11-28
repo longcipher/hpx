@@ -82,3 +82,6 @@ pub use self::emulation::{Emulation, EmulationOS, EmulationOption};
 /// fingerprints, along with utilities for header composition, fingerprint
 /// diffing, and named TLS presets.
 pub mod fingerprint;
+
+/// Local wire-fingerprint self-check for regression-testing emulation profiles.
+pub mod verify;

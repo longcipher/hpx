@@ -12,8 +12,9 @@ This crate is part of the [hpx](https://github.com/longcipher/hpx) project. It i
 
 - Full RFC 6455 compliance — passes the Autobahn test suite
 - Permessage-deflate compression (RFC 7692) with configurable window bits
-- SIMD-accelerated frame masking (NEON on ARM, AVX2 on x86)
-- Optional SIMD-accelerated UTF-8 validation
+- Word-aligned scalar frame masking (the default; fastest path on aarch64 and for small frames)
+- Optional `simd-mask` feature: AVX2 on x86_64 (runtime-detected, ≥ 64 B) and NEON on aarch64 for large payloads (≥ 64 KiB; the scalar path is faster below that)
+- SIMD-accelerated UTF-8 validation (non-optional on native targets)
 - WASM target support
 - Axum WebSocket extractor integration
 - Multiple TLS backends (ring, aws-lc-rs)
@@ -84,7 +85,7 @@ hpx-yawc automatically handles WebSocket control frames:
 | `rustls-ring` | **Yes** | TLS via rustls with ring crypto backend |
 | `rustls-aws-lc-rs` | No | TLS via rustls with AWS LC crypto backend |
 | `axum` | No | Axum WebSocket extractor integration |
-| `simd` | No | SIMD-accelerated UTF-8 validation |
+| `simd-mask` | No | AVX2 (x86_64, ≥ 64 B) / NEON (aarch64, ≥ 64 KiB) XOR frame masking |
 | `smol` | No | smol async runtime support |
 | `zlib` | No | zlib compression backend (enables window bits configuration) |
 
@@ -98,4 +99,5 @@ hpx-yawc is built on tokio's I/O traits but can work with other async runtimes t
 
 ## License
 
-Apache-2.0
+MPL-2.0, inherited from the upstream [yawc](https://github.com/infinitefield/yawc)
+fork. The rest of the hpx workspace is Apache-2.0.

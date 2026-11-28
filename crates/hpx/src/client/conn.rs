@@ -3,6 +3,7 @@ mod conn;
 mod connector;
 mod http;
 mod proxy;
+pub(crate) mod tcp_tuning;
 mod tls_info;
 #[cfg(unix)]
 mod uds;
@@ -51,6 +52,7 @@ pub(crate) use self::{
     connector::Connector,
     http::{HttpInfo, TcpConnectOptions},
     proxy::tunnel,
+    tcp_tuning::TcpTuning,
     tls_info::TlsInfoFactory,
 };
 use crate::{client::http::ConnectRequest, dns::DynResolver, proxy::matcher::Intercept};

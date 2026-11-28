@@ -153,6 +153,37 @@ pub struct TlsOptions {
     /// **Default:** `None`
     pub sigalgs_list: Option<Cow<'static, str>>,
 
+    /// Raw TLS `SignatureScheme` codepoints for the ClientHello
+    /// `signature_algorithms` extension.
+    ///
+    /// OpenSSL's named `sigalgs_list` cannot express post-quantum or GREASE
+    /// codepoints. When set, these values are passed to BoringSSL's
+    /// `SSL_CTX_set_verify_algorithm_prefs`, which accepts arbitrary `u16`
+    /// codepoints (for example `0x0904`–`0x0906` for ML-DSA and `0x0a0a` for
+    /// GREASE). The list **replaces** the named list, so it must contain the
+    /// full desired ordering, not just the additions.
+    ///
+    /// **Default:** `None`
+    #[cfg(feature = "boring-tls")]
+    pub verify_algorithm_prefs: Option<Cow<'static, [u16]>>,
+
+    /// Chromium's `trust_anchors` ClientHello extension (codepoint `0xCA34`).
+    ///
+    /// The value is a BoringSSL-encoded list of length-prefixed ASN.1 relative
+    /// OIDs (draft-ietf-tls-trust-anchor-ids). Chrome 152 sends an **empty**
+    /// list by default; supplying `Some(&[])`
+    /// reproduces that exact wire shape. `None` omits the extension, which
+    /// remains the behaviour of older profiles and of every non-Chromium
+    /// browser.
+    ///
+    /// Only has an effect with the BoringSSL backend: BoringSSL exposes
+    /// `SSL_CTX_set1_requested_trust_anchors`, while rustls and OpenSSL have
+    /// no equivalent API.
+    ///
+    /// **Default:** `None`
+    #[cfg(feature = "boring-tls")]
+    pub requested_trust_anchors: Option<Cow<'static, [u8]>>,
+
     /// Supported certificate compression algorithms ([RFC 8879](https://datatracker.ietf.org/doc/html/rfc8879)).
     ///
     /// **Default:** `None`
@@ -204,6 +235,10 @@ impl Hash for TlsOptions {
         self.curves_list.hash(state);
         self.cipher_list.hash(state);
         self.sigalgs_list.hash(state);
+        #[cfg(feature = "boring-tls")]
+        self.verify_algorithm_prefs.hash(state);
+        #[cfg(feature = "boring-tls")]
+        self.requested_trust_anchors.hash(state);
         // certificate_compression_algorithms and extension_permutation do not implement Hash
         // We skip them for hashing, relying on PartialEq for collision resolution.
         self.aes_hw_override.hash(state);
@@ -392,6 +427,33 @@ impl TlsOptionsBuilder {
         self
     }
 
+    /// Sets raw `SignatureScheme` codepoints for the ClientHello.
+    ///
+    /// See [`TlsOptions::verify_algorithm_prefs`]. The list replaces the named
+    /// `sigalgs_list` entirely.
+    #[cfg(feature = "boring-tls")]
+    #[inline]
+    pub fn verify_algorithm_prefs<T>(mut self, prefs: T) -> Self
+    where
+        T: Into<Cow<'static, [u16]>>,
+    {
+        self.config.verify_algorithm_prefs = Some(prefs.into());
+        self
+    }
+
+    /// Sets Chromium's `trust_anchors` ClientHello extension.
+    ///
+    /// Pass an empty slice (`&[]`) to reproduce Chrome 152's empty extension.
+    #[cfg(feature = "boring-tls")]
+    #[inline]
+    pub fn requested_trust_anchors<T>(mut self, ids: T) -> Self
+    where
+        T: Into<Cow<'static, [u8]>>,
+    {
+        self.config.requested_trust_anchors = Some(ids.into());
+        self
+    }
+
     /// Sets the certificate compression algorithms.
     #[inline]
     #[cfg(feature = "boring-tls")]
@@ -468,6 +530,52 @@ impl TlsOptions {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_has_no_raw_signature_prefs() {
+        let defaults = TlsOptions::default();
+        assert_eq!(defaults.sigalgs_list, None);
+        #[cfg(feature = "boring-tls")]
+        assert_eq!(defaults.verify_algorithm_prefs, None);
+    }
+
+    #[cfg(feature = "boring-tls")]
+    #[test]
+    fn raw_signature_prefs_survive_builder_and_hashing() {
+        use std::collections::hash_map::DefaultHasher;
+
+        const PREFS: &[u16] = &[0x0a0a, 0x0403, 0x0904, 0x0905, 0x0906];
+        let opts = TlsOptions::builder().verify_algorithm_prefs(PREFS).build();
+        assert_eq!(opts.verify_algorithm_prefs.as_deref(), Some(PREFS));
+        assert_ne!(
+            opts.verify_algorithm_prefs,
+            TlsOptions::default().verify_algorithm_prefs
+        );
+
+        let mut hasher = DefaultHasher::new();
+        opts.hash(&mut hasher);
+        let with_prefs = hasher.finish();
+        let mut hasher = DefaultHasher::new();
+        TlsOptions::default().hash(&mut hasher);
+        assert_ne!(with_prefs, hasher.finish());
+    }
+
+    #[cfg(feature = "boring-tls")]
+    #[test]
+    fn raw_signature_prefs_accept_owned_vectors() {
+        let opts = TlsOptions::builder()
+            .verify_algorithm_prefs(vec![0x0904_u16, 0x0905])
+            .build();
+        assert_eq!(
+            opts.verify_algorithm_prefs.as_deref(),
+            Some(&[0x0904, 0x0905][..])
+        );
+    }
+}
+
 impl Default for TlsOptions {
     fn default() -> Self {
         Self {
@@ -492,6 +600,10 @@ impl Default for TlsOptions {
             curves_list: None,
             cipher_list: None,
             sigalgs_list: None,
+            #[cfg(feature = "boring-tls")]
+            verify_algorithm_prefs: None,
+            #[cfg(feature = "boring-tls")]
+            requested_trust_anchors: None,
             #[cfg(feature = "boring-tls")]
             certificate_compression_algorithms: None,
             #[cfg(feature = "boring-tls")]

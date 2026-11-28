@@ -10,7 +10,7 @@
 
 ## Scope
 
-- `crates/hpx` is the core HTTP client; `crates/hpx-browser` the headless browser engine; `crates/hpx-dl` the segmented download engine; `crates/hpx-emulation` the browser fingerprint profiles; `crates/hpx-h3` a vendored `hyperium/h3` fork; `crates/hpx-streams` the response-stream codecs; `crates/yawc` (package `hpx-yawc`) the WebSocket client/server.
+- `crates/hpx` is the core HTTP client; `crates/hpx-browser` the headless browser engine; `crates/hpx-dl` the segmented download engine; `crates/hpx-emulation` the browser fingerprint profiles; `crates/hpx-h3` a vendored `hyperium/h3` fork; `crates/hpx-streams` the response-stream codecs; `crates/hpx-transport` the exchange transport governance layer (quota pools, dynamic auth, order-book resync); `crates/yawc` (package `hpx-yawc`) the WebSocket client/server.
 - `bin/hpx-cli` is the CLI; `bin/hpxless` is the standalone CDP-compatible browser server.
 - `crates/yawc/yawcc` is its own workspace root and is not part of this workspace.
 - The `fuzz` directories under `crates/*/fuzz` are excluded from the workspace on purpose: they pin their own graph, need nightly, and use `libfuzzer-sys`.
@@ -32,9 +32,11 @@ After each feature or bug fix, in order; any failure means the task is not done:
 just format
 just lint
 just test
-just test-all
 just test-rustls
+just doctest
 ```
+
+`just test-all` is the CI aggregator: fast nextest run, slow-test run, and doctests.
 
 Commit hooks run the fast subset (`just hooks`): fmt check, cargo sort,
 clippy, rumdl, file hygiene, Kingfisher secret scanning. Never add `cargo
@@ -49,7 +51,7 @@ temp file and run `cargo mutants --in-diff <diff-file>` for that file only, with
 60 mutants / 300 s. Never add a whole-repo mutation recipe: `just check-mutation-scope` fails
 `just lint` when an unbounded mutation command appears in a build or CI file.
 
-`just test` runs `cargo nextest`, which skips doctests. Doctests are part of the contract: run `cargo test --workspace --all-features --doc` as well.
+`just test` runs `cargo nextest` with the default filter, which skips doctests and the three slow benchmark-style tests. `just doctest` runs `cargo test --workspace --all-features --doc`; `just test-slow` runs the excluded tests. All three run in `just test-all`.
 
 `--all-features` enables `boring-tls`, which compiles the rustls backend (`tls/rustls.rs`) out; `just test-rustls` is the only gate that runs it.
 
@@ -68,7 +70,10 @@ temp file and run `cargo mutants --in-diff <diff-file>` for that file only, with
 - Building the browser stack needs the native packages `libfreetype-dev` and `libfontconfig1-dev`.
 - Workspace MSRV is Rust 1.100. Prefer newly stabilized features and APIs over older workarounds; do not add feature gates for anything already stable in 1.100.
 - `[workspace.lints.cargo]` enables Cargo's native `unused_dependencies` lint, the only unused-dependency check; do not reintroduce a third-party checker. Its level is `warn`, and `.cargo/config.toml` sets `build.warnings = "deny"` so a finding fails the gate.
-- `.cargo/config.toml` sets resolver `incompatible-rust-versions = "fallback"` (MSRV-aligned resolution) and `registry.global-min-publish-age = "2 days"` (Rust 1.100 dependency cooldown); keep both.
+- `.cargo/config.toml` sets resolver `incompatible-rust-versions = "fallback"` (MSRV-aligned resolution) and `registry.global-min-publish-age = "2 days"` (Rust 1.100 dependency cooldown); keep both. `just check-config-docs` asserts these keys are active rather than commented out.
+- `just no-test-deps` keeps `proptest`, `arbitrary` and `test-fuzz` out of the default dependency graph of the `hpx` crate.
+- `just check-feature-matrix` (`cargo hack --each-feature`) is a diagnostic, not a gate: `hpx --no-default-features` and `hpx-streams --features hotpath` still have pre-existing feature debt. `just check-feature-propagation` (`zepter`) is a blocking CI gate for feature forwarding between workspace crates. `just check-publish-features` still reproduces `cargo publish --verify` exactly.
+- CI has an explicit MSRV 1.100 job that clears `RUSTFLAGS` (the default `-Zpolonius=next` is nightly-only) and the compiler wrapper.
 
 ## Dependency choices
 
@@ -89,6 +94,24 @@ temp file and run `cargo mutants --in-diff <diff-file>` for that file only, with
 - `--all-features` builds must stay green on macOS: BoringSSL FIPS is intentionally disabled because its `objcopy` step needs GNU `objcopy`.
 - `hpx-h3` is a vendored fork: keep changes minimal and upstream-shaped, and never enable mutation testing on it.
 - Fuzz targets are per crate under `crates/<crate>/fuzz`; build them with `just fuzz-build` and gate them with `just fuzz-smoke`. A crash is a finding, not a flake.
-- Publishing order is dependency order: `hpx-yawc`, `hpx-h3`, `hpx`, `hpx-browser`, `hpx-dl`, `hpx-emulation`, `hpx-streams`, `hpxless`, `hpx-cli`. Use `just publish`.
+- Publishing order is dependency order: `hpx-yawc`, `hpx-h3`, `hpx`, `hpx-browser`, `hpx-dl`, `hpx-emulation`, `hpx-streams`, `hpx-transport`, `hpxless`, `hpx-cli`. Use `just publish`.
 - Always keep `check-publish-features` as a dependency of both `just ci` and `just publish` when touching features or publishing: `cargo check --workspace --all-features` unifies workspace features, so only an isolated `cargo check -p <crate>` per publishable crate reproduces the feature set that `cargo publish --verify` compiles.
 - Always strip the brackets from an IPv6 literal before using it as a TLS server name, a DNS query or a SOCKS address, and add them back (only if missing) when building `host:port` authorities or dial targets: `http::Uri::host` and `Url::host_str` both keep the brackets, so `ServerName::try_from(uri.host())` fails for `[::1]`.
+
+## Performance
+
+- Do not clone large values to read them. Borrow, `take`, or share through `Arc`; getters return references.
+- Cap any length derived from untrusted input before `Vec::with_capacity` or a loop. This applies to protocol parsers (`h1`, `h2`, `h3`), CDP messages, and PAC scripts.
+- Do not read the same state or socket value twice; build optional data lazily when only some paths need it.
+- Prefer `const fn` and `#[inline]` for tiny accessors on hot paths. Every `unsafe` block carries a `// SAFETY:` comment stating the invariant.
+- Never commit `#[ignore]` manual performance tests. Write a bench and report measured results; benchmark baselines are only meaningful with the pinned toolchain.
+- Do not add a wrapper, trait, enum, or type alias with a single use. The exception is a type alias that replaces `#[allow(clippy::type_complexity)]`.
+- Use combined `if let` chains instead of nesting, and `let Some(x) = x else { return };` for early exits.
+- Put doc comments before attributes (`///` before `#[derive]`); keep imports at module scope, and use `use super::*;` in test modules.
+- Assert exact errors and messages (snapbox-style) rather than `.contains(...)`.
+
+## Agent rule layout
+
+- This file is the single source of truth for the workspace. Reviewer-enforced style rules live in `.agents/skills/hpx-rust-style/SKILL.md`; load it before writing, refactoring, or reviewing Rust.
+- `crates/hpx-browser/AGENTS.md` governs the browser engine, and `crates/hpx-h3/AGENTS.md` governs the vendored H3 fork. Read the nested file before changing that directory; the nested file may only add rules, never contradict this one.
+- `just check-agents-md` verifies that every workspace crate is documented here and that all referenced rule files exist.

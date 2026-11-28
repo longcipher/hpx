@@ -19,6 +19,8 @@
 //! - `csv`: CSV stream format
 //! - `protobuf`: [Protobuf] len-prefixed stream format
 //! - `arrow`: [Apache Arrow IPC] stream format
+//! - `borrowed-json`: zero-copy, on-demand JSON frame views via the `simd-json` tape
+//! - `sbe`: zero-copy FIX Simple Binary Encoding envelopes and schema negotiation
 //!
 //! # Example
 //!
@@ -127,6 +129,27 @@ pub use arrow_ipc_stream::ArrowIpcStreamResponse;
 mod arrow_ipc_len_codec;
 #[cfg(feature = "arrow")]
 mod arrow_ipc_stream;
+
+/// FIX SBE streaming codec and schema negotiation helpers.
+#[cfg(feature = "sbe")]
+#[cfg_attr(docsrs, doc(cfg(feature = "sbe")))]
+pub mod sbe_stream;
+
+#[cfg(feature = "sbe")]
+#[cfg_attr(docsrs, doc(cfg(feature = "sbe")))]
+pub use sbe_stream::{
+    SBE_HEADER_LEN, SBE_LENGTH_PREFIX_LEN, SbeCodec, SbeMessage, SbeRequest, SbeSchema,
+    SbeStreamResponse, should_fallback,
+};
+
+/// Zero-copy, on-demand JSON frame views.
+#[cfg(feature = "borrowed-json")]
+#[cfg_attr(docsrs, doc(cfg(feature = "borrowed-json")))]
+pub mod borrowed_json;
+
+#[cfg(feature = "borrowed-json")]
+#[cfg_attr(docsrs, doc(cfg(feature = "borrowed-json")))]
+pub use borrowed_json::{BorrowedJsonFrame, PathSegment};
 
 /// Error types for streaming responses.
 pub mod error;

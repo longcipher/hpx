@@ -54,9 +54,9 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.8.14"
+version = "0.8.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54dae3d1d7b8956f3506c4e999a74e77f932a59153ccf38ab8cf96db74bb9dc0"
+checksum = "3019c0b8d883a8a17df3129e417ef463c087807d245e8881a31d583dee1c0519"
 dependencies = [
  "cfg-if",
  "const-random",
@@ -264,9 +264,9 @@ checksum = "76a2e8124351fda1ef8aaaa3bbd7ebbcb486bbcd4225aca0aa0d84bb2db8fecb"
 
 [[package]]
 name = "arrayvec"
-version = "0.7.8"
+version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
+checksum = "47a64a0fd06e123e9e3cf3ad01432af17dcab8185e8023edcf184fe696f9675d"
 
 [[package]]
 name = "arrow"
@@ -1321,9 +1321,9 @@ dependencies = [
 
 [[package]]
 name = "boring"
-version = "5.6.0"
+version = "5.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78768ebbcd8b284d61c52e2058a4de72e61015aa2b41da2489b29a5211c7a2d5"
+checksum = "093fe0c9f8d2f593cca339fe6cc5a86121bfad806c6430c0d07293f46af00141"
 dependencies = [
  "bitflags 2.13.2",
  "boring-sys",
@@ -1334,9 +1334,9 @@ dependencies = [
 
 [[package]]
 name = "boring-sys"
-version = "5.6.0"
+version = "5.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30c5445059ff90c02d95d05345f2b5f13c135150eb8ac6432ea182d47420799e"
+checksum = "c3be6e18ffdb4eb2bed4ecafb8cea7bdce3eae02350814035ba62c560ddb959f"
 dependencies = [
  "bindgen 0.72.1",
  "cmake",
@@ -3421,6 +3421,7 @@ dependencies = [
  "base64-simd",
  "boa_engine",
  "boring",
+ "boring-sys",
  "brotli",
  "bytes",
  "codspeed-criterion-compat",
@@ -3436,6 +3437,7 @@ dependencies = [
  "hickory-resolver",
  "hmac",
  "hotpath",
+ "hpx-emulation",
  "hpx-h3",
  "hpx-yawc",
  "http",
@@ -3623,6 +3625,7 @@ dependencies = [
  "rand 0.10.4",
  "serde",
  "serde_json",
+ "sha2",
  "strum 0.28.0",
  "strum_macros 0.28.0",
  "tokio",
@@ -3669,6 +3672,10 @@ dependencies = [
  "tokio-util",
  "tracing-subscriber",
 ]
+
+[[package]]
+name = "hpx-transport"
+version = "2.6.1"
 
 [[package]]
 name = "hpx-yawc"

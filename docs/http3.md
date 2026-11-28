@@ -249,10 +249,12 @@ This means the `http3` feature pulls in `rustls` and `quinn` as additional depen
 
 ## Known Limitations
 
-- **No Alt-Svc discovery**: The client does not automatically discover HTTP/3 support via the `Alt-Svc` response header (RFC 7838). You must use `http3_only()` or `http3_prior_knowledge()` to force HTTP/3. Alt-Svc-based upgrade is planned for Phase 2.
-- **No WebSocket over HTTP/3**: Extended CONNECT (RFC 9220) for WebSocket-over-h3 is not yet supported. The `enable_connect_protocol` field exists on `Http3Options` but is not wired.
-- **No 0-RTT resumption**: Although `enable_0rtt` is `true` by default in `Http3Options`, the 0-RTT handshake path is not yet fully validated end-to-end.
 - **No connection migration**: QUIC connection migration (RFC 9000 §9) is not supported. If the client's network path changes, the connection will fail.
+- **QUIC transport parameters**: `Http3Options` and `QuicConfig` expose HTTP/3 SETTINGS ordering, GREASE settings and a `quinn::TransportConfig` escape hatch. The QUIC ClientHello transport parameters, the initial packet number and the DCID are still chosen by `quinn` and are not byte-for-byte matched to a browser profile.
+- **0-RTT**: `QuicConnector` calls `into_0rtt()`, tracks `used_0rtt` and surfaces `H3Error::ZeroRttRejected`. Replay safety for non-idempotent requests remains the caller's responsibility.
+- **HTTP/1.1 Alt-Svc**: `AltSvcCache` and `prefer_http3()` implement h2-to-h3 discovery; opportunistic upgrade from an h1-only connection is not wired.
+
+Alt-Svc discovery, WebSocket over HTTP/3 (RFC 9220, `H3WebSocket`) and Extended CONNECT are implemented. The vendored `hpx-h3` fork defines WebTransport stream identifiers, but no WebTransport session-establishment API is exposed yet. Earlier revisions of this document listed these as missing.
 
 ## References
 

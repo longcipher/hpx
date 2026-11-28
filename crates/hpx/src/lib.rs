@@ -224,7 +224,7 @@
 //! [`RequestBuilder::no_proxy()`].
 //!
 //! With the `pac` feature a Proxy Auto-Config script can be used instead;
-//! see [`Proxy::pac()`].
+//! see `Proxy::pac()` (only available when that feature is enabled).
 //!
 //! `socks` feature is required if you have configured socks proxy like this:
 //!
@@ -489,6 +489,9 @@ pub use self::{
     proxy::{IntoProxy, NoProxy, Proxy, ProxyAuthMethod},
     proxy_pool::{ProxyPool, ProxyPoolBuilder, ProxyPoolStrategy},
 };
+#[cfg(unix)]
+pub use crate::client::conn::tcp_tuning::{QuickAckRead, tcp_quickack};
+pub use crate::client::conn::tcp_tuning::{QuickAckStream, TcpTuning, TcpTuningError};
 pub mod tower_compat {
     //! Tower-native compatibility for composing hpx with the broader tower ecosystem.
     //!

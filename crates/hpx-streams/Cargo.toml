@@ -16,12 +16,22 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-arrow = ["dep:arrow", "dep:bytes", "dep:tokio-util"]
-csv = ["dep:csv", "dep:serde", "dep:tokio-util"]
+arrow = ["dep:arrow", "dep:bytes", "dep:tokio-util", "dep:hpx", "hpx/stream"]
+# Enable zero-copy, on-demand JSON frame access via the simd-json tape.
+# Deliberately independent from `simd-json` so callers that only need a
+# borrowed view do not pull in the full streaming codec stack.
+# Not part of the `hft`/`stealth` presets: those are `hpx` crate presets and
+# `hpx` does not depend on `hpx-streams`, so this is enabled per consumer.
+borrowed-json = ["dep:simd-json"]
+csv = ["dep:csv", "dep:serde", "dep:bytes", "dep:tokio-util", "dep:hpx", "hpx/stream"]
 default = []
 hotpath = ["dep:hotpath"]
-json = ["dep:serde", "dep:serde_json", "dep:hpx", "hpx/json", "dep:tokio-util"]
-protobuf = ["dep:prost", "dep:bytes", "dep:tokio-util"]
+json = ["dep:serde", "dep:serde_json", "dep:bytes", "dep:hpx", "hpx/json", "hpx/stream", "dep:tokio-util"]
+protobuf = ["dep:prost", "dep:bytes", "dep:tokio-util", "dep:hpx", "hpx/stream"]
+# Enable zero-copy FIX SBE streaming (length-prefixed envelopes).
+# Not part of `hft`/`stealth`: those are `hpx` presets and `hpx` does not
+# depend on `hpx-streams`; this is enabled per consumer.
+sbe = ["dep:bytes", "dep:hpx", "hpx/stream", "dep:tokio-util"]
 # Enable SIMD-accelerated JSON parsing (requires json feature).
 simd-json = ["json", "dep:simd-json"]
 

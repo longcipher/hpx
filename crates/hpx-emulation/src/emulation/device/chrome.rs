@@ -2072,3 +2072,105 @@ mod_generator!(
         )
     ]
 );
+
+mod_generator!(
+    v150,
+    tls_options!(8, CHROME_150_SIGALGS),
+    http2_options!(3),
+    header_initializer_with_zstd_priority,
+    [
+        (
+            MacOS,
+            r#""Chromium";v="150", "Google Chrome";v="150", "Not_A Brand";v="99""#,
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+        ),
+        (
+            Linux,
+            r#""Chromium";v="150", "Google Chrome";v="150", "Not_A Brand";v="99""#,
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+        ),
+        (
+            Android,
+            r#""Chromium";v="150", "Google Chrome";v="150", "Not_A Brand";v="99""#,
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Mobile Safari/537.36"
+        ),
+        (
+            Windows,
+            r#""Chromium";v="150", "Google Chrome";v="150", "Not_A Brand";v="99""#,
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+        ),
+        (
+            IOS,
+            r#""Chromium";v="150", "Google Chrome";v="150", "Not_A Brand";v="99""#,
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/150.0.0.0 Mobile/15E148 Safari/604.1"
+        )
+    ]
+);
+
+mod_generator!(
+    v151,
+    tls_options!(8, CHROME_150_SIGALGS),
+    http2_options!(3),
+    header_initializer_with_zstd_priority,
+    [
+        (
+            MacOS,
+            r#""Chromium";v="151", "Google Chrome";v="151", "Not_A Brand";v="99""#,
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+        ),
+        (
+            Linux,
+            r#""Chromium";v="151", "Google Chrome";v="151", "Not_A Brand";v="99""#,
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+        ),
+        (
+            Android,
+            r#""Chromium";v="151", "Google Chrome";v="151", "Not_A Brand";v="99""#,
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36"
+        ),
+        (
+            Windows,
+            r#""Chromium";v="151", "Google Chrome";v="151", "Not_A Brand";v="99""#,
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+        ),
+        (
+            IOS,
+            r#""Chromium";v="151", "Google Chrome";v="151", "Not_A Brand";v="99""#,
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/151.0.0.0 Mobile/15E148 Safari/604.1"
+        )
+    ]
+);
+
+mod_generator!(
+    v152,
+    tls_options!(9, CHROME_152_SIGALGS),
+    http2_options!(3),
+    header_initializer_with_zstd_priority,
+    [
+        (
+            MacOS,
+            r#""Chromium";v="152", "Google Chrome";v="152", "Not_A Brand";v="99""#,
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
+        ),
+        (
+            Linux,
+            r#""Chromium";v="152", "Google Chrome";v="152", "Not_A Brand";v="99""#,
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
+        ),
+        (
+            Android,
+            r#""Chromium";v="152", "Google Chrome";v="152", "Not_A Brand";v="99""#,
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Mobile Safari/537.36"
+        ),
+        (
+            Windows,
+            r#""Chromium";v="152", "Google Chrome";v="152", "Not_A Brand";v="99""#,
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
+        ),
+        (
+            IOS,
+            r#""Chromium";v="152", "Google Chrome";v="152", "Not_A Brand";v="99""#,
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/152.0.0.0 Mobile/15E148 Safari/604.1"
+        )
+    ]
+);

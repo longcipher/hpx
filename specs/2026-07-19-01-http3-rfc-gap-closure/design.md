@@ -10,6 +10,16 @@
 | **Supersedes** | `docs/tasks.md` Phase 1 Task 1 (sub-tasks 1.1–1.5); `docs/adr/0001-http3-over-rustls-quinn.md` records the TLS backend decision referenced there. |
 | **Reference repo** | `/Volumes/akext/tmp/reqwest` (reqwest 0.13.4) — comparison baseline only; no code is copied. |
 
+> **Historical note**: this draft describes a planned two-backend WebSocket layout
+> (`fastwebsockets` + `yawc`) and a transport actor inside `hpx-transport`. Neither
+> shipped in that shape. The shipped HTTP/3 and RFC 9220 implementation uses only the
+> vendored `hpx-h3` fork and `hpx-yawc`. The old multi-transport `hpx-transport` crate
+> was removed; the current `hpx-transport` crate is a separate, dependency-free
+> governance layer (quota pools, dynamic auth, order-book resync — see its README).
+> Path references to `crates/fastwebsockets/`, `backend_fastwebsockets.rs`,
+> `hpx-util` and the old `hpx-transport` actor below are obsolete; see `README.md`
+> for the current layout.
+
 ## Summary
 
 hpx already ships a mature HTTP/2 implementation that exceeds reqwest's surface (full RFC 7540 priority tree, customizable SETTINGS order, GREASE, browser-emulation profiles for Chrome v100–v143 / Firefox / Safari / Opera / OkHttp, ECH grease via BoringSSL). HTTP/3 is, however, **not implemented in any usable form** — only the ALPN/ALPS constant placeholders `AlpnProtocol::HTTP3` / `AlpsProtocol::HTTP3` exist (`crates/hpx/src/tls.rs`), with no `quinn` / `h3` / `h3-quinn` dependency, no `Ver::Http3` pool shard, no QUIC TLS path, and no `http3_*` builder methods. WebSocket is split across two backends (fastwebsockets: RFC 6455 + RFC 8441 over h2; yawc: RFC 6455 + RFC 7692 deflate over h1) — RFC 9220 (WebSocket over HTTP/3) is missing entirely.

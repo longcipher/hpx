@@ -87,7 +87,7 @@ webpki-roots = ["dep:webpki-root-certs"]
 system-proxy = ["dep:system-configuration", "dep:windows-registry"]
 
 # Enable tracing logging.
-tracing = ["http2/tracing", "dep:tracing"]
+tracing = ["http2/tracing", "dep:tracing", "hpx-h3?/tracing"]
 
 # Enable hotpath profiling instrumentation.
 hotpath = ["dep:hotpath", "hpx-yawc/hotpath"]
@@ -105,6 +105,7 @@ sse = ["dep:memchr", "dep:fastrand", "stream"]
 # Enable BoringSSL support.
 boring-tls = [
     "dep:boring",
+    "dep:boring-sys",
     "dep:tokio-boring",
     "dep:brotli",
     "dep:flate2",
@@ -218,6 +219,7 @@ async-trait = { workspace = true, optional = true }
 base64-simd = { workspace = true }
 boa_engine = { workspace = true, optional = true }
 boring = { workspace = true, optional = true }
+boring-sys = { workspace = true, optional = true }
 brotli = { workspace = true, optional = true }
 bytes = { workspace = true }
 const-oid = { workspace = true, features = ["db"], optional = true }
@@ -305,6 +307,7 @@ axum = { workspace = true, features = ["ws"] }
 base64-simd = { workspace = true }
 criterion = { workspace = true }
 futures = { workspace = true, features = ["std"] }
+hpx-emulation = { workspace = true }
 hyper = { workspace = true, features = ["http1", "http2", "server"] }
 hyper-util = { workspace = true, features = [
     "http1",

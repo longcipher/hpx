@@ -30,19 +30,9 @@ exclude_globs = [
     "crates/hpx-h3/**",
 ]
 
-# Skip tests that are extremely slow (many seconds to minutes each) when
-# running mutation tests. A mutation run executes the test suite hundreds of
-# times, so skipping these keeps each mutant's test phase fast.
-#
-# These are `cargo nextest` *filter expressions* (`-E`). The older `--skip <name>`
-# spelling was removed from nextest, and passing it here made every mutation run
-# abort with "unexpected argument '--skip' found" before a single mutant was
-# tested. The `test(~/regex/)` form is a substring/regex match, so partial test
-# names still select as intended.
-additional_cargo_test_args = [
-    "-E",
-    "not (test(~/memory_benchmark/) or test(~/reload_html_100_times_no_leak/) or test(~/create_and_drop_100_pages_no_leak/))",
-]
+# Slow benchmark-style tests are excluded by `.config/nextest.toml`'s
+# `default-filter`, which nextest applies to mutation runs as well. Keeping the
+# exclusion in one place avoids drift between `just test` and mutation runs.
 
 # Note: by default each mutant is validated by the tests of its own package
 # (precise and fast). For a deeper, cross-crate analysis that runs the whole

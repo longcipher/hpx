@@ -42,7 +42,7 @@ use super::layer::decoder::AcceptEncoding;
 use super::ws::WebSocketRequestBuilder;
 use super::{
     Body,
-    conn::{BoxedConnectorLayer, Connector, TcpConnectOptions},
+    conn::{BoxedConnectorLayer, Connector, TcpConnectOptions, TcpTuning},
     core::body::Incoming,
     layer::{
         config::{ConfigService, TransportOptions},
@@ -311,6 +311,7 @@ struct TransportConfig {
     tcp_recv_buffer_size: Option<usize>,
     tcp_happy_eyeballs_timeout: Option<Duration>,
     tcp_connect_options: TcpConnectOptions,
+    tcp_low_latency: TcpTuning,
 }
 
 /// Connection pool configuration
@@ -319,6 +320,7 @@ struct PoolConfig {
     idle_timeout: Option<Duration>,
     max_idle_per_host: usize,
     max_size: Option<NonZeroU32>,
+    stale_after: Option<Duration>,
 }
 
 /// TLS configuration
@@ -459,6 +461,7 @@ impl From<TransportConfigOptions> for TransportConfig {
             tcp_recv_buffer_size: value.tcp_recv_buffer_size,
             tcp_happy_eyeballs_timeout: value.tcp_happy_eyeballs_timeout,
             tcp_connect_options: value.tcp_connect_options,
+            tcp_low_latency: value.tcp_low_latency,
         }
     }
 }
@@ -469,6 +472,7 @@ impl From<PoolConfigOptions> for PoolConfig {
             idle_timeout: value.idle_timeout,
             max_idle_per_host: value.max_idle_per_host,
             max_size: value.max_size,
+            stale_after: value.stale_after,
         }
     }
 }
@@ -562,11 +566,13 @@ impl Client {
                     tcp_send_buffer_size: None,
                     tcp_recv_buffer_size: None,
                     tcp_happy_eyeballs_timeout: Some(Duration::from_millis(300)),
+                    tcp_low_latency: TcpTuning::default(),
                 },
                 pool: PoolConfig {
                     idle_timeout: Some(Duration::from_secs(90)),
                     max_idle_per_host: usize::MAX,
                     max_size: None,
+                    stale_after: None,
                 },
                 tls: TlsConfig {
                     keylog: None,
@@ -901,6 +907,44 @@ mod tests {
             builder.config.protocol.timeout_options.connect_timeout(),
             Some(connect_timeout)
         );
+    }
+
+    #[test]
+    fn low_latency_tuning_survives_both_config_paths() {
+        let tuning = TcpTuning::new()
+            .with_busy_poll_us(50)
+            .with_incoming_cpu(2)
+            .with_priority(6)
+            .with_quickack(true);
+
+        let direct = Client::builder().tcp_low_latency(tuning);
+        assert_eq!(direct.config.transport.tcp_low_latency, tuning);
+
+        let grouped = Client::builder()
+            .transport_config(TransportConfigOptions::new().tcp_low_latency(tuning));
+        assert_eq!(grouped.config.transport.tcp_low_latency, tuning);
+
+        assert!(
+            !Client::builder()
+                .config
+                .transport
+                .tcp_low_latency
+                .is_enabled()
+        );
+    }
+
+    #[test]
+    fn pool_stale_after_survives_both_config_paths() {
+        let stale = Duration::from_secs(30);
+
+        let direct = Client::builder().pool_stale_after(Some(stale));
+        assert_eq!(direct.config.pool.stale_after, Some(stale));
+
+        let grouped =
+            Client::builder().pool_config(PoolConfigOptions::new().stale_after(Some(stale)));
+        assert_eq!(grouped.config.pool.stale_after, Some(stale));
+
+        assert_eq!(Client::builder().config.pool.stale_after, None);
     }
 
     #[test]

@@ -4,7 +4,6 @@
     feature = "rustls-tls"
 ))]
 use bytes::Bytes;
-use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::UnixStream;
 #[cfg(feature = "boring-tls")]
@@ -14,6 +13,7 @@ use tokio_openssl::SslStream;
 #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
 use tokio_rustls::client::TlsStream;
 
+use super::tcp_tuning::QuickAckStream;
 use crate::tls::{TlsInfo, conn::MaybeHttpsStream};
 
 /// A trait for extracting TLS information from a connection.
@@ -60,16 +60,10 @@ fn extract_tls_info<S>(ssl_stream: &SslStream<S>) -> TlsInfo {
     }
 }
 
-// ===== impl TcpStream =====
-
-impl TlsInfoFactory for TcpStream {
-    fn tls_info(&self) -> Option<TlsInfo> {
-        None
-    }
-}
+// ===== impl QuickAckStream =====
 
 #[cfg(feature = "boring-tls")]
-impl TlsInfoFactory for SslStream<TcpStream> {
+impl TlsInfoFactory for SslStream<QuickAckStream> {
     #[inline]
     fn tls_info(&self) -> Option<TlsInfo> {
         Some(extract_tls_info(self))
@@ -77,7 +71,7 @@ impl TlsInfoFactory for SslStream<TcpStream> {
 }
 
 #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
-impl TlsInfoFactory for SslStream<TcpStream> {
+impl TlsInfoFactory for SslStream<QuickAckStream> {
     #[inline]
     fn tls_info(&self) -> Option<TlsInfo> {
         Some(extract_tls_info(self))
@@ -85,7 +79,7 @@ impl TlsInfoFactory for SslStream<TcpStream> {
 }
 
 #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
-impl TlsInfoFactory for TlsStream<TcpStream> {
+impl TlsInfoFactory for TlsStream<QuickAckStream> {
     #[inline]
     fn tls_info(&self) -> Option<TlsInfo> {
         self.get_ref().1.peer_certificates().map(|certs| TlsInfo {
@@ -95,7 +89,7 @@ impl TlsInfoFactory for TlsStream<TcpStream> {
     }
 }
 
-impl TlsInfoFactory for MaybeHttpsStream<TcpStream> {
+impl TlsInfoFactory for MaybeHttpsStream<QuickAckStream> {
     fn tls_info(&self) -> Option<TlsInfo> {
         match self {
             Self::Https(tls) => tls.tls_info(),
@@ -105,7 +99,7 @@ impl TlsInfoFactory for MaybeHttpsStream<TcpStream> {
 }
 
 #[cfg(feature = "boring-tls")]
-impl TlsInfoFactory for SslStream<MaybeHttpsStream<TcpStream>> {
+impl TlsInfoFactory for SslStream<MaybeHttpsStream<QuickAckStream>> {
     #[inline]
     fn tls_info(&self) -> Option<TlsInfo> {
         Some(extract_tls_info(self))
@@ -113,7 +107,7 @@ impl TlsInfoFactory for SslStream<MaybeHttpsStream<TcpStream>> {
 }
 
 #[cfg(all(feature = "openssl-tls", not(feature = "boring-tls")))]
-impl TlsInfoFactory for SslStream<MaybeHttpsStream<TcpStream>> {
+impl TlsInfoFactory for SslStream<MaybeHttpsStream<QuickAckStream>> {
     #[inline]
     fn tls_info(&self) -> Option<TlsInfo> {
         Some(extract_tls_info(self))
@@ -121,7 +115,7 @@ impl TlsInfoFactory for SslStream<MaybeHttpsStream<TcpStream>> {
 }
 
 #[cfg(all(feature = "rustls-tls", not(feature = "boring-tls")))]
-impl TlsInfoFactory for TlsStream<MaybeHttpsStream<TcpStream>> {
+impl TlsInfoFactory for TlsStream<MaybeHttpsStream<QuickAckStream>> {
     #[inline]
     fn tls_info(&self) -> Option<TlsInfo> {
         self.get_ref().1.peer_certificates().map(|certs| TlsInfo {

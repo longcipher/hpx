@@ -6,7 +6,10 @@ authors.workspace = true
 description = "Yet another websocket library. A fast, secure WebSocket implementation with RFC 6455 compliance and compression support"
 documentation = "https://docs.rs/hpx-yawc"
 repository.workspace = true
-license.workspace = true
+# A fork of `infinitefield/yawc`, which is MPL-2.0. The MPL is file-level
+# copyleft, so the crate keeps the upstream license instead of the Apache-2.0
+# used by the rest of the workspace.
+license = "MPL-2.0"
 keywords = ["websocket", "websockets", "ws", "networking", "wasm"]
 categories = [
     "network-programming",
@@ -37,6 +40,12 @@ hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]
 proxy = []
 rustls-aws-lc-rs = ["tokio-rustls/aws-lc-rs"]
 rustls-ring = ["tokio-rustls/ring"]
+# Opt-in SIMD XOR client-frame masking (AVX2 on x86_64, NEON on aarch64).
+# Not part of the `hft` or `stealth` presets: the word-aligned scalar path in
+# src/mask.rs wins for small frames and for every size measured on aarch64, so
+# this stays opt-in until a per-size benchmark shows a net win on the
+# deployment target.
+simd-mask = []
 smol = ["dep:smol"]
 socks = ["proxy", "dep:tokio-socks"]
 zlib = ["flate2/any_zlib", "flate2/zlib-rs"]

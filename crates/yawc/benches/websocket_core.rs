@@ -31,9 +31,9 @@ const SIZES: [usize; 5] = [16, 125, 126, 1024, 64 * 1024];
 // =============================================================================
 // Experimental SIMD masking implementation (ported from tokio-websockets).
 //
-// This module is intentionally inlined in the benchmark file so we can measure
-// the speedup of AVX2/SSE2/NEON paths against yawc's current scalar paths
-// BEFORE committing to a production change in `src/mask.rs`.
+// This module is intentionally inlined in the benchmark file so the
+// `simd-mask` production path in `src/mask.rs` can be compared against a
+// reference vector implementation on the same inputs.
 //
 // Key correctness invariant (copied from tokio-websockets): the framing key
 // cycles every 4 bytes. When `align_to_mut` splits the input into
@@ -513,6 +513,44 @@ fn bench_mask_simd_vs_scalar(c: &mut Criterion) {
     group.finish();
 }
 
+/// Crossover benchmark for the opt-in `simd-mask` feature.
+///
+/// `apply_mask` routes payloads at or above `SIMD_THRESHOLD` through AVX2/NEON
+/// and everything else through the word-aligned scalar path. This group finds
+/// the size at which the vector path actually beats the scalar path on the
+/// host, so the threshold can be set from data instead of a guess.
+fn bench_mask_threshold(c: &mut Criterion) {
+    let mut group = c.benchmark_group("yawc/mask-threshold");
+    group.sample_size(50);
+    group.measurement_time(std::time::Duration::from_secs(1));
+
+    for size in [
+        96, 128, 160, 192, 256, 384, 512, 768, 1024, 2048, 4096, 16384,
+    ] {
+        group.throughput(Throughput::Bytes(size as u64));
+
+        let mut scalar = payload(size);
+        group.bench_with_input(
+            BenchmarkId::new("scalar_fast64", size),
+            &size,
+            |bench, _| {
+                bench.iter(|| {
+                    hpx_yawc::mask::apply_mask_fast64(black_box(&mut scalar), black_box(MASK));
+                });
+            },
+        );
+
+        let mut production = payload(size);
+        group.bench_with_input(BenchmarkId::new("apply_mask", size), &size, |bench, _| {
+            bench.iter(|| {
+                hpx_yawc::mask::apply_mask(black_box(&mut production), black_box(MASK));
+            });
+        });
+    }
+
+    group.finish();
+}
+
 /// Misaligned-input benchmark: simulates real-world WebSocket frame decoding
 /// where the payload starts at a non-8-byte-aligned offset (e.g. a 6-byte
 /// header with no mask, or a 10-byte header with mask).
@@ -696,6 +734,7 @@ fn benchmark(c: &mut Criterion) {
 
     bench_mask(c);
     bench_mask_simd_vs_scalar(c);
+    bench_mask_threshold(c);
     bench_mask_misaligned(c);
     bench_encode(c);
     bench_decode(c);

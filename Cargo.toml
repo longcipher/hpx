@@ -220,9 +220,9 @@ hpx-h3 = { path = "crates/hpx-h3", version = "2.6.1" }
 hpx-yawc = { path = "crates/yawc", version = "2.6.1" }
 
 # external crates
-ahash = "0.8.14"
+ahash = "0.8.15"
 arc-swap = "1.9.5"
-arrayvec = "0.7.8"
+arrayvec = "0.7.9"
 arrow = "60.2.0"
 assert_matches = "1.5.0"
 async-trait = "0.1.92"
@@ -234,7 +234,10 @@ blitz-html = "0.3.0-beta.6"
 blitz-traits = "0.3.0-beta.6"
 boa_engine = "0.22.0"
 bon = "3.10.3"
-boring = "5.6.0"
+boring = "5.6.1"
+# Must match the `boring` version exactly: both link the same BoringSSL
+# native library and Cargo allows only one `links = "boringssl"` provider.
+boring-sys = "5.6.1"
 brotli = "9.1.3"
 bytes = "1.12.2"
 clap = "4.6.10"
@@ -357,5 +360,19 @@ incremental = true
 opt-level = 3
 
 [profile.release]
+opt-level = 3
 lto = "thin"
 codegen-units = 16
+debug = "none"
+strip = "symbols"
+panic = "unwind"
+
+[profile.profiling]
+inherits = "release"
+debug = "full"
+strip = "none"
+
+[profile.maxperf]
+inherits = "release"
+lto = "fat"
+codegen-units = 1

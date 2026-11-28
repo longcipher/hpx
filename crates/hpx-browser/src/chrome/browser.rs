@@ -382,7 +382,8 @@ mod tests {
     #[tokio::test]
     async fn launch_and_kill_chrome() {
         if find_chrome().is_err() {
-            eprintln!("Chrome not found, skipping integration test");
+            // Chrome is optional on developer machines; skip silently so
+            // `print_stderr` stays enforced for test targets too.
             return;
         }
 
@@ -429,7 +430,8 @@ mod tests {
     #[tokio::test]
     async fn connect_and_new_page() {
         if find_chrome().is_err() {
-            eprintln!("Chrome not found, skipping integration test");
+            // Chrome is optional on developer machines; skip silently so
+            // `print_stderr` stays enforced for test targets too.
             return;
         }
 
@@ -473,7 +475,8 @@ mod tests {
     #[tokio::test]
     async fn connect_to_existing_browser() {
         if find_chrome().is_err() {
-            eprintln!("Chrome not found, skipping integration test");
+            // Chrome is optional on developer machines; skip silently so
+            // `print_stderr` stays enforced for test targets too.
             return;
         }
 

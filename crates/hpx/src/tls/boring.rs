@@ -6,6 +6,7 @@ mod cache;
 mod cert_compression;
 mod ext;
 mod service;
+mod trust_anchors;
 
 use std::{
     borrow::Cow,
@@ -19,7 +20,10 @@ use std::{
 use boring::{
     error::ErrorStack,
     ex_data::Index,
-    ssl::{Ssl, SslConnector, SslMethod, SslOptions, SslRef, SslSessionCacheMode},
+    ssl::{
+        Ssl, SslConnector, SslMethod, SslOptions, SslRef, SslSessionCacheMode,
+        SslSignatureAlgorithm,
+    },
 };
 use cache::{SessionCache, SessionKey};
 use http::Uri;
@@ -443,6 +447,33 @@ impl TlsConnectorBuilder {
 
         // Set TLS signature algorithms list
         set_option_ref_try!(opts, sigalgs_list, connector, set_sigalgs_list);
+
+        // Chrome 150+ advertises post-quantum ML-DSA SignatureSchemes, and
+        // Chrome 152+ adds signature-algorithm GREASE. These codepoints have
+        // no OpenSSL name, so they are injected as raw u16 preferences. This
+        // list replaces the named list above and therefore carries the full
+        // desired ordering.
+        if let Some(prefs) = opts.verify_algorithm_prefs.as_ref() {
+            let prefs = prefs
+                .iter()
+                .copied()
+                .map(SslSignatureAlgorithm::from)
+                .collect::<Vec<_>>();
+            // Rejecting the whole list is a fingerprint-visible failure: the
+            // connection silently falls back to BoringSSL's defaults. Make it
+            // loud instead of hiding it behind a warning.
+            connector
+                .set_verify_algorithm_prefs(&prefs)
+                .map_err(Error::tls)?;
+        }
+
+        // Chrome 152+ sends an empty `trust_anchors` (0xCA34) ClientHello
+        // extension. BoringSSL emits it as soon as a (possibly empty) list is
+        // configured; earlier browser profiles leave it unset.
+        trust_anchors::set_requested_trust_anchors(
+            &mut connector,
+            opts.requested_trust_anchors.as_deref(),
+        )?;
 
         // Set TLS prreserve TLS 1.3 cipher list order
         // set_option!(

@@ -2,10 +2,23 @@
 # https://nexte.st/book/configuration.html
 
 [profile.default]
-# Retry flaky tests up to 2 times
-retries = 2
+# Long-running benchmark-style tests are excluded from the default run.
+# `just test-slow` runs only those tests, and `just test-all` runs both paths.
+default-filter = "not test(/memory_benchmark|reload_html_100_times_no_leak|create_and_drop_100_pages_no_leak/)"
+retries = { backoff = "exponential", count = 2, delay = "2s", jitter = true }
+slow-timeout = { period = "30s", terminate-after = 2 }
+status-level = "fail"
 
 # Tests that hit external network (tls.peet.ws) may fail due to network conditions
 [[profile.default.overrides]]
 filter = "package(hpx-emulation) & test(/emulation/)"
-retries = 3
+retries = { backoff = "exponential", count = 3, delay = "2s", jitter = true }
+
+[[profile.default.overrides]]
+filter = "test(/memory_benchmark|reload_html_100_times_no_leak|create_and_drop_100_pages_no_leak/)"
+slow-timeout = { period = "300s", terminate-after = 1 }
+
+# CI must report every job outcome; a skipped or cancelled test is not green.
+[profile.ci]
+fail-fast = false
+status-level = "all"

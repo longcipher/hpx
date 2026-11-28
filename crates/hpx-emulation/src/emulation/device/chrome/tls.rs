@@ -44,6 +44,30 @@ macro_rules! tls_options {
             .curves($curves)
             .alps_use_new_codepoint(true))
     };
+    // Chrome 150+ advertises post-quantum ML-DSA SignatureSchemes (and 152+
+    // adds signature-algorithm GREASE). OpenSSL's named sigalgs string cannot
+    // express those codepoints, so the whole list is supplied as raw u16s.
+    (8, $prefs:expr) => {
+        tls_options!(@build ChromeTlsConfig::builder()
+            .permute_extensions(true)
+            .enable_ech_grease(true)
+            .pre_shared_key(true)
+            .curves(CURVES_3)
+            .alps_use_new_codepoint(true)
+            .verify_algorithm_prefs($prefs))
+    };
+    // Chrome 152+ additionally sends an empty `trust_anchors` (0xCA34)
+    // ClientHello extension.
+    (9, $prefs:expr) => {
+        tls_options!(@build ChromeTlsConfig::builder()
+            .permute_extensions(true)
+            .enable_ech_grease(true)
+            .pre_shared_key(true)
+            .curves(CURVES_3)
+            .alps_use_new_codepoint(true)
+            .verify_algorithm_prefs($prefs)
+            .requested_trust_anchors(&[]))
+    };
 }
 
 /// Standard Chrome cipher suites.
@@ -207,6 +231,28 @@ pub(crate) const SIGALGS_LIST: &str = join!(
     "rsa_pkcs1_sha512"
 );
 
+/// Raw TLS `SignatureScheme` codepoints for Chrome 150/151.
+///
+/// The first eight entries mirror [`SIGALGS_LIST`]; `0x0904`/`0x0905`/`0x0906`
+/// are ML-DSA-44/65/87, which Chrome 150 started advertising. Ordering must
+/// be re-validated against a live ClientHello capture before claiming
+/// byte-for-byte parity with a shipping browser build.
+pub(crate) const CHROME_150_SIGALGS: &[u16] = &[
+    0x0403, 0x0804, 0x0401, 0x0503, 0x0805, 0x0501, 0x0806, 0x0601, 0x0904, 0x0905, 0x0906,
+];
+
+/// Raw `SignatureScheme` codepoints for Chrome 152+.
+///
+/// Signature-algorithm GREASE is inserted by BoringSSL itself when
+/// `grease_enabled` is true; adding `0x0a0a` here makes
+/// `SSL_CTX_set_verify_algorithm_prefs` reject the **whole** list, silently
+/// falling back to BoringSSL's default algorithms. Chrome 152 additionally
+/// sends an empty `trust_anchors` extension, configured by `tls_options!(9,
+/// ...)` through `TlsOptions::requested_trust_anchors`.
+pub(crate) const CHROME_152_SIGALGS: &[u16] = &[
+    0x0403, 0x0804, 0x0401, 0x0503, 0x0805, 0x0501, 0x0806, 0x0601, 0x0904, 0x0905, 0x0906,
+];
+
 pub(crate) const CERT_COMPRESSION_ALGORITHM: &[CertificateCompressionAlgorithm] =
     &[CertificateCompressionAlgorithm::BROTLI];
 
@@ -235,11 +281,17 @@ pub(crate) struct ChromeTlsConfig {
 
     #[builder(default = false, into)]
     pre_shared_key: bool,
+
+    /// Raw `SignatureScheme` codepoints; `None` keeps the named sigalgs string.
+    verify_algorithm_prefs: Option<&'static [u16]>,
+
+    /// Empty for Chrome 152+, absent for older versions.
+    requested_trust_anchors: Option<&'static [u8]>,
 }
 
 impl From<ChromeTlsConfig> for TlsOptions {
     fn from(val: ChromeTlsConfig) -> Self {
-        Self::builder()
+        let mut builder = Self::builder()
             .grease_enabled(true)
             .enable_ocsp_stapling(true)
             .enable_signed_cert_timestamps(true)
@@ -254,7 +306,15 @@ impl From<ChromeTlsConfig> for TlsOptions {
             .alps_protocols([val.alps_protos])
             .alps_use_new_codepoint(val.alps_use_new_codepoint)
             .aes_hw_override(true)
-            .certificate_compression_algorithms(CERT_COMPRESSION_ALGORITHM)
-            .build()
+            .certificate_compression_algorithms(CERT_COMPRESSION_ALGORITHM);
+
+        if let Some(prefs) = val.verify_algorithm_prefs {
+            builder = builder.verify_algorithm_prefs(prefs);
+        }
+        if let Some(ids) = val.requested_trust_anchors {
+            builder = builder.requested_trust_anchors(ids);
+        }
+
+        builder.build()
     }
 }
